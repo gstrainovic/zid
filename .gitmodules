@@ -1,6 +1,3 @@
-[submodule "libs/clay-zig"]
-	path = libs/clay-zig
-	url = https://codeberg.org/Zettexe/clay-zig
 [submodule "libs/wgpu_native_zig"]
 	path = libs/wgpu_native_zig
 	url = https://github.com/bronter/wgpu_native_zig.git
@@ -10,3 +7,6 @@
 [submodule "libs/gooey"]
 	path = libs/gooey
 	url = https://github.com/gstrainovic/gooey-vulkan
+[submodule "libs/clay-zig"]
+	path = libs/clay-zig
+	url = https://github.com/johan0A/clay-zig-bindings

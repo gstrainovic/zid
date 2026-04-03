@@ -1,0 +1,225 @@
+//! Rendering-Modul für vulkan-ed
+//!
+//! Verwendet WGPU für cross-platform GPU Rendering.
+
+const std = @import("std");
+const wgpu = @import("wgpu");
+
+const log = std.log.scoped(.rendering);
+
+/// Renderer Konfiguration
+pub const RendererConfig = struct {
+    vsync: bool = true,
+    clear_color: [4]f32 = .{ 0.15, 0.15, 0.2, 1.0 },
+};
+
+/// Renderer Hauptstruktur
+pub const Renderer = struct {
+    allocator: std.mem.Allocator,
+    config: RendererConfig,
+    instance: ?*wgpu.Instance = null,
+    adapter: ?*wgpu.Adapter = null,
+    device: ?*wgpu.Device = null,
+    queue: ?*wgpu.Queue = null,
+    surface: ?*wgpu.Surface = null,
+    swap_chain_format: wgpu.TextureFormat = .bgra8_unorm,
+    width: u32 = 0,
+    height: u32 = 0,
+
+    const Self = @This();
+
+    /// Renderer initialisieren
+    pub fn init(allocator: std.mem.Allocator, config: RendererConfig) !Self {
+        log.info("Initializing renderer (WGPU backend, Vulkan forced via WGPU_BACKEND=vulkan)", .{});
+
+        // WGPU Instance erstellen (Vulkan Backend forcieren)
+        var extras = wgpu.InstanceExtras{
+            .backends = wgpu.InstanceBackends.vulkan,
+            .flags = wgpu.InstanceFlags.default,
+            .dx12_shader_compiler = .@"undefined",
+            .gles3_minor_version = .automatic,
+            .gl_fence_behavior = .gl_fence_behaviour_normal,
+            .dxc_max_shader_model = .dxc_max_shader_model_v6_0,
+        };
+
+        const base_descriptor = wgpu.InstanceDescriptor{
+            .features = .{
+                .timed_wait_any_enable = 0,
+                .timed_wait_any_max_count = 0,
+            },
+        };
+        const descriptor = base_descriptor.withNativeExtras(&extras);
+
+        const instance = wgpu.Instance.create(&descriptor) orelse return error.NoInstance;
+
+        // Adapter anfordern (nur Vulkan!)
+        const request_options = wgpu.RequestAdapterOptions{
+            .backend_type = wgpu.BackendType.vulkan,
+            .feature_level = wgpu.FeatureLevel.core,
+        };
+        const adapter_result = instance.requestAdapterSync(&request_options, 200_000_000);
+        const adapter = switch (adapter_result.status) {
+            .success => adapter_result.adapter.?,
+            else => {
+                instance.release();
+                return error.NoAdapter;
+            },
+        };
+
+        // Device anfordern
+        const device_desc = wgpu.DeviceDescriptor{
+            .required_feature_count = 0,
+            .required_limits = null,
+        };
+        const device_result = adapter.requestDeviceSync(instance, &device_desc, 0);
+        const device = switch (device_result.status) {
+            .success => device_result.device.?,
+            else => {
+                adapter.release();
+                instance.release();
+                return error.NoDevice;
+            },
+        };
+
+        const queue = device.getQueue() orelse {
+            device.release();
+            adapter.release();
+            instance.release();
+            return error.NoQueue;
+        };
+
+        log.info("WGPU initialized: instance={*} adapter={*} device={*}", .{ instance, adapter, device });
+
+        return Self{
+            .allocator = allocator,
+            .config = config,
+            .instance = instance,
+            .adapter = adapter,
+            .device = device,
+            .queue = queue,
+        };
+    }
+
+    /// Renderer aufräumen
+    pub fn deinit(self: *Self) void {
+        log.info("Renderer shutdown", .{});
+        if (self.surface) |surface| surface.release();
+        if (self.queue) |queue| queue.release();
+        if (self.device) |device| device.release();
+        if (self.adapter) |adapter| adapter.release();
+        if (self.instance) |instance| instance.release();
+    }
+
+    /// Surface vom wio Window erstellen (Wayland)
+    pub fn setWindow(self: *Self, wayland_display: ?*anyopaque, wayland_surface: ?*anyopaque) !void {
+        if (self.instance == null) return error.NoInstance;
+        if (wayland_display == null) return error.NoWaylandDisplay;
+        if (wayland_surface == null) return error.NoWaylandSurface;
+
+        const descriptor = wgpu.surfaceDescriptorFromWaylandSurface(.{
+            .display = wayland_display.?,
+            .surface = wayland_surface.?,
+        });
+
+        self.surface = self.instance.?.createSurface(&descriptor);
+        if (self.surface == null) return error.NoSurface;
+
+        log.info("WGPU surface created: {*}", .{self.surface});
+    }
+
+    /// Swap Chain konfigurieren
+    pub fn configureSwapChain(self: *Self, width: u32, height: u32) !void {
+        if (self.device == null) return error.NoDevice;
+        if (self.surface == null) return error.NoSurface;
+
+        self.width = width;
+        self.height = height;
+
+        const config = wgpu.SurfaceConfiguration{
+            .usage = wgpu.TextureUsages.render_attachment,
+            .format = self.swap_chain_format,
+            .width = width,
+            .height = height,
+            .present_mode = if (self.config.vsync) .fifo else .immediate,
+            .alpha_mode = .auto,
+            .view_format_count = 0,
+            .view_formats = &[0]wgpu.TextureFormat{},
+            .device = self.device.?,
+        };
+
+        self.surface.?.configure(&config);
+        log.info("Swap chain configured: {}x{}", .{ width, height });
+    }
+
+    /// Frame starten
+    pub fn beginFrame(self: *Self) ?*wgpu.TextureView {
+        if (self.surface == null) return null;
+
+        var surface_texture: wgpu.SurfaceTexture = undefined;
+        self.surface.?.getCurrentTexture(&surface_texture);
+        if (surface_texture.status != .success_optimal and surface_texture.status != .success_suboptimal) return null;
+
+        return surface_texture.texture.?.createView(&wgpu.TextureViewDescriptor{
+            .label = wgpu.StringView{},
+        });
+    }
+
+    /// Frame beenden und präsentieren
+    pub fn endFrame(self: *Self, texture_view: ?*wgpu.TextureView) void {
+        if (texture_view) |view| view.release();
+        _ = self.surface.?.present();
+    }
+
+    /// Viewport Resize
+    pub fn resize(self: *Self, width: u32, height: u32) !void {
+        if (width == 0 or height == 0) return;
+        log.info("Viewport resized: {}x{}", .{ width, height });
+        try self.configureSwapChain(width, height);
+    }
+
+    /// Clear Color setzen
+    pub fn setClearColor(self: *Self, r: f32, g: f32, b: f32, a: f32) void {
+        self.config.clear_color = .{ r, g, b, a };
+    }
+
+    /// Frame rendern (Clear + Present)
+    pub fn renderFrame(self: *Self) void {
+        const texture_view = self.beginFrame() orelse return;
+        defer self.endFrame(texture_view);
+
+        const command_encoder = self.device.?.createCommandEncoder(&wgpu.CommandEncoderDescriptor{
+            .label = wgpu.StringView{},
+        }) orelse return;
+        defer command_encoder.release();
+
+        const color_attachments = [_]wgpu.ColorAttachment{
+            .{
+                .view = texture_view,
+                .resolve_target = null,
+                .load_op = .clear,
+                .store_op = .store,
+                .clear_value = wgpu.Color{
+                    .r = self.config.clear_color[0],
+                    .g = self.config.clear_color[1],
+                    .b = self.config.clear_color[2],
+                    .a = self.config.clear_color[3],
+                },
+            },
+        };
+
+        const render_pass_desc = wgpu.RenderPassDescriptor{
+            .color_attachment_count = color_attachments.len,
+            .color_attachments = &color_attachments,
+        };
+
+        const render_pass = command_encoder.beginRenderPass(&render_pass_desc) orelse return;
+        render_pass.end();
+
+        const command_buffer = command_encoder.finish(&wgpu.CommandBufferDescriptor{
+            .label = wgpu.StringView{},
+        }) orelse return;
+        defer command_buffer.release();
+
+        self.queue.?.submit(&[_]*wgpu.CommandBuffer{command_buffer});
+    }
+};

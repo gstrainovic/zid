@@ -1,14 +1,88 @@
 const std = @import("std");
-const clay = @import("clay");
+const builtin = @import("builtin");
+const platform = @import("platform/mod.zig");
+const rendering = @import("rendering/mod.zig");
+const text = @import("text/mod.zig");
+const ui = @import("ui/mod.zig");
 
-pub fn main() void {
-    std.debug.print("vulkan-ed starting...\n", .{});
+const log = std.log.scoped(.main);
 
-    // TODO: Initialize wio window
-    // TODO: Initialize WGPU device/surface
-    // TODO: Initialize Clay layout
-    // TODO: Initialize text renderer (DirectWrite/FreeType)
-    // TODO: Initialize vkvg for 2D graphics
+pub fn main() !void {
+    // Allocator setup
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
 
-    std.debug.print("vulkan-ed ready!\n", .{});
+    log.info("=== vulkan-ed starting ===", .{});
+    log.info("Platform: {s}-{s}", .{
+        @tagName(builtin.cpu.arch),
+        @tagName(builtin.os.tag),
+    });
+
+    // 1. Renderer initialisieren (WGPU - VOR wio, kein EGL-Konflikt)
+    var renderer = try rendering.Renderer.init(allocator, .{
+        .vsync = true,
+        .clear_color = .{ 0.25, 0.2, 0.35, 1.0 },
+    });
+    defer renderer.deinit();
+
+    // 2. Platform initialisieren (wio - NACH wgpu, vermeidet EGL-Konflikt)
+    var plat = try platform.Platform.init(allocator, .{
+        .title = "vulkan-ed",
+        .width = 1200,
+        .height = 800,
+    });
+    defer plat.deinit();
+
+    // Window erstellen (NACH renderer)
+    try plat.createWindow();
+
+    // Surface vom Window erstellen
+    try renderer.setWindow(plat.getWaylandDisplay(), plat.getWaylandSurface());
+    try renderer.configureSwapChain(plat.getSize().width, plat.getSize().height);
+
+    // 3. Text Renderer initialisieren (DirectWrite/FreeType)
+    var text_renderer = try text.TextRenderer.init(allocator, .{
+        .font_path = "fonts/JetBrainsMono-Regular.ttf",
+        .size = 14.0,
+    });
+    defer text_renderer.deinit();
+
+    // TODO: text_renderer.buildAtlas();
+
+    // 4. UI System initialisieren (Clay)
+    var ui_system = try ui.UI.init(allocator, .{
+        .font_size = 14.0,
+    });
+    defer ui_system.deinit();
+
+    try ui_system.setupClay(plat.getSize().width, plat.getSize().height);
+
+    log.info("=== vulkan-ed ready ===", .{});
+    log.info("Press Ctrl+C to exit (or close window)", .{});
+
+    // Render Loop
+    while (plat.isRunning()) {
+        // Events verarbeiten
+        if (plat.window) |*win| {
+            while (win.getEvent()) |event| {
+                switch (event) {
+                    .size_logical => |sz| {
+                        renderer.resize(@intCast(sz.width), @intCast(sz.height)) catch {};
+                    },
+                    else => {},
+                }
+                plat.handleEventExternal(event);
+            }
+        }
+
+        // Rendern
+        renderer.renderFrame();
+
+        // Kurze Pause für CPU-Effizienz
+        std.Thread.sleep(1 * std.time.ns_per_ms);
+    }
+
+    log.info("=== vulkan-ed exiting ===", .{});
 }
+

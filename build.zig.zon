@@ -1,17 +1,26 @@
 .{
-    .name = "vulkan-ed",
+    .name = .vulkan_ed,
     .version = "0.1.0",
+    .fingerprint = 0xe53b65ee896dabc0,
     .minimum_zig_version = "0.13.0",
+    .dependencies = .{
+        .wio = .{
+            .url = "https://github.com/ypsvlq/wio/archive/refs/heads/master.tar.gz",
+            .hash = "1220d98070a4e9d418dbea9098982f7feb41129af3750800550750bc9bfeb46989c6",
+        },
+        .clay = .{
+            .path = "libs/clay-zig",
+        },
+        .wgpu = .{
+            .path = "libs/wgpu_native_zig",
+        },
+    },
     .paths = .{
         "build.zig",
         "build.zig.zon",
         "fonts/",
+        "libs/clay-zig/src/",
+        "libs/clay-zig/clay.h",
         "src/",
-    },
-    .dependencies = .{
-        .clay_zig = .{
-            .url = "https://codeberg.org/Zettexe/clay-zig/archive/6324af57b0749fb16f07664ffe6af279c8893fc3.tar.gz",
-            .hash = "12200000000000000000000000000000000000000000000000000000000000000000",
-        },
     },
 }
