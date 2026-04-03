@@ -1,0 +1,17 @@
+.{
+    .name = "vulkan-ed",
+    .version = "0.1.0",
+    .minimum_zig_version = "0.13.0",
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "fonts/",
+        "src/",
+    },
+    .dependencies = .{
+        .clay_zig = .{
+            .url = "https://codeberg.org/Zettexe/clay-zig/archive/6324af57b0749fb16f07664ffe6af279c8893fc3.tar.gz",
+            .hash = "12200000000000000000000000000000000000000000000000000000000000000000",
+        },
+    },
+}

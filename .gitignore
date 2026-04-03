@@ -1,0 +1,17 @@
+# Build outputs
+zig-out/
+.zig-cache/
+
+# Test data (too large for git)
+test_data/
+
+# Screenshots (local only)
+screenshots/
+
+# OS files
+.DS_Store
+Thumbs.db
+*.tmp
+
+# Archives
+archives/
