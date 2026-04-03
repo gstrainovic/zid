@@ -1,0 +1,252 @@
+# Zed-Editor Killer - Projektplanung
+
+## 🎯 Ziel
+
+Cross-platform Code Editor (Windows + Linux) mit GPU-Rendering, inspiriert von Zed.
+
+## 📐 Architektur-Entscheidungen
+
+### Cross-platform wo es Sinn macht
+- ✅ **WGPU Native** für GPU Rendering (DirectX 12 / Vulkan / Metal)
+- ✅ **Clay-Zig** für UI Layout (Flexbox, Constraints - reine Mathematik)
+- ✅ **vkvg** für 2D Graphics (Vulkan-basiert, Cairo-ähnliche API)
+
+### Platform-spezifisch wo Qualität zählt
+- 🔴 **Text Rendering**: DirectWrite (Windows) / FreeType+HarfBuzz (Linux)
+- 🔴 **Window Management**: wio (cross-platform)
+  - **Goran:** wio langt? → **Antwort: Ja für Start, bei Problemen → Win32 direkt (Windows) / Wayland direkt (Linux)**
+- 🔴 **Font Discovery**: 
+  - **Goran:** Was ist das? Ich will eh nur JetBrains Mono überall!
+  - **Antwort:** Wenn wir JetBrains Mono mitliefern (gebundelte Font-Datei), brauchen wir KEINE Font Discovery! Wir laden die .ttf/.otf direkt vom Dateipfad. Spart uns Registry/Fontconfig komplett! ✅
+
+### Gooey-Migration Strategie
+
+**Von Gooey übernehmen:**
+- ✅ GPU Rendering Pipeline (Vulkan-basiert)
+- ✅ Declarative UI Patterns
+- ✅ Component System (Button, TextInput, TextArea, Scroll, etc.)
+- ✅ Animation System
+- ✅ Theme System (Catppuccin Light/Dark)
+- ✅ Entity System
+- ✅ Virtual Lists/Tables
+- ✅ Code Editor Beispiel (Syntax Highlighting Logic)
+
+**Ersetzen:**
+- ❌ Cairo SVG Rasterizing → ✅ **vkvg** (Vulkan-basiert, cross-platform)
+- ❌ Platform-spezifischer Code → ✅ wio (cross-platform Windowing)
+  - **Goran:** Was ist damit gemeint? → **Antwort:** Gooey hatte separaten Code für Windows (Win32), Linux (Wayland/X11), macOS (AppKit). Wir ersetzen das durch wio, das alle Plattformen abdeckt.
+- ❌ Font Discovery → ✅ JetBrains Mono direkt laden (keine System-Suche nötig)
+  - **Goran:** ? → **Antwort:** Siehe oben - wir bundlen die Font-Datei, fertig!
+
+**Nicht übernehmen:**
+- ❌ Linux-spezifischer Code (Wayland, DBus, etc.)
+  - **Goran:** Wieso hatte es und wieso brauchen wir es nicht?
+  - **Antwort:** Gooey hatte Wayland/X11 für Window-Management + DBus für File-Dialogs. Wir nutzen stattdessen wio für Windows + eigene Vulkan-Renderer. DBus/File-Dialogs können wir später bei Bedarf nachbauen.
+- ❌ macOS-spezifischer Code (AppKit, CoreText, Metal) - **Goran:** Brauchen wir nicht, löschen! ✅
+- ❌ Web/WASM-spezifischer Code
+
+## 🏗️ Geplante Architektur
+
+```
+┌─────────────────────────────────────────────┐
+│         DEIN EDITOR (Zig)                   │
+├─────────────────────────────────────────────┤
+│  UI Layout: Clay-Zig (cross-platform)       │
+│  - Flexbox, Constraints, etc.               │
+├─────────────────────────────────────────────┤
+│  Rendering: WGPU Native (cross-platform)    │
+│  - DirectX 12 (Windows) / Vulkan (Linux)    │ Goran: Gooey nutzt Vulkan direkt - WGPU ist aber besser! WGPU abstrahiert DX12/Vulkan automatisch, weniger Code!
+│  - Einheitlicher Shader-Code (WGSL)         │
+├─────────────────────────────────────────────┤
+│  Text Rendering: Platform-spezifisch        │
+│  ├─ Windows: DirectWrite → Glyph-Atlas      │
+│  └─ Linux: FreeType + HarfBuzz → Glyph-Atlas│ Goran: macOS löschen, brauchen wir nicht! ✅
+│       ↓                                     │
+│  GPU Texture (einheitlich für WGPU)         │
+├─────────────────────────────────────────────┤
+│  2D Graphics: vkvg (Vulkan-basiert)         │
+│  - Cairo-ähnliche API für Icons, Shapes     │
+│  - Plattformübergreifend (Vulkan)           │
+├─────────────────────────────────────────────┤
+│  Window Management: wio                     │
+│  - Cross-platform (Windows + Linux)         │
+│  - Native Zig, Input Handling               │
+│  - Stellt Window Handle für WGPU Surface    │
+└─────────────────────────────────────────────┘
+```
+
+## 💡 UI-Architektur (in Diskussion)
+
+### Idee: Gooey-Teile + vkvg statt Cairo
+
+**Problem mit Gooey:**
+- Cairo für SVG Rasterizing (Linux-only)
+- Text Rendering Probleme unter Windows
+- Zu stark auf Linux/macOS fixiert
+
+**Lösungsansatz:**
+- **Von Gooey übernehmen:**
+  - GPU Rendering Pipeline (Vulkan-basiert)
+  - Declarative UI Patterns
+  - Component System (Button, TextInput, etc.)
+  - Animation System
+  - Theme System
+
+- **Ersetzen:**
+  - ❌ Cairo → ✅ **vkvg** (Vulkan-basiert, cross-platform)
+  - ❌ Platform-spezifischer Code → ✅ Eigene Implementation
+  - ❌ Font Discovery → ✅ Platform-native (DirectWrite/CoreText/Fontconfig)
+
+### Text Rendering Strategie
+
+**⚠️ KRITISCHE ERKENNTNIS: FreeType auf Windows = UNBENUTZBAR**
+
+Screenshots von Windows-Test (`/mnt/windows1/Users/gstra/projects/zed-killer`):
+- `text_test_result.png` - "HELLLOOO WORLD" extrem verschwommen
+- `final_zed_result.png` - Text auf dunklem Hintergrund matschig
+- `zed_killer_final.png` - Editor-Text **unleserlich**, Monospace-Font katastrophal
+
+**Ursache:** FreeType ohne Subpixel-Rendering (ClearType) auf Windows erzeugt Graustufen-Anti-Aliasing = matschiger Text.
+
+**✅ Korrekte Strategie:**
+
+**Windows: DirectWrite (NICHT FreeType!)**
+- DirectWrite mit ClearType = gestochen scharfer Text
+- RGB Subpixel-Rendering wie native Windows-Apps
+- **MUSS sein, kein "optional"** - sonst unbenutzbar!
+
+**Linux: FreeType + HarfBuzz**
+- Bewährt, gute Qualität mit Subpixel-Hinting
+
+**Font-Strategie: JetBrains Mono bundlen**
+- ✅ Wir liefern JetBrains Mono .ttf/.otf mit dem Editor
+- ✅ Keine Font Discovery nötig (kein Fontconfig, keine Registry-Suche)
+- ✅ Gleiche Font auf beiden Plattformen = konsistentes Aussehen
+- ✅ Spart Komplexität!
+
+**Glyph-Atlas Architektur:**
+```
+Windows: DirectWrite + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) → GPU
+Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) → GPU
+                                                ↓
+                                   Einheitliches GPU-Rendering (WGPU)
+```
+
+### vkvg für 2D Graphics
+
+**Vorteile:**
+- ✅ Cairo-ähnliche API (Gooey-Code leicht migrierbar)
+- ✅ Vulkan-basiert (cross-platform Windows + Linux)
+- ✅ GPU-beschleunigt
+- ✅ SVG Rendering eingebaut (löst Gooey's Cairo-Problem)
+- ✅ Font System mit Caching
+- ✅ Path Rendering, Textures, Patterns, Gradients
+
+**Verwendung:**
+- Icons und SVG Rendering
+- Komplexe 2D Shapes
+- UI Decorations
+- Syntax Highlighting Visuals
+- Optional: Glyph-Atlas für Text (Phase 1)
+
+## ✅ TODO
+
+### Phase 1: Projekt-Setup
+- [ ] Zig Projekt initialisieren
+- [ ] WGPU Native als Dependency
+- [ ] Clay-Zig als Dependency
+- [ ] vkvg Integration prüfen/Build-System
+- [ ] Build-Skripte für Windows + Linux
+
+### Phase 2: Platform Layer - Window Management
+
+**⚠️ WICHTIG: WGPU hat KEIN Window Management!**
+WGPU ist nur GPU-Rendering API - benötigt Window Handle für Surface Creation.
+
+**✅ Lösung: wio (native Zig Windowing Library)**
+
+Vorteile von wio:
+- ✅ Cross-platform (Windows + Linux)
+- ✅ Native Zig (keine C-Bindings)
+- ✅ Bereits in deinem Windows-Fork getestet und funktioniert
+- ✅ Input Handling integriert
+- ✅ Weniger Dependencies als direkte Win32/Wayland Implementation
+
+Alternative (falls wio nicht ausreicht):
+- Windows: Direkte Win32 API
+- Linux: Wayland/X11 direkt
+
+**TODO:**
+- [ ] wio als Dependency integrieren
+- [ ] Windows: wio Window erstellen (bereits vorhanden im Fork!)
+- [ ] Linux: wio Window erstellen
+- [ ] wio → WGPU Surface Verbindung
+- [ ] Input Event Handling
+- [ ] Event Loop implementieren
+
+### Phase 3: Rendering
+- [ ] WGPU Device/Surface Initialisierung
+- [ ] Basic Triangle Rendering (Test)
+- [ ] Clay Renderer für WGPU bauen
+- [ ] Text Renderer Interface definieren
+
+### Phase 4: Text Rendering (HÖCHSTE PRIORITÄT!)
+- [ ] JetBrains Mono Font-Dateien bundlen (.ttf/.otf)
+- [ ] Glyph-Atlas Interface definieren
+- [ ] **Windows: DirectWrite Integration** (MUSS sein!)
+  - [ ] DirectWrite COM Interface in Zig wrappen
+  - [ ] Glyph-Rendering mit ClearType/Subpixel
+  - [ ] JetBrainsMono.ttf laden und Glyphen extrahieren
+- [ ] Linux: FreeType + HarfBuzz (von Gooey übernehmen)
+  - [ ] JetBrainsMono.ttf laden
+  - [ ] Subpixel-Hinting konfigurieren
+- [ ] GPU Glyph-Atlas Rendering (einheitlich für beide Plattformen)
+
+### Phase 5: 2D Graphics mit vkvg
+- [ ] vkvg als Dependency integrieren
+- [ ] SVG Rendering mit vkvg
+- [ ] Icon Rendering
+- [ ] UI Decorations (Borders, Gradients, Shadows)
+
+### Phase 6: UI Components (von Gooey migrieren)
+- [ ] UI Primitives (Box, Text, Image)
+- [ ] Button, TextInput, TextArea
+- [ ] Scroll Container
+- [ ] Layout Integration mit Clay
+- [ ] Theme System (Catppuccin)
+- [ ] Animation System
+
+## 📚 Verfügbare Libraries
+
+| Library | Zweck | Status |
+|---------|-------|--------|
+| clay-zig | UI Layout Engine | ✅ Verfügbar |
+| wgpu_native_zig | GPU Rendering (DX12/Vulkan/Metal) | ✅ Verfügbar |
+| vkvg-zig | 2D Vulkan Graphics (Cairo-Ersatz) | ✅ Verfügbar |
+| **wio** | **Window Management + Input (cross-platform)** | ✅ Im Windows-Fork verwendet |
+| gooey | UI Framework (Referenz/Inspiration) | ⚠️ Nur Linux/macOS |
+
+## 🔗 Resources
+
+- Gooey Win-Fail Branch: `/home/g/projects/vulkan-ed/gooey-win-fail`
+- **Windows Zed-Killer (Screenshots!):** `/mnt/windows1/Users/gstra/projects/zed-killer`
+  - `text_test_result.png` - FreeType Text-Qualität katastrophal
+  - `final_zed_result.png` - Dunkler Hintergrund, immer noch unscharf
+  - `zed_killer_final.png` - Editor unbenutzbar
+- Clay-Zig: `/home/g/projects/vulkan-ed/clay-zig`
+- WGPU: `/home/g/projects/vulkan-ed/wgpu_native_zig`
+- vkvg: `/home/g/projects/vulkan-ed/vkvg-zig`
+- Gooey (Referenz): `/home/g/projects/vulkan-ed/gooey`
+
+## 📖 Lessons Learned aus Gooey Windows Fail
+
+1. **FreeType auf Windows = unbenutzbar** (kein Subpixel-Rendering)
+2. **DirectWrite ist Pflicht** für Windows, kein "nice-to-have"
+3. **NanoVG als Cairo-Ersatz** war nicht implementiert (nur placeholder)
+4. **wio + Vulkan Platform-Code** ist gut - kann übernommen werden
+5. **vkvg > NanoVG** für Vulkan-basierte 2D Graphics
+6. **WGPU hat kein Window Management** - wio verwenden
+7. **Windows Fork Code ist brauchbar** - nur Text/SVG müssen ersetzt werden
+8. **JetBrains Mono bundlen** - keine Font Discovery nötig (spart Komplexität!)
+9. **macOS/WASM nicht unterstützen** - Fokus auf Windows + Linux
+10. **WGPU > direktes Vulkan** - abstrahiert DX12/Vulkan automatisch, weniger Code
