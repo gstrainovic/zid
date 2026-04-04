@@ -48,7 +48,8 @@ pub fn main() !void {
     });
     defer text_renderer.deinit();
 
-    // TODO: text_renderer.buildAtlas();
+    // Glyph-Atlas bauen
+    try text_renderer.buildAtlas();
 
     // 4. UI System initialisieren (Clay)
     var ui_system = try ui.UI.init(allocator, .{

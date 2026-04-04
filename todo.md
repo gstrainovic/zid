@@ -152,54 +152,36 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
 ## ✅ TODO
 
 ### Phase 1: Projekt-Setup
-- [ ] Zig Projekt initialisieren
-- [ ] WGPU Native als Dependency
-- [ ] Clay-Zig als Dependency
-- [ ] vkvg Integration prüfen/Build-System
-- [ ] Build-Skripte für Windows + Linux
+- [x] Zig Projekt initialisieren
+- [x] WGPU Native als Dependency
+- [x] Clay-Zig als Dependency
+- [x] vkvg Integration prüfen/Build-System
+- [x] Build-Skripte für Windows + Linux
 
 ### Phase 2: Platform Layer - Window Management
-
-**⚠️ WICHTIG: WGPU hat KEIN Window Management!**
-WGPU ist nur GPU-Rendering API - benötigt Window Handle für Surface Creation.
-
-**✅ Lösung: wio (native Zig Windowing Library)**
-
-Vorteile von wio:
-- ✅ Cross-platform (Windows + Linux)
-- ✅ Native Zig (keine C-Bindings)
-- ✅ Bereits in deinem Windows-Fork getestet und funktioniert
-- ✅ Input Handling integriert
-- ✅ Weniger Dependencies als direkte Win32/Wayland Implementation
-
-Alternative (falls wio nicht ausreicht):
-- Windows: Direkte Win32 API
-- Linux: Wayland/X11 direkt
-
-**TODO:**
-- [ ] wio als Dependency integrieren
-- [ ] Windows: wio Window erstellen (bereits vorhanden im Fork!)
-- [ ] Linux: wio Window erstellen
-- [ ] wio → WGPU Surface Verbindung
-- [ ] Input Event Handling
-- [ ] Event Loop implementieren
+- [x] wio als Dependency integrieren
+- [x] Windows: wio Window erstellen (bereits vorhanden im Fork!)
+- [x] Linux: wio Window erstellen
+- [x] wio → WGPU Surface Verbindung
+- [x] Input Event Handling
+- [x] Event Loop implementieren
 
 ### Phase 3: Rendering
-- [ ] WGPU Device/Surface Initialisierung
-- [ ] Basic Triangle Rendering (Test)
+- [x] WGPU Device/Surface Initialisierung
+- [x] Basic Triangle Rendering (Test)
 - [ ] Clay Renderer für WGPU bauen
 - [ ] Text Renderer Interface definieren
 
 ### Phase 4: Text Rendering (HÖCHSTE PRIORITÄT!)
-- [ ] JetBrains Mono Font-Dateien bundlen (.ttf/.otf)
-- [ ] Glyph-Atlas Interface definieren
+- [x] JetBrains Mono Font-Dateien bundlen (.ttf/.otf)
+- [x] Glyph-Atlas Interface definieren
 - [ ] **Windows: DirectWrite Integration** (MUSS sein!)
   - [ ] DirectWrite COM Interface in Zig wrappen
   - [ ] Glyph-Rendering mit ClearType/Subpixel
   - [ ] JetBrainsMono.ttf laden und Glyphen extrahieren
-- [ ] Linux: FreeType + HarfBuzz (von Gooey übernehmen)
-  - [ ] JetBrainsMono.ttf laden
-  - [ ] Subpixel-Hinting konfigurieren
+- [x] Linux: FreeType + HarfBuzz (von Gooey übernehmen)
+  - [x] JetBrainsMono.ttf laden
+  - [x] Subpixel-Hinting konfigurieren
 - [ ] GPU Glyph-Atlas Rendering (einheitlich für beide Plattformen)
 
 ### Phase 5: 2D Graphics mit vkvg
