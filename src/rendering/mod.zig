@@ -13,6 +13,9 @@ pub const RendererConfig = struct {
     clear_color: [4]f32 = .{ 0.15, 0.15, 0.2, 1.0 },
 };
 
+/// Dreieck Shader Pfad (wird zur Runtime geladen)
+pub const triangle_shader_path = "zig-out/share/triangle.wgsl";
+
 /// Renderer Hauptstruktur
 pub const Renderer = struct {
     allocator: std.mem.Allocator,
@@ -22,6 +25,8 @@ pub const Renderer = struct {
     device: ?*wgpu.Device = null,
     queue: ?*wgpu.Queue = null,
     surface: ?*wgpu.Surface = null,
+    shader_module: ?*wgpu.ShaderModule = null,
+    render_pipeline: ?*wgpu.RenderPipeline = null,
     swap_chain_format: wgpu.TextureFormat = .bgra8_unorm,
     width: u32 = 0,
     height: u32 = 0,
@@ -88,6 +93,70 @@ pub const Renderer = struct {
             return error.NoQueue;
         };
 
+        // Shader-Datei laden (zur Runtime)
+        const shader_code = try std.fs.cwd().readFileAlloc(allocator, triangle_shader_path, 1024 * 1024);
+        defer allocator.free(shader_code);
+
+        // Shader-Modul laden (WGSL)
+        const shader_module = device.createShaderModule(&wgpu.shaderModuleWGSLDescriptor(.{
+            .label = "triangle.wgsl",
+            .code = shader_code,
+        })) orelse {
+            queue.release();
+            device.release();
+            adapter.release();
+            instance.release();
+            return error.ShaderCompileFailed;
+        };
+
+        // Render Pipeline erstellen
+        const color_targets = [_]wgpu.ColorTargetState{
+            wgpu.ColorTargetState{
+                .format = .bgra8_unorm,
+                .blend = &wgpu.BlendState{
+                    .color = wgpu.BlendComponent{
+                        .operation = .add,
+                        .src_factor = .src_alpha,
+                        .dst_factor = .one_minus_src_alpha,
+                    },
+                    .alpha = wgpu.BlendComponent{
+                        .operation = .add,
+                        .src_factor = .zero,
+                        .dst_factor = .one,
+                    },
+                },
+            },
+        };
+
+        const fragment_state = wgpu.FragmentState{
+            .module = shader_module,
+            .entry_point = wgpu.StringView.fromSlice("fs_main"),
+            .target_count = color_targets.len,
+            .targets = color_targets[0..].ptr,
+        };
+
+        const render_pipeline = device.createRenderPipeline(&wgpu.RenderPipelineDescriptor{
+            .label = wgpu.StringView.fromSlice("triangle_pipeline"),
+            .vertex = wgpu.VertexState{
+                .module = shader_module,
+                .entry_point = wgpu.StringView.fromSlice("vs_main"),
+            },
+            .primitive = wgpu.PrimitiveState{
+                .topology = .triangle_list,
+                .front_face = .ccw,
+                .cull_mode = .none,
+            },
+            .fragment = &fragment_state,
+            .multisample = wgpu.MultisampleState{},
+        }) orelse {
+            shader_module.release();
+            queue.release();
+            device.release();
+            adapter.release();
+            instance.release();
+            return error.PipelineCreateFailed;
+        };
+
         log.info("WGPU initialized: instance={*} adapter={*} device={*}", .{ instance, adapter, device });
 
         return Self{
@@ -97,12 +166,16 @@ pub const Renderer = struct {
             .adapter = adapter,
             .device = device,
             .queue = queue,
+            .shader_module = shader_module,
+            .render_pipeline = render_pipeline,
         };
     }
 
     /// Renderer aufräumen
     pub fn deinit(self: *Self) void {
         log.info("Renderer shutdown", .{});
+        if (self.render_pipeline) |p| p.release();
+        if (self.shader_module) |s| s.release();
         if (self.surface) |surface| surface.release();
         if (self.queue) |queue| queue.release();
         if (self.device) |device| device.release();
@@ -182,7 +255,7 @@ pub const Renderer = struct {
         self.config.clear_color = .{ r, g, b, a };
     }
 
-    /// Frame rendern (Clear + Present)
+    /// Frame rendern (Clear + Dreieck + Present)
     pub fn renderFrame(self: *Self) void {
         const texture_view = self.beginFrame() orelse return;
         defer self.endFrame(texture_view);
@@ -213,7 +286,13 @@ pub const Renderer = struct {
         };
 
         const render_pass = command_encoder.beginRenderPass(&render_pass_desc) orelse return;
+
+        // Dreieck rendern
+        render_pass.setPipeline(self.render_pipeline.?);
+        render_pass.draw(3, 1, 0, 0);
+
         render_pass.end();
+        render_pass.release();
 
         const command_buffer = command_encoder.finish(&wgpu.CommandBufferDescriptor{
             .label = wgpu.StringView{},

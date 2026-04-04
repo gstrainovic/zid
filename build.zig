@@ -36,6 +36,10 @@ pub fn build(b: *std.Build) void {
     exe_mod.addImport("wio", wio_dep.module("wio"));
     exe_mod.addImport("wgpu", wgpu_dep.module("wgpu"));
 
+    // Shader als Resource-File installieren
+    const shader_install = b.addInstallFileWithDir(b.path("shaders/triangle.wgsl"), .{ .custom = "share" }, "triangle.wgsl");
+    b.getInstallStep().dependOn(&shader_install.step);
+
     const exe = b.addExecutable(.{
         .name = "vulkan-ed",
         .root_module = exe_mod,
