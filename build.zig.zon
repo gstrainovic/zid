@@ -14,6 +14,9 @@
         .wgpu = .{
             .path = "libs/wgpu_native_zig",
         },
+        .gooey = .{
+            .path = "libs/gooey",
+        },
     },
     .paths = .{
         "build.zig",

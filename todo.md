@@ -189,8 +189,15 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
 - [ ] SVG Rendering mit vkvg
 - [ ] Icon Rendering
 - [ ] UI Decorations (Borders, Gradients, Shadows)
+- [ ] **Cairo durch vkvg ersetzen** (letzter Punkt - Performance-Option)
+  - [ ] Gooey's svg/backends/cairo.zig durch vkvg ersetzen
+  - [ ] GPU-beschleunigtes SVG-Rendering
+  - [ ] Tests verifizieren
 
 ### Phase 6: UI Components (von Gooey migrieren)
+- [ ] Gooey als Dependency einbinden (build.zig)
+- [ ] Gooey Scene kopieren (GPU Buffers)
+- [ ] Gooey TextSystem kopieren (Atlas, Cache, Render)
 - [ ] UI Primitives (Box, Text, Image)
 - [ ] Button, TextInput, TextArea
 - [ ] Scroll Container

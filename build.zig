@@ -25,6 +25,12 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    // gooey from submodule
+    const gooey_dep = b.dependency("gooey", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
     const exe_mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
@@ -35,6 +41,7 @@ pub fn build(b: *std.Build) void {
     exe_mod.addImport("clay", clay_dep.module("zclay"));
     exe_mod.addImport("wio", wio_dep.module("wio"));
     exe_mod.addImport("wgpu", wgpu_dep.module("wgpu"));
+    exe_mod.addImport("gooey", gooey_dep.module("gooey"));
 
     // Shader als Resource-File installieren
     const shader_install = b.addInstallFileWithDir(b.path("shaders/triangle.wgsl"), .{ .custom = "share" }, "triangle.wgsl");
@@ -58,7 +65,7 @@ pub fn build(b: *std.Build) void {
         exe.root_module.linkSystemLibrary("EGL", .{});
         // Vulkan für WGPU/Vulkan Rendering
         exe.root_module.linkSystemLibrary("vulkan", .{});
-        // FreeType + HarfBuzz + Fontconfig für Text Rendering (von Gooey)
+        // FreeType + HarfBuzz + Fontconfig für Gooey Text/SVG Rendering
         exe.root_module.linkSystemLibrary("freetype2", .{});
         exe.root_module.linkSystemLibrary("harfbuzz", .{});
         exe.root_module.linkSystemLibrary("fontconfig", .{});
