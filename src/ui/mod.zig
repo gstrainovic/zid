@@ -79,7 +79,7 @@ pub const UI = struct {
         clay.setLayoutDimensions(.{ .w = @floatFromInt(width), .h = @floatFromInt(height) });
     }
 
-    /// Beispiel: Einfaches Layout rendern
+    /// Beispiel: Layout mit Button rendern
     pub fn renderExample(self: *Self) []clay.RenderCommand {
         self.beginLayout();
 
@@ -93,15 +93,26 @@ pub const UI = struct {
             },
             .background_color = .{ 200, 50, 50, 255 },
         })({
-            // Header
+            // Header mit Button
             clay.UI()(.{
                 .id = clay.ElementId.ID("Header"),
                 .layout = .{
                     .sizing = .{ .w = .grow, .h = .fixed(80) },
+                    .child_gap = 8,
+                    .child_alignment = .{ .x = .left, .y = .center },
+                    .padding = .all(10),
                 },
                 .background_color = .{ 50, 200, 50, 255 },
             })({
-                // Header - green
+                // Button im Header (gelb)
+                clay.UI()(.{
+                    .id = clay.ElementId.ID("TestButton"),
+                    .layout = .{
+                        .sizing = .{ .w = .fixed(80), .h = .fixed(30) },
+                    },
+                    .background_color = .{ 255, 200, 50, 255 },
+                    .corner_radius = .all(4),
+                })({});
             });
 
             // Content Area
@@ -111,9 +122,7 @@ pub const UI = struct {
                     .sizing = .grow,
                 },
                 .background_color = .{ 50, 50, 200, 255 },
-            })({
-                // Content placeholder
-            });
+            })({});
         });
 
         return self.endLayout();
