@@ -10,7 +10,6 @@ const atlas_mod = @import("atlas.zig");
 const builtin = @import("builtin");
 const types = @import("types.zig");
 const font_face_mod = @import("font_face.zig");
-const platform = @import("../platform/mod.zig");
 
 const Atlas = @import("atlas.zig").Atlas;
 const Region = @import("atlas.zig").Region;
@@ -20,8 +19,8 @@ const RasterizedGlyph = types.RasterizedGlyph;
 const SUBPIXEL_VARIANTS_X = types.SUBPIXEL_VARIANTS_X;
 const SUBPIXEL_VARIANTS_Y = types.SUBPIXEL_VARIANTS_Y;
 
-const is_wasm = platform.is_wasm;
-const is_linux = platform.is_linux;
+const is_wasm = builtin.cpu.arch == .wasm32 or builtin.cpu.arch == .wasm64;
+const is_linux = builtin.os.tag == .linux;
 
 /// Key for glyph lookup - includes subpixel variant
 pub const GlyphKey = struct {

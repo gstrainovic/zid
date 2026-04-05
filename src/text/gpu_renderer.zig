@@ -92,7 +92,7 @@ pub const TextRendererGPU = struct {
 
         const vertex_buffers = [_]wgpu.VertexBufferLayout{
             .{
-                .array_stride = 8 * @sizeOf(f32), // pos(2) + uv(2)
+                .array_stride = 4 * @sizeOf(f32), // pos(2) + uv(2)
                 .step_mode = .vertex,
                 .attribute_count = 2,
                 .attributes = &[_]wgpu.VertexAttribute{
@@ -244,7 +244,8 @@ pub const TextRendererGPU = struct {
         log.info("Atlas updated: {}x{}", .{ atlas_size, atlas_size });
     }
 
-    /// Text rendern
+    /// Text rendern mit echtem Glyph-Atlas Rendering
+    /// Verwendet Gooey's 3-Phasen-Pipeline: shapeTextInto → resolveGlyphBatch → emit Quads
     pub fn renderText(
         self: *Self,
         render_pass: *wgpu.RenderPassEncoder,
@@ -253,148 +254,164 @@ pub const TextRendererGPU = struct {
         x: f32,
         y: f32,
     ) !void {
-        _ = text_renderer;
-        _ = text_str;
-        // TODO: Glyph-Atlas Rendering implementieren
-        // Für jetzt: Test-Quads rendern
-        if (self.text_pipeline == null) {
-            log.info("Creating text color pipeline...", .{});
-            const shader_code = try std.fs.cwd().readFileAlloc(
-                self.allocator,
-                "zig-out/share/text_color.wgsl",
-                1024 * 1024,
-            );
-            defer self.allocator.free(shader_code);
-            log.info("Text shader loaded: {} bytes", .{shader_code.len});
+        if (text_str.len == 0) return;
 
-            self.text_shader_module = self.device.createShaderModule(&wgpu.shaderModuleWGSLDescriptor(.{
-                .label = "text_color.wgsl",
-                .code = shader_code,
-            })) orelse {
-                log.err("Failed to create text shader module", .{});
-                return;
-            };
-            log.info("Text shader module created", .{});
+        const ts = text_renderer.ts_ptr;
+        const font_size = text_renderer.config.size;
+        const scale_factor: f32 = 1.0; // Keine zusätzliche Skalierung
 
-            const color_targets = [_]wgpu.ColorTargetState{
-                wgpu.ColorTargetState{
-                    .format = self.swap_chain_format,
-                    .blend = &wgpu.BlendState{
-                        .color = wgpu.BlendComponent{
-                            .operation = .add,
-                            .src_factor = .src_alpha,
-                            .dst_factor = .one_minus_src_alpha,
-                        },
-                        .alpha = wgpu.BlendComponent{
-                            .operation = .add,
-                            .src_factor = .one,
-                            .dst_factor = .one_minus_src_alpha,
-                        },
-                    },
-                },
-            };
+        // size_scale = font_size / metrics.point_size
+        const size_scale = if (ts.getMetrics()) |metrics|
+            font_size / metrics.point_size
+        else
+            1.0;
 
-            const vertex_buffers = [_]wgpu.VertexBufferLayout{
-                .{
-                    .array_stride = 6 * @sizeOf(f32), // pos(2) + color(4)
-                    .step_mode = .vertex,
-                    .attribute_count = 2,
-                    .attributes = &[_]wgpu.VertexAttribute{
-                        .{ .format = .float32x2, .offset = 0, .shader_location = 0 },
-                        .{ .format = .float32x4, .offset = 2 * @sizeOf(f32), .shader_location = 1 },
-                    },
-                },
-            };
+        // === Phase 1: Text shapen (echte Glyph-Metriken vom Font) ===
+        var glyph_buf: [256]text.ShapedGlyph = undefined;
+        var shaped = try ts.shapeTextInto(text_str, null, &glyph_buf);
+        defer if (shaped.owned) shaped.deinit(ts.allocator);
 
-            const fragment_state = wgpu.FragmentState{
-                .module = self.text_shader_module.?,
-                .entry_point = wgpu.StringView.fromSlice("fs_main"),
-                .target_count = color_targets.len,
-                .targets = color_targets[0..].ptr,
-            };
+        if (shaped.glyphs.len == 0) return;
 
-            self.text_pipeline = self.device.createRenderPipeline(&wgpu.RenderPipelineDescriptor{
-                .label = wgpu.StringView.fromSlice("text_color_pipeline"),
-                .vertex = wgpu.VertexState{
-                    .module = self.text_shader_module.?,
-                    .entry_point = wgpu.StringView.fromSlice("vs_main"),
-                    .buffer_count = vertex_buffers.len,
-                    .buffers = vertex_buffers[0..].ptr,
-                },
-                .primitive = wgpu.PrimitiveState{
-                    .topology = .triangle_list,
-                    .front_face = .ccw,
-                    .cull_mode = .none,
-                },
-                .fragment = &fragment_state,
-                .multisample = wgpu.MultisampleState{},
-            }) orelse {
-                log.err("Failed to create text pipeline", .{});
-                return;
-            };
-            log.info("Text pipeline created successfully", .{});
-        }
+        // === Phase 2: Device-Positionen + Subpixel-Offsets berechnen ===
+        var device_x: [256]f32 = undefined;
+        var device_y: [256]f32 = undefined;
+        var subpixel_x: [256]u8 = undefined;
 
-        // Einfacher Text-Renderer: Zeigt "Hello" als farbige Quads zum Test
+        computeGlyphDevicePositions(
+            shaped.glyphs,
+            x,
+            y, // baseline_y
+            size_scale,
+            scale_factor,
+            device_x[0 .. shaped.glyphs.len],
+            device_y[0 .. shaped.glyphs.len],
+            subpixel_x[0 .. shaped.glyphs.len],
+        );
+
+        // === Phase 3: Glyphs aus dem Atlas holen (batch, ein Lock) ===
+        var cached_results: [256]text.CachedGlyph = undefined;
+
+        try ts.resolveGlyphBatch(
+            shaped.glyphs,
+            font_size,
+            subpixel_x[0 .. shaped.glyphs.len],
+            cached_results[0 .. shaped.glyphs.len],
+        );
+
+        // === Phase 4: GPU Vertices aus echten Glyph-Metriken bauen ===
         var vertices = std.ArrayList(f32){};
         defer vertices.deinit(self.allocator);
 
-        const test_text = "HELLO";
-        const char_width: f32 = 40.0;
-        const char_height: f32 = 60.0;
-        var pen_x: f32 = x;
-        const pen_y: f32 = y;
+        for (
+            cached_results[0 .. shaped.glyphs.len],
+            device_x[0 .. shaped.glyphs.len],
+            device_y[0 .. shaped.glyphs.len],
+        ) |cached, dev_x, dev_y| {
+            if (cached.region.width == 0 or cached.region.height == 0) continue;
 
-        // Für jedes Zeichen ein farbiges Quad (gelb)
-        var i: usize = 0;
-        while (i < test_text.len) : (i += 1) {
-            const r: f32 = 1.0;
-            const g: f32 = 0.9;
-            const b: f32 = 0.2;
+            // UV aus cached atlas_size (thread-safe, auch wenn Atlas wächst)
+            const uv = cached.uv();
 
-            // Quad zu Dreiecken (6 Vertices) - NDC Koordinaten (-1 bis 1)
-            const ndc_x0 = (pen_x / self.viewport_width) * 2.0 - 1.0;
-            const ndc_y0 = -((pen_y / self.viewport_height) * 2.0 - 1.0);
-            const ndc_x1 = ((pen_x + char_width) / self.viewport_width) * 2.0 - 1.0;
-            const ndc_y1 = -(((pen_y - char_height) / self.viewport_height) * 2.0 - 1.0);
+            const glyph_w: f32 = @floatFromInt(cached.region.width);
+            const glyph_h: f32 = @floatFromInt(cached.region.height);
 
+            // Device-Pixel Position: floor(device) + raster_offset → zurück zu logical
+            const glyph_x = (@floor(dev_x) + @as(f32, @floatFromInt(cached.offset_x))) / scale_factor;
+            const glyph_y = (@floor(dev_y) - @as(f32, @floatFromInt(cached.offset_y))) / scale_factor;
+
+            // NDC (-1 bis 1)
+            const ndc_x0 = (glyph_x / self.viewport_width) * 2.0 - 1.0;
+            const ndc_y0 = -((glyph_y / self.viewport_height) * 2.0 - 1.0);
+            const ndc_x1 = ((glyph_x + glyph_w) / self.viewport_width) * 2.0 - 1.0;
+            const ndc_y1 = -(((glyph_y - glyph_h) / self.viewport_height) * 2.0 - 1.0);
+
+            // 2 Dreiecke = 6 Vertices (pos: 2f32 + uv: 2f32)
             try vertices.appendSlice(self.allocator, &.{
-                ndc_x0, ndc_y0, r, g, b, 1.0,
-                ndc_x1, ndc_y0, r, g, b, 1.0,
-                ndc_x0, ndc_y1, r, g, b, 1.0,
-                ndc_x1, ndc_y0, r, g, b, 1.0,
-                ndc_x1, ndc_y1, r, g, b, 1.0,
-                ndc_x0, ndc_y1, r, g, b, 1.0,
+                ndc_x0, ndc_y0, uv.u0, uv.v0,
+                ndc_x1, ndc_y0, uv.u1, uv.v0,
+                ndc_x0, ndc_y1, uv.u0, uv.v1,
+                ndc_x1, ndc_y0, uv.u1, uv.v0,
+                ndc_x1, ndc_y1, uv.u1, uv.v1,
+                ndc_x0, ndc_y1, uv.u0, uv.v1,
             });
-            pen_x += char_width + 4.0;
         }
 
         if (vertices.items.len == 0) return;
 
-        // Text-Vertex-Buffer (pos: 2f32 + color: 4f32 = 6f32 pro Vertex)
-        if (self.text_vertex_buffer) |buf| buf.release();
+        // Atlas Bind Group
+        const bind_group = self.device.createBindGroup(&wgpu.BindGroupDescriptor{
+            .label = wgpu.StringView.fromSlice("text_bind_group"),
+            .layout = self.bind_group_layout.?,
+            .entry_count = 2,
+            .entries = &[_]wgpu.BindGroupEntry{
+                .{
+                    .binding = 0,
+                    .texture_view = self.atlas_texture_view.?,
+                    .sampler = null,
+                },
+                .{
+                    .binding = 1,
+                    .texture_view = null,
+                    .sampler = self.sampler.?,
+                },
+            },
+        }) orelse return;
+        defer bind_group.release();
+
+        // Vertex Buffer
         const vertex_buffer = self.device.createBuffer(&wgpu.BufferDescriptor{
             .label = wgpu.StringView.fromSlice("text_vertex_buffer"),
             .size = vertices.items.len * @sizeOf(f32),
             .usage = wgpu.BufferUsages.vertex | wgpu.BufferUsages.copy_dst,
             .mapped_at_creation = 0,
         }) orelse return;
+        defer vertex_buffer.release();
 
-        log.info("Text vertices: {}", .{vertices.items.len});
         self.queue.writeBuffer(
             vertex_buffer,
             0,
             @as(*const anyopaque, @ptrCast(vertices.items.ptr)),
             vertices.items.len * @sizeOf(f32),
         );
-        self.text_vertex_buffer = vertex_buffer;
-        self.text_vertex_count = @intCast(vertices.items.len / 6);
 
-        // Text rendern mit einfachem Color-Pipeline (kein Atlas nötig)
-        if (self.text_pipeline) |pipeline| {
-            render_pass.setPipeline(pipeline);
-            render_pass.setVertexBuffer(0, vertex_buffer, 0, vertices.items.len * @sizeOf(f32));
-            render_pass.draw(self.text_vertex_count, 1, 0, 0);
+        // Mit Atlas-Pipeline rendern (echte Glyphen aus Textur)
+        render_pass.setPipeline(self.pipeline.?);
+        render_pass.setVertexBuffer(0, vertex_buffer, 0, vertices.items.len * @sizeOf(f32));
+        render_pass.setBindGroup(0, bind_group, 0, null);
+        const vertex_count = vertices.items.len / 4; // 4 floats pro Vertex
+        render_pass.draw(@intCast(vertex_count), 1, 0, 0);
+    }
+
+    /// Phase 1: Device-Pixel-Positionen und Subpixel-Offsets berechnen.
+    /// Exakt wie Gooey's computeGlyphDevicePositions.
+    fn computeGlyphDevicePositions(
+        shaped_glyphs: []const text.ShapedGlyph,
+        start_x: f32,
+        baseline_y: f32,
+        size_scale: f32,
+        scale_factor: f32,
+        out_device_x: []f32,
+        out_device_y: []f32,
+        out_subpixel_x: []u8,
+    ) void {
+        const SUBPIXEL_VARIANTS_F: f32 = 4.0;
+        var pen_x = start_x;
+        for (shaped_glyphs, 0..) |glyph, index| {
+            const scaled_x_offset = glyph.x_offset * size_scale;
+            const scaled_y_offset = glyph.y_offset * size_scale;
+            const scaled_advance = glyph.x_advance * size_scale;
+
+            const device_x = (pen_x + scaled_x_offset) * scale_factor;
+            const device_y = (baseline_y + scaled_y_offset) * scale_factor;
+
+            const fractional_x = device_x - @floor(device_x);
+
+            out_device_x[index] = device_x;
+            out_device_y[index] = device_y;
+            out_subpixel_x[index] = @intFromFloat(@floor(fractional_x * SUBPIXEL_VARIANTS_F));
+
+            pen_x += scaled_advance;
         }
     }
 

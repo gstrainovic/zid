@@ -17,7 +17,10 @@ const platform = struct {
     pub const is_wasm = builtin.cpu.arch == .wasm32 or builtin.cpu.arch == .wasm64;
     pub const is_linux = builtin.os.tag == .linux;
 };
-const RenderStats = struct {};
+const RenderStats = struct {
+    pub fn recordShapeCacheHit(self: *@This()) void { _ = self; }
+    pub fn recordShapeMiss(self: *@This(), elapsed: u64) void { _ = self; _ = elapsed; }
+};
 
 const Atlas = @import("atlas.zig").Atlas;
 
