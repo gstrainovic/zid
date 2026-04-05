@@ -5,6 +5,8 @@
 const std = @import("std");
 const clay = @import("clay");
 const Theme = @import("theme.zig").Theme;
+const Animation = @import("animation.zig").Animation;
+const AnimationType = @import("animation.zig").AnimationType;
 
 const log = std.log.scoped(.ui);
 
@@ -109,13 +111,23 @@ pub const UI = struct {
                 },
                 .background_color = t.surface,
             })({
-                // Button im Header (primary color)
+                // Button im Header mit Fade-In Animation
                 clay.UI()(.{
                     .id = clay.ElementId.ID("TestButton"),
                     .layout = .{
                         .sizing = .{ .w = .fixed(80), .h = .fixed(30) },
                     },
                     .background_color = t.primary,
+                    .corner_radius = .all(4),
+                })({});
+
+                // Animierter Button (scale-up)
+                clay.UI()(.{
+                    .id = clay.ElementId.ID("AnimatedButton"),
+                    .layout = .{
+                        .sizing = .{ .w = .fixed(80), .h = .fixed(30) },
+                    },
+                    .background_color = t.accent,
                     .corner_radius = .all(4),
                 })({});
             });

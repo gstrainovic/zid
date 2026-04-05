@@ -209,11 +209,13 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
   - [ ] Shadow (Drop Shadows)
 - [x] UI Primitives (Box, Text, Image)
 - [x] Button, TextInput, TextArea, ScrollContainer
-  - [x] Button (gelb, 80x30, im Header)
-  - [x] TextInput (hellgrau, 200x35, im Content)
-  - [x] TextArea (dunkelgrau, 300x100, im Content)
-  - [x] ScrollContainer (braun, 150x100, im Content)
-- [ ] Theme System (Catppuccin Light/Dark)
+  - [x] Button (primary Farbe, 80x30)
+  - [x] TextInput (surface Farbe, 200x35)
+  - [x] TextArea (overlay Farbe, 300x100)
+  - [x] ScrollContainer (accent Farbe, 150x100)
+- [x] Theme System (Catppuccin Light/Dark)
+  - [x] Dark Theme (Macchiato) - aktiv
+  - [x] Light Theme (Latte) - verfügbar
 - [ ] Animation System
 
 ### Phase 6: Code Editor
