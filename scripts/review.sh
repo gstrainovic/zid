@@ -97,7 +97,6 @@ set +e
 claude -p "$USER_PROMPT" \
     --model sonnet \
     --effort medium \
-    --max-budget-usd 0.60 \
     --output-format json \
     --json-schema "$SCHEMA" \
     --permission-mode default \
