@@ -175,7 +175,8 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
   - [x] ClayRenderer Modul (clay_renderer/mod.zig)
   - [x] Integration in main.zig
   - [x] Vertex Buffer mit COPY_DST Usage
-  - [x] Verifiziert: 3 Clay-Rechtecke pro Frame gerendert
+  - [x] Verifiziert: 3 Clay-Rechtecke pro Frame gerendert (Screenshot: phase4_clay_final.png)
+  - [x] Event-basierter Render Loop (wio.wait mit Timeout)
 
 ### Phase 4: Text Rendering (HÖCHSTE PRIORITÄT!)
 - [x] JetBrains Mono Font-Dateien bundlen (.ttf/.otf)

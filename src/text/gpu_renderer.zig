@@ -245,13 +245,13 @@ pub const TextRendererGPU = struct {
         x: f32,
         y: f32,
     ) !void {
+        // Text-Rendering noch in Entwicklung - skip für stabile Clay-Rectangles
         _ = self;
         _ = render_pass;
         _ = text_renderer;
         _ = text_str;
         _ = x;
         _ = y;
-        // TODO: Text rendering implementation pending
         return;
     }
 
