@@ -178,24 +178,24 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
   - [x] Event-basierter Render Loop (wio.wait mit Timeout)
 
 ### Phase 4: Text Rendering (HÖCHSTE PRIORITÄT!)
-- [ ] JetBrains Mono Font-Dateien bundlen (.ttf/.otf)
-- [ ] Glyph-Atlas Interface definieren
-- [ ] **Gooey TextSystem adaptieren** (Atlas, Cache, Shaper)
-  - [ ] Gooey's `text_system.zig` → unser TextRenderer
-  - [ ] Gooey's `atlas.zig` → GPU Glyph-Atlas
-  - [ ] Gooey's `cache.zig` → Subpixel-Glyph-Cache
-  - [ ] Gooey's `render.zig` → Text → Scene
-  - [ ] Gooey's `backends/freetype/` → FreeType Integration
-- [ ] **Linux: FreeType + HarfBuzz** (von Gooey)
-  - [ ] JetBrainsMono.ttf laden
-  - [ ] Subpixel-Hinting konfigurieren
-  - [ ] Gooey's `backends/freetype/` integriert
-- [ ] GPU Text Renderer (gpu_renderer.zig)
-  - [ ] Text-Color Pipeline (einfache Quads)
-  - [ ] NDC-Koordinaten (-1 bis 1)
-  - [ ] Verifiziert: "HELLO" als 5 gelbe Quads sichtbar (Screenshot: phase4_text_ndc.png)
-  - [ ] Text-Atlas Shader vorbereitet (text_atlas.wgsl)
-  - [ ] Glyph-Atlas Rendering mit echten Font-Glyphen
+- [x] JetBrains Mono Font-Dateien bundlen (.ttf/.otf)
+- [x] Glyph-Atlas Interface definieren
+- [x] **Gooey TextSystem adaptieren** (Atlas, Cache, Shaper)
+  - [x] Gooey's `text_system.zig` → unser TextRenderer
+  - [x] Gooey's `atlas.zig` → GPU Glyph-Atlas
+  - [x] Gooey's `cache.zig` → Subpixel-Glyph-Cache
+  - [x] Gooey's `render.zig` → Text → Scene
+  - [x] Gooey's `backends/freetype/` → FreeType Integration
+- [x] **Linux: FreeType + HarfBuzz** (von Gooey)
+  - [x] JetBrainsMono.ttf laden
+  - [x] Subpixel-Hinting konfigurieren
+  - [x] Gooey's `backends/freetype/` integriert
+- [x] GPU Text Renderer (gpu_renderer.zig)
+  - [x] Text-Color Pipeline (einfache Quads)
+  - [x] NDC-Koordinaten (-1 bis 1)
+  - [x] Verifiziert: "HELLO" als Text sichtbar (Screenshot: phase4_text.png)
+  - [x] Text-Atlas Shader vorbereitet (text_atlas.wgsl)
+  - [x] Glyph-Atlas Rendering mit echten Font-Glyphen
 - [ ] **Windows: DirectWrite Integration** (MUSS sein!)
   - [ ] DirectWrite COM Interface in Zig wrappen
   - [ ] Glyph-Rendering mit ClearType/Subpixel
