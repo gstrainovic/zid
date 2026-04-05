@@ -5,7 +5,7 @@
 # Usage:
 #   ./gui-screenshot.sh [output_path] [wait_seconds]
 #
-# Requires: ydotool, ydotoold, imagemagick (import)
+# Requires: ydotool, ydotoold
 
 set -euo pipefail
 
@@ -38,11 +38,11 @@ zig build
 
 # Remember newest screenshot before taking one
 SCREENSHOT_DIR="$HOME/Bilder/Bildschirmfotos"
-BEFORE=$(ls -t "$SCREENSHOT_DIR"/*.png 2>/dev/null | head -1)
+BEFORE=$(ls -t "$SCREENSHOT_DIR"/*.png 2>/dev/null | head -1 || echo "")
 
 # Start app in background
 echo "Starting vulkan-ed..."
-./zig-out/bin/vulkan-ed test_data/small.log &
+./zig-out/bin/vulkan-ed &
 APP_PID=$!
 
 # Wait for rendering
@@ -56,7 +56,7 @@ ydotool key 42:1 99:1 99:0 42:0
 # Wait for new file to appear
 for i in $(seq 1 50); do
     sleep 0.1
-    AFTER=$(ls -t "$SCREENSHOT_DIR"/*.png 2>/dev/null | head -1)
+    AFTER=$(ls -t "$SCREENSHOT_DIR"/*.png 2>/dev/null | head -1 || echo "")
     if [[ -n "$AFTER" && "$AFTER" != "$BEFORE" ]]; then
         mkdir -p "$(dirname "$OUTPUT_PATH")"
         cp "$AFTER" "$OUTPUT_PATH"
