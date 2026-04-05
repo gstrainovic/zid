@@ -180,20 +180,22 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
 ### Phase 4: Text Rendering (HÖCHSTE PRIORITÄT!)
 - [x] JetBrains Mono Font-Dateien bundlen (.ttf/.otf)
 - [x] Glyph-Atlas Interface definieren
-- [ ] **Gooey TextSystem adaptieren** (Atlas, Cache, Shaper)
-  - [ ] Gooey's `text_system.zig` → unser TextRenderer
-  - [ ] Gooey's `atlas.zig` → GPU Glyph-Atlas
-  - [ ] Gooey's `cache.zig` → Subpixel-Glyph-Cache
-  - [ ] Gooey's `render.zig` → Text → Scene
-- [ ] **Linux: FreeType + HarfBuzz** (von Gooey)
+- [x] **Gooey TextSystem adaptieren** (Atlas, Cache, Shaper)
+  - [x] Gooey's `text_system.zig` → unser TextRenderer
+  - [x] Gooey's `atlas.zig` → GPU Glyph-Atlas
+  - [x] Gooey's `cache.zig` → Subpixel-Glyph-Cache
+  - [x] Gooey's `render.zig` → Text → Scene
+  - [x] Gooey's `backends/freetype/` → FreeType Integration
+- [x] **Linux: FreeType + HarfBuzz** (von Gooey)
   - [x] JetBrainsMono.ttf laden
   - [x] Subpixel-Hinting konfigurieren
-  - [ ] Gooey's `backends/freetype/` integrieren
+  - [x] Gooey's `backends/freetype/` integriert
 - [ ] **Windows: DirectWrite Integration** (MUSS sein!)
   - [ ] DirectWrite COM Interface in Zig wrappen
   - [ ] Glyph-Rendering mit ClearType/Subpixel
   - [ ] JetBrainsMono.ttf laden und Glyphen extrahieren
 - [ ] GPU Glyph-Atlas Rendering (WGPU, einheitlich für beide Plattformen)
+- [ ] **TODO: TextSystem.init Debugging** - crasht aktuell
 
 ### Phase 5: UI Components (von Gooey lernen, mit wgpu+wio bauen)
 - [ ] Scene-System (Gooey's `scene.zig` → WGPU Buffers)
