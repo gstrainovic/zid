@@ -193,7 +193,9 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
   - [x] Gooey's `backends/freetype/` integriert
 - [x] GPU Text Renderer (gpu_renderer.zig)
   - [x] Text-Color Pipeline (einfache Quads)
-  - [ ] Glyph-Atlas Rendering (in Arbeit)
+  - [x] NDC-Koordinaten (-1 bis 1)
+  - [x] Verifiziert: "HELLO" als 5 gelbe Quads sichtbar (Screenshot: phase4_text_ndc.png)
+  - [ ] Glyph-Atlas Rendering (nächster Schritt)
 - [ ] **Windows: DirectWrite Integration** (MUSS sein!)
   - [ ] DirectWrite COM Interface in Zig wrappen
   - [ ] Glyph-Rendering mit ClearType/Subpixel
