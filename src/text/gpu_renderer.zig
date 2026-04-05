@@ -255,7 +255,8 @@ pub const TextRendererGPU = struct {
     ) !void {
         _ = text_renderer;
         _ = text_str;
-        // Text Color Pipeline bei erstem Aufruf erstellen
+        // TODO: Glyph-Atlas Rendering implementieren
+        // Für jetzt: Test-Quads rendern
         if (self.text_pipeline == null) {
             log.info("Creating text color pipeline...", .{});
             const shader_code = try std.fs.cwd().readFileAlloc(
