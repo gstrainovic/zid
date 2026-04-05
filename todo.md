@@ -159,12 +159,12 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
 - [x] Build-Skripte für Windows + Linux
 
 ### Phase 2: Platform Layer - Window Management
-- [ ] wio als Dependency integrieren
-- [ ] Windows: wio Window erstellen
-- [ ] Linux: wio Window erstellen
-- [ ] wio → WGPU Surface Verbindung
-- [ ] Input Event Handling
-- [ ] Event Loop implementieren
+- [x] wio als Dependency integrieren
+- [x] Windows: wio Window erstellen
+- [x] Linux: wio Window erstellen
+- [x] wio → WGPU Surface Verbindung
+- [x] Input Event Handling
+- [x] Event Loop implementieren
 
 ### Phase 3: Rendering
 - [ ] WGPU Device/Surface Initialisierung
