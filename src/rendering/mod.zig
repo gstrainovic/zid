@@ -303,6 +303,56 @@ pub const Renderer = struct {
         self.queue.?.submit(&[_]*wgpu.CommandBuffer{command_buffer});
     }
 
+    /// Frame rendern NUR mit Clay-Rechtecken (für Phase 3 Verifikation)
+    pub fn renderFrameClayOnly(
+        self: *Self,
+        clay_rdr: anytype,
+        clay_commands: []clay.RenderCommand,
+    ) void {
+        const texture_view = self.beginFrame() orelse return;
+        defer self.endFrame(texture_view);
+
+        const command_encoder = self.device.?.createCommandEncoder(&wgpu.CommandEncoderDescriptor{
+            .label = wgpu.StringView{},
+        }) orelse return;
+        defer command_encoder.release();
+
+        const color_attachments = [_]wgpu.ColorAttachment{
+            .{
+                .view = texture_view,
+                .resolve_target = null,
+                .load_op = .clear,
+                .store_op = .store,
+                .clear_value = wgpu.Color{
+                    .r = self.config.clear_color[0],
+                    .g = self.config.clear_color[1],
+                    .b = self.config.clear_color[2],
+                    .a = self.config.clear_color[3],
+                },
+            },
+        };
+
+        const render_pass_desc = wgpu.RenderPassDescriptor{
+            .color_attachment_count = color_attachments.len,
+            .color_attachments = &color_attachments,
+        };
+
+        const render_pass = command_encoder.beginRenderPass(&render_pass_desc) orelse return;
+
+        // NUR Clay Rechtecke rendern (KEIN Dreieck, KEIN Text)
+        clay_rdr.renderClayLayout(render_pass, clay_commands) catch return;
+
+        render_pass.end();
+        render_pass.release();
+
+        const command_buffer = command_encoder.finish(&wgpu.CommandBufferDescriptor{
+            .label = wgpu.StringView{},
+        }) orelse return;
+        defer command_buffer.release();
+
+        self.queue.?.submit(&[_]*wgpu.CommandBuffer{command_buffer});
+    }
+
     /// Frame rendern mit Clay UI + Text (Clear + Clay + Text + Dreieck + Present)
     pub fn renderFrameWithText(
         self: *Self,
