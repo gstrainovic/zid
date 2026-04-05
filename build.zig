@@ -52,6 +52,8 @@ pub fn build(b: *std.Build) void {
     b.getInstallStep().dependOn(&shader_install_text.step);
     const shader_install_text_color = b.addInstallFileWithDir(b.path("shaders/text_color.wgsl"), .{ .custom = "share" }, "text_color.wgsl");
     b.getInstallStep().dependOn(&shader_install_text_color.step);
+    const shader_install_text_atlas = b.addInstallFileWithDir(b.path("shaders/text_atlas.wgsl"), .{ .custom = "share" }, "text_atlas.wgsl");
+    b.getInstallStep().dependOn(&shader_install_text_atlas.step);
 
     const exe = b.addExecutable(.{
         .name = "vulkan-ed",
