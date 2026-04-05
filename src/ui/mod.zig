@@ -115,14 +115,26 @@ pub const UI = struct {
                 })({});
             });
 
-            // Content Area
+            // Content Area mit TextInput
             clay.UI()(.{
                 .id = clay.ElementId.ID("Content"),
                 .layout = .{
                     .sizing = .grow,
+                    .padding = .all(16),
+                    .child_gap = 8,
                 },
                 .background_color = .{ 50, 50, 200, 255 },
-            })({});
+            })({
+                // TextInput im Content (hellgrau)
+                clay.UI()(.{
+                    .id = clay.ElementId.ID("TextInput"),
+                    .layout = .{
+                        .sizing = .{ .w = .fixed(200), .h = .fixed(35) },
+                    },
+                    .background_color = .{ 200, 200, 200, 255 },
+                    .corner_radius = .all(4),
+                })({});
+            });
         });
 
         return self.endLayout();
