@@ -195,7 +195,8 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
   - [x] Text-Color Pipeline (einfache Quads)
   - [x] NDC-Koordinaten (-1 bis 1)
   - [x] Verifiziert: "HELLO" als 5 gelbe Quads sichtbar (Screenshot: phase4_text_ndc.png)
-  - [ ] Glyph-Atlas Rendering (nächster Schritt)
+  - [x] Text-Atlas Shader vorbereitet (text_atlas.wgsl)
+  - [ ] Glyph-Atlas Rendering mit echten Font-Glyphen
 - [ ] **Windows: DirectWrite Integration** (MUSS sein!)
   - [ ] DirectWrite COM Interface in Zig wrappen
   - [ ] Glyph-Rendering mit ClearType/Subpixel
