@@ -75,19 +75,15 @@ pub fn main() !void {
     log.info("=== vulkan-ed ready ===", .{});
     log.info("Press Ctrl+C to exit (or close window)", .{});
 
-    // Event-basierter Render Loop
-    // wio.wait() blockiert bis Events eintreffen → keine CPU-Last im Idle
+    // Render Loop mit wio Event-Handling
+    // wio.wait(16ms) → begrenzt auf ~60fps, blockiert nicht komplett
     while (plat.isRunning()) {
-        // Blockierend auf Events warten (keine CPU-Last!)
-        wio.wait(.{});
+        wio.wait(.{ .timeout_ns = 16 * std.time.ns_per_ms });
         wio.update();
-
-        var needs_render = false;
 
         // Events verarbeiten
         if (plat.window) |*win| {
             while (win.getEvent()) |event| {
-                needs_render = true;
                 switch (event) {
                     .size_logical => |sz| {
                         renderer.resize(@intCast(sz.width), @intCast(sz.height)) catch {};
@@ -100,14 +96,11 @@ pub fn main() !void {
             }
         }
 
-        // Nur rendern wenn Events eingetroffen sind
-        if (needs_render) {
-            // Clay Layout berechnen
-            const render_commands = ui_system.renderExample();
+        // Clay Layout berechnen
+        const render_commands = ui_system.renderExample();
 
-            // Rendern (Clear + Clay Rectangles + Dreieck + Present)
-            renderer.renderFrameWithClay(&clay_rdr, render_commands);
-        }
+        // Rendern (Clear + Clay Rectangles + Dreieck + Present)
+        renderer.renderFrameWithClay(&clay_rdr, render_commands);
     }
 
     log.info("=== vulkan-ed exiting ===", .{});
