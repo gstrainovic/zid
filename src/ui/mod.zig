@@ -4,6 +4,7 @@
 
 const std = @import("std");
 const clay = @import("clay");
+const Theme = @import("theme.zig").Theme;
 
 const log = std.log.scoped(.ui);
 
@@ -18,6 +19,7 @@ pub const UIConfig = struct {
 pub const UI = struct {
     allocator: std.mem.Allocator,
     config: UIConfig,
+    theme: Theme,
     initialized: bool = false,
 
     // Clay Memory Arena
@@ -38,6 +40,7 @@ pub const UI = struct {
         return Self{
             .allocator = allocator,
             .config = config,
+            .theme = Theme.dark(),
             .clay_memory = clay_memory,
             .initialized = false,
         };
@@ -79,9 +82,11 @@ pub const UI = struct {
         clay.setLayoutDimensions(.{ .w = @floatFromInt(width), .h = @floatFromInt(height) });
     }
 
-    /// Beispiel: Layout mit Button rendern
+    /// Beispiel: Layout mit Theme rendern
     pub fn renderExample(self: *Self) []clay.RenderCommand {
         self.beginLayout();
+
+        const t = self.theme;
 
         // Root Container
         clay.UI()(.{
@@ -91,7 +96,7 @@ pub const UI = struct {
                 .padding = .all(16),
                 .child_gap = 16,
             },
-            .background_color = .{ 200, 50, 50, 255 },
+            .background_color = t.bg,
         })({
             // Header mit Button
             clay.UI()(.{
@@ -102,20 +107,20 @@ pub const UI = struct {
                     .child_alignment = .{ .x = .left, .y = .center },
                     .padding = .all(10),
                 },
-                .background_color = .{ 50, 200, 50, 255 },
+                .background_color = t.surface,
             })({
-                // Button im Header (gelb)
+                // Button im Header (primary color)
                 clay.UI()(.{
                     .id = clay.ElementId.ID("TestButton"),
                     .layout = .{
                         .sizing = .{ .w = .fixed(80), .h = .fixed(30) },
                     },
-                    .background_color = .{ 255, 200, 50, 255 },
+                    .background_color = t.primary,
                     .corner_radius = .all(4),
                 })({});
             });
 
-            // Content Area mit TextInput
+            // Content Area mit TextInput, TextArea, ScrollContainer
             clay.UI()(.{
                 .id = clay.ElementId.ID("Content"),
                 .layout = .{
@@ -123,35 +128,35 @@ pub const UI = struct {
                     .padding = .all(16),
                     .child_gap = 8,
                 },
-                .background_color = .{ 50, 50, 200, 255 },
+                .background_color = t.bg,
             })({
-                // TextInput im Content (hellgrau)
+                // TextInput (surface color)
                 clay.UI()(.{
                     .id = clay.ElementId.ID("TextInput"),
                     .layout = .{
                         .sizing = .{ .w = .fixed(200), .h = .fixed(35) },
                     },
-                    .background_color = .{ 200, 200, 200, 255 },
+                    .background_color = t.surface,
                     .corner_radius = .all(4),
                 })({});
 
-                // TextArea im Content (dunkelgrau)
+                // TextArea (overlay color)
                 clay.UI()(.{
                     .id = clay.ElementId.ID("TextArea"),
                     .layout = .{
                         .sizing = .{ .w = .fixed(300), .h = .fixed(100) },
                     },
-                    .background_color = .{ 80, 80, 100, 255 },
+                    .background_color = t.overlay,
                     .corner_radius = .all(4),
                 })({});
 
-                // ScrollContainer (braun)
+                // ScrollContainer (accent color)
                 clay.UI()(.{
                     .id = clay.ElementId.ID("ScrollContainer"),
                     .layout = .{
                         .sizing = .{ .w = .fixed(150), .h = .fixed(100) },
                     },
-                    .background_color = .{ 120, 80, 50, 255 },
+                    .background_color = t.accent,
                     .corner_radius = .all(4),
                 })({});
             });

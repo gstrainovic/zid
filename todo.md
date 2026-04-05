@@ -208,11 +208,11 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
   - [ ] GlyphInstance (Text)
   - [ ] Shadow (Drop Shadows)
 - [x] UI Primitives (Box, Text, Image)
-- [x] Button, TextInput, TextArea
+- [x] Button, TextInput, TextArea, ScrollContainer
   - [x] Button (gelb, 80x30, im Header)
   - [x] TextInput (hellgrau, 200x35, im Content)
   - [x] TextArea (dunkelgrau, 300x100, im Content)
-- [ ] Scroll Container
+  - [x] ScrollContainer (braun, 150x100, im Content)
 - [ ] Theme System (Catppuccin Light/Dark)
 - [ ] Animation System
 
