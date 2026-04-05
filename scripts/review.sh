@@ -53,9 +53,19 @@ EOF
     done
 fi
 
-# ---- Hauptsache: Claude als Reviewer aufrufen ----
-if ! command -v claude &>/dev/null; then
-    echo "ERROR: claude CLI nicht im PATH" >&2
+# ---- Hauptsache: Claude als Reviewer (Fallback: Gemini) aufrufen ----
+CLAUDE_AVAIL=false
+if command -v claude &>/dev/null; then
+    CLAUDE_AVAIL=true
+fi
+
+GEMINI_AVAIL=false
+if command -v gemini &>/dev/null; then
+    GEMINI_AVAIL=true
+fi
+
+if [[ "$CLAUDE_AVAIL" == "false" && "$GEMINI_AVAIL" == "false" ]]; then
+    echo "ERROR: Weder claude noch gemini CLI im PATH" >&2
     exit 2
 fi
 
@@ -83,71 +93,118 @@ AUSGABE-REGELN (strikt):
 - Maximal 3 Eintraege in required_fixes, je max 200 Zeichen.
 - Erste Zeichen deiner Antwort: { — letzte Zeichen: }."
 
-# Hinweis zu --bare: Wir verwenden es NICHT, weil --bare OAuth/Keychain
-# ignoriert und nur ANTHROPIC_API_KEY akzeptiert. Der User ist per OAuth
-# eingeloggt, daher laufen wir im Normal-Modus und nehmen die etwas
-# hoeheren Input-Tokens durch Auto-Memory/CLAUDE.md-Loading in Kauf.
 RESPONSE_FILE=$(mktemp)
 trap 'rm -f "$RESPONSE_FILE" "$RESPONSE_FILE.err"' EXIT
 
-# WICHTIG: Positional prompt MUSS vor --allowedTools stehen, sonst schluckt
-# das variadic Argument (<tools...>) den Prompt und claude meldet
-# "Input must be provided either through stdin or as a prompt argument".
-set +e
-claude -p "$USER_PROMPT" \
-    --model sonnet \
-    --effort medium \
-    --output-format json \
-    --json-schema "$SCHEMA" \
-    --permission-mode default \
-    --append-system-prompt "$SYSTEM_PROMPT" \
-    --add-dir "$REPO_ROOT" \
-    --allowedTools "Read" "Glob" "Grep" "Bash(git log:*)" "Bash(git diff:*)" "Bash(git show:*)" "Bash(git tag:*)" "Bash(ls:*)" "Bash(sha256sum:*)" \
-    >"$RESPONSE_FILE" 2>"$RESPONSE_FILE.err"
-CLAUDE_EXIT=$?
-set -e
+SUCCESS=false
 
-if [[ $CLAUDE_EXIT -ne 0 ]]; then
-    echo "ERROR: claude CLI exit=$CLAUDE_EXIT" >&2
-    echo "--- stdout ---" >&2; cat "$RESPONSE_FILE" >&2
-    echo "--- stderr ---" >&2; cat "$RESPONSE_FILE.err" >&2
+if [[ "$CLAUDE_AVAIL" == "true" ]]; then
+    # Hinweis zu --bare: Wir verwenden es NICHT, weil --bare OAuth/Keychain
+    # ignoriert und nur ANTHROPIC_API_KEY akzeptiert.
+    set +e
+    claude -p "$USER_PROMPT" \
+        --model sonnet \
+        --effort medium \
+        --output-format json \
+        --json-schema "$SCHEMA" \
+        --permission-mode default \
+        --append-system-prompt "$SYSTEM_PROMPT" \
+        --add-dir "$REPO_ROOT" \
+        --allowedTools "Read" "Glob" "Grep" "Bash(git log:*)" "Bash(git diff:*)" "Bash(git show:*)" "Bash(git tag:*)" "Bash(ls:*)" "Bash(sha256sum:*)" \
+        >"$RESPONSE_FILE" 2>"$RESPONSE_FILE.err"
+    CLAUDE_EXIT=$?
+    set -e
+    
+    if [[ $CLAUDE_EXIT -eq 0 ]]; then
+        SUCCESS=true
+    else
+        echo "Claude failed (exit $CLAUDE_EXIT), trying fallback..." >&2
+    fi
+fi
+
+if [[ "$SUCCESS" == "false" && "$GEMINI_AVAIL" == "true" ]]; then
+    # Construct combined prompt for Gemini
+    GEMINI_PROMPT="SYSTEM_PROMPT:
+$SYSTEM_PROMPT
+
+JSON_SCHEMA:
+$SCHEMA
+
+$USER_PROMPT"
+
+    set +e
+    gemini -p "$GEMINI_PROMPT" \
+        --yolo \
+        -o json \
+        >"$RESPONSE_FILE" 2>"$RESPONSE_FILE.err"
+    GEMINI_EXIT=$?
+    set -e
+    
+    if [[ $GEMINI_EXIT -eq 0 ]]; then
+        SUCCESS=true
+    else
+        echo "ERROR: gemini CLI exit=$GEMINI_EXIT" >&2
+        cat "$RESPONSE_FILE.err" >&2
+        cat <<EOF
+{"verdict":"REJECT","reasons":["gemini CLI Fehler exit=$GEMINI_EXIT — siehe stderr"],"required_fixes":["Infrastruktur pruefen: gemini --version, gemini auth status"]}
+EOF
+        exit 2
+    fi
+fi
+
+if [[ "$SUCCESS" == "false" ]]; then
     cat <<EOF
-{"verdict":"REJECT","reasons":["claude CLI Fehler exit=$CLAUDE_EXIT — siehe stderr"],"required_fixes":["Infrastruktur pruefen: claude --version, claude auth status, OAuth-Login"]}
+{"verdict":"REJECT","reasons":["Alle Reviewer-Dienste fehlgeschlagen"],"required_fixes":["Verbindung und Quotas fuer claude/gemini pruefen"]}
 EOF
     exit 2
 fi
 
-# claude --output-format json wraps the result. Auf is_error pruefen, bevor
-# wir versuchen "result" als JSON zu parsen.
+# Parser fuer JSON-Ausgabe (unterstützt Claude und Gemini Format)
 VERDICT_JSON=$(python3 - <<'PY' "$RESPONSE_FILE"
-import json, sys
+import json, sys, re
 path = sys.argv[1]
 with open(path) as f:
     raw = f.read()
+
+# Robust JSON extraction (skip prefix/suffix text)
+json_match = re.search(r'(\{.*\})', raw, re.DOTALL)
+if not json_match:
+    print(json.dumps({
+        "verdict": "REJECT",
+        "reasons": ["CLI Ausgabe enthielt kein gueltiges JSON-Objekt"],
+        "required_fixes": ["Rohausgabe in stderr pruefen"],
+        "_raw": raw[:500],
+    }))
+    sys.exit(0)
+
+raw_json = json_match.group(1)
 try:
-    outer = json.loads(raw)
+    outer = json.loads(raw_json)
 except json.JSONDecodeError:
     print(json.dumps({
         "verdict": "REJECT",
-        "reasons": ["claude Ausgabe war kein gueltiges JSON"],
+        "reasons": ["CLI Ausgabe war kein gueltiges JSON"],
         "required_fixes": ["Rohausgabe in stderr pruefen"],
-        "_raw": raw[:500],
+        "_raw": raw_json[:500],
     }))
     sys.exit(0)
 
 if outer.get("is_error"):
     print(json.dumps({
         "verdict": "REJECT",
-        "reasons": [f"claude Fehler: {outer.get('result','unbekannt')}"],
-        "required_fixes": ["claude auth status pruefen; bei OAuth: interaktiv claude starten und /login"],
+        "reasons": [f"Reviewer Fehler: {outer.get('result','unbekannt')}"],
+        "required_fixes": ["CLI auth status pruefen"],
     }))
     sys.exit(0)
 
-result = outer.get("result", "")
-# Strip markdown code fences if Claude wrapped the JSON despite --json-schema
+# Detect format: Claude uses 'result', Gemini uses 'response'
+result = outer.get("result")
+if result is None:
+    result = outer.get("response", "")
+
+# Strip markdown code fences if Claude/Gemini wrapped the JSON
 cleaned = str(result).strip()
 if cleaned.startswith("```"):
-    # remove leading ```json or ``` and trailing ```
     lines = cleaned.split("\n")
     if lines[0].startswith("```"):
         lines = lines[1:]
@@ -157,16 +214,20 @@ if cleaned.startswith("```"):
 
 try:
     inner = json.loads(cleaned)
+    # Ensure it has the minimum required fields
+    if "verdict" not in inner:
+        raise ValueError("Missing 'verdict' in response")
     print(json.dumps(inner))
-except (json.JSONDecodeError, TypeError):
+except (json.JSONDecodeError, TypeError, ValueError) as e:
     print(json.dumps({
         "verdict": "REJECT",
-        "reasons": ["Reviewer-Antwort war kein gueltiges Schema-JSON (evtl. abgeschnitten)"],
-        "required_fixes": ["--max-budget-usd erhoehen oder Reviewer-Prompt kuerzen"],
+        "reasons": [f"Gueltiges JSON, aber Schema/Inhalt fehlerhaft: {str(e)}"],
+        "required_fixes": ["Reviewer-Prompt kuerzen oder Budget erhoehen"],
         "_raw": cleaned[:800],
     }))
 PY
 )
+
 
 printf '%s\n' "$VERDICT_JSON"
 
