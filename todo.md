@@ -168,13 +168,13 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
 ### Phase 3: Rendering
 - [x] WGPU Device/Surface Initialisierung
 - [x] Basic Triangle Rendering (Test)
-- [x] Clay Layout → WGPU Render Commands (Rectangle, Text, Image)
+- [x] Clay Layout → WGPU Render Commands (Rectangle)
 - [x] Clay Renderer für WGPU bauen
   - [x] Rectangle Shader (rectangle.wgsl)
   - [x] ClayRenderer Modul (clay_renderer/mod.zig)
   - [x] Integration in main.zig
   - [x] Vertex Buffer mit COPY_DST Usage
-  - [x] Verifiziert: 3 Clay-Rechtecke pro Frame gerendert (Screenshot: phase3_rendering.png)
+  - [x] Verifiziert: Clay-Rechtecke pro Frame gerendert (Screenshot: phase3_clay_only.png)
   - [x] Event-basierter Render Loop (wio.wait mit Timeout)
 
 ### Phase 4: Text Rendering (HÖCHSTE PRIORITÄT!)

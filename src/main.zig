@@ -91,6 +91,10 @@ pub fn main() !void {
     // Render Loop
     var frame_count: u32 = 0;
     while (plat.isRunning()) {
+        // Event-basierter Render Loop mit wio.wait (Timeout für CPU-Effizienz)
+        wio.wait(.{ .timeout_ns = 16 * std.time.ns_per_ms });
+        wio.update();
+
         // Events verarbeiten
         if (plat.window) |*win| {
             while (win.getEvent()) |event| {
