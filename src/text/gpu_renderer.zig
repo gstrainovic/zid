@@ -351,14 +351,19 @@ pub const TextRendererGPU = struct {
             const g: f32 = 0.9;
             const b: f32 = 0.2;
 
-            // Quad zu Dreiecken (6 Vertices)
+            // Quad zu Dreiecken (6 Vertices) - NDC Koordinaten (-1 bis 1)
+            const ndc_x0 = (pen_x / self.viewport_width) * 2.0 - 1.0;
+            const ndc_y0 = -((pen_y / self.viewport_height) * 2.0 - 1.0);
+            const ndc_x1 = ((pen_x + char_width) / self.viewport_width) * 2.0 - 1.0;
+            const ndc_y1 = -(((pen_y - char_height) / self.viewport_height) * 2.0 - 1.0);
+
             try vertices.appendSlice(self.allocator, &.{
-                pen_x, pen_y, r, g, b, 1.0,
-                pen_x + char_width, pen_y, r, g, b, 1.0,
-                pen_x, pen_y - char_height, r, g, b, 1.0,
-                pen_x + char_width, pen_y, r, g, b, 1.0,
-                pen_x + char_width, pen_y - char_height, r, g, b, 1.0,
-                pen_x, pen_y - char_height, r, g, b, 1.0,
+                ndc_x0, ndc_y0, r, g, b, 1.0,
+                ndc_x1, ndc_y0, r, g, b, 1.0,
+                ndc_x0, ndc_y1, r, g, b, 1.0,
+                ndc_x1, ndc_y0, r, g, b, 1.0,
+                ndc_x1, ndc_y1, r, g, b, 1.0,
+                ndc_x0, ndc_y1, r, g, b, 1.0,
             });
             pen_x += char_width + 4.0;
         }
