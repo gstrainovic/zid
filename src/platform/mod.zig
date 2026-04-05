@@ -73,6 +73,8 @@ pub const Platform = struct {
         if (self.window) |*win| {
             win.destroy();
         }
+        // wio deinitialisieren (gibt pollfds ArrayList und HashMap frei)
+        wio.deinit();
         log.info("Platform shutdown", .{});
     }
 
