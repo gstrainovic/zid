@@ -257,17 +257,23 @@ pub const TextRendererGPU = struct {
         _ = text_str;
         // Text Color Pipeline bei erstem Aufruf erstellen
         if (self.text_pipeline == null) {
+            log.info("Creating text color pipeline...", .{});
             const shader_code = try std.fs.cwd().readFileAlloc(
                 self.allocator,
                 "zig-out/share/text_color.wgsl",
                 1024 * 1024,
             );
             defer self.allocator.free(shader_code);
+            log.info("Text shader loaded: {} bytes", .{shader_code.len});
 
             self.text_shader_module = self.device.createShaderModule(&wgpu.shaderModuleWGSLDescriptor(.{
                 .label = "text_color.wgsl",
                 .code = shader_code,
-            })) orelse return;
+            })) orelse {
+                log.err("Failed to create text shader module", .{});
+                return;
+            };
+            log.info("Text shader module created", .{});
 
             const color_targets = [_]wgpu.ColorTargetState{
                 wgpu.ColorTargetState{
@@ -321,7 +327,11 @@ pub const TextRendererGPU = struct {
                 },
                 .fragment = &fragment_state,
                 .multisample = wgpu.MultisampleState{},
-            });
+            }) orelse {
+                log.err("Failed to create text pipeline", .{});
+                return;
+            };
+            log.info("Text pipeline created successfully", .{});
         }
 
         // Einfacher Text-Renderer: Zeigt "Hello" als farbige Quads zum Test
@@ -364,6 +374,7 @@ pub const TextRendererGPU = struct {
             .mapped_at_creation = 0,
         }) orelse return;
 
+        log.info("Text vertices: {}", .{vertices.items.len});
         self.queue.writeBuffer(
             vertex_buffer,
             0,

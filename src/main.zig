@@ -109,15 +109,15 @@ pub fn main() !void {
         // Clay Layout berechnen
         const render_commands = ui_system.renderExample();
 
-        // Rendern: Clear → Clay → Text → Dreieck → Present
+        // Rendern: Clear → Clay → Dreieck → Text → Present
         renderer.renderFrameWithText(
             &clay_rdr,
             &text_gpu,
             &text_renderer,
             render_commands,
-            "Hello Vulkan-ED!",
-            100.0,
+            "HELLO",
             200.0,
+            100.0,
         );
 
         frame_count += 1;
