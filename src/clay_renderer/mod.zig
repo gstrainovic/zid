@@ -253,11 +253,6 @@ pub const ClayRenderer = struct {
         render_pass.setPipeline(self.render_pipeline.?);
         render_pass.setVertexBuffer(0, self.vertex_buffer.?, 0, self.vertex_buffer_size);
         render_pass.draw(@intCast(vertices.items.len), 1, 0, 0);
-
-        log.info("Rendered {} clay rectangles ({} vertices)", .{
-            render_commands.len,
-            vertices.items.len,
-        });
     }
 
     /// X-Koordinate normalisieren (Pixel → NDC -1..1)
