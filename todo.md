@@ -191,12 +191,13 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
   - [x] JetBrainsMono.ttf laden
   - [x] Subpixel-Hinting konfigurieren
   - [x] Gooey's `backends/freetype/` integriert
+- [x] GPU Text Renderer (gpu_renderer.zig)
+  - [x] Text-Color Pipeline (einfache Quads)
+  - [ ] Glyph-Atlas Rendering (in Arbeit)
 - [ ] **Windows: DirectWrite Integration** (MUSS sein!)
   - [ ] DirectWrite COM Interface in Zig wrappen
   - [ ] Glyph-Rendering mit ClearType/Subpixel
   - [ ] JetBrainsMono.ttf laden und Glyphen extrahieren
-- [ ] GPU Glyph-Atlas Rendering (WGPU, einheitlich für beide Plattformen)
-- [ ] **TODO: TextSystem.init Debugging** - crasht aktuell
 
 ### Phase 5: UI Components (von Gooey lernen, mit wgpu+wio bauen)
 - [ ] Scene-System (Gooey's `scene.zig` → WGPU Buffers)
