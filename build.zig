@@ -44,8 +44,10 @@ pub fn build(b: *std.Build) void {
     exe_mod.addImport("gooey", gooey_dep.module("gooey"));
 
     // Shader als Resource-File installieren
-    const shader_install = b.addInstallFileWithDir(b.path("shaders/triangle.wgsl"), .{ .custom = "share" }, "triangle.wgsl");
-    b.getInstallStep().dependOn(&shader_install.step);
+    const shader_install_triangle = b.addInstallFileWithDir(b.path("shaders/triangle.wgsl"), .{ .custom = "share" }, "triangle.wgsl");
+    b.getInstallStep().dependOn(&shader_install_triangle.step);
+    const shader_install_rectangle = b.addInstallFileWithDir(b.path("shaders/rectangle.wgsl"), .{ .custom = "share" }, "rectangle.wgsl");
+    b.getInstallStep().dependOn(&shader_install_rectangle.step);
 
     const exe = b.addExecutable(.{
         .name = "vulkan-ed",

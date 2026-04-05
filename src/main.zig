@@ -4,6 +4,7 @@ const platform = @import("platform/mod.zig");
 const rendering = @import("rendering/mod.zig");
 const text = @import("text/mod.zig");
 const ui = @import("ui/mod.zig");
+const clay_renderer_mod = @import("clay_renderer/mod.zig");
 
 const log = std.log.scoped(.main);
 
@@ -59,6 +60,17 @@ pub fn main() !void {
 
     try ui_system.setupClay(plat.getSize().width, plat.getSize().height);
 
+    // 5. Clay Renderer initialisieren (WGPU)
+    var clay_rdr = try clay_renderer_mod.ClayRenderer.init(
+        allocator,
+        renderer.device.?,
+        renderer.queue.?,
+        renderer.swap_chain_format,
+        plat.getSize().width,
+        plat.getSize().height,
+    );
+    defer clay_rdr.deinit();
+
     log.info("=== vulkan-ed ready ===", .{});
     log.info("Press Ctrl+C to exit (or close window)", .{});
 
@@ -70,6 +82,8 @@ pub fn main() !void {
                 switch (event) {
                     .size_logical => |sz| {
                         renderer.resize(@intCast(sz.width), @intCast(sz.height)) catch {};
+                        clay_rdr.setViewport(@intCast(sz.width), @intCast(sz.height));
+                        ui_system.resize(@intCast(sz.width), @intCast(sz.height));
                     },
                     else => {},
                 }
@@ -77,8 +91,11 @@ pub fn main() !void {
             }
         }
 
-        // Rendern
-        renderer.renderFrame();
+        // Clay Layout berechnen
+        const render_commands = ui_system.renderExample();
+
+        // Rendern (Clear + Clay Rectangles + Dreieck + Present)
+        renderer.renderFrameWithClay(&clay_rdr, render_commands);
 
         // Kurze Pause für CPU-Effizienz
         std.Thread.sleep(1 * std.time.ns_per_ms);

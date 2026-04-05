@@ -76,7 +76,7 @@ pub const UI = struct {
     /// Window Resize behandeln
     pub fn resize(self: *Self, width: u32, height: u32) void {
         _ = self;
-        clay.setLayoutDimensions(.{ .x = width, .y = height });
+        clay.setLayoutDimensions(.{ .w = @floatFromInt(width), .h = @floatFromInt(height) });
     }
 
     /// Beispiel: Einfaches Layout rendern
@@ -84,43 +84,35 @@ pub const UI = struct {
         self.beginLayout();
 
         // Root Container
-        clay.ui()(.{
-            .id = clay.id("Root"),
+        clay.UI()(.{
+            .id = clay.ElementId.ID("Root"),
             .layout = .{
-                .sizing = clay.Element.Sizing.grow(.{}),
-                .padding = clay.Padding.all(16),
+                .sizing = .grow,
+                .padding = .all(16),
                 .child_gap = 16,
             },
+            .background_color = .{ 200, 50, 50, 255 },
         })({
             // Header
-            clay.ui()(.{
-                .id = clay.id("Header"),
+            clay.UI()(.{
+                .id = clay.ElementId.ID("Header"),
                 .layout = .{
-                    .sizing = .{
-                        .width = clay.Element.Sizing.Axis.grow(.{}),
-                        .height = clay.Element.Sizing.Axis.fixed(40),
-                    },
+                    .sizing = .{ .w = .grow, .h = .fixed(80) },
                 },
-                .rectangle = .{ .color = .{ .r = 40, .g = 40, .b = 50 } },
+                .background_color = .{ 50, 200, 50, 255 },
             })({
-                clay.text("vulkan-ed", .{
-                    .font_size = 18,
-                    .text_color = .{ .r = 255, .g = 255, .b = 255 },
-                });
+                // Header - green
             });
 
             // Content Area
-            clay.ui()(.{
-                .id = clay.id("Content"),
+            clay.UI()(.{
+                .id = clay.ElementId.ID("Content"),
                 .layout = .{
-                    .sizing = clay.Element.Sizing.grow(.{}),
+                    .sizing = .grow,
                 },
-                .rectangle = .{ .color = .{ .r = 30, .g = 30, .b = 40 } },
+                .background_color = .{ 50, 50, 200, 255 },
             })({
-                clay.text("Hello from Clay UI!", .{
-                    .font_size = 16,
-                    .text_color = .{ .r = 200, .g = 200, .b = 200 },
-                });
+                // Content placeholder
             });
         });
 

@@ -160,7 +160,7 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
 
 ### Phase 2: Platform Layer - Window Management
 - [x] wio als Dependency integrieren
-- [x] Windows: wio Window erstellen (bereits vorhanden im Fork!)
+- [x] Windows: wio Window erstellen
 - [x] Linux: wio Window erstellen
 - [x] wio → WGPU Surface Verbindung
 - [x] Input Event Handling
@@ -169,41 +169,49 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
 ### Phase 3: Rendering
 - [x] WGPU Device/Surface Initialisierung
 - [x] Basic Triangle Rendering (Test)
+- [ ] Clay Layout → WGPU Render Commands (Rectangle, Text, Image)
 - [ ] Clay Renderer für WGPU bauen
-- [ ] Text Renderer Interface definieren
 
 ### Phase 4: Text Rendering (HÖCHSTE PRIORITÄT!)
 - [x] JetBrains Mono Font-Dateien bundlen (.ttf/.otf)
 - [x] Glyph-Atlas Interface definieren
+- [ ] **Gooey TextSystem adaptieren** (Atlas, Cache, Shaper)
+  - [ ] Gooey's `text_system.zig` → unser TextRenderer
+  - [ ] Gooey's `atlas.zig` → GPU Glyph-Atlas
+  - [ ] Gooey's `cache.zig` → Subpixel-Glyph-Cache
+  - [ ] Gooey's `render.zig` → Text → Scene
+- [ ] **Linux: FreeType + HarfBuzz** (von Gooey)
+  - [x] JetBrainsMono.ttf laden
+  - [x] Subpixel-Hinting konfigurieren
+  - [ ] Gooey's `backends/freetype/` integrieren
 - [ ] **Windows: DirectWrite Integration** (MUSS sein!)
   - [ ] DirectWrite COM Interface in Zig wrappen
   - [ ] Glyph-Rendering mit ClearType/Subpixel
   - [ ] JetBrainsMono.ttf laden und Glyphen extrahieren
-- [x] Linux: FreeType + HarfBuzz (von Gooey übernehmen)
-  - [x] JetBrainsMono.ttf laden
-  - [x] Subpixel-Hinting konfigurieren
-- [ ] GPU Glyph-Atlas Rendering (einheitlich für beide Plattformen)
+- [ ] GPU Glyph-Atlas Rendering (WGPU, einheitlich für beide Plattformen)
 
-### Phase 5: 2D Graphics mit vkvg
-- [ ] vkvg als Dependency integrieren
-- [ ] SVG Rendering mit vkvg
-- [ ] Icon Rendering
-- [ ] UI Decorations (Borders, Gradients, Shadows)
-- [ ] **Cairo durch vkvg ersetzen** (letzter Punkt - Performance-Option)
-  - [ ] Gooey's svg/backends/cairo.zig durch vkvg ersetzen
-  - [ ] GPU-beschleunigtes SVG-Rendering
-  - [ ] Tests verifizieren
-
-### Phase 6: UI Components (von Gooey migrieren)
-- [ ] Gooey als Dependency einbinden (build.zig)
-- [ ] Gooey Scene kopieren (GPU Buffers)
-- [ ] Gooey TextSystem kopieren (Atlas, Cache, Render)
+### Phase 5: UI Components (von Gooey lernen, mit wgpu+wio bauen)
+- [ ] Scene-System (Gooey's `scene.zig` → WGPU Buffers)
+  - [ ] Quad (Rechtecke)
+  - [ ] GlyphInstance (Text)
+  - [ ] Shadow (Drop Shadows)
 - [ ] UI Primitives (Box, Text, Image)
 - [ ] Button, TextInput, TextArea
 - [ ] Scroll Container
-- [ ] Layout Integration mit Clay
-- [ ] Theme System (Catppuccin)
+- [ ] Theme System (Catppuccin Light/Dark)
 - [ ] Animation System
+
+### Phase 6: Code Editor
+- [ ] Syntax Highlighting Logic (von Gooey's `code_editor_state.zig`)
+- [ ] Line Numbers Gutter
+- [ ] Current Line Highlight
+- [ ] Scrollable Editor-Content
+
+### Phase 7: 2D Graphics mit vkvg (letzter Punkt - Performance-Option)
+- [ ] vkvg als Dependency integrieren
+- [ ] SVG Rendering mit vkvg (ersetzt Gooey's cairo.zig Software-Renderer)
+- [ ] Icon Rendering
+- [ ] UI Decorations (Borders, Gradients, Shadows)
 
 ## 📚 Verfügbare Libraries
 
