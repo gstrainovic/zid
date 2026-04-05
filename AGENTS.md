@@ -75,6 +75,27 @@ eigenmaechtig mit Phase N+1 beginnen, solange Phase N nicht ACK ist.
      **ruft review.sh erneut auf**. Nicht weiter zu Phase N+1!
    - Exit `2` = Infrastruktur-Fehler (Screenshot fehlt, CLI fehlt). Beheben, neu aufrufen.
 
+### Sonderfall: Bestehender Code vor dem todo.md-Reset
+
+Der todo.md-Reset zum `phase-0-ack`-Tag hat alle Haken entfernt, aber der
+Code unter `src/` kann eine Phase schon implementieren (z.B. Phase 1
+Projekt-Setup, Phase 2 wio-Window). In diesem Fall **nicht neu schreiben**,
+sondern **neu verifizieren**:
+
+1. `zig build` ausfuehren — muss sauber bauen.
+2. `./gui-screenshot.sh screenshots/phase<N>_verify.png 5` — Screenshot
+   der die Phase-Funktion visuell beweist (fuer Phase 1: laufendes Fenster,
+   fuer Phase 2: Input-Events reagieren, etc.).
+3. todo.md-Haken setzen.
+4. Commit-Message mit Praefix `verify:` statt `feat:`:
+   `verify: Phase N bestehende Implementierung validiert`.
+5. `./scripts/review.sh <N>` aufrufen.
+
+Der Reviewer akzeptiert verify-Commits wenn (a) der Screenshot den Claim
+visuell beweist **und** (b) der Render-/Logik-Pfad im HEAD-Code tatsaechlich
+existiert (nicht nur todo.md-Edit). Ein leerer `verify:`-Commit ohne Screenshot-
+Beweis ist REJECT.
+
 ### Vier Grundregeln, die Claude streng prueft
 
 1. **Screenshot-Diff-Regel** — Wenn der neue Phase-Screenshot byte-identisch
