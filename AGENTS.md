@@ -52,6 +52,64 @@
 ./gui-screenshot.sh screenshots/phase4_text.png 5
 ```
 
+## Supervisor Gates (Claude als Reviewer)
+
+Zwischen jeder Phase ist ein **Review-Gate durch Claude** Pflicht. Qwen darf nicht
+eigenmaechtig mit Phase N+1 beginnen, solange Phase N nicht ACK ist.
+
+### Workflow pro Phase
+
+1. Phase laut 8-Schritte-Workflow abschliessen (inkl. Screenshot).
+2. todo.md-Haken setzen, commit + push.
+3. **Review aufrufen:**
+   ```bash
+   ./scripts/review.sh <phase-nummer>
+   ```
+4. Ausgabe ist JSON auf stdout + Exit-Code:
+   - Exit `0` = **ACCEPT** → Qwen setzt Git-Tag und darf weiter:
+     ```bash
+     git tag phase-<N>-ack && git push --tags
+     ```
+   - Exit `1` = **REJECT** → JSON enthaelt `reasons` und `required_fixes`.
+     Qwen arbeitet die Fixes ab, macht neuen Screenshot, commit + push,
+     **ruft review.sh erneut auf**. Nicht weiter zu Phase N+1!
+   - Exit `2` = Infrastruktur-Fehler (Screenshot fehlt, CLI fehlt). Beheben, neu aufrufen.
+
+### Vier Grundregeln, die Claude streng prueft
+
+1. **Screenshot-Diff-Regel** — Wenn der neue Phase-Screenshot byte-identisch
+   oder visuell identisch zum Vorgaenger-Screenshot ist, ist die Phase nicht
+   fertig, egal was der Code behauptet. (Byte-Check passiert bereits im Wrapper,
+   vor dem Claude-Aufruf, um Tokens zu sparen.)
+
+2. **Claim-Match-Regel** — Jedes Wort im todo.md-Task ("Line Numbers", "Button",
+   "TextArea") muss im Screenshot als erkennbares visuelles Element vorkommen.
+   Ein andersfarbiges Rechteck ist **kein** TextInput. Ein dunkler Streifen ist
+   **kein** Line-Numbers-Gutter.
+
+3. **Keine Stubs im Diff** — TODO/FIXME/placeholder/unimplemented im neuen Code
+   der abgehakten Phase → automatischer REJECT.
+
+4. **Implementierungs-Spuren im Diff** — Wenn die Phase ein neues UI-Element
+   behauptet, muss der Render-Pfad im Diff sichtbar sein (neue Draw-Calls,
+   Shader-Uniforms, Vertex-Buffer). todo.md-Edit allein ist keine Implementierung.
+
+### Token-Budget
+
+Der Reviewer laeuft mit **Sonnet 4.6**, **Effort: medium**, unter
+`--bare --max-budget-usd 0.30`. Das reicht pro Review bequem (~5–10 Cent
+typisch). Qwen darf review.sh beliebig oft aufrufen — billiger ist es
+trotzdem, die vier Grundregeln **vor** dem Aufruf selbst zu pruefen.
+
+Warum diese Wahl:
+- **Sonnet statt Opus:** Reviewer-Aufgabe ist strukturiert (Claim-vs-Evidenz,
+  JSON-Output), Opus waere Overkill und ~5x teurer.
+- **Effort medium statt high:** Reviews sind kein Research, keine Algorithmen.
+  Medium reicht fuer Bildvergleich + Diff-Check und spart Thinking-Tokens.
+- **`--bare`:** Kein Auto-Memory, keine CLAUDE.md-Autoloading, keine Plugins —
+  nur der explizite Reviewer-Prompt. Deterministisch und tokensparend.
+
 ## Current Status
 
-Siehe todo.md für aktuellen Projektstatus.
+Siehe todo.md für aktuellen Projektstatus. Letzter ACK-Anker:
+`git tag --list 'phase-*-ack' | sort -V | tail -1`

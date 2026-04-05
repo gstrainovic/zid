@@ -152,50 +152,50 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
 ## ✅ TODO
 
 ### Phase 1: Projekt-Setup
-- [x] Zig Projekt initialisieren
-- [x] WGPU Native als Dependency
-- [x] Clay-Zig als Dependency
-- [x] vkvg Integration prüfen/Build-System
-- [x] Build-Skripte für Windows + Linux
+- [ ] Zig Projekt initialisieren
+- [ ] WGPU Native als Dependency
+- [ ] Clay-Zig als Dependency
+- [ ] vkvg Integration prüfen/Build-System
+- [ ] Build-Skripte für Windows + Linux
 
 ### Phase 2: Platform Layer - Window Management
-- [x] wio als Dependency integrieren
-- [x] Windows: wio Window erstellen
-- [x] Linux: wio Window erstellen
-- [x] wio → WGPU Surface Verbindung
-- [x] Input Event Handling
-- [x] Event Loop implementieren
+- [ ] wio als Dependency integrieren
+- [ ] Windows: wio Window erstellen
+- [ ] Linux: wio Window erstellen
+- [ ] wio → WGPU Surface Verbindung
+- [ ] Input Event Handling
+- [ ] Event Loop implementieren
 
 ### Phase 3: Rendering
-- [x] WGPU Device/Surface Initialisierung
-- [x] Basic Triangle Rendering (Test)
-- [x] Clay Layout → WGPU Render Commands (Rectangle, Text, Image)
-- [x] Clay Renderer für WGPU bauen
-  - [x] Rectangle Shader (rectangle.wgsl)
-  - [x] ClayRenderer Modul (clay_renderer/mod.zig)
-  - [x] Integration in main.zig
-  - [x] Vertex Buffer mit COPY_DST Usage
-  - [x] Verifiziert: 3 Clay-Rechtecke pro Frame gerendert (Screenshot: phase4_clay_final.png)
-  - [x] Event-basierter Render Loop (wio.wait mit Timeout)
+- [ ] WGPU Device/Surface Initialisierung
+- [ ] Basic Triangle Rendering (Test)
+- [ ] Clay Layout → WGPU Render Commands (Rectangle, Text, Image)
+- [ ] Clay Renderer für WGPU bauen
+  - [ ] Rectangle Shader (rectangle.wgsl)
+  - [ ] ClayRenderer Modul (clay_renderer/mod.zig)
+  - [ ] Integration in main.zig
+  - [ ] Vertex Buffer mit COPY_DST Usage
+  - [ ] Verifiziert: 3 Clay-Rechtecke pro Frame gerendert (Screenshot: phase4_clay_final.png)
+  - [ ] Event-basierter Render Loop (wio.wait mit Timeout)
 
 ### Phase 4: Text Rendering (HÖCHSTE PRIORITÄT!)
-- [x] JetBrains Mono Font-Dateien bundlen (.ttf/.otf)
-- [x] Glyph-Atlas Interface definieren
-- [x] **Gooey TextSystem adaptieren** (Atlas, Cache, Shaper)
-  - [x] Gooey's `text_system.zig` → unser TextRenderer
-  - [x] Gooey's `atlas.zig` → GPU Glyph-Atlas
-  - [x] Gooey's `cache.zig` → Subpixel-Glyph-Cache
-  - [x] Gooey's `render.zig` → Text → Scene
-  - [x] Gooey's `backends/freetype/` → FreeType Integration
-- [x] **Linux: FreeType + HarfBuzz** (von Gooey)
-  - [x] JetBrainsMono.ttf laden
-  - [x] Subpixel-Hinting konfigurieren
-  - [x] Gooey's `backends/freetype/` integriert
-- [x] GPU Text Renderer (gpu_renderer.zig)
-  - [x] Text-Color Pipeline (einfache Quads)
-  - [x] NDC-Koordinaten (-1 bis 1)
-  - [x] Verifiziert: "HELLO" als 5 gelbe Quads sichtbar (Screenshot: phase4_text_ndc.png)
-  - [x] Text-Atlas Shader vorbereitet (text_atlas.wgsl)
+- [ ] JetBrains Mono Font-Dateien bundlen (.ttf/.otf)
+- [ ] Glyph-Atlas Interface definieren
+- [ ] **Gooey TextSystem adaptieren** (Atlas, Cache, Shaper)
+  - [ ] Gooey's `text_system.zig` → unser TextRenderer
+  - [ ] Gooey's `atlas.zig` → GPU Glyph-Atlas
+  - [ ] Gooey's `cache.zig` → Subpixel-Glyph-Cache
+  - [ ] Gooey's `render.zig` → Text → Scene
+  - [ ] Gooey's `backends/freetype/` → FreeType Integration
+- [ ] **Linux: FreeType + HarfBuzz** (von Gooey)
+  - [ ] JetBrainsMono.ttf laden
+  - [ ] Subpixel-Hinting konfigurieren
+  - [ ] Gooey's `backends/freetype/` integriert
+- [ ] GPU Text Renderer (gpu_renderer.zig)
+  - [ ] Text-Color Pipeline (einfache Quads)
+  - [ ] NDC-Koordinaten (-1 bis 1)
+  - [ ] Verifiziert: "HELLO" als 5 gelbe Quads sichtbar (Screenshot: phase4_text_ndc.png)
+  - [ ] Text-Atlas Shader vorbereitet (text_atlas.wgsl)
   - [ ] Glyph-Atlas Rendering mit echten Font-Glyphen
 - [ ] **Windows: DirectWrite Integration** (MUSS sein!)
   - [ ] DirectWrite COM Interface in Zig wrappen
@@ -203,29 +203,29 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
   - [ ] JetBrainsMono.ttf laden und Glyphen extrahieren
 
 ### Phase 5: UI Components (von Gooey lernen, mit wgpu+wio bauen)
-- [x] Scene-System (Gooey's `scene.zig` → WGPU Buffers)
-  - [x] Quad (Rechtecke) - funktioniert mit Clay
+- [ ] Scene-System (Gooey's `scene.zig` → WGPU Buffers)
+  - [ ] Quad (Rechtecke) - funktioniert mit Clay
   - [ ] GlyphInstance (Text)
   - [ ] Shadow (Drop Shadows)
-- [x] UI Primitives (Box, Text, Image)
-- [x] Button, TextInput, TextArea, ScrollContainer
-  - [x] Button (primary Farbe)
-  - [x] TextInput (surface Farbe)
-  - [x] TextArea (overlay Farbe)
-  - [x] ScrollContainer (accent Farbe)
-- [x] Theme System (Catppuccin Light/Dark)
-  - [x] Dark Theme (Macchiato) - aktiv
-  - [x] Light Theme (Latte) - verfügbar
-- [x] Animation System
-  - [x] Fade, Slide, Scale Animationen
-  - [x] Easing functions
-  - [x] AnimationManager
+- [ ] UI Primitives (Box, Text, Image)
+- [ ] Button, TextInput, TextArea, ScrollContainer
+  - [ ] Button (primary Farbe)
+  - [ ] TextInput (surface Farbe)
+  - [ ] TextArea (overlay Farbe)
+  - [ ] ScrollContainer (accent Farbe)
+- [ ] Theme System (Catppuccin Light/Dark)
+  - [ ] Dark Theme (Macchiato) - aktiv
+  - [ ] Light Theme (Latte) - verfügbar
+- [ ] Animation System
+  - [ ] Fade, Slide, Scale Animationen
+  - [ ] Easing functions
+  - [ ] AnimationManager
 
 ### Phase 6: Code Editor
-- [x] Code Editor Container mit Line Numbers Gutter
-  - [x] Editor Container (dunkel)
-  - [x] Line Numbers Gutter (dunkler, links)
-  - [x] Screenshot beweis: screenshots/phase6_codeeditor.png
+- [ ] Code Editor Container mit Line Numbers Gutter
+  - [ ] Editor Container (dunkel)
+  - [ ] Line Numbers Gutter (dunkler, links)
+  - [ ] Screenshot beweis: screenshots/phase6_codeeditor.png
 - [ ] Syntax Highlighting Logic (von Gooey's `code_editor_state.zig`)
 - [ ] Current Line Highlight
 - [ ] Scrollable Editor-Content
