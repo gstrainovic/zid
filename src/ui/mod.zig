@@ -134,6 +134,16 @@ pub const UI = struct {
                     .background_color = .{ 200, 200, 200, 255 },
                     .corner_radius = .all(4),
                 })({});
+
+                // TextArea im Content (dunkelgrau)
+                clay.UI()(.{
+                    .id = clay.ElementId.ID("TextArea"),
+                    .layout = .{
+                        .sizing = .{ .w = .fixed(300), .h = .fixed(100) },
+                    },
+                    .background_color = .{ 80, 80, 100, 255 },
+                    .corner_radius = .all(4),
+                })({});
             });
         });
 
