@@ -6,6 +6,7 @@ const rendering = @import("rendering/mod.zig");
 const text = @import("text/mod.zig");
 const ui = @import("ui/mod.zig");
 const clay_renderer_mod = @import("clay_renderer/mod.zig");
+const editor = @import("editor/mod.zig");
 
 const log = std.log.scoped(.main);
 

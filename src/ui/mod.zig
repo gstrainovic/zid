@@ -171,6 +171,25 @@ pub const UI = struct {
                     .background_color = t.accent,
                     .corner_radius = .all(4),
                 })({});
+
+                // Code Editor (dunkel mit Line Numbers)
+                clay.UI()(.{
+                    .id = clay.ElementId.ID("CodeEditor"),
+                    .layout = .{
+                        .sizing = .{ .w = .grow, .h = .fixed(200) },
+                    },
+                    .background_color = .{ 30, 30, 46, 255 },
+                    .corner_radius = .all(4),
+                })({
+                    // Line Numbers Gutter (links, dunkler)
+                    clay.UI()(.{
+                        .id = clay.ElementId.ID("LineNumbers"),
+                        .layout = .{
+                            .sizing = .{ .w = .fixed(50), .h = .grow },
+                        },
+                        .background_color = .{ 24, 24, 37, 255 },
+                    })({});
+                });
             });
         });
 
