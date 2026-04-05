@@ -29,6 +29,7 @@ pub const TextRendererGPU = struct {
     viewport_height: f32 = 800,
     atlas_size: u32 = 512,
     cached_glyphs: std.AutoHashMap(u21, GlyphQuad),
+    last_atlas_generation: u32 = 0, // Trackt ob Atlas sich geändert hat
 
     const Self = @This();
 
@@ -298,6 +299,13 @@ pub const TextRendererGPU = struct {
             subpixel_x[0 .. shaped.glyphs.len],
             cached_results[0 .. shaped.glyphs.len],
         );
+
+        // Wenn sich der Atlas geändert hat (neue Glyphen gerastert), auf GPU hochladen
+        // Auch beim ersten Mal hochladen (atlas_texture_view == null)
+        if (self.atlas_texture_view == null or text_renderer.atlasGeneration() != self.last_atlas_generation) {
+            try self.updateAtlas(text_renderer.getAtlasData(), text_renderer.getAtlasSize());
+            self.last_atlas_generation = text_renderer.atlasGeneration();
+        }
 
         // === Phase 4: GPU Vertices aus echten Glyph-Metriken bauen ===
         var vertices = std.ArrayList(f32){};

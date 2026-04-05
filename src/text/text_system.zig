@@ -530,6 +530,8 @@ pub const TextSystem = struct {
     /// Multiple DisplayLink threads may render glyphs concurrently, and the
     /// atlas skyline data structure is not thread-safe.
     glyph_cache_mutex: std.Thread.Mutex,
+    /// Trackt Atlas-Änderungen für GPU-Upload (inkrementiert bei jeder Glyph-Rasterisierung)
+    atlas_generation: u32 = 0,
 
     const Self = @This();
 
@@ -918,6 +920,9 @@ pub const TextSystem = struct {
                 out_cached[i] = try self.cache.getOrRenderSubpixel(face, glyphs[i].glyph_id, font_size, subpixel_xs[i], 0);
             }
         }
+
+        // Atlas wurde potentiell geändert (neue Glyphen gerastert)
+        self.atlas_generation +%= 1;
     }
 };
 

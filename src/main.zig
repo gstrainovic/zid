@@ -62,9 +62,7 @@ pub fn main() !void {
     );
     defer text_gpu.deinit();
 
-    // Atlas auf GPU uploaden
-    try text_gpu.updateAtlas(text_renderer.getAtlasData(), text_renderer.getAtlasSize());
-    log.info("Text atlas uploaded to GPU: {}x{}", .{ text_renderer.getAtlasSize(), text_renderer.getAtlasSize() });
+    // Atlas wird automatisch in renderText hochgeladen wenn Glyphen gerastert werden
 
     // 5. UI System initialisieren (Clay)
     var ui_system = try ui.UI.init(allocator, .{

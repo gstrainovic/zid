@@ -63,6 +63,11 @@ pub const TextRenderer = struct {
 
     const Self = @This();
 
+    /// Atlas-Generation für GPU-Upload-Tracking (delegiert an TextSystem)
+    pub fn atlasGeneration(self: *const Self) u32 {
+        return self.ts_ptr.atlas_generation;
+    }
+
     pub fn init(allocator: std.mem.Allocator, config: FontConfig) !Self {
         log.info("Initializing text renderer", .{});
         log.info("Platform: {s}", .{@tagName(builtin.os.tag)});
@@ -131,7 +136,7 @@ pub const TextRenderer = struct {
             const h = rasterized.height;
             const atlas_size = self.ts_ptr.cache.grayscale_atlas.size;
             const bpp = self.ts_ptr.cache.grayscale_atlas.format.bytesPerPixel();
-            
+
             var py: u32 = 0;
             while (py < h) : (py += 1) {
                 const src_row = py * w;
