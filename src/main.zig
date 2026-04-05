@@ -50,8 +50,8 @@ pub fn main() !void {
     });
     defer text_renderer.deinit();
 
-    // Glyph-Atlas bauen
-    try text_renderer.buildAtlas();
+    // Gooey's TextSystem baut Atlas automatisch beim ersten use
+    log.info("Text renderer ready: {d}pt", .{text_renderer.config.size});
 
     // 4. UI System initialisieren (Clay)
     var ui_system = try ui.UI.init(allocator, .{
