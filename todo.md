@@ -222,8 +222,11 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
   - [x] AnimationManager
 
 ### Phase 6: Code Editor
+- [x] Code Editor Container mit Line Numbers Gutter
+  - [x] Editor Container (dunkel)
+  - [x] Line Numbers Gutter (dunkler, links)
+  - [x] Screenshot beweis: screenshots/phase6_codeeditor.png
 - [ ] Syntax Highlighting Logic (von Gooey's `code_editor_state.zig`)
-- [ ] Line Numbers Gutter
 - [ ] Current Line Highlight
 - [ ] Scrollable Editor-Content
 
