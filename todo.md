@@ -152,11 +152,11 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
 ## ✅ TODO
 
 ### Phase 1: Projekt-Setup
-- [ ] Zig Projekt initialisieren
-- [ ] WGPU Native als Dependency
-- [ ] Clay-Zig als Dependency
-- [ ] vkvg Integration prüfen/Build-System
-- [ ] Build-Skripte für Windows + Linux
+- [x] Zig Projekt initialisieren
+- [x] WGPU Native als Dependency
+- [x] Clay-Zig als Dependency
+- [x] vkvg Integration prüfen/Build-System
+- [x] Build-Skripte für Windows + Linux
 
 ### Phase 2: Platform Layer - Window Management
 - [ ] wio als Dependency integrieren
