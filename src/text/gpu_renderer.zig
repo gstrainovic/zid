@@ -16,10 +16,14 @@ pub const TextRendererGPU = struct {
     atlas_texture_view: ?*wgpu.TextureView = null,
     sampler: ?*wgpu.Sampler = null,
     pipeline: ?*wgpu.RenderPipeline = null,
+    text_pipeline: ?*wgpu.RenderPipeline = null,
     shader_module: ?*wgpu.ShaderModule = null,
+    text_shader_module: ?*wgpu.ShaderModule = null,
     bind_group_layout: ?*wgpu.BindGroupLayout = null,
     pipeline_layout: ?*wgpu.PipelineLayout = null,
     vertex_buffer: ?*wgpu.Buffer = null,
+    text_vertex_buffer: ?*wgpu.Buffer = null,
+    text_vertex_count: u32 = 0,
     swap_chain_format: wgpu.TextureFormat = .bgra8_unorm,
     viewport_width: f32 = 1200,
     viewport_height: f32 = 800,
@@ -162,6 +166,7 @@ pub const TextRendererGPU = struct {
             .shader_module = shader_module,
             .sampler = sampler,
             .pipeline = pipeline,
+            .text_pipeline = null, // Wird bei erstem renderText erstellt
             .bind_group_layout = bind_group_layout,
             .pipeline_layout = pipeline_layout,
             .swap_chain_format = swap_chain_format,
@@ -173,11 +178,14 @@ pub const TextRendererGPU = struct {
 
     pub fn deinit(self: *Self) void {
         log.info("GPU text renderer shutdown", .{});
+        if (self.text_vertex_buffer) |b| b.release();
         if (self.vertex_buffer) |b| b.release();
         if (self.atlas_texture_view) |v| v.release();
         if (self.atlas_texture) |t| t.release();
         if (self.bind_group_layout) |l| l.release();
         if (self.pipeline_layout) |l| l.release();
+        if (self.text_pipeline) |p| p.release();
+        if (self.text_shader_module) |s| s.release();
         if (self.sampler) |s| s.release();
         if (self.pipeline) |p| p.release();
         if (self.shader_module) |s| s.release();
@@ -245,14 +253,132 @@ pub const TextRendererGPU = struct {
         x: f32,
         y: f32,
     ) !void {
-        // Text-Rendering noch in Entwicklung - skip für stabile Clay-Rectangles
-        _ = self;
-        _ = render_pass;
         _ = text_renderer;
         _ = text_str;
-        _ = x;
-        _ = y;
-        return;
+        // Text Color Pipeline bei erstem Aufruf erstellen
+        if (self.text_pipeline == null) {
+            const shader_code = try std.fs.cwd().readFileAlloc(
+                self.allocator,
+                "zig-out/share/text_color.wgsl",
+                1024 * 1024,
+            );
+            defer self.allocator.free(shader_code);
+
+            self.text_shader_module = self.device.createShaderModule(&wgpu.shaderModuleWGSLDescriptor(.{
+                .label = "text_color.wgsl",
+                .code = shader_code,
+            })) orelse return;
+
+            const color_targets = [_]wgpu.ColorTargetState{
+                wgpu.ColorTargetState{
+                    .format = self.swap_chain_format,
+                    .blend = &wgpu.BlendState{
+                        .color = wgpu.BlendComponent{
+                            .operation = .add,
+                            .src_factor = .src_alpha,
+                            .dst_factor = .one_minus_src_alpha,
+                        },
+                        .alpha = wgpu.BlendComponent{
+                            .operation = .add,
+                            .src_factor = .one,
+                            .dst_factor = .one_minus_src_alpha,
+                        },
+                    },
+                },
+            };
+
+            const vertex_buffers = [_]wgpu.VertexBufferLayout{
+                .{
+                    .array_stride = 6 * @sizeOf(f32), // pos(2) + color(4)
+                    .step_mode = .vertex,
+                    .attribute_count = 2,
+                    .attributes = &[_]wgpu.VertexAttribute{
+                        .{ .format = .float32x2, .offset = 0, .shader_location = 0 },
+                        .{ .format = .float32x4, .offset = 2 * @sizeOf(f32), .shader_location = 1 },
+                    },
+                },
+            };
+
+            const fragment_state = wgpu.FragmentState{
+                .module = self.text_shader_module.?,
+                .entry_point = wgpu.StringView.fromSlice("fs_main"),
+                .target_count = color_targets.len,
+                .targets = color_targets[0..].ptr,
+            };
+
+            self.text_pipeline = self.device.createRenderPipeline(&wgpu.RenderPipelineDescriptor{
+                .label = wgpu.StringView.fromSlice("text_color_pipeline"),
+                .vertex = wgpu.VertexState{
+                    .module = self.text_shader_module.?,
+                    .entry_point = wgpu.StringView.fromSlice("vs_main"),
+                    .buffer_count = vertex_buffers.len,
+                    .buffers = vertex_buffers[0..].ptr,
+                },
+                .primitive = wgpu.PrimitiveState{
+                    .topology = .triangle_list,
+                    .front_face = .ccw,
+                    .cull_mode = .none,
+                },
+                .fragment = &fragment_state,
+                .multisample = wgpu.MultisampleState{},
+            });
+        }
+
+        // Einfacher Text-Renderer: Zeigt "Hello" als farbige Quads zum Test
+        var vertices = std.ArrayList(f32){};
+        defer vertices.deinit(self.allocator);
+
+        const test_text = "HELLO";
+        const char_width: f32 = 40.0;
+        const char_height: f32 = 60.0;
+        var pen_x: f32 = x;
+        const pen_y: f32 = y;
+
+        // Für jedes Zeichen ein farbiges Quad (gelb)
+        var i: usize = 0;
+        while (i < test_text.len) : (i += 1) {
+            const r: f32 = 1.0;
+            const g: f32 = 0.9;
+            const b: f32 = 0.2;
+
+            // Quad zu Dreiecken (6 Vertices)
+            try vertices.appendSlice(self.allocator, &.{
+                pen_x, pen_y, r, g, b, 1.0,
+                pen_x + char_width, pen_y, r, g, b, 1.0,
+                pen_x, pen_y - char_height, r, g, b, 1.0,
+                pen_x + char_width, pen_y, r, g, b, 1.0,
+                pen_x + char_width, pen_y - char_height, r, g, b, 1.0,
+                pen_x, pen_y - char_height, r, g, b, 1.0,
+            });
+            pen_x += char_width + 4.0;
+        }
+
+        if (vertices.items.len == 0) return;
+
+        // Text-Vertex-Buffer (pos: 2f32 + color: 4f32 = 6f32 pro Vertex)
+        if (self.text_vertex_buffer) |buf| buf.release();
+        const vertex_buffer = self.device.createBuffer(&wgpu.BufferDescriptor{
+            .label = wgpu.StringView.fromSlice("text_vertex_buffer"),
+            .size = vertices.items.len * @sizeOf(f32),
+            .usage = wgpu.BufferUsages.vertex | wgpu.BufferUsages.copy_dst,
+            .mapped_at_creation = 0,
+        }) orelse return;
+
+        self.queue.writeBuffer(
+            vertex_buffer,
+            0,
+            @as(*const anyopaque, @ptrCast(vertices.items.ptr)),
+            vertices.items.len * @sizeOf(f32),
+        );
+        self.text_vertex_buffer = vertex_buffer;
+        self.text_vertex_count = @intCast(vertices.items.len / 6);
+
+        // Text rendern mit einfachem Color-Pipeline (kein Atlas nötig)
+        if (self.text_pipeline) |pipeline| {
+            render_pass.setPipeline(pipeline);
+            render_pass.setVertexBuffer(0, vertex_buffer, 0, vertices.items.len * @sizeOf(f32));
+            render_pass.draw(self.text_vertex_count, 1, 0, 0);
+        }
     }
 
     pub fn setViewport(self: *Self, width: u32, height: u32) void {

@@ -347,12 +347,12 @@ pub const Renderer = struct {
         // 1. Clay UI rendern (Rechtecke)
         clay_rdr.renderClayLayout(render_pass, clay_commands) catch return;
 
-        // 2. Text rendern
-        text_gpu.renderText(render_pass, text_renderer, text_str, text_x, text_y) catch {};
-
-        // 3. Dreieck rendern (als Test/Demo)
+        // 2. Dreieck rendern (als Test/Demo)
         render_pass.setPipeline(self.render_pipeline.?);
         render_pass.draw(3, 1, 0, 0);
+
+        // 3. Text rendern (nach Dreieck für Sichtbarkeit)
+        text_gpu.renderText(render_pass, text_renderer, text_str, text_x, text_y) catch {};
 
         render_pass.end();
         render_pass.release();

@@ -50,6 +50,8 @@ pub fn build(b: *std.Build) void {
     b.getInstallStep().dependOn(&shader_install_rectangle.step);
     const shader_install_text = b.addInstallFileWithDir(b.path("shaders/text.wgsl"), .{ .custom = "share" }, "text.wgsl");
     b.getInstallStep().dependOn(&shader_install_text.step);
+    const shader_install_text_color = b.addInstallFileWithDir(b.path("shaders/text_color.wgsl"), .{ .custom = "share" }, "text_color.wgsl");
+    b.getInstallStep().dependOn(&shader_install_text_color.step);
 
     const exe = b.addExecutable(.{
         .name = "vulkan-ed",

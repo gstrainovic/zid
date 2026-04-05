@@ -116,8 +116,8 @@ pub fn main() !void {
             &text_renderer,
             render_commands,
             "Hello Vulkan-ED!",
-            50.0,
             100.0,
+            200.0,
         );
 
         frame_count += 1;
