@@ -46,14 +46,26 @@ pub fn main() !void {
     // 3. Text Renderer initialisieren (DirectWrite/FreeType)
     var text_renderer = try text.TextRenderer.init(allocator, .{
         .font_path = "fonts/JetBrainsMono-Regular.ttf",
-        .size = 14.0,
+        .size = 24.0,
     });
     defer text_renderer.deinit();
 
-    // Gooey's TextSystem baut Atlas automatisch beim ersten use
-    log.info("Text renderer ready: {d}pt", .{text_renderer.config.size});
+    // 4. GPU Text Renderer initialisieren
+    var text_gpu = try text.GPURenderer.init(
+        allocator,
+        renderer.device.?,
+        renderer.queue.?,
+        renderer.swap_chain_format,
+        plat.getSize().width,
+        plat.getSize().height,
+    );
+    defer text_gpu.deinit();
 
-    // 4. UI System initialisieren (Clay)
+    // Atlas auf GPU uploaden
+    try text_gpu.updateAtlas(text_renderer.getAtlasData(), text_renderer.getAtlasSize());
+    log.info("Text atlas uploaded to GPU: {}x{}", .{ text_renderer.getAtlasSize(), text_renderer.getAtlasSize() });
+
+    // 5. UI System initialisieren (Clay)
     var ui_system = try ui.UI.init(allocator, .{
         .font_size = 14.0,
     });
@@ -61,7 +73,7 @@ pub fn main() !void {
 
     try ui_system.setupClay(plat.getSize().width, plat.getSize().height);
 
-    // 5. Clay Renderer initialisieren (WGPU)
+    // 6. Clay Renderer initialisieren (WGPU)
     var clay_rdr = try clay_renderer_mod.ClayRenderer.init(
         allocator,
         renderer.device.?,
@@ -75,12 +87,9 @@ pub fn main() !void {
     log.info("=== vulkan-ed ready ===", .{});
     log.info("Press Ctrl+C to exit (or close window)", .{});
 
-    // Render Loop mit wio Event-Handling
-    // wio.wait(16ms) → begrenzt auf ~60fps, blockiert nicht komplett
+    // Render Loop
+    var frame_count: u32 = 0;
     while (plat.isRunning()) {
-        wio.wait(.{ .timeout_ns = 16 * std.time.ns_per_ms });
-        wio.update();
-
         // Events verarbeiten
         if (plat.window) |*win| {
             while (win.getEvent()) |event| {
@@ -88,6 +97,7 @@ pub fn main() !void {
                     .size_logical => |sz| {
                         renderer.resize(@intCast(sz.width), @intCast(sz.height)) catch {};
                         clay_rdr.setViewport(@intCast(sz.width), @intCast(sz.height));
+                        text_gpu.setViewport(@intCast(sz.width), @intCast(sz.height));
                         ui_system.resize(@intCast(sz.width), @intCast(sz.height));
                     },
                     else => {},
@@ -99,8 +109,18 @@ pub fn main() !void {
         // Clay Layout berechnen
         const render_commands = ui_system.renderExample();
 
-        // Rendern (Clear + Clay Rectangles + Dreieck + Present)
-        renderer.renderFrameWithClay(&clay_rdr, render_commands);
+        // Rendern: Clear → Clay → Text → Dreieck → Present
+        renderer.renderFrameWithText(
+            &clay_rdr,
+            &text_gpu,
+            &text_renderer,
+            render_commands,
+            "Hello Vulkan-ED!",
+            50.0,
+            100.0,
+        );
+
+        frame_count += 1;
     }
 
     log.info("=== vulkan-ed exiting ===", .{});

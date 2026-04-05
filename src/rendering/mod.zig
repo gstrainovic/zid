@@ -303,11 +303,16 @@ pub const Renderer = struct {
         self.queue.?.submit(&[_]*wgpu.CommandBuffer{command_buffer});
     }
 
-    /// Frame rendern mit Clay UI (Clear + Clay Rectangles + Dreieck + Present)
-    pub fn renderFrameWithClay(
+    /// Frame rendern mit Clay UI + Text (Clear + Clay + Text + Dreieck + Present)
+    pub fn renderFrameWithText(
         self: *Self,
         clay_rdr: anytype,
+        text_gpu: anytype,
+        text_renderer: anytype,
         clay_commands: []clay.RenderCommand,
+        text_str: []const u8,
+        text_x: f32,
+        text_y: f32,
     ) void {
         const texture_view = self.beginFrame() orelse return;
         defer self.endFrame(texture_view);
@@ -342,7 +347,10 @@ pub const Renderer = struct {
         // 1. Clay UI rendern (Rechtecke)
         clay_rdr.renderClayLayout(render_pass, clay_commands) catch return;
 
-        // 2. Dreieck rendern (als Test/Demo)
+        // 2. Text rendern
+        text_gpu.renderText(render_pass, text_renderer, text_str, text_x, text_y) catch {};
+
+        // 3. Dreieck rendern (als Test/Demo)
         render_pass.setPipeline(self.render_pipeline.?);
         render_pass.draw(3, 1, 0, 0);
 

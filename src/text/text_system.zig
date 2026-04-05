@@ -538,9 +538,13 @@ pub const TextSystem = struct {
         std.debug.assert(scale > 0);
         std.debug.assert(scale <= 4.0); // Reasonable scale factor limit
 
+        std.log.info("TextSystem.init: creating GlyphCache...", .{});
+        const cache = try cache_mod.GlyphCache.init(allocator, scale);
+        std.log.info("TextSystem.init: GlyphCache created", .{});
+
         return .{
             .allocator = allocator,
-            .cache = try cache_mod.GlyphCache.init(allocator, scale),
+            .cache = cache,
             .current_face = null,
             .shaper = null,
             .scale_factor = scale,

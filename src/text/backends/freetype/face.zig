@@ -64,13 +64,16 @@ pub const FreeTypeFace = struct {
 
     /// Load a font by name using Fontconfig
     pub fn init(name: []const u8, size: f32) !Self {
+        std.log.info("FreeTypeFace.init: name={s} size={d}", .{ name, size });
         const library = try ensureLibraryInit();
+        std.log.info("FreeType library ready", .{});
 
         // Use Fontconfig to find the font file
         var font_path = try findFontPath(name, null) orelse {
             std.log.err("Font not found: {s}", .{name});
             return error.FontNotFound;
         };
+        std.log.info("Font path found: {s}", .{font_path.pathSlice()});
 
         return initFromPath(library, font_path.pathSlice(), font_path.path_len, size);
     }
