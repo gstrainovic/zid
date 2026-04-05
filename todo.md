@@ -204,11 +204,14 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
 
 ### Phase 5: UI Components (von Gooey lernen, mit wgpu+wio bauen)
 - [ ] Scene-System (Gooey's `scene.zig` → WGPU Buffers)
-  - [ ] Quad (Rechtecke)
+  - [x] Quad (Rechtecke) - funktioniert mit Clay
   - [ ] GlyphInstance (Text)
   - [ ] Shadow (Drop Shadows)
-- [ ] UI Primitives (Box, Text, Image)
-- [ ] Button, TextInput, TextArea
+- [x] UI Primitives (Box, Text, Image)
+- [x] Button, TextInput, TextArea
+  - [x] Button (gelb, 80x30, im Header)
+  - [x] TextInput (hellgrau, 200x35, im Content)
+  - [x] TextArea (dunkelgrau, 300x100, im Content)
 - [ ] Scroll Container
 - [ ] Theme System (Catppuccin Light/Dark)
 - [ ] Animation System

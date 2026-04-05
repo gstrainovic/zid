@@ -144,6 +144,16 @@ pub const UI = struct {
                     .background_color = .{ 80, 80, 100, 255 },
                     .corner_radius = .all(4),
                 })({});
+
+                // ScrollContainer (braun)
+                clay.UI()(.{
+                    .id = clay.ElementId.ID("ScrollContainer"),
+                    .layout = .{
+                        .sizing = .{ .w = .fixed(150), .h = .fixed(100) },
+                    },
+                    .background_color = .{ 120, 80, 50, 255 },
+                    .corner_radius = .all(4),
+                })({});
             });
         });
 
