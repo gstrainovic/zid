@@ -62,115 +62,19 @@ pub const FreeTypeFace = struct {
 
     const Self = @This();
 
-    /// Load a font by name using Fontconfig
-    pub fn init(name: []const u8, size: f32) !Self {
-        std.log.info("FreeTypeFace.init: name={s} size={d}", .{ name, size });
+    /// Load a font directly from a file path
+    pub fn init(path: []const u8, size: f32) !Self {
+        std.log.info("FreeTypeFace.init: path={s} size={d}", .{ path, size });
         const library = try ensureLibraryInit();
-        std.log.info("FreeType library ready", .{});
+        
+        // Ensure path is null-terminated for FT_New_Face
+        var path_buf: [512]u8 = undefined;
+        if (path.len >= path_buf.len) return error.FontPathTooLong;
+        @memcpy(path_buf[0..path.len], path);
+        path_buf[path.len] = 0;
+        const path_z: [:0]const u8 = path_buf[0..path.len :0];
 
-        // Use Fontconfig to find the font file
-        var font_path = try findFontPath(name, null) orelse {
-            std.log.err("Font not found: {s}", .{name});
-            return error.FontNotFound;
-        };
-        std.log.info("Font path found: {s}", .{font_path.pathSlice()});
-
-        return initFromPath(library, font_path.pathSlice(), font_path.path_len, size);
-    }
-
-    /// Load a system font
-    pub fn initSystem(style: SystemFont, size: f32) !Self {
-        const library = try ensureLibraryInit();
-
-        // Map system font style to Fontconfig pattern
-        const family = switch (style) {
-            .monospace => "monospace",
-            .sans_serif => "sans-serif",
-            .serif => "serif",
-            .system => "sans-serif",
-        };
-
-        const spacing: ?c_int = switch (style) {
-            .monospace => ft.FC_MONO,
-            else => null,
-        };
-
-        var font_path = try findFontPath(family, spacing) orelse {
-            std.log.err("System font not found: {s}", .{family});
-            return error.FontNotFound;
-        };
-
-        return initFromPath(library, font_path.pathSlice(), font_path.path_len, size);
-    }
-
-    const FontPathResult = struct {
-        path_buf: [512]u8,
-        path_len: usize,
-
-        pub fn pathSlice(self: *const FontPathResult) [:0]const u8 {
-            return self.path_buf[0..self.path_len :0];
-        }
-    };
-
-    fn findFontPath(family: []const u8, spacing: ?c_int) !?FontPathResult {
-        // Create Fontconfig pattern
-        const pattern = ft.FcPatternCreate() orelse return error.FontconfigError;
-        defer ft.FcPatternDestroy(pattern);
-
-        // Add family name
-        var family_buf: [256]u8 = undefined;
-        if (family.len >= family_buf.len) return error.FontNameTooLong;
-        @memcpy(family_buf[0..family.len], family);
-        family_buf[family.len] = 0;
-
-        _ = ft.FcPatternAddString(pattern, ft.FC_FAMILY, family_buf[0..family.len :0]);
-
-        // Request scalable fonts
-        _ = ft.FcPatternAddBool(pattern, ft.FC_SCALABLE, 1);
-
-        // Add spacing constraint for monospace
-        if (spacing) |sp| {
-            _ = ft.FcPatternAddInteger(pattern, ft.FC_SPACING, sp);
-        }
-
-        // Apply default substitutions
-        _ = ft.FcConfigSubstitute(null, pattern, .FcMatchPattern);
-        ft.FcDefaultSubstitute(pattern);
-
-        // Find best match
-        var fc_result: ft.FcResult = undefined;
-        const matched = ft.FcFontMatch(null, pattern, &fc_result) orelse {
-            return null;
-        };
-        defer ft.FcPatternDestroy(matched);
-
-        if (fc_result != .FcResultMatch) {
-            return null;
-        }
-
-        // Get file path from matched pattern
-        var file_path: ?[*:0]const ft.FcChar8 = null;
-        const path_result = ft.FcPatternGetString(matched, ft.FC_FILE, 0, &file_path);
-
-        if (path_result != .FcResultMatch or file_path == null) {
-            return null;
-        }
-
-        // Calculate length
-        var len: usize = 0;
-        while (file_path.?[len] != 0) : (len += 1) {}
-
-        // Copy path before pattern is destroyed (defer above)
-        if (len >= 511) return error.FontPathTooLong;
-
-        var font_result = FontPathResult{
-            .path_buf = undefined,
-            .path_len = len,
-        };
-        @memcpy(font_result.path_buf[0..len], file_path.?[0..len]);
-        font_result.path_buf[len] = 0;
-
-        return font_result;
+        return initFromPath(library, path_z, path.len, size);
     }
 
     fn initFromPath(library: ft.FT_Library, path: [:0]const u8, path_len: usize, size: f32) !Self {

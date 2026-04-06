@@ -607,17 +607,6 @@ pub const TextSystem = struct {
         self.shape_cache.current_font_ptr = 0;
     }
 
-    /// Load a system font
-    pub fn loadSystemFont(self: *Self, style: SystemFont, size: f32) !void {
-        std.debug.assert(size > 0 and size < 1000);
-
-        if (self.current_face) |*f| f.deinit();
-        self.current_face = try PlatformFace.initSystem(style, size);
-        self.cache.clear();
-        // Force shape cache invalidation
-        self.shape_cache.current_font_ptr = 0;
-    }
-
     /// Get current font metrics
     pub inline fn getMetrics(self: *const Self) ?Metrics {
         if (self.current_face) |f| return f.metrics;
@@ -913,6 +902,8 @@ pub const TextSystem = struct {
         self.glyph_cache_mutex.lock();
         defer self.glyph_cache_mutex.unlock();
 
+        const old_gen = self.cache.getGeneration();
+
         for (0..glyphs.len) |i| {
             if (glyphs[i].font_ref) |fallback_font| {
                 out_cached[i] = try self.cache.getOrRenderFallback(fallback_font, glyphs[i].glyph_id, font_size, subpixel_xs[i], 0);
@@ -922,7 +913,9 @@ pub const TextSystem = struct {
         }
 
         // Atlas wurde potentiell geändert (neue Glyphen gerastert)
-        self.atlas_generation +%= 1;
+        if (self.cache.getGeneration() != old_gen) {
+            self.atlas_generation +%= 1;
+        }
     }
 };
 

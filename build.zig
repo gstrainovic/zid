@@ -73,10 +73,9 @@ pub fn build(b: *std.Build) void {
         exe.root_module.linkSystemLibrary("EGL", .{});
         // Vulkan für WGPU/Vulkan Rendering
         exe.root_module.linkSystemLibrary("vulkan", .{});
-        // FreeType + HarfBuzz + Fontconfig für Gooey Text/SVG Rendering
+        // FreeType + HarfBuzz für Text/SVG Rendering
         exe.root_module.linkSystemLibrary("freetype2", .{});
         exe.root_module.linkSystemLibrary("harfbuzz", .{});
-        exe.root_module.linkSystemLibrary("fontconfig", .{});
         exe.root_module.link_libc = true;
     }
 

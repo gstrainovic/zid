@@ -177,29 +177,26 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
   - [x] Verifiziert: Clay-Rechtecke pro Frame gerendert (Screenshot: phase3_clay_only.png)
   - [x] Event-basierter Render Loop (wio.wait mit Timeout)
 
-### Phase 4: Text Rendering (HÖCHSTE PRIORITÄT!)
-- [x] JetBrains Mono Font-Dateien bundlen (.ttf/.otf)
-- [x] Glyph-Atlas Interface definieren
-- [x] **Gooey TextSystem adaptieren** (Atlas, Cache, Shaper)
-  - [x] Gooey's `text_system.zig` → unser TextRenderer
-  - [x] Gooey's `atlas.zig` → GPU Glyph-Atlas
-  - [x] Gooey's `cache.zig` → Subpixel-Glyph-Cache
-  - [x] Gooey's `render.zig` → Text → Scene
-  - [x] Gooey's `backends/freetype/` → FreeType Integration
-- [x] **Linux: FreeType + HarfBuzz** (von Gooey)
-  - [x] JetBrainsMono.ttf laden
-  - [x] Subpixel-Hinting konfigurieren
-  - [x] Gooey's `backends/freetype/` integriert
-- [x] GPU Text Renderer (gpu_renderer.zig)
-  - [x] Text-Color Pipeline (einfache Quads)
-  - [x] NDC-Koordinaten (-1 bis 1)
-  - [x] Verifiziert: "HELLO" als Text sichtbar (Screenshot: phase4_text.png)
-  - [x] Text-Atlas Shader vorbereitet (text_atlas.wgsl)
-  - [x] Glyph-Atlas Rendering mit echten Font-Glyphen
-- [ ] **Windows: DirectWrite Integration** (MUSS sein!)
-  - [ ] DirectWrite COM Interface in Zig wrappen
-  - [ ] Glyph-Rendering mit ClearType/Subpixel
-  - [ ] JetBrainsMono.ttf laden und Glyphen extrahieren
+- [x] Phase 4: Text Rendering (HÖCHSTE PRIORITÄT!)
+  - [x] JetBrains Mono Font-Dateien bundlen (.ttf/.otf)
+  - [x] Glyph-Atlas Interface definieren
+  - [x] **Gooey TextSystem adaptieren** (Atlas, Cache, Shaper)
+    - [x] Gooey's `text_system.zig` → unser TextRenderer
+    - [x] Gooey's `atlas.zig` → GPU Glyph-Atlas
+    - [x] Gooey's `cache.zig` → Subpixel-Glyph-Cache
+    - [x] Gooey's `render.zig` → Text → Scene
+    - [x] Gooey's `backends/freetype/` → FreeType Integration
+  - [x] **Linux: FreeType + HarfBuzz** (von Gooey)
+    - [x] JetBrainsMono.ttf laden
+    - [x] Subpixel-Hinting konfigurieren
+    - [x] Gooey's `backends/freetype/` integriert
+  - [x] GPU Text Renderer (gpu_renderer.zig)
+    - [x] Text-Color Pipeline (einfache Quads)
+    - [x] NDC-Koordinaten (-1 bis 1)
+    - [x] Verifiziert: "HELLO" als Text sichtbar (Screenshot: phase4_text.png)
+    - [x] Text-Atlas Shader vorbereitet (text_atlas.wgsl)
+    - [x] Glyph-Atlas Rendering mit echten Font-Glyphen
+  - [ ] **Windows: DirectWrite Integration** (MUSS sein!) - *Ausstehend für Windows-Build*
 
 ### Phase 5: UI Components (von Gooey lernen, mit wgpu+wio bauen)
 - [ ] Scene-System (Gooey's `scene.zig` → WGPU Buffers)

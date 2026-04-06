@@ -23,6 +23,7 @@ pub const TextRendererGPU = struct {
     pipeline_layout: ?*wgpu.PipelineLayout = null,
     vertex_buffer: ?*wgpu.Buffer = null,
     text_vertex_buffer: ?*wgpu.Buffer = null,
+    text_vertex_buffer_size: usize = 0,
     text_vertex_count: u32 = 0,
     swap_chain_format: wgpu.TextureFormat = .bgra8_unorm,
     viewport_width: f32 = 1200,
@@ -52,13 +53,13 @@ pub const TextRendererGPU = struct {
         // Shader laden
         const shader_code = try std.fs.cwd().readFileAlloc(
             allocator,
-            "zig-out/share/text.wgsl",
+            "zig-out/share/text_atlas.wgsl",
             1024 * 1024,
         );
         defer allocator.free(shader_code);
 
         const shader_module = device.createShaderModule(&wgpu.shaderModuleWGSLDescriptor(.{
-            .label = "text.wgsl",
+            .label = "text_atlas.wgsl",
             .code = shader_code,
         })) orelse return error.ShaderCompileFailed;
 
@@ -332,7 +333,7 @@ pub const TextRendererGPU = struct {
             const ndc_x0 = (glyph_x / self.viewport_width) * 2.0 - 1.0;
             const ndc_y0 = -((glyph_y / self.viewport_height) * 2.0 - 1.0);
             const ndc_x1 = ((glyph_x + glyph_w) / self.viewport_width) * 2.0 - 1.0;
-            const ndc_y1 = -(((glyph_y - glyph_h) / self.viewport_height) * 2.0 - 1.0);
+            const ndc_y1 = -(((glyph_y + glyph_h) / self.viewport_height) * 2.0 - 1.0);
 
             // 2 Dreiecke = 6 Vertices (pos: 2f32 + uv: 2f32)
             try vertices.appendSlice(self.allocator, &.{
@@ -367,25 +368,32 @@ pub const TextRendererGPU = struct {
         }) orelse return;
         defer bind_group.release();
 
-        // Vertex Buffer
-        const vertex_buffer = self.device.createBuffer(&wgpu.BufferDescriptor{
-            .label = wgpu.StringView.fromSlice("text_vertex_buffer"),
-            .size = vertices.items.len * @sizeOf(f32),
-            .usage = wgpu.BufferUsages.vertex | wgpu.BufferUsages.copy_dst,
-            .mapped_at_creation = 0,
-        }) orelse return;
-        defer vertex_buffer.release();
+        // Bind Group nur erstellen wenn nötig oder persistent halten
+        // Für jetzt: Bind Group pro Frame ist okay, aber Buffer muss persistent sein
+        
+        // Vertex Buffer vergrößern oder erstellen
+        const needed_size = vertices.items.len * @sizeOf(f32);
+        if (self.text_vertex_buffer == null or self.text_vertex_buffer_size < needed_size) {
+            if (self.text_vertex_buffer) |b| b.release();
+            self.text_vertex_buffer_size = @max(needed_size, 4096 * @sizeOf(f32));
+            self.text_vertex_buffer = self.device.createBuffer(&wgpu.BufferDescriptor{
+                .label = wgpu.StringView.fromSlice("text_vertex_buffer"),
+                .size = self.text_vertex_buffer_size,
+                .usage = wgpu.BufferUsages.vertex | wgpu.BufferUsages.copy_dst,
+                .mapped_at_creation = 0,
+            }) orelse return;
+        }
 
         self.queue.writeBuffer(
-            vertex_buffer,
+            self.text_vertex_buffer.?,
             0,
             @as(*const anyopaque, @ptrCast(vertices.items.ptr)),
-            vertices.items.len * @sizeOf(f32),
+            needed_size,
         );
 
         // Mit Atlas-Pipeline rendern (echte Glyphen aus Textur)
         render_pass.setPipeline(self.pipeline.?);
-        render_pass.setVertexBuffer(0, vertex_buffer, 0, vertices.items.len * @sizeOf(f32));
+        render_pass.setVertexBuffer(0, self.text_vertex_buffer.?, 0, needed_size);
         render_pass.setBindGroup(0, bind_group, 0, null);
         const vertex_count = vertices.items.len / 4; // 4 floats pro Vertex
         render_pass.draw(@intCast(vertex_count), 1, 0, 0);

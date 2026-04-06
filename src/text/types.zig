@@ -18,14 +18,6 @@ pub const SUBPIXEL_VARIANTS_Y: u8 = 1; // Only horizontal variants needed for te
 /// and would only occur with text containing many different scripts/emoji.
 pub const MAX_FALLBACK_FONTS_PER_RUN: usize = 16;
 
-/// System font styles
-pub const SystemFont = enum {
-    monospace,
-    sans_serif,
-    serif,
-    system,
-};
-
 /// Text decoration style
 pub const TextDecoration = packed struct {
     underline: bool = false,

@@ -81,12 +81,10 @@ pub const TextRenderer = struct {
         try ts_ptr.initInPlace(allocator, 1.0);
         log.info("TextSystem created successfully", .{});
 
-        // Font laden
-        if (is_linux) {
-            log.info("Loading system monospace font...", .{});
-            try ts_ptr.loadSystemFont(.monospace, config.size);
-            log.info("Font loaded successfully", .{});
-        }
+        // Font laden (Direkt vom Pfad, KEINE Discovery/Fontconfig!)
+        log.info("Loading font from path: {s}...", .{config.font_path});
+        try ts_ptr.loadFont(config.font_path, config.size);
+        log.info("Font loaded successfully", .{});
 
         return Self{
             .allocator = allocator,
