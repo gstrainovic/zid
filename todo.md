@@ -230,15 +230,15 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
   - [x] Editor-Content in ScrollContainer
 
 ### Phase 7: SVG Icons (Gooey SVG-Pipeline)
-- [ ] Gooey SVG-Module integrieren
-  - [ ] `svg/rasterizer.zig` (Platform-Dispatcher → cairo.zig auf Linux)
-  - [ ] `svg/atlas.zig` (Texture Atlas Cache für gerasterte Icons)
-  - [ ] `scene/svg.zig` (SVG Path Parser)
-  - [ ] `svg/backends/cairo.zig` (CPU-Rasterisierung, pure Zig)
-- [ ] SVG Atlas als wgpu Texture hochladen
-- [ ] Icon Rendering als Textured Quads in Clay UI
-- [ ] Lucide Icons einbinden (wie Gooey's `examples/lucide_demo.zig`)
-- [~] ~~vkvg Bindings~~ — entfernt, Gooey SVG-Pipeline reicht für gecachte Icons
+- [x] Gooey SVG-Module integrieren
+  - [x] `svg/rasterizer.zig` (Platform-Dispatcher → cairo.zig auf Linux)
+  - [x] `svg/atlas.zig` (Texture Atlas Cache für gerasterte Icons)
+  - [x] `scene/svg.zig` (SVG Path Parser)
+  - [x] `svg/backends/cairo.zig` (CPU-Rasterisierung, pure Zig)
+- [x] SVG Atlas als wgpu Texture hochladen
+- [x] Icon Rendering als Textured Quads in Clay UI
+- [x] Lucide Icons einbinden (wie Gooey's `examples/lucide_demo.zig`)
+- [x] ~~vkvg Bindings~~ — entfernt, Gooey SVG-Pipeline reicht für gecachte Icons
 
 ### Phase 8: Interaktion & Editor-Logik (Input, State & Interaction Layer)
 - [ ] **Input Handling (wio → Clay)**

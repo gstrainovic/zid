@@ -369,7 +369,7 @@ pub const Renderer = struct {
         self.queue.?.submit(&[_]*wgpu.CommandBuffer{command_buffer});
     }
 
-    /// Frame rendern mit Clay UI + Text + Images (Clear + Clay + Text + Images + Present)
+    /// Frame rendern mit Clay UI + Text + Images + SVGs (Clear + Clay + Text + Images + SVGs + Present)
     pub fn renderFrameWithText(
         self: *Self,
         clay_rdr: anytype,
@@ -381,6 +381,8 @@ pub const Renderer = struct {
         text_y: f32,
         image_rdr: ?*image_renderer.ImageRenderer,
         images: []const ImageToRender,
+        svg_gpu: ?*@import("../svg/gpu_renderer.zig").SvgRendererGPU,
+        svg_atlas: ?*@import("../svg/mod.zig").SvgAtlas,
     ) void {
         const texture_view = self.beginFrame() orelse return;
         defer self.endFrame(texture_view);
@@ -418,9 +420,15 @@ pub const Renderer = struct {
         if (image_rdr) |img_renderer| {
             img_renderer.beginFrame();
         }
+        if (svg_gpu) |sg| {
+            sg.beginFrame();
+            if (svg_atlas) |sa| {
+                sa.resetFrameBudget();
+            }
+        }
 
-        // 1. Clay UI rendern (Rechtecke + Text + Images in korrekter Z-Order)
-        clay_rdr.renderClayLayout(render_pass, text_gpu, text_renderer, image_rdr, clay_commands) catch return;
+        // 1. Clay UI rendern (Rechtecke + Text + Images + SVGs in korrekter Z-Order)
+        clay_rdr.renderClayLayout(render_pass, text_gpu, text_renderer, image_rdr, svg_gpu, svg_atlas, clay_commands) catch return;
 
         // 2. Images rendern (über Clay UI - Legacy/Direct Rendering)
         if (image_rdr) |img_renderer| {

@@ -183,6 +183,8 @@ pub const ClayRenderer = struct {
         text_gpu: anytype,
         text_renderer: anytype,
         image_renderer: anytype,
+        svg_gpu: anytype,
+        svg_atlas: anytype,
         render_commands: []clay.RenderCommand,
     ) !void {
         if (render_commands.len == 0) return {};
@@ -273,19 +275,40 @@ pub const ClayRenderer = struct {
                         const b = tint[2] / 255.0;
                         const a = if (tint[3] == 0) 1.0 else tint[3] / 255.0; // Fallback alpha if 0
 
-                        const ImageTexture = @import("image_renderer.zig").ImageTexture;
-                        const texture: *const ImageTexture = @ptrCast(@alignCast(ptr));
-                        
-                        if (image_renderer) |ir| {
-                            try ir.renderImage(
-                                render_pass,
-                                texture,
-                                bbox.x,
-                                bbox.y,
-                                bbox.width,
-                                bbox.height,
-                                .{ r, g, b, a },
-                            );
+                        // Check if it's an SVG icon or a normal image
+                        const svg = @import("../svg/mod.zig");
+                        const magic_ptr: *const u64 = @ptrCast(@alignCast(ptr));
+                        if (magic_ptr.* == svg.SvgRenderInfo.MAGIC) {
+                            const info: *const svg.SvgRenderInfo = @ptrCast(@alignCast(ptr));
+                            
+                            if (svg_gpu) |sg| {
+                                try sg.renderSvg(
+                                    render_pass,
+                                    svg_atlas.?,
+                                    info.path_data,
+                                    bbox.x,
+                                    bbox.y,
+                                    bbox.width,
+                                    bbox.height,
+                                    info.viewbox,
+                                    .{ r, g, b, a },
+                                );
+                            }
+                        } else {
+                            const ImageTexture = @import("image_renderer.zig").ImageTexture;
+                            const texture: *const ImageTexture = @ptrCast(@alignCast(ptr));
+                            
+                            if (image_renderer) |ir| {
+                                try ir.renderImage(
+                                    render_pass,
+                                    texture,
+                                    bbox.x,
+                                    bbox.y,
+                                    bbox.width,
+                                    bbox.height,
+                                    .{ r, g, b, a },
+                                );
+                            }
                         }
                     }
                 },

@@ -7,6 +7,8 @@ const text = @import("text/mod.zig");
 const ui = @import("ui/mod.zig");
 const clay_renderer_mod = @import("clay_renderer/mod.zig");
 const image_renderer_mod = @import("clay_renderer/image_renderer.zig");
+const svg = @import("svg/mod.zig");
+const svg_gpu_mod = @import("svg/gpu_renderer.zig");
 const editor = @import("editor/mod.zig");
 
 const log = std.log.scoped(.main);
@@ -86,7 +88,21 @@ pub fn main() !void {
     );
     defer text_gpu.deinit();
 
-    // Atlas wird automatisch in renderText hochgeladen wenn Glyphen gerastert werden
+    // 4.1 SVG Atlas und GPU Renderer initialisieren
+    var svg_atlas = try svg.SvgAtlas.init(allocator, 1.0); // Scale 1.0 initial
+    defer svg_atlas.deinit();
+
+    var svg_gpu = try svg_gpu_mod.SvgRendererGPU.init(
+        allocator,
+        renderer.device.?,
+        renderer.queue.?,
+        renderer.swap_chain_format,
+        plat.getSize().width,
+        plat.getSize().height,
+    );
+    defer svg_gpu.deinit();
+
+    // Atlas wird automatisch in renderText/renderSvg hochgeladen wenn Glyphen/Icons gerastert werden
 
     // 5. UI System initialisieren (Clay)
     var ui_system = try ui.UI.init(allocator, .{
@@ -169,8 +185,10 @@ pub fn main() !void {
                         renderer.resize(@intCast(sz.width), @intCast(sz.height)) catch {};
                         clay_rdr.setViewport(@intCast(sz.width), @intCast(sz.height));
                         text_gpu.setViewport(@intCast(sz.width), @intCast(sz.height));
+                        svg_gpu.setViewport(@intCast(sz.width), @intCast(sz.height));
                         image_rdr.setViewport(@intCast(sz.width), @intCast(sz.height));
                         ui_system.resize(@intCast(sz.width), @intCast(sz.height));
+                        svg_atlas.setScaleFactor(@as(f32, @floatFromInt(sz.width)) / 1200.0);
                     },
                     .mouse => |pos| {
                         mouse_x = @floatFromInt(pos.x);
@@ -213,6 +231,8 @@ pub fn main() !void {
             0,
             &image_rdr,
             &[_]rendering.ImageToRender{}, // Keine Legacy-Bilder
+            &svg_gpu,
+            &svg_atlas,
         );
 
         frame_count += 1;

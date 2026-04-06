@@ -34,6 +34,9 @@ pub const UI = struct {
     // Animationen
     anim_manager: AnimationManager,
 
+    // Frame Arena für kurzlebige Daten (z.B. SvgRenderInfo)
+    frame_arena: std.heap.ArenaAllocator,
+
     // Code Editor
     code_editor: editor_mod.CodeEditor,
 
@@ -69,6 +72,7 @@ pub const UI = struct {
             .clay_memory = clay_memory,
             .initialized = false,
             .anim_manager = AnimationManager.init(allocator),
+            .frame_arena = std.heap.ArenaAllocator.init(allocator),
             .code_editor = code_editor,
         };
     }
@@ -77,6 +81,7 @@ pub const UI = struct {
     pub fn deinit(self: *Self) void {
         log.info("UI system shutdown", .{});
         self.anim_manager.deinit();
+        self.frame_arena.deinit();
         self.allocator.free(self.clay_memory);
     }
 
@@ -122,7 +127,7 @@ pub const UI = struct {
 
     /// Layout beginnen
     pub fn beginLayout(self: *Self) void {
-        _ = self;
+        _ = self.frame_arena.reset(.retain_capacity);
         clay.beginLayout();
     }
 
@@ -217,6 +222,12 @@ pub const UI = struct {
                 }
 
                 clay.text("VULKAN-ED", .{ .font_size = 32, .color = t.text });
+
+                // SVG Icons Test
+                const fa = self.frame_arena.allocator();
+                components.Svg(fa, "IconSearch", components.Lucide.search, 24, t.accent);
+                components.Svg(fa, "IconSettings", components.Lucide.settings, 24, t.subtext);
+                components.Svg(fa, "IconHeart", components.Lucide.heart, 24, .{ 255, 100, 100, 255 });
 
                 // Button 1 (Statisch)
                 components.Button("TestButton", "HELLO CLAY", t);
