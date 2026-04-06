@@ -4,7 +4,7 @@
 
 const std = @import("std");
 const clay = @import("clay");
-const Theme = @import("theme.zig").Theme;
+pub const Theme = @import("theme.zig").Theme;
 const animation = @import("animation.zig");
 const Animation = animation.Animation;
 const AnimationType = animation.AnimationType;
@@ -113,6 +113,13 @@ pub const UI = struct {
             },
             .background_color = t.bg,
         })({
+            // VERIFICATION RECT
+            clay.UI()(.{
+                .id = clay.ElementId.ID("VerifyRect"),
+                .layout = .{ .sizing = .{ .w = .fixed(100), .h = .fixed(100) } },
+                .background_color = .{ 255, 0, 0, 255 },
+            })({});
+
             // Header mit Button
             clay.UI()(.{
                 .id = clay.ElementId.ID("Header"),

@@ -25,7 +25,7 @@ pub fn main() !void {
     // 1. Renderer initialisieren (WGPU - VOR wio, kein EGL-Konflikt)
     var renderer = try rendering.Renderer.init(allocator, .{
         .vsync = true,
-        .clear_color = .{ 0.25, 0.2, 0.35, 1.0 },
+        .clear_color = .{ 0.0, 1.0, 0.0, 1.0 },
     });
     defer renderer.deinit();
 
@@ -99,6 +99,13 @@ pub fn main() !void {
         // UI updaten (Animationen) - ca. 60 FPS
         ui_system.update(16.0);
 
+        // Theme alle 120 Frames wechseln (Beweis für Phase 5)
+        if (frame_count % 240 == 120) {
+            ui_system.theme = ui.Theme.light();
+        } else if (frame_count % 240 == 0) {
+            ui_system.theme = ui.Theme.dark();
+        }
+
         // Events verarbeiten
         if (plat.window) |*win| {
             while (win.getEvent()) |event| {
@@ -118,15 +125,15 @@ pub fn main() !void {
         // Clay Layout berechnen
         const render_commands = ui_system.renderExample();
 
-        // Rendern: Clear → Clay → Dreieck → Text → Present
+        // Rendern: Clear → Clay UI → Present
         renderer.renderFrameWithText(
             &clay_rdr,
             &text_gpu,
             &text_renderer,
             render_commands,
-            "HELLO",
-            200.0,
-            100.0,
+            "", // Kein extra Text
+            0,
+            0,
         );
 
         frame_count += 1;

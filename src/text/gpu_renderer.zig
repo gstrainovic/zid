@@ -24,6 +24,7 @@ pub const TextRendererGPU = struct {
     vertex_buffer: ?*wgpu.Buffer = null,
     text_vertex_buffer: ?*wgpu.Buffer = null,
     text_vertex_buffer_size: usize = 0,
+    text_vertex_buffer_cursor: usize = 0, // Aktuelle Position im Buffer
     text_vertex_count: u32 = 0,
     swap_chain_format: wgpu.TextureFormat = .bgra8_unorm,
     viewport_width: f32 = 1200,
@@ -192,6 +193,10 @@ pub const TextRendererGPU = struct {
         if (self.pipeline) |p| p.release();
         if (self.shader_module) |s| s.release();
         self.cached_glyphs.deinit();
+    }
+
+    pub fn beginFrame(self: *Self) void {
+        self.text_vertex_buffer_cursor = 0;
     }
 
     /// Atlas-Textur von CPU auf GPU updaten
@@ -373,27 +378,32 @@ pub const TextRendererGPU = struct {
         
         // Vertex Buffer vergrößern oder erstellen
         const needed_size = vertices.items.len * @sizeOf(f32);
-        if (self.text_vertex_buffer == null or self.text_vertex_buffer_size < needed_size) {
+        const total_needed = self.text_vertex_buffer_cursor + needed_size;
+        
+        if (self.text_vertex_buffer == null or self.text_vertex_buffer_size < total_needed) {
             if (self.text_vertex_buffer) |b| b.release();
-            self.text_vertex_buffer_size = @max(needed_size, 4096 * @sizeOf(f32));
+            self.text_vertex_buffer_size = @max(total_needed * 2, 65536); // Gross genug für viele Texte
             self.text_vertex_buffer = self.device.createBuffer(&wgpu.BufferDescriptor{
                 .label = wgpu.StringView.fromSlice("text_vertex_buffer"),
                 .size = self.text_vertex_buffer_size,
                 .usage = wgpu.BufferUsages.vertex | wgpu.BufferUsages.copy_dst,
                 .mapped_at_creation = 0,
             }) orelse return;
+            self.text_vertex_buffer_cursor = 0; // Reset nach Resize um Komplexität zu sparen
         }
 
+        const offset = self.text_vertex_buffer_cursor;
         self.queue.writeBuffer(
             self.text_vertex_buffer.?,
-            0,
+            offset,
             @as(*const anyopaque, @ptrCast(vertices.items.ptr)),
             needed_size,
         );
+        self.text_vertex_buffer_cursor += needed_size;
 
         // Mit Atlas-Pipeline rendern (echte Glyphen aus Textur)
         render_pass.setPipeline(self.pipeline.?);
-        render_pass.setVertexBuffer(0, self.text_vertex_buffer.?, 0, needed_size);
+        render_pass.setVertexBuffer(0, self.text_vertex_buffer.?, offset, needed_size);
         render_pass.setBindGroup(0, bind_group, 0, null);
         const vertex_count = vertices.items.len / 4; // 4 floats pro Vertex
         render_pass.draw(@intCast(vertex_count), 1, 0, 0);

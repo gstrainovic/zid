@@ -6,7 +6,7 @@
     .dependencies = .{
         .wio = .{
             .url = "https://github.com/ypsvlq/wio/archive/refs/heads/master.tar.gz",
-            .hash = "1220d98070a4e9d418dbea9098982f7feb41129af3750800550750bc9bfeb46989c6",
+            .hash = "12202c853a2f1f680d5b277290fd7b51954d5f9f24a54cd3d3c3eb924d0fc459a7d7",
         },
         .clay = .{
             .path = "libs/clay-zig",
