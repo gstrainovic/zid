@@ -7,7 +7,7 @@ const text = @import("text/mod.zig");
 const ui = @import("ui/mod.zig");
 const clay_renderer_mod = @import("clay_renderer/mod.zig");
 const editor = @import("editor/mod.zig");
-// const vkvg_mod = @import("vkvg/mod.zig"); // TODO: vkvg muss als System-Library installiert werden
+const vkvg_mod = @import("vkvg/mod.zig");
 
 const log = std.log.scoped(.main);
 
@@ -112,9 +112,13 @@ pub fn main() !void {
     );
     defer clay_rdr.deinit();
 
-    // TODO: vkvg Renderer (wenn vkvg installiert ist)
+    // 7. vkvg Renderer initialisieren (2D Graphics)
+    // TODO: vkvg Integration mit wgpu - benötigt Zugriff auf Vulkan-Handles
+    // wgpu abstrahiert Vulkan weg, daher müssen wir die nativen Handles extrahieren
+    // oder vkvg separat initialisieren
     // var vkvg_rdr = try vkvg_mod.Renderer.init(...);
     // defer vkvg_rdr.deinit();
+    _ = vkvg_mod; // Unused import warning vermeiden
 
     log.info("=== vulkan-ed ready ===", .{});
     log.info("Press Ctrl+C to exit (or close window)", .{});

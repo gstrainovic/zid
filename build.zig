@@ -31,6 +31,56 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    // vkvg from submodule - als C-Library kompilieren
+    const vkvg_mod_obj = b.createModule(.{
+        .target = target,
+        .optimize = optimize,
+    });
+    const vkvg_lib = b.addLibrary(.{
+        .linkage = .static,
+        .name = "vkvg",
+        .root_module = vkvg_mod_obj,
+    });
+    vkvg_lib.linkLibC();
+    vkvg_lib.addIncludePath(b.path("libs/vkvg-zig/include"));
+    vkvg_lib.addIncludePath(b.path("libs/vkvg-zig/src"));
+    vkvg_lib.addIncludePath(b.path("libs/vkvg-zig/vkh/include"));
+    vkvg_lib.addIncludePath(b.path("libs/vkvg-zig/vkh/src"));
+    vkvg_lib.addIncludePath(b.path("libs/vkvg-zig/external/uthash/src"));
+    vkvg_lib.addIncludePath(b.path("libs/vkvg-zig/shaders"));
+    // Externe Dependencies
+    vkvg_lib.addIncludePath(b.path("libs/vkvg-zig/external/glbinding/include"));
+    vkvg_lib.addIncludePath(b.path("libs/vkvg-zig/external/freetype-gl"));
+    vkvg_lib.addIncludePath(b.path("libs/vkvg-zig/external/libtess2/Include"));
+    vkvg_lib.linkSystemLibrary("vulkan");
+    vkvg_lib.linkSystemLibrary("fontconfig");
+    vkvg_lib.linkSystemLibrary("freetype2");
+    vkvg_lib.linkSystemLibrary("harfbuzz");
+    // Alle vkvg C-Sourcen
+    vkvg_lib.addCSourceFile(.{ .file = b.path("libs/vkvg-zig/src/vkvg_context.c"), .flags = &[_][]const u8{"-std=c11", "-DVKVG_BACKEND_VULKAN=1"} });
+    vkvg_lib.addCSourceFile(.{ .file = b.path("libs/vkvg-zig/src/vkvg_context_internal.c"), .flags = &[_][]const u8{"-std=c11", "-DVKVG_BACKEND_VULKAN=1"} });
+    vkvg_lib.addCSourceFile(.{ .file = b.path("libs/vkvg-zig/src/vkvg_device.c"), .flags = &[_][]const u8{"-std=c11", "-DVKVG_BACKEND_VULKAN=1"} });
+    vkvg_lib.addCSourceFile(.{ .file = b.path("libs/vkvg-zig/src/vkvg_device_internal.c"), .flags = &[_][]const u8{"-std=c11", "-DVKVG_BACKEND_VULKAN=1"} });
+    vkvg_lib.addCSourceFile(.{ .file = b.path("libs/vkvg-zig/src/vkvg_experimental.c"), .flags = &[_][]const u8{"-std=c11", "-DVKVG_BACKEND_VULKAN=1"} });
+    vkvg_lib.addCSourceFile(.{ .file = b.path("libs/vkvg-zig/src/vkvg_fonts.c"), .flags = &[_][]const u8{"-std=c11", "-DVKVG_BACKEND_VULKAN=1"} });
+    vkvg_lib.addCSourceFile(.{ .file = b.path("libs/vkvg-zig/src/vkvg_matrix.c"), .flags = &[_][]const u8{"-std=c11", "-DVKVG_BACKEND_VULKAN=1"} });
+    vkvg_lib.addCSourceFile(.{ .file = b.path("libs/vkvg-zig/src/vkvg_pattern.c"), .flags = &[_][]const u8{"-std=c11", "-DVKVG_BACKEND_VULKAN=1"} });
+    vkvg_lib.addCSourceFile(.{ .file = b.path("libs/vkvg-zig/src/vkvg_surface.c"), .flags = &[_][]const u8{"-std=c11", "-DVKVG_BACKEND_VULKAN=1"} });
+    vkvg_lib.addCSourceFile(.{ .file = b.path("libs/vkvg-zig/src/vkvg_surface_internal.c"), .flags = &[_][]const u8{"-std=c11", "-DVKVG_BACKEND_VULKAN=1"} });
+    vkvg_lib.addCSourceFile(.{ .file = b.path("libs/vkvg-zig/src/cross_os.c"), .flags = &[_][]const u8{"-std=c11", "-DVKVG_BACKEND_VULKAN=1"} });
+    // vkh (Vulkan Helper)
+    vkvg_lib.addCSourceFile(.{ .file = b.path("libs/vkvg-zig/vkh/src/vkh_device.c"), .flags = &[_][]const u8{"-std=c11", "-DVKVG_BACKEND_VULKAN=1"} });
+    vkvg_lib.addCSourceFile(.{ .file = b.path("libs/vkvg-zig/vkh/src/vkh_image.c"), .flags = &[_][]const u8{"-std=c11", "-DVKVG_BACKEND_VULKAN=1"} });
+    vkvg_lib.addCSourceFile(.{ .file = b.path("libs/vkvg-zig/vkh/src/vkhelpers.c"), .flags = &[_][]const u8{"-std=c11", "-DVKVG_BACKEND_VULKAN=1"} });
+    vkvg_lib.addCSourceFile(.{ .file = b.path("libs/vkvg-zig/vkh/src/vkh_buffer.c"), .flags = &[_][]const u8{"-std=c11", "-DVKVG_BACKEND_VULKAN=1"} });
+    vkvg_lib.addCSourceFile(.{ .file = b.path("libs/vkvg-zig/vkh/src/vkh_queue.c"), .flags = &[_][]const u8{"-std=c11", "-DVKVG_BACKEND_VULKAN=1"} });
+    vkvg_lib.addCSourceFile(.{ .file = b.path("libs/vkvg-zig/vkh/src/vkh_presenter.c"), .flags = &[_][]const u8{"-std=c11", "-DVKVG_BACKEND_VULKAN=1"} });
+    vkvg_lib.addCSourceFile(.{ .file = b.path("libs/vkvg-zig/vkh/src/vkh_phyinfo.c"), .flags = &[_][]const u8{"-std=c11", "-DVKVG_BACKEND_VULKAN=1"} });
+    // Shaders einbinden
+    vkvg_lib.addIncludePath(b.path("libs/vkvg-zig/shaders"));
+
+    b.installArtifact(vkvg_lib);
+
     const exe_mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
@@ -42,6 +92,10 @@ pub fn build(b: *std.Build) void {
     exe_mod.addImport("wio", wio_dep.module("wio"));
     exe_mod.addImport("wgpu", wgpu_dep.module("wgpu"));
     exe_mod.addImport("gooey", gooey_dep.module("gooey"));
+    // vkvg Header für @cImport
+    exe_mod.addIncludePath(b.path("libs/vkvg-zig/include"));
+    exe_mod.addIncludePath(b.path("libs/vkvg-zig/src"));
+    exe_mod.addIncludePath(b.path("libs/vkvg-zig/vkh/include"));
 
     // Shader als Resource-File installieren
     const shader_install_triangle = b.addInstallFileWithDir(b.path("shaders/triangle.wgsl"), .{ .custom = "share" }, "triangle.wgsl");
@@ -76,8 +130,8 @@ pub fn build(b: *std.Build) void {
         // FreeType + HarfBuzz für Text/SVG Rendering
         exe.root_module.linkSystemLibrary("freetype2", .{});
         exe.root_module.linkSystemLibrary("harfbuzz", .{});
-        // vkvg für 2D Graphics - TODO: als System-Library installieren oder aus Submodule bauen
-        // exe.linkLibrary(vkvg_lib);
+        // vkvg für 2D Graphics (aus Submodule gebaut)
+        exe.linkLibrary(vkvg_lib);
         exe.root_module.link_libc = true;
     }
 

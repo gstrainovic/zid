@@ -1,43 +1,73 @@
-/// vkvg Bindings für Zig
-/// Vulkan-basierte 2D Graphics Library (Cairo-ähnliche API)
-
+/// vkvg Bindings für Zig - korrekte API v0.5+
 const std = @import("std");
 const c = @cImport({
+    @cDefine("VK_NO_PROTOTYPES", "1");
     @cInclude("vkvg.h");
 });
 
-pub const Context = opaque {};
-pub const Surface = opaque {};
-pub const Device = opaque {};
+// =============================================================================
+// Opaque Types
+// =============================================================================
+pub const Device = c.VkvgDevice;
+pub const Surface = c.VkvgSurface;
+pub const Context = c.VkvgContext;
+pub const Pattern = c.VkvgPattern;
+pub const Recording = c.VkvgRecording;
+pub const Text = c.VkvgText;
 
+// =============================================================================
+// Enums
+// =============================================================================
 pub const Status = enum(c_int) {
     success = c.VKVG_STATUS_SUCCESS,
     no_memory = c.VKVG_STATUS_NO_MEMORY,
-    invalid_status = c.VKVG_STATUS_INVALID_STATUS,
+    null_pointer = c.VKVG_STATUS_NULL_POINTER,
+    invalid_restore = c.VKVG_STATUS_INVALID_RESTORE,
+    no_current_point = c.VKVG_STATUS_NO_CURRENT_POINT,
     invalid_matrix = c.VKVG_STATUS_INVALID_MATRIX,
-    invalid_surface = c.VKVG_STATUS_INVALID_SURFACE,
-    invalid_context = c.VKVG_STATUS_INVALID_CONTEXT,
-    invalid_rect = c.VKVG_STATUS_INVALID_RECT,
-    invalid_path = c.VKVG_STATUS_INVALID_PATH,
-    invalid_string = c.VKVG_STATUS_INVALID_STRING,
+    invalid_status = c.VKVG_STATUS_INVALID_STATUS,
+    invalid_index = c.VKVG_STATUS_INVALID_INDEX,
+    write_error = c.VKVG_STATUS_WRITE_ERROR,
+    pattern_type_mismatch = c.VKVG_STATUS_PATTERN_TYPE_MISMATCH,
+    pattern_invalid_gradient = c.VKVG_STATUS_PATTERN_INVALID_GRADIENT,
+    invalid_format = c.VKVG_STATUS_INVALID_FORMAT,
     file_not_found = c.VKVG_STATUS_FILE_NOT_FOUND,
+    invalid_dash = c.VKVG_STATUS_INVALID_DASH,
+    invalid_rect = c.VKVG_STATUS_INVALID_RECT,
+    timeout = c.VKVG_STATUS_TIMEOUT,
+    device_error = c.VKVG_STATUS_DEVICE_ERROR,
+    invalid_device_create_info = c.VKVG_STATUS_INVALID_DEVICE_CREATE_INFO,
+    invalid_image = c.VKVG_STATUS_INVALID_IMAGE,
+    invalid_surface = c.VKVG_STATUS_INVALID_SURFACE,
+    invalid_font = c.VKVG_STATUS_INVALID_FONT,
+    in_cache = c.VKVG_STATUS_IN_CACHE,
+    _,
 };
 
-pub const LineCap = enum(c_int) {
-    butt = c.VKVG_LINE_CAP_BUTT,
-    round = c.VKVG_LINE_CAP_ROUND,
-    square = c.VKVG_LINE_CAP_SQUARE,
+pub const Format = enum(c_int) {
+    argb32 = c.VKVG_FORMAT_ARGB32,
+    rgb24 = c.VKVG_FORMAT_RGB24,
+    a8 = c.VKVG_FORMAT_A8,
+    a1 = c.VKVG_FORMAT_A1,
+    _,
 };
 
-pub const LineJoin = enum(c_int) {
-    miter = c.VKVG_LINE_JOIN_MITER,
-    round = c.VKVG_LINE_JOIN_ROUND,
-    bevel = c.VKVG_LINE_JOIN_BEVEL,
+pub const Extend = enum(c_int) {
+    none = c.VKVG_EXTEND_NONE,
+    repeat = c.VKVG_EXTEND_REPEAT,
+    reflect = c.VKVG_EXTEND_REFLECT,
+    pad = c.VKVG_EXTEND_PAD,
+    _,
 };
 
-pub const FillRule = enum(c_int) {
-    winding = c.VKVG_FILL_RULE_WINDING,
-    even_odd = c.VKVG_FILL_RULE_EVEN_ODD,
+pub const Filter = enum(c_int) {
+    fast = c.VKVG_FILTER_FAST,
+    good = c.VKVG_FILTER_GOOD,
+    best = c.VKVG_FILTER_BEST,
+    nearest = c.VKVG_FILTER_NEAREST,
+    bilinear = c.VKVG_FILTER_BILINEAR,
+    gaussian = c.VKVG_FILTER_GAUSSIAN,
+    _,
 };
 
 pub const PatternType = enum(c_int) {
@@ -45,728 +75,592 @@ pub const PatternType = enum(c_int) {
     surface = c.VKVG_PATTERN_TYPE_SURFACE,
     linear = c.VKVG_PATTERN_TYPE_LINEAR,
     radial = c.VKVG_PATTERN_TYPE_RADIAL,
+    mesh = c.VKVG_PATTERN_TYPE_MESH,
+    raster_source = c.VKVG_PATTERN_TYPE_RASTER_SOURCE,
+    _,
+};
+
+pub const LineCap = enum(c_int) {
+    butt = c.VKVG_LINE_CAP_BUTT,
+    round = c.VKVG_LINE_CAP_ROUND,
+    square = c.VKVG_LINE_CAP_SQUARE,
+    _,
+};
+
+pub const LineJoin = enum(c_int) {
+    miter = c.VKVG_LINE_JOIN_MITER,
+    round = c.VKVG_LINE_JOIN_ROUND,
+    bevel = c.VKVG_LINE_JOIN_BEVEL,
+    _,
+};
+
+pub const FillRule = enum(c_int) {
+    winding = c.VKVG_FILL_RULE_WINDING,
+    even_odd = c.VKVG_FILL_RULE_EVEN_ODD,
+    _,
+};
+
+pub const FontWeight = enum(c_int) {
+    normal = c.VKVG_FONT_WEIGHT_NORMAL,
+    bold = c.VKVG_FONT_WEIGHT_BOLD,
+    _,
 };
 
 pub const FontSlant = enum(c_int) {
     normal = c.VKVG_FONT_SLANT_NORMAL,
     italic = c.VKVG_FONT_SLANT_ITALIC,
     oblique = c.VKVG_FONT_SLANT_OBLIQUE,
+    _,
 };
 
-pub const FontWeight = enum(c_int) {
-    normal = c.VKVG_FONT_WEIGHT_NORMAL,
-    bold = c.VKVG_FONT_WEIGHT_BOLD,
+pub const Operator = enum(c_int) {
+    clear = c.VKVG_OPERATOR_CLEAR,
+    source = c.VKVG_OPERATOR_SOURCE,
+    over = c.VKVG_OPERATOR_OVER,
+    in = c.VKVG_OPERATOR_IN,
+    out = c.VKVG_OPERATOR_OUT,
+    atop = c.VKVG_OPERATOR_ATOP,
+    dest = c.VKVG_OPERATOR_DEST,
+    dest_over = c.VKVG_OPERATOR_DEST_OVER,
+    dest_in = c.VKVG_OPERATOR_DEST_IN,
+    dest_out = c.VKVG_OPERATOR_DEST_OUT,
+    dest_atop = c.VKVG_OPERATOR_DEST_ATOP,
+    xor = c.VKVG_OPERATOR_XOR,
+    add = c.VKVG_OPERATOR_ADD,
+    saturate = c.VKVG_OPERATOR_SATURATE,
+    _,
 };
 
-pub const TextExtents = extern struct {
-    x_bearing: f64,
-    y_bearing: f64,
-    width: f64,
-    height: f64,
-    x_advance: f64,
-    y_advance: f64,
-};
-
-pub const FontExtents = extern struct {
-    ascent: f64,
-    descent: f64,
-    height: f64,
-    max_x_advance: f64,
-    max_y_advance: f64,
-};
-
-pub const Rectangle = extern struct {
-    x: f64,
-    y: f64,
-    width: f64,
-    height: f64,
-};
-
-pub const Point = extern struct {
-    x: f64,
-    y: f64,
+// =============================================================================
+// Structs
+// =============================================================================
+pub const DeviceCreateInfo = extern struct {
+    instance: c.VkInstance,
+    phy: c.VkPhysicalDevice,
+    vkdev: c.VkDevice,
+    qFamIdx: u32,
+    qIndex: u32,
+    threadAware: bool,
 };
 
 pub const Matrix = extern struct {
-    xx: f64,
-    xy: f64,
-    yx: f64,
-    yy: f64,
-    x0: f64,
-    y0: f64,
+    xx: f32,
+    yx: f32,
+    xy: f32,
+    yy: f32,
+    x0: f32,
+    y0: f32,
+};
+
+pub const Rectangle = extern struct {
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+};
+
+pub const Point = extern struct {
+    x: f32,
+    y: f32,
+};
+
+pub const TextExtents = extern struct {
+    x_bearing: f32,
+    y_bearing: f32,
+    width: f32,
+    height: f32,
+    x_advance: f32,
+    y_advance: f32,
+};
+
+pub const FontExtents = extern struct {
+    ascent: f32,
+    descent: f32,
+    height: f32,
+    max_x_advance: f32,
+    max_y_advance: f32,
 };
 
 // =============================================================================
-// Device
+// Matrix Functions
 // =============================================================================
-
-pub fn deviceCreate(physical_device: anytype, device: anytype, queue: anytype, queue_family_index: u32) ?*Device {
-    return @ptrCast(c.vkvg_device_create(@ptrCast(physical_device), @ptrCast(device), @ptrCast(queue), queue_family_index));
+pub fn matrixInitIdentity(matrix: *Matrix) void {
+    c.vkvg_matrix_init_identity(@ptrCast(matrix));
 }
 
-pub fn deviceDestroy(dev: ?*Device) void {
-    c.vkvg_device_destroy(@ptrCast(dev));
+pub fn matrixInit(matrix: *Matrix, xx: f32, yx: f32, xy: f32, yy: f32, x0: f32, y0: f32) void {
+    c.vkvg_matrix_init(@ptrCast(matrix), xx, yx, xy, yy, x0, y0);
 }
 
-pub fn deviceGetVkDevice(dev: ?*Device) anytype {
-    return c.vkvg_device_get_vk_device(@ptrCast(dev));
+pub fn matrixInitTranslate(matrix: *Matrix, tx: f32, ty: f32) void {
+    c.vkvg_matrix_init_translate(@ptrCast(matrix), tx, ty);
 }
 
-pub fn deviceGetVkInstance(dev: ?*Device) anytype {
-    return c.vkvg_device_get_vk_instance(@ptrCast(dev));
+pub fn matrixInitScale(matrix: *Matrix, sx: f32, sy: f32) void {
+    c.vkvg_matrix_init_scale(@ptrCast(matrix), sx, sy);
 }
 
-pub fn deviceWaitIdle(dev: ?*Device) void {
-    c.vkvg_device_wait_idle(@ptrCast(dev));
+pub fn matrixInitRotate(matrix: *Matrix, radians: f32) void {
+    c.vkvg_matrix_init_rotate(@ptrCast(matrix), radians);
 }
 
-// =============================================================================
-// Surface
-// =============================================================================
-
-pub fn surfaceCreate(dev: ?*Device, width: u32, height: u32) ?*Surface {
-    return @ptrCast(c.vkvg_surface_create(@ptrCast(dev), width, height));
+pub fn matrixTranslate(matrix: *Matrix, tx: f32, ty: f32) void {
+    c.vkvg_matrix_translate(@ptrCast(matrix), tx, ty);
 }
 
-pub fn surfaceCreateForVulkanImage(dev: ?*Device, vk_image: anytype, width: u32, height: u32) ?*Surface {
-    return @ptrCast(c.vkvg_surface_create_for_vk_image(@ptrCast(dev), vk_image, width, height));
+pub fn matrixScale(matrix: *Matrix, sx: f32, sy: f32) void {
+    c.vkvg_matrix_scale(@ptrCast(matrix), sx, sy);
 }
 
-pub fn surfaceCreateFromPng(dev: ?*Device, path: [*:0]const u8) ?*Surface {
-    return @ptrCast(c.vkvg_surface_create_from_png(@ptrCast(dev), path));
+pub fn matrixRotate(matrix: *Matrix, radians: f32) void {
+    c.vkvg_matrix_rotate(@ptrCast(matrix), radians);
 }
 
-pub fn surfaceCreateFromSvg(dev: ?*Device, path: [*:0]const u8) ?*Surface {
-    return @ptrCast(c.vkvg_surface_create_from_svg(@ptrCast(dev), path));
+pub fn matrixMultiply(result: *Matrix, a: *const Matrix, b: *const Matrix) void {
+    c.vkvg_matrix_multiply(@ptrCast(result), @ptrCast(a), @ptrCast(b));
 }
 
-pub fn surfaceCreateForImage(dev: ?*Device, img: ?*Image) ?*Surface {
-    return @ptrCast(c.vkvg_surface_create_for_image(@ptrCast(dev), @ptrCast(img)));
+pub fn matrixTransformDistance(matrix: *const Matrix, dx: *f32, dy: *f32) void {
+    c.vkvg_matrix_transform_distance(@ptrCast(matrix), dx, dy);
 }
 
-pub fn surfaceReference(ctx: ?*Context) ?*Surface {
-    return @ptrCast(c.vkvg_surface_reference(@ptrCast(ctx)));
+pub fn matrixTransformPoint(matrix: *const Matrix, x: *f32, y: *f32) void {
+    c.vkvg_matrix_transform_point(@ptrCast(matrix), x, y);
 }
 
-pub fn surfaceDestroy(surf: ?*Surface) void {
-    c.vkvg_surface_destroy(@ptrCast(surf));
+pub fn matrixInvert(matrix: *Matrix) Status {
+    return @enumFromInt(c.vkvg_matrix_invert(@ptrCast(matrix)));
 }
 
-pub fn surfaceGetWidth(surf: ?*Surface) u32 {
-    return c.vkvg_surface_get_width(@ptrCast(surf));
-}
-
-pub fn surfaceGetHeight(surf: ?*Surface) u32 {
-    return c.vkvg_surface_get_height(@ptrCast(surf));
-}
-
-pub fn surfaceFlush(surf: ?*Surface) void {
-    c.vkvg_surface_flush(@ptrCast(surf));
-}
-
-pub fn surfaceWriteToPng(surf: ?*Surface, path: [*:0]const u8) void {
-    c.vkvg_surface_write_to_png(@ptrCast(surf), path);
-}
-
-pub fn surfaceGetVkImage(surf: ?*Surface) anytype {
-    return c.vkvg_surface_get_vk_image(@ptrCast(surf));
-}
-
-pub fn surfaceGetContent(surf: ?*Surface) c_int {
-    return c.vkvg_surface_get_content(@ptrCast(surf));
+pub fn matrixGetScale(matrix: *const Matrix, sx: *f32, sy: *f32) void {
+    c.vkvg_matrix_get_scale(@ptrCast(matrix), sx, sy);
 }
 
 // =============================================================================
-// Image
+// Device Functions
 // =============================================================================
-
-pub const Image = opaque {};
-
-pub fn imageCreateFromPng(dev: ?*Device, path: [*:0]const u8) ?*Image {
-    return @ptrCast(c.vkvg_image_create_from_png(@ptrCast(dev), path));
+pub fn deviceCreate(info: *DeviceCreateInfo) ?Device {
+    return c.vkvg_device_create(@ptrCast(info));
 }
 
-pub fn imageCreateFromPngData(dev: ?*Device, data: [*]const u8, size: usize) ?*Image {
-    return @ptrCast(c.vkvg_image_create_from_png_data(@ptrCast(dev), data, size));
+pub fn deviceDestroy(dev: Device) void {
+    c.vkvg_device_destroy(dev);
 }
 
-pub fn imageDestroy(img: ?*Image) void {
-    c.vkvg_image_destroy(@ptrCast(img));
+pub fn deviceStatus(dev: Device) Status {
+    return @enumFromInt(c.vkvg_device_status(dev));
 }
 
-pub fn imageGetWidth(img: ?*Image) u32 {
-    return c.vkvg_image_get_width(@ptrCast(img));
+pub fn deviceReference(dev: Device) Device {
+    return c.vkvg_device_reference(dev);
 }
 
-pub fn imageGetHeight(img: ?*Image) u32 {
-    return c.vkvg_image_get_height(@ptrCast(img));
+pub fn deviceGetReferenceCount(dev: Device) u32 {
+    return c.vkvg_device_get_reference_count(dev);
 }
 
-pub fn imageGetStride(img: ?*Image) i32 {
-    return c.vkvg_image_get_stride(@ptrCast(img));
+pub fn deviceSetContextCacheSize(dev: Device, max_count: u32) void {
+    c.vkvg_device_set_context_cache_size(dev, max_count);
 }
 
-pub fn imageReference(img: ?*Image) ?*Image {
-    return @ptrCast(c.vkvg_image_reference(@ptrCast(img)));
-}
-
-pub fn imageGetUserData(img: ?*Image) ?*anyopaque {
-    return c.vkvg_image_get_user_data(@ptrCast(img));
-}
-
-pub fn imageSetUserData(img: ?*Image, key: ?*const anyopaque, user_data: ?*anyopaque, destroy: ?*const fn (?*anyopaque) callconv(.C) void) c_int {
-    return c.vkvg_image_set_user_data(@ptrCast(img), key, user_data, destroy);
-}
-
-pub fn imageGetMimeType(img: ?*Image) ?[*:0]const u8 {
-    return c.vkvg_image_get_mime_type(@ptrCast(img));
+pub fn getRequiredInstanceExtensions(extensions: [*c]const u8, count: *u32) void {
+    c.vkvg_get_required_instance_extensions(extensions, count);
 }
 
 // =============================================================================
-// Context
+// Surface Functions
 // =============================================================================
-
-pub fn contextCreate(surf: ?*Surface) ?*Context {
-    return @ptrCast(c.vkvg_context_create(@ptrCast(surf)));
+pub fn surfaceCreate(dev: Device, width: u32, height: u32) ?Surface {
+    return c.vkvg_surface_create(dev, width, height);
 }
 
-pub fn contextReference(ctx: ?*Context) ?*Context {
-    return @ptrCast(c.vkvg_context_reference(@ptrCast(ctx)));
+pub fn surfaceCreateFromImage(dev: Device, file_path: [*:0]const u8) ?Surface {
+    return c.vkvg_surface_create_from_image(dev, file_path);
 }
 
-pub fn contextDestroy(ctx: ?*Context) void {
-    c.vkvg_context_destroy(@ptrCast(ctx));
+pub fn surfaceStatus(surf: Surface) Status {
+    return @enumFromInt(c.vkvg_surface_status(surf));
 }
 
-pub fn contextGetDevice(ctx: ?*Context) ?*Device {
-    return @ptrCast(c.vkvg_context_get_device(@ptrCast(ctx)));
+pub fn surfaceReference(surf: Surface) Surface {
+    return c.vkvg_surface_reference(surf);
 }
 
-pub fn contextGetTarget(ctx: ?*Context) ?*Surface {
-    return @ptrCast(c.vkvg_context_get_target(@ptrCast(ctx)));
+pub fn surfaceGetReferenceCount(surf: Surface) u32 {
+    return c.vkvg_surface_get_reference_count(surf);
+}
+
+pub fn surfaceDestroy(surf: Surface) void {
+    c.vkvg_surface_destroy(surf);
+}
+
+pub fn surfaceClear(surf: Surface) void {
+    c.vkvg_surface_clear(surf);
+}
+
+pub fn surfaceGetVkImage(surf: Surface) c.VkImage {
+    return c.vkvg_surface_get_vk_image(surf);
+}
+
+pub fn surfaceGetWidth(surf: Surface) u32 {
+    return c.vkvg_surface_get_width(surf);
+}
+
+pub fn surfaceGetHeight(surf: Surface) u32 {
+    return c.vkvg_surface_get_height(surf);
+}
+
+pub fn surfaceFlush(surf: Surface) void {
+    c.vkvg_surface_flush(surf);
+}
+
+pub fn surfaceWriteToPng(surf: Surface, path: [*:0]const u8) Status {
+    return @enumFromInt(c.vkvg_surface_write_to_png(surf, path));
 }
 
 // =============================================================================
-// Drawing Operations
+// Context Functions
 // =============================================================================
-
-pub fn save(ctx: ?*Context) void {
-    c.vkvg_save(@ptrCast(ctx));
+pub fn contextCreate(surf: Surface) ?Context {
+    return c.vkvg_context_create(surf);
 }
 
-pub fn restore(ctx: ?*Context) void {
-    c.vkvg_restore(@ptrCast(ctx));
+pub fn contextDestroy(ctx: Context) void {
+    c.vkvg_context_destroy(ctx);
 }
 
-pub fn pushGroup(ctx: ?*Context) void {
-    c.vkvg_push_group(@ptrCast(ctx));
+pub fn contextStatus(ctx: Context) Status {
+    return @enumFromInt(c.vkvg_context_status(ctx));
 }
 
-pub fn pushGroupWithContent(ctx: ?*Context, content: c_int) void {
-    c.vkvg_push_group_with_content(@ptrCast(ctx), content);
+pub fn contextGetDevice(ctx: Context) Device {
+    return c.vkvg_context_get_device(ctx);
 }
 
-pub fn popGroup(ctx: ?*Context) ?*Pattern {
-    return @ptrCast(c.vkvg_pop_group(@ptrCast(ctx)));
+pub fn contextGetTarget(ctx: Context) Surface {
+    return c.vkvg_context_get_target(ctx);
 }
 
-pub fn popGroupToSource(ctx: ?*Context) void {
-    c.vkvg_pop_group_to_source(@ptrCast(ctx));
+pub fn contextReference(ctx: Context) Context {
+    return c.vkvg_context_reference(ctx);
+}
+
+// =============================================================================
+// Save/Restore
+// =============================================================================
+pub fn save(ctx: Context) void {
+    c.vkvg_save(ctx);
+}
+
+pub fn restore(ctx: Context) void {
+    c.vkvg_restore(ctx);
 }
 
 // =============================================================================
 // Path Operations
 // =============================================================================
-
-pub fn newPath(ctx: ?*Context) void {
-    c.vkvg_new_path(@ptrCast(ctx));
+pub fn newPath(ctx: Context) void {
+    c.vkvg_new_path(ctx);
 }
 
-pub fn closePath(ctx: ?*Context) void {
-    c.vkvg_close_path(@ptrCast(ctx));
+pub fn closePath(ctx: Context) void {
+    c.vkvg_close_path(ctx);
 }
 
-pub fn arc(ctx: ?*Context, xc: f64, yc: f64, radius: f64, angle1: f64, angle2: f64) void {
-    c.vkvg_arc(@ptrCast(ctx), xc, yc, radius, angle1, angle2);
+pub fn arc(ctx: Context, xc: f32, yc: f32, radius: f32, angle1: f32, angle2: f32) void {
+    c.vkvg_arc(ctx, xc, yc, radius, angle1, angle2);
 }
 
-pub fn arcNegative(ctx: ?*Context, xc: f64, yc: f64, radius: f64, angle1: f64, angle2: f64) void {
-    c.vkvg_arc_negative(@ptrCast(ctx), xc, yc, radius, angle1, angle2);
+pub fn arcNegative(ctx: Context, xc: f32, yc: f32, radius: f32, angle1: f32, angle2: f32) void {
+    c.vkvg_arc_negative(ctx, xc, yc, radius, angle1, angle2);
 }
 
-pub fn curveTo(ctx: ?*Context, x1: f64, y1: f64, x2: f64, y2: f64, x3: f64, y3: f64) void {
-    c.vkvg_curve_to(@ptrCast(ctx), x1, y1, x2, y2, x3, y3);
+pub fn curveTo(ctx: Context, x1: f32, y1: f32, x2: f32, y2: f32, x3: f32, y3: f32) void {
+    c.vkvg_curve_to(ctx, x1, y1, x2, y2, x3, y3);
 }
 
-pub fn lineTo(ctx: ?*Context, x: f64, y: f64) void {
-    c.vkvg_line_to(@ptrCast(ctx), x, y);
+pub fn lineTo(ctx: Context, x: f32, y: f32) void {
+    c.vkvg_line_to(ctx, x, y);
 }
 
-pub fn moveTo(ctx: ?*Context, x: f64, y: f64) void {
-    c.vkvg_move_to(@ptrCast(ctx), x, y);
+pub fn moveTo(ctx: Context, x: f32, y: f32) void {
+    c.vkvg_move_to(ctx, x, y);
 }
 
-pub fn rectangle(ctx: ?*Context, x: f64, y: f64, width: f64, height: f64) void {
-    c.vkvg_rectangle(@ptrCast(ctx), x, y, width, height);
+pub fn rectangle(ctx: Context, x: f32, y: f32, width: f32, height: f32) void {
+    c.vkvg_rectangle(ctx, x, y, width, height);
 }
 
-pub fn relCurveTo(ctx: ?*Context, dx1: f64, dy1: f64, dx2: f64, dy2: f64, dx3: f64, dy3: f64) void {
-    c.vkvg_rel_curve_to(@ptrCast(ctx), dx1, dy1, dx2, dy2, dx3, dy3);
+pub fn relCurveTo(ctx: Context, dx1: f32, dy1: f32, dx2: f32, dy2: f32, dx3: f32, dy3: f32) void {
+    c.vkvg_rel_curve_to(ctx, dx1, dy1, dx2, dy2, dx3, dy3);
 }
 
-pub fn relLineTo(ctx: ?*Context, dx: f64, dy: f64) void {
-    c.vkvg_rel_line_to(@ptrCast(ctx), dx, dy);
+pub fn relLineTo(ctx: Context, dx: f32, dy: f32) void {
+    c.vkvg_rel_line_to(ctx, dx, dy);
 }
 
-pub fn relMoveTo(ctx: ?*Context, dx: f64, dy: f64) void {
-    c.vkvg_rel_move_to(@ptrCast(ctx), dx, dy);
-}
-
-pub fn textPath(ctx: ?*Context, utf8: [*:0]const u8) void {
-    c.vkvg_text_path(@ptrCast(ctx), utf8);
-}
-
-pub fn glyphPath(ctx: ?*Context, glyphs: [*]c.vkvg_glyph_info_t, num_glyphs: usize) void {
-    c.vkvg_glyph_path(@ptrCast(ctx), glyphs, num_glyphs);
+pub fn relMoveTo(ctx: Context, dx: f32, dy: f32) void {
+    c.vkvg_rel_move_to(ctx, dx, dy);
 }
 
 // =============================================================================
 // Painting
 // =============================================================================
-
-pub fn fill(ctx: ?*Context) void {
-    c.vkvg_fill(@ptrCast(ctx));
+pub fn fill(ctx: Context) void {
+    c.vkvg_fill(ctx);
 }
 
-pub fn fillPreserve(ctx: ?*Context) void {
-    c.vkvg_fill_preserve(@ptrCast(ctx));
+pub fn fillPreserve(ctx: Context) void {
+    c.vkvg_fill_preserve(ctx);
 }
 
-pub fn stroke(ctx: ?*Context) void {
-    c.vkvg_stroke(@ptrCast(ctx));
+pub fn stroke(ctx: Context) void {
+    c.vkvg_stroke(ctx);
 }
 
-pub fn strokePreserve(ctx: ?*Context) void {
-    c.vkvg_stroke_preserve(@ptrCast(ctx));
+pub fn strokePreserve(ctx: Context) void {
+    c.vkvg_stroke_preserve(ctx);
 }
 
-pub fn copyPage(ctx: ?*Context) void {
-    c.vkvg_copy_page(@ptrCast(ctx));
+pub fn copyPage(ctx: Context) void {
+    c.vkvg_copy_page(ctx);
 }
 
-pub fn showPage(ctx: ?*Context) void {
-    c.vkvg_show_page(@ptrCast(ctx));
+pub fn showPage(ctx: Context) void {
+    c.vkvg_show_page(ctx);
 }
 
-pub fn inFill(ctx: ?*Context, x: f64, y: f64) bool {
-    return c.vkvg_in_fill(@ptrCast(ctx), x, y) != 0;
+pub fn inFill(ctx: Context, x: f32, y: f32) bool {
+    return c.vkvg_in_fill(ctx, x, y) != 0;
 }
 
-pub fn inStroke(ctx: ?*Context, x: f64, y: f64) bool {
-    return c.vkvg_in_stroke(@ptrCast(ctx), x, y) != 0;
-}
-
-pub fn inClip(ctx: ?*Context, x: f64, y: f64) bool {
-    return c.vkvg_in_clip(@ptrCast(ctx), x, y) != 0;
+pub fn inStroke(ctx: Context, x: f32, y: f32) bool {
+    return c.vkvg_in_stroke(ctx, x, y) != 0;
 }
 
 // =============================================================================
 // Clipping
 // =============================================================================
-
-pub fn clip(ctx: ?*Context) void {
-    c.vkvg_clip(@ptrCast(ctx));
+pub fn clip(ctx: Context) void {
+    c.vkvg_clip(ctx);
 }
 
-pub fn clipPreserve(ctx: ?*Context) void {
-    c.vkvg_clip_preserve(@ptrCast(ctx));
+pub fn clipPreserve(ctx: Context) void {
+    c.vkvg_clip_preserve(ctx);
 }
 
-pub fn clipExtents(ctx: ?*Context, extents: *Rectangle) void {
-    c.vkvg_clip_extents(@ptrCast(ctx), @ptrCast(extents));
+pub fn clipExtents(ctx: Context, extents: *Rectangle) void {
+    c.vkvg_clip_extents(ctx, @ptrCast(extents));
 }
 
-pub fn inClip(ctx2: ?*Context, x: f64, y: f64) bool {
-    return c.vkvg_in_clip(@ptrCast(ctx2), x, y) != 0;
-}
-
-pub fn resetClip(ctx: ?*Context) void {
-    c.vkvg_reset_clip(@ptrCast(ctx));
-}
-
-// =============================================================================
-// Fonts
-// =============================================================================
-
-pub fn selectFontFace(ctx: ?*Context, family: [*:0]const u8, slant: FontSlant, weight: FontWeight) void {
-    c.vkvg_select_font_face(@ptrCast(ctx), family, @intFromEnum(slant), @intFromEnum(weight));
-}
-
-pub fn setFontSize(ctx: ?*Context, size: f64) void {
-    c.vkvg_set_font_size(@ptrCast(ctx), size);
-}
-
-pub fn setFontMatrix(ctx: ?*Context, matrix: *Matrix) void {
-    c.vkvg_set_font_matrix(@ptrCast(ctx), @ptrCast(matrix));
-}
-
-pub fn getFontMatrix(ctx: ?*Context, matrix: *Matrix) void {
-    c.vkvg_get_font_matrix(@ptrCast(ctx), @ptrCast(matrix));
-}
-
-pub fn textExtents(ctx: ?*Context, utf8: [*:0]const u8, extents: *TextExtents) void {
-    c.vkvg_text_extents(@ptrCast(ctx), utf8, @ptrCast(extents));
-}
-
-pub fn glyphExtents(ctx: ?*Context, glyphs: [*]c.vkvg_glyph_info_t, num_glyphs: usize, extents: *TextExtents) void {
-    c.vkvg_glyph_extents(@ptrCast(ctx), glyphs, num_glyphs, @ptrCast(extents));
-}
-
-pub fn fontExtents(ctx: ?*Context, extents: *FontExtents) void {
-    c.vkvg_font_extents(@ptrCast(ctx), @ptrCast(extents));
-}
-
-pub fn setFont(ctx: ?*Context, font: ?*anyopaque) void {
-    c.vkvg_set_font(@ptrCast(ctx), font);
-}
-
-pub fn getFont(ctx: ?*Context) ?*anyopaque {
-    return c.vkvg_get_font(@ptrCast(ctx));
-}
-
-pub fn showText(ctx: ?*Context, utf8: [*:0]const u8) void {
-    c.vkvg_show_text(@ptrCast(ctx), utf8);
-}
-
-pub fn showGlyphs(ctx: ?*Context, glyphs: [*]c.vkvg_glyph_info_t, num_glyphs: usize) void {
-    c.vkvg_show_glyphs(@ptrCast(ctx), glyphs, num_glyphs);
-}
-
-pub fn showTextGlyphs(ctx: ?*Context, utf8: [*:0]const u8, glyphs: [*]c.vkvg_glyph_info_t, num_glyphs: usize) void {
-    c.vkvg_show_text_glyphs(@ptrCast(ctx), utf8, glyphs, num_glyphs);
-}
-
-// =============================================================================
-// Transformations
-// =============================================================================
-
-pub fn translate(ctx: ?*Context, tx: f64, ty: f64) void {
-    c.vkvg_translate(@ptrCast(ctx), tx, ty);
-}
-
-pub fn scale(ctx: ?*Context, sx: f64, sy: f64) void {
-    c.vkvg_scale(@ptrCast(ctx), sx, sy);
-}
-
-pub fn rotate(ctx: ?*Context, radians: f64) void {
-    c.vkvg_rotate(@ptrCast(ctx), radians);
-}
-
-pub fn transform(ctx: ?*Context, matrix: *Matrix) void {
-    c.vkvg_transform(@ptrCast(ctx), @ptrCast(matrix));
-}
-
-pub fn setMatrix(ctx: ?*Context, matrix: *Matrix) void {
-    c.vkvg_set_matrix(@ptrCast(ctx), @ptrCast(matrix));
-}
-
-pub fn getMatrix(ctx: ?*Context, matrix: *Matrix) void {
-    c.vkvg_get_matrix(@ptrCast(ctx), @ptrCast(matrix));
-}
-
-pub fn identityMatrix(ctx: ?*Context) void {
-    c.vkvg_identity_matrix(@ptrCast(ctx));
-}
-
-pub fn userToDevice(ctx: ?*Context, x: *f64, y: *f64) void {
-    c.vkvg_user_to_device(@ptrCast(ctx), x, y);
-}
-
-pub fn userToDeviceDistance(ctx: ?*Context, dx: *f64, dy: *f64) void {
-    c.vkvg_user_to_device_distance(@ptrCast(ctx), dx, dy);
-}
-
-pub fn deviceToUser(ctx: ?*Context, x: *f64, y: *f64) void {
-    c.vkvg_device_to_user(@ptrCast(ctx), x, y);
-}
-
-pub fn deviceToUserDistance(ctx: ?*Context, dx: *f64, dy: *f64) void {
-    c.vkvg_device_to_user_distance(@ptrCast(ctx), dx, dy);
+pub fn resetClip(ctx: Context) void {
+    c.vkvg_reset_clip(ctx);
 }
 
 // =============================================================================
 // Source/Pattern
 // =============================================================================
-
-pub fn setSource(ctx: ?*Context, r: f64, g: f64, b: f64, a: f64) void {
-    c.vkvg_set_source(@ptrCast(ctx), r, g, b, a);
+pub fn setSource(ctx: Context, r: f32, g: f32, b: f32, a: f32) void {
+    c.vkvg_set_source(ctx, r, g, b, a);
 }
 
-pub fn setSourceRGBA(ctx: ?*Context, r: f64, g: f64, b: f64, a: f64) void {
-    c.vkvg_set_source_rgba(@ptrCast(ctx), r, g, b, a);
+pub fn setSourceRGBA(ctx: Context, r: f32, g: f32, b: f32, a: f32) void {
+    c.vkvg_set_source_rgba(ctx, r, g, b, a);
 }
 
-pub fn setSourceRGB(ctx: ?*Context, r: f64, g: f64, b: f64) void {
-    c.vkvg_set_source_rgb(@ptrCast(ctx), r, g, b);
+pub fn setSourceRGB(ctx: Context, r: f32, g: f32, b: f32) void {
+    c.vkvg_set_source_rgb(ctx, r, g, b);
 }
 
-pub fn setSourceSurface(ctx: ?*Context, surface: ?*Surface, x: f64, y: f64) void {
-    c.vkvg_set_source_surface(@ptrCast(ctx), @ptrCast(surface), x, y);
+pub fn setSourceSurface(ctx: Context, surface: Surface, x: f32, y: f32) void {
+    c.vkvg_set_source_surface(ctx, surface, x, y);
 }
 
-pub fn setSourcePattern(ctx: ?*Context, pattern: ?*Pattern) void {
-    c.vkvg_set_source_pattern(@ptrCast(ctx), @ptrCast(pattern));
+pub fn setSourcePattern(ctx: Context, pattern: Pattern) void {
+    c.vkvg_set_source_pattern(ctx, pattern);
 }
 
-pub fn setSourceImage(ctx: ?*Context, img: ?*Image, x: f64, y: f64) void {
-    c.vkvg_set_source_image(@ptrCast(ctx), @ptrCast(img), x, y);
-}
-
-pub fn getSource(ctx: ?*Context) ?*Pattern {
-    return @ptrCast(c.vkvg_get_source(@ptrCast(ctx)));
+pub fn getSource(ctx: Context) Pattern {
+    return c.vkvg_get_source(ctx);
 }
 
 // =============================================================================
-// Pattern
+// Pattern Functions
 // =============================================================================
-
-pub const Pattern = opaque {};
-
-pub fn patternCreateSolid(red: f64, green: f64, blue: f64, alpha: f64) ?*Pattern {
-    return @ptrCast(c.vkvg_pattern_create_rgba(red, green, blue, alpha));
+pub fn patternCreateSolid(red: f32, green: f32, blue: f32, alpha: f32) ?Pattern {
+    return c.vkvg_pattern_create_solid(red, green, blue, alpha);
 }
 
-pub fn patternCreateSurface(surface: ?*Surface) ?*Pattern {
-    return @ptrCast(c.vkvg_pattern_create_surface(@ptrCast(surface)));
+pub fn patternCreateSurface(surface: Surface) ?Pattern {
+    return c.vkvg_pattern_create_surface(surface);
 }
 
-pub fn patternCreateLinear(x0: f64, y0: f64, x1: f64, y1: f64) ?*Pattern {
-    return @ptrCast(c.vkvg_pattern_create_linear(x0, y0, x1, y1));
+pub fn patternCreateLinear(x0: f32, y0: f32, x1: f32, y1: f32) ?Pattern {
+    return c.vkvg_pattern_create_linear(x0, y0, x1, y1);
 }
 
-pub fn patternCreateRadial(cx0: f64, cy0: f64, radius0: f64, cx1: f64, cy1: f64, radius1: f64) ?*Pattern {
-    return @ptrCast(c.vkvg_pattern_create_radial(cx0, cy0, radius0, cx1, cy1, radius1));
+pub fn patternCreateRadial(cx0: f32, cy0: f32, radius0: f32, cx1: f32, cy1: f32, radius1: f32) ?Pattern {
+    return c.vkvg_pattern_create_radial(cx0, cy0, radius0, cx1, cy1, radius1);
 }
 
-pub fn patternReference(pattern: ?*Pattern) ?*Pattern {
-    return @ptrCast(c.vkvg_pattern_reference(@ptrCast(pattern)));
+pub fn patternReference(pattern: Pattern) Pattern {
+    return c.vkvg_pattern_reference(pattern);
 }
 
-pub fn patternDestroy(pattern: ?*Pattern) void {
-    c.vkvg_pattern_destroy(@ptrCast(pattern));
+pub fn patternDestroy(pattern: Pattern) void {
+    c.vkvg_pattern_destroy(pattern);
 }
 
-pub fn patternGetType(pattern: ?*Pattern) PatternType {
-    return @enumFromInt(c.vkvg_pattern_get_type(@ptrCast(pattern)));
+pub fn patternGetType(pattern: Pattern) PatternType {
+    return @enumFromInt(c.vkvg_pattern_get_type(pattern));
 }
 
-pub fn patternGetExtend(pattern: ?*Pattern) c_int {
-    return c.vkvg_pattern_get_extend(@ptrCast(pattern));
+pub fn patternAddColorStopRgba(pattern: Pattern, offset: f32, r: f32, g: f32, b: f32, a: f32) void {
+    c.vkvg_pattern_add_color_stop_rgba(pattern, offset, r, g, b, a);
 }
 
-pub fn patternSetExtend(pattern: ?*Pattern, extend: c_int) void {
-    c.vkvg_pattern_set_extend(@ptrCast(pattern), extend);
-}
-
-pub fn patternGetFilter(pattern: ?*Pattern) c_int {
-    return c.vkvg_pattern_get_filter(@ptrCast(pattern));
-}
-
-pub fn patternSetFilter(pattern: ?*Pattern, filter: c_int) void {
-    c.vkvg_pattern_set_filter(@ptrCast(pattern), filter);
-}
-
-pub fn patternAddColorStopRgba(pattern: ?*Pattern, offset: f64, r: f64, g: f64, b: f64, a: f64) void {
-    c.vkvg_pattern_add_color_stop_rgba(@ptrCast(pattern), offset, r, g, b, a);
-}
-
-pub fn patternAddColorStopRgb(pattern: ?*Pattern, offset: f64, r: f64, g: f64, b: f64) void {
-    c.vkvg_pattern_add_color_stop_rgb(@ptrCast(pattern), offset, r, g, b);
-}
-
-pub fn patternGetColorStopCount(pattern: ?*Pattern) c_int {
-    return c.vkvg_pattern_get_color_stop_count(@ptrCast(pattern));
-}
-
-pub fn patternGetColorStopRgba(pattern: ?*Pattern, stop_index: c_int, offset: *f64, r: *f64, g: *f64, b: *f64, a: *f64) Status {
-    return @enumFromInt(c.vkvg_pattern_get_color_stop_rgba(@ptrCast(pattern), stop_index, offset, r, g, b, a));
-}
-
-pub fn patternGetMatrix(pattern: ?*Pattern, matrix: *Matrix) void {
-    c.vkvg_pattern_get_matrix(@ptrCast(pattern), @ptrCast(matrix));
-}
-
-pub fn patternSetMatrix(pattern: ?*Pattern, matrix: *Matrix) void {
-    c.vkvg_pattern_set_matrix(@ptrCast(pattern), @ptrCast(matrix));
-}
-
-pub fn patternGetSurface(pattern: ?*Pattern) ?*Surface {
-    return @ptrCast(c.vkvg_pattern_get_surface(@ptrCast(pattern)));
+pub fn patternAddColorStopRgb(pattern: Pattern, offset: f32, r: f32, g: f32, b: f32) void {
+    c.vkvg_pattern_add_color_stop_rgb(pattern, offset, r, g, b);
 }
 
 // =============================================================================
 // State
 // =============================================================================
-
-pub fn setLineWidth(ctx: ?*Context, width: f64) void {
-    c.vkvg_set_line_width(@ptrCast(ctx), width);
+pub fn setLineWidth(ctx: Context, width: f32) void {
+    c.vkvg_set_line_width(ctx, width);
 }
 
-pub fn setLineCap(ctx: ?*Context, line_cap: LineCap) void {
-    c.vkvg_set_line_cap(@ptrCast(ctx), @intFromEnum(line_cap));
+pub fn setLineCap(ctx: Context, line_cap: LineCap) void {
+    c.vkvg_set_line_cap(ctx, @intFromEnum(line_cap));
 }
 
-pub fn setLineJoin(ctx: ?*Context, line_join: LineJoin) void {
-    c.vkvg_set_line_join(@ptrCast(ctx), @intFromEnum(line_join));
+pub fn setLineJoin(ctx: Context, line_join: LineJoin) void {
+    c.vkvg_set_line_join(ctx, @intFromEnum(line_join));
 }
 
-pub fn setMiterLimit(ctx: ?*Context, limit: f64) void {
-    c.vkvg_set_miter_limit(@ptrCast(ctx), limit);
+pub fn setMiterLimit(ctx: Context, limit: f32) void {
+    c.vkvg_set_miter_limit(ctx, limit);
 }
 
-pub fn setDash(ctx: ?*Context, dashes: [*]const f64, num_dashes: c_int, offset: f64) void {
-    c.vkvg_set_dash(@ptrCast(ctx), dashes, num_dashes, offset);
+pub fn setFillRule(ctx: Context, fill_rule: FillRule) void {
+    c.vkvg_set_fill_rule(ctx, @intFromEnum(fill_rule));
 }
 
-pub fn getDashCount(ctx: ?*Context) c_int {
-    return c.vkvg_get_dash_count(@ptrCast(ctx));
+pub fn setOperator(ctx: Context, op: Operator) void {
+    c.vkvg_set_operator(ctx, @intFromEnum(op));
 }
 
-pub fn setFillRule(ctx: ?*Context, fill_rule: FillRule) void {
-    c.vkvg_set_fill_rule(@ptrCast(ctx), @intFromEnum(fill_rule));
+pub fn setTolerance(ctx: Context, tolerance: f32) void {
+    c.vkvg_set_tolerance(ctx, tolerance);
 }
 
-pub fn setOperator(ctx: ?*Context, op: c_int) void {
-    c.vkvg_set_operator(@ptrCast(ctx), op);
+pub fn getLineWidth(ctx: Context) f32 {
+    return c.vkvg_get_line_width(ctx);
 }
 
-pub fn setTolerance(ctx: ?*Context, tolerance: f64) void {
-    c.vkvg_set_tolerance(@ptrCast(ctx), tolerance);
+pub fn getLineCap(ctx: Context) LineCap {
+    return @enumFromInt(c.vkvg_get_line_cap(ctx));
 }
 
-pub fn setCurrentPoint(ctx: ?*Context, x: f64, y: f64) void {
-    c.vkvg_set_current_point(@ptrCast(ctx), x, y);
+pub fn getLineJoin(ctx: Context) LineJoin {
+    return @enumFromInt(c.vkvg_get_line_join(ctx));
 }
 
-pub fn getCurrentPoint(ctx: ?*Context, x: *f64, y: *f64) void {
-    c.vkvg_get_current_point(@ptrCast(ctx), x, y);
+pub fn getMiterLimit(ctx: Context) f32 {
+    return c.vkvg_get_miter_limit(ctx);
 }
 
-pub fn getLineWidth(ctx: ?*Context) f64 {
-    return c.vkvg_get_line_width(@ptrCast(ctx));
+pub fn getFillRule(ctx: Context) FillRule {
+    return @enumFromInt(c.vkvg_get_fill_rule(ctx));
 }
 
-pub fn getLineCap(ctx: ?*Context) LineCap {
-    return @enumFromInt(c.vkvg_get_line_cap(@ptrCast(ctx)));
+pub fn getOperator(ctx: Context) Operator {
+    return @enumFromInt(c.vkvg_get_operator(ctx));
 }
 
-pub fn getLineJoin(ctx: ?*Context) LineJoin {
-    return @enumFromInt(c.vkvg_get_line_join(@ptrCast(ctx)));
-}
-
-pub fn getMiterLimit(ctx: ?*Context) f64 {
-    return c.vkvg_get_miter_limit(@ptrCast(ctx));
-}
-
-pub fn getFillRule(ctx: ?*Context) FillRule {
-    return @enumFromInt(c.vkvg_get_fill_rule(@ptrCast(ctx)));
-}
-
-pub fn getOperator(ctx: ?*Context) c_int {
-    return c.vkvg_get_operator(@ptrCast(ctx));
-}
-
-pub fn getTolerance(ctx: ?*Context) f64 {
-    return c.vkvg_get_tolerance(@ptrCast(ctx));
+pub fn getTolerance(ctx: Context) f32 {
+    return c.vkvg_get_tolerance(ctx);
 }
 
 // =============================================================================
-// Path Info
+// Transformations
 // =============================================================================
-
-pub fn newPathFromRect(ctx: ?*Context, x: f64, y: f64, w: f64, h: f64) void {
-    c.vkvg_new_path_from_rect(@ptrCast(ctx), x, y, w, h);
+pub fn translate(ctx: Context, tx: f32, ty: f32) void {
+    c.vkvg_translate(ctx, tx, ty);
 }
 
-pub fn pathExtents(ctx: ?*Context, x1: *f64, y1: *f64, x2: *f64, y2: *f64) void {
-    c.vkvg_path_extents(@ptrCast(ctx), x1, y1, x2, y2);
+pub fn scale(ctx: Context, sx: f32, sy: f32) void {
+    c.vkvg_scale(ctx, sx, sy);
 }
 
-pub fn pathIsEmpty(ctx: ?*Context) bool {
-    return c.vkvg_path_is_empty(@ptrCast(ctx)) != 0;
+pub fn rotate(ctx: Context, radians: f32) void {
+    c.vkvg_rotate(ctx, radians);
 }
 
-pub fn pathIsInFill(ctx: ?*Context, x: f64, y: f64) bool {
-    return c.vkvg_path_is_in_fill(@ptrCast(ctx), x, y) != 0;
+pub fn transform(ctx: Context, matrix: *const Matrix) void {
+    c.vkvg_transform(ctx, @ptrCast(matrix));
 }
 
-pub fn pathIsInStroke(ctx: ?*Context, x: f64, y: f64) bool {
-    return c.vkvg_path_is_in_stroke(@ptrCast(ctx), x, y) != 0;
+pub fn setMatrix(ctx: Context, matrix: *const Matrix) void {
+    c.vkvg_set_matrix(ctx, @ptrCast(matrix));
+}
+
+pub fn getMatrix(ctx: Context, matrix: *Matrix) void {
+    c.vkvg_get_matrix(ctx, @ptrCast(matrix));
+}
+
+pub fn identityMatrix(ctx: Context) void {
+    c.vkvg_identity_matrix(ctx);
 }
 
 // =============================================================================
-// SVG Rendering
+// Fonts
 // =============================================================================
-
-pub fn svgRenderToSurface(surf: ?*Surface, path: [*:0]const u8, width: f64, height: f64) Status {
-    return @enumFromInt(c.vkvg_svg_render_to_surface(@ptrCast(surf), path, width, height));
+pub fn selectFontFace(ctx: Context, family: [*:0]const u8, slant: FontSlant, weight: FontWeight) void {
+    c.vkvg_select_font_face(ctx, family, @intFromEnum(slant), @intFromEnum(weight));
 }
 
-pub fn svgRenderToSurfaceFromString(surf: ?*Surface, svg_string: [*:0]const u8, width: f64, height: f64) Status {
-    return @enumFromInt(c.vkvg_svg_render_to_surface_from_string(@ptrCast(surf), svg_string, width, height));
+pub fn setFontSize(ctx: Context, size: f32) void {
+    c.vkvg_set_font_size(ctx, size);
 }
 
-pub fn svgRenderToSurfaceFromMemory(surf: ?*Surface, data: [*]const u8, size: usize, width: f64, height: f64) Status {
-    return @enumFromInt(c.vkvg_svg_render_to_surface_from_memory(@ptrCast(surf), data, size, width, height));
+pub fn textExtents(ctx: Context, utf8: [*:0]const u8, extents: *TextExtents) void {
+    c.vkvg_text_extents(ctx, utf8, @ptrCast(extents));
 }
 
-pub fn svgRenderPathToSurface(ctx: ?*Context, surf: ?*Surface) void {
-    c.vkvg_svg_render_path_to_surface(@ptrCast(ctx), @ptrCast(surf));
+pub fn fontExtents(ctx: Context, extents: *FontExtents) void {
+    c.vkvg_font_extents(ctx, @ptrCast(extents));
 }
 
-pub fn svgSetSizeCallback(cb: ?*const fn ([*:0]const u8, *f64, *f64) callconv(.C) void) void {
-    c.vkvg_svg_set_size_callback(cb);
-}
-
-pub fn svgGetError() [*:0]const u8 {
-    return c.vkvg_svg_get_error();
+pub fn showText(ctx: Context, utf8: [*:0]const u8) void {
+    c.vkvg_show_text(ctx, utf8);
 }
 
 // =============================================================================
 // Gradients
 // =============================================================================
-
 pub fn addLinearGradient(
-    ctx: ?*Context,
-    x0: f64, y0: f64, x1: f64, y1: f64,
-    r0: f64, g0: f64, b0: f64, a0: f64,
-    r1: f64, g1: f64, b1: f64, a1: f64,
+    ctx: Context,
+    x0: f32, y0: f32, x1: f32, y1: f32,
+    r0: f32, g0: f32, b0: f32, a0: f32,
+    r1: f32, g1: f32, b1: f32, a1: f32,
 ) void {
-    c.vkvg_add_linear_gradient(@ptrCast(ctx), x0, y0, x1, y1, r0, g0, b0, a0, r1, g1, b1, a1);
+    c.vkvg_add_linear_gradient(ctx, x0, y0, x1, y1, r0, g0, b0, a0, r1, g1, b1, a1);
 }
 
 pub fn addRadialGradient(
-    ctx: ?*Context,
-    cx0: f64, cy0: f64, r0: f64,
-    cx1: f64, cy1: f64, r1: f64,
-    r0c: f64, g0c: f64, b0c: f64, a0c: f64,
-    r1c: f64, g1c: f64, b1c: f64, a1c: f64,
+    ctx: Context,
+    cx0: f32, cy0: f32, r0: f32,
+    cx1: f32, cy1: f32, r1: f32,
+    r0c: f32, g0c: f32, b0c: f32, a0c: f32,
+    r1c: f32, g1c: f32, b1c: f32, a1c: f32,
 ) void {
-    c.vkvg_add_radial_gradient(@ptrCast(ctx), cx0, cy0, r0, cx1, cy1, r1, r0c, g0c, b0c, a0c, r1c, g1c, b1c, a1c);
+    c.vkvg_add_radial_gradient(ctx, cx0, cy0, r0, cx1, cy1, r1, r0c, g0c, b0c, a0c, r1c, g1c, b1c, a1c);
 }
 
 // =============================================================================
-// Status
+// Status String
 // =============================================================================
-
-pub fn status(ctx: ?*Context) Status {
-    return @enumFromInt(c.vkvg_status(@ptrCast(ctx)));
-}
-
-pub fn statusString(status_val: Status) [*:0]const u8 {
-    return c.vkvg_status_string(@intFromEnum(status_val));
-}
-
-pub fn errorString(status_val: c_int) [*:0]const u8 {
-    return c.vkvg_error_string(status_val);
+pub fn statusString(status: Status) [*:0]const u8 {
+    return c.vkvg_status_string(@intFromEnum(status));
 }
