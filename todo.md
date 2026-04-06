@@ -9,7 +9,7 @@ Cross-platform Code Editor (Windows + Linux) mit GPU-Rendering, inspiriert von Z
 ### Cross-platform wo es Sinn macht
 - ✅ **WGPU Native** für GPU Rendering (DirectX 12 / Vulkan / Metal)
 - ✅ **Clay-Zig** für UI Layout (Flexbox, Constraints - reine Mathematik)
-- ✅ **vkvg** für 2D Graphics (Vulkan-basiert, Cairo-ähnliche API)
+- ✅ **Gooey SVG-Pipeline** für Icons (SVG Path → CPU-Rasterisierung → Texture Atlas Cache → GPU Quad)
 
 ### Platform-spezifisch wo Qualität zählt
 - 🔴 **Text Rendering**: DirectWrite (Windows) / FreeType+HarfBuzz (Linux)
@@ -32,7 +32,7 @@ Cross-platform Code Editor (Windows + Linux) mit GPU-Rendering, inspiriert von Z
 - ✅ Code Editor Beispiel (Syntax Highlighting Logic)
 
 **Ersetzen:**
-- ❌ Cairo SVG Rasterizing → ✅ **vkvg** (Vulkan-basiert, cross-platform)
+- ❌ Cairo SVG Rasterizing → ✅ **Gooey SVG-Pipeline** (cairo.zig CPU-Rasterisierung + Atlas Cache — einmalig pro Icon, danach GPU)
 - ❌ Platform-spezifischer Code → ✅ wio (cross-platform Windowing)
   - **Goran:** Was ist damit gemeint? → **Antwort:** Gooey hatte separaten Code für Windows (Win32), Linux (Wayland/X11), macOS (AppKit). Wir ersetzen das durch wio, das alle Plattformen abdeckt.
 - ❌ Font Discovery → ✅ JetBrains Mono direkt laden (keine System-Suche nötig)
@@ -64,9 +64,9 @@ Cross-platform Code Editor (Windows + Linux) mit GPU-Rendering, inspiriert von Z
 │       ↓                                     │
 │  GPU Texture (einheitlich für WGPU)         │
 ├─────────────────────────────────────────────┤
-│  2D Graphics: vkvg (Vulkan-basiert)         │
-│  - Cairo-ähnliche API für Icons, Shapes     │
-│  - Plattformübergreifend (Vulkan)           │
+│  SVG Icons: Gooey SVG-Pipeline              │
+│  - SVG Path → CPU-Rasterisierung (einmalig) │
+│  - Texture Atlas Cache → GPU Quad           │
 ├─────────────────────────────────────────────┤
 │  Window Management: wio                     │
 │  - Cross-platform (Windows + Linux)         │
@@ -77,10 +77,9 @@ Cross-platform Code Editor (Windows + Linux) mit GPU-Rendering, inspiriert von Z
 
 ## 💡 UI-Architektur (in Diskussion)
 
-### Idee: Gooey-Teile + vkvg statt Cairo
+### Idee: Gooey-Teile wiederverwenden
 
-**Problem mit Gooey:**
-- Cairo für SVG Rasterizing (Linux-only)
+**Problem mit Gooey direkt:**
 - Text Rendering Probleme unter Windows
 - Zu stark auf Linux/macOS fixiert
 
@@ -91,11 +90,11 @@ Cross-platform Code Editor (Windows + Linux) mit GPU-Rendering, inspiriert von Z
   - Component System (Button, TextInput, etc.)
   - Animation System
   - Theme System
+  - **SVG-Pipeline** (cairo.zig Rasterisierung + Atlas Cache) — einmalig pro Icon pro Größe, danach GPU
 
 - **Ersetzen:**
-  - ❌ Cairo → ✅ **vkvg** (Vulkan-basiert, cross-platform)
-  - ❌ Platform-spezifischer Code → ✅ Eigene Implementation
-  - ❌ Font Discovery → ✅ Platform-native (DirectWrite/CoreText/Fontconfig)
+  - ❌ Platform-spezifischer Code → ✅ wio (cross-platform)
+  - ❌ Font Discovery → ✅ JetBrains Mono direkt laden
 
 ### Text Rendering Strategie
 
@@ -132,22 +131,20 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
                                    Einheitliches GPU-Rendering (WGPU)
 ```
 
-### vkvg für 2D Graphics
+### SVG Icons: Gooey SVG-Pipeline
 
-**Vorteile:**
-- ✅ Cairo-ähnliche API (Gooey-Code leicht migrierbar)
-- ✅ Vulkan-basiert (cross-platform Windows + Linux)
-- ✅ GPU-beschleunigt
-- ✅ SVG Rendering eingebaut (löst Gooey's Cairo-Problem)
-- ✅ Font System mit Caching
-- ✅ Path Rendering, Textures, Patterns, Gradients
+**Warum Gooey's SVG statt vkvg:**
+- ✅ Existiert bereits, getestet, funktioniert
+- ✅ SVG Path Parsing + CPU-Rasterisierung (cairo.zig)
+- ✅ Texture Atlas Cache — jedes Icon wird nur einmal gerastert
+- ✅ Danach nur GPU Quad Rendering (schnell)
+- ✅ Keine extra Vulkan-Instance nötig (vkvg bräuchte eigenen VkDevice)
+- ✅ Pure Zig, keine externe Library-Dependency
 
-**Verwendung:**
-- Icons und SVG Rendering
-- Komplexe 2D Shapes
-- UI Decorations
-- Syntax Highlighting Visuals
-- Optional: Glyph-Atlas für Text (Phase 1)
+**vkvg wäre Overkill:**
+- Für statische Icons die einmal gecacht werden ist GPU-Rasterisierung unnötig
+- Zwei Vulkan-Kontexte (wgpu + vkvg) = Ressourcenverschwendung
+- vkvg lohnt sich nur für dynamische 2D-Inhalte (Canvas, Zeichentools)
 
 ## ✅ TODO
 
@@ -155,7 +152,7 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
 - [x] Zig Projekt initialisieren
 - [x] WGPU Native als Dependency
 - [x] Clay-Zig als Dependency
-- [x] vkvg Integration prüfen/Build-System
+- [x] ~~vkvg Integration~~ → entschieden: Gooey SVG-Pipeline statt vkvg
 - [x] Build-Skripte für Windows + Linux
 
 ### Phase 2: Platform Layer - Window Management
@@ -233,19 +230,16 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
 - [x] Scrollable Editor-Content
   - [x] Editor-Content in ScrollContainer
 
-### Phase 7: 2D Graphics mit vkvg (letzter Punkt - Performance-Option)
-- [x] vkvg Bindings erstellt (src/vkvg/bindings.zig)
-  - [x] Vollständige Zig-Bindings für vkvg C-API
-  - [x] Device, Surface, Context, Pattern, SVG Rendering
-  - [x] Screenshot beweis: screenshots/phase7_vkvg_bindings.png (Build funktioniert)
-  - [ ] vkvg Library muss als System-Package installiert werden (z.B. `pacman -S vkvg`)
-- [x] vkvg Renderer Modul (src/vkvg/renderer.zig)
-  - [x] Icon Loading und Caching
-  - [x] Gradient Drawing
-  - [x] Decoration Drawing
-- [ ] SVG Rendering mit vkvg (ersetzt Gooey's cairo.zig Software-Renderer) - *Benötigt installierte vkvg Library*
-- [ ] Icon Rendering - *Benötigt installierte vkvg Library*
-- [ ] UI Decorations (Borders, Gradients, Shadows) - *Benötigt installierte vkvg Library*
+### Phase 7: SVG Icons (Gooey SVG-Pipeline)
+- [ ] Gooey SVG-Module integrieren
+  - [ ] `svg/rasterizer.zig` (Platform-Dispatcher → cairo.zig auf Linux)
+  - [ ] `svg/atlas.zig` (Texture Atlas Cache für gerasterte Icons)
+  - [ ] `scene/svg.zig` (SVG Path Parser)
+  - [ ] `svg/backends/cairo.zig` (CPU-Rasterisierung, pure Zig)
+- [ ] SVG Atlas als wgpu Texture hochladen
+- [ ] Icon Rendering als Textured Quads in Clay UI
+- [ ] Lucide Icons einbinden (wie Gooey's `examples/lucide_demo.zig`)
+- [~] ~~vkvg Bindings~~ — entfernt, Gooey SVG-Pipeline reicht für gecachte Icons
 
 ### Phase 8: Interaktion & Editor-Logik (Input, State & Interaction Layer)
 - [ ] **Input Handling (wio → Clay)**
@@ -277,7 +271,7 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
 |---------|-------|--------|
 | clay-zig | UI Layout Engine | ✅ Verfügbar |
 | wgpu_native_zig | GPU Rendering (DX12/Vulkan/Metal) | ✅ Verfügbar |
-| vkvg-zig | 2D Vulkan Graphics (Cairo-Ersatz) | ✅ Verfügbar |
+| gooey (SVG-Pipeline) | SVG Icons (Rasterisierung + Atlas Cache) | ✅ Verfügbar |
 | **wio** | **Window Management + Input (cross-platform)** | ✅ Im Windows-Fork verwendet |
 | gooey | UI Framework (Referenz/Inspiration) | ⚠️ Nur Linux/macOS |
 
@@ -290,7 +284,6 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
   - `zed_killer_final.png` - Editor unbenutzbar
 - Clay-Zig: `/home/g/projects/vulkan-ed/clay-zig`
 - WGPU: `/home/g/projects/vulkan-ed/wgpu_native_zig`
-- vkvg: `/home/g/projects/vulkan-ed/vkvg-zig`
 - Gooey (Referenz): `/home/g/projects/vulkan-ed/gooey`
 
 ## 📖 Lessons Learned aus Gooey Windows Fail
@@ -299,7 +292,7 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
 2. **DirectWrite ist Pflicht** für Windows, kein "nice-to-have"
 3. **NanoVG als Cairo-Ersatz** war nicht implementiert (nur placeholder)
 4. **wio + Vulkan Platform-Code** ist gut - kann übernommen werden
-5. **vkvg > NanoVG** für Vulkan-basierte 2D Graphics
+5. **Gooey SVG-Pipeline > vkvg** für Icons — CPU-Rasterisierung + Atlas Cache reicht, vkvg braucht eigene Vulkan-Instance = Overkill
 6. **WGPU hat kein Window Management** - wio verwenden
 7. **Windows Fork Code ist brauchbar** - nur Text/SVG müssen ersetzt werden
 8. **JetBrains Mono bundlen** - keine Font Discovery nötig (spart Komplexität!)
