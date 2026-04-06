@@ -13,10 +13,16 @@
    2. Beispiele finden mit `rg` Suche (example|demo|sample) rekursiv überall, auch in libs/
    3. Implementieren (von Gooey übernehmen statt neu erfinden)
    4. Mit ./gui-screenshot.sh Screenshot machen
-   5. Screenshot muss BEWEISEN dass Implementierung funktioniert
-   6. Falls nicht: Schritte 1-5 wiederholen bis es passt
+   5. Screenshot SELBST PRÜFEN: mit Read-Tool als Bild öffnen und visuell
+      kontrollieren ob die Implementierung sichtbar ist. NICHT nur prüfen
+      ob die Datei existiert oder ein PNG ist — den INHALT anschauen!
+      Checkliste: Ist das neue Feature sichtbar? Ist es korrekt positioniert?
+      Ist Text lesbar? Sind Farben wie erwartet?
+   6. Falls Screenshot den Claim NICHT visuell beweist: Schritte 3-5
+      wiederholen bis es passt. NICHT zum Reviewer gehen mit einem
+      Screenshot der die Implementierung nicht zeigt!
    7. todo.md abhaken, commit & push
-   8. Weiter mit nächstem Task
+   8. ./scripts/review.sh <N> aufrufen (Supervisor Gate)
    ```
 
 3. **Keine Ausreden**
@@ -118,17 +124,15 @@ Beweis ist REJECT.
 ### Token-Budget
 
 Der Reviewer laeuft mit **Sonnet 4.6**, **Effort: medium**, unter
-`--bare --max-budget-usd 0.30`. Das reicht pro Review bequem (~5–10 Cent
-typisch). Qwen darf review.sh beliebig oft aufrufen — billiger ist es
-trotzdem, die vier Grundregeln **vor** dem Aufruf selbst zu pruefen.
+`--max-budget-usd 0.60`. Qwen darf review.sh beliebig oft aufrufen —
+billiger ist es trotzdem, den Screenshot **selbst visuell zu pruefen**
+(Schritt 5 im 8-Schritte-Workflow) bevor review.sh aufgerufen wird.
 
 Warum diese Wahl:
 - **Sonnet statt Opus:** Reviewer-Aufgabe ist strukturiert (Claim-vs-Evidenz,
   JSON-Output), Opus waere Overkill und ~5x teurer.
 - **Effort medium statt high:** Reviews sind kein Research, keine Algorithmen.
   Medium reicht fuer Bildvergleich + Diff-Check und spart Thinking-Tokens.
-- **`--bare`:** Kein Auto-Memory, keine CLAUDE.md-Autoloading, keine Plugins —
-  nur der explizite Reviewer-Prompt. Deterministisch und tokensparend.
 
 ## Current Status
 

@@ -252,6 +252,33 @@ pub const ClayRenderer = struct {
 
                     try text_gpu.renderText(render_pass, text_renderer, text_str, bbox.x, baseline_y, .{ r, g, b, a });
                 },
+                .scissor_start => {
+                    // Flush existing rects before changing scissor
+                    if (rect_vertices.items.len > 0) {
+                        try self.flushRects(render_pass, rect_vertices.items);
+                        rect_vertices.clearRetainingCapacity();
+                    }
+                    
+                    const bbox = cmd.bounding_box;
+                    // Scissor rect must be within viewport bounds
+                    const sx: u32 = @intFromFloat(@max(0, bbox.x));
+                    const sy: u32 = @intFromFloat(@max(0, bbox.y));
+                    const sw: u32 = @intFromFloat(@min(self.viewport_width - @as(f32, @floatFromInt(sx)), bbox.width));
+                    const sh: u32 = @intFromFloat(@min(self.viewport_height - @as(f32, @floatFromInt(sy)), bbox.height));
+                    
+                    if (sw > 0 and sh > 0) {
+                        render_pass.setScissorRect(sx, sy, sw, sh);
+                    }
+                },
+                .scissor_end => {
+                    // Flush rects before resetting scissor
+                    if (rect_vertices.items.len > 0) {
+                        try self.flushRects(render_pass, rect_vertices.items);
+                        rect_vertices.clearRetainingCapacity();
+                    }
+                    
+                    render_pass.setScissorRect(0, 0, @intFromFloat(self.viewport_width), @intFromFloat(self.viewport_height));
+                },
                 else => {},
             }
         }

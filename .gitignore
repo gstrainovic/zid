@@ -6,7 +6,7 @@ zig-out/
 test_data/
 
 # Screenshots (local only)
-screenshots/
+# screenshots/
 
 # OS files
 .DS_Store

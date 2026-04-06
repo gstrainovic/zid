@@ -163,6 +163,7 @@ pub const UI = struct {
                     .sizing = .grow,
                     .padding = .all(16),
                     .child_gap = 16,
+                    .direction = .top_to_bottom,
                 },
                 .background_color = t.bg,
             })({

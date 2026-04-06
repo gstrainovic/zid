@@ -349,6 +349,8 @@ const vertex_buffers = [_]wgpu.VertexBufferLayout{
             const ndc_x1 = ((glyph_x + glyph_w) / self.viewport_width) * 2.0 - 1.0;
             const ndc_y1 = -(((glyph_y + glyph_h) / self.viewport_height) * 2.0 - 1.0);
 
+            log.debug("Text NDC: x0={d} y0={d} color={d},{d},{d}", .{ndc_x0, ndc_y0, r, g, b});
+
             // 2 Dreiecke = 6 Vertices (pos: 2f32 + uv: 2f32 + color: 4f32)
             try vertices.appendSlice(self.allocator, &.{
                 ndc_x0, ndc_y0, uv.u0, uv.v0, r, g, b, a,

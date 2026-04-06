@@ -7,11 +7,15 @@ pub fn Button(id: []const u8, text: []const u8, theme: Theme) void {
         .id = clay.ElementId.ID(id),
         .layout = .{
             .sizing = .{ .w = .fit, .h = .fit },
-            .padding = .axes(8, 16),
+            .padding = .axes(10, 24),
             .child_alignment = .{ .x = .center, .y = .center },
         },
         .background_color = theme.primary,
-        .corner_radius = .all(4),
+        .corner_radius = .all(theme.radius_sm),
+        .border = .{
+            .width = .{ .left = 1, .right = 1, .top = 1, .bottom = 1 },
+            .color = theme.border,
+        },
     })({
         clay.text(text, .{ 
             .font_size = 16, 
