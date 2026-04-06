@@ -138,6 +138,19 @@ pub const UI = struct {
         clay.setLayoutDimensions(.{ .w = @floatFromInt(width), .h = @floatFromInt(height) });
     }
 
+    /// Maus-Position und Button-Status an Clay weiterleiten
+    pub fn setPointerState(self: *Self, x: f32, y: f32, is_down: bool) void {
+        _ = self;
+        clay.setPointerState(.{ .x = x, .y = y }, is_down);
+    }
+
+    /// Scroll-Events an Clay weiterleiten
+    pub fn updateScroll(self: *Self, delta_x: f32, delta_y: f32, delta_time_ms: f32) void {
+        _ = self;
+        // Clay erwartet Scroll-Delta als Vector2 und delta_time in Sekunden
+        clay.updateScrollContainers(false, .{ .x = delta_x, .y = delta_y }, delta_time_ms / 1000.0);
+    }
+
     /// Beispiel: Layout mit Theme rendern
     pub fn renderExample(self: *Self) []clay.RenderCommand {
         self.beginLayout();

@@ -234,10 +234,41 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
   - [x] Editor-Content in ScrollContainer
 
 ### Phase 7: 2D Graphics mit vkvg (letzter Punkt - Performance-Option)
-- [ ] vkvg als Dependency integrieren
-- [ ] SVG Rendering mit vkvg (ersetzt Gooey's cairo.zig Software-Renderer)
-- [ ] Icon Rendering
-- [ ] UI Decorations (Borders, Gradients, Shadows)
+- [x] vkvg Bindings erstellt (src/vkvg/bindings.zig)
+  - [x] Vollständige Zig-Bindings für vkvg C-API
+  - [x] Device, Surface, Context, Pattern, SVG Rendering
+  - [ ] vkvg Library muss als System-Package installiert werden (z.B. `pacman -S vkvg`)
+- [x] vkvg Renderer Modul (src/vkvg/renderer.zig)
+  - [x] Icon Loading und Caching
+  - [x] Gradient Drawing
+  - [x] Decoration Drawing
+- [ ] SVG Rendering mit vkvg (ersetzt Gooey's cairo.zig Software-Renderer) - *Benötigt installierte vkvg Library*
+- [ ] Icon Rendering - *Benötigt installierte vkvg Library*
+- [ ] UI Decorations (Borders, Gradients, Shadows) - *Benötigt installierte vkvg Library*
+
+### Phase 8: Interaktion & Editor-Logik (Input, State & Interaction Layer)
+- [ ] **Input Handling (wio → Clay)**
+  - [ ] Maus-Events (Move, Click, Scroll) von wio abfangen (`src/main.zig` und `src/platform/mod.zig`)
+  - [ ] Maus-Position an Clay-Zig weiterleiten (`clay.setPointerState`)
+  - [ ] Scroll-Events an Clay-Zig weiterleiten (`clay.updateScrollContainers`)
+  - [ ] Tastatur-Events (Press, Release, Text Input) abfangen
+- [ ] **Text-Buffer & Cursor Management**
+  - [ ] Echte Datenstruktur für Text (z.B. Gap-Buffer, Line-Array oder Rope) statt statischer Strings (`src/editor/code_editor.zig`)
+  - [ ] Cursor-Position (Zeile/Spalte) verwalten und visuell rendern (Blinkender Cursor)
+  - [ ] Cursor-Navigation (Pfeiltasten, Pos1, Ende, Bild auf/ab)
+- [ ] **Text Selection (Markieren)**
+  - [ ] Start- und End-Position der Markierung verwalten
+  - [ ] Maus-Drag-Logik zum Erstellen von Markierungen (Event-Listener in UI)
+  - [ ] Markierten Text visuell hervorheben (Hintergrundfarbe hinter Glyph-Instanzen rendern)
+- [ ] **Text Editing**
+  - [ ] Zeichen einfügen an Cursor-Position (Keyboard Text-Input)
+  - [ ] Zeichen löschen (Backspace, Delete)
+  - [ ] Neue Zeilen einfügen (Enter)
+  - [ ] Berücksichtigung von markiertem Text beim Tippen (Ersetzen)
+- [ ] **Viewport & Scrolling Logik (Editor)**
+  - [ ] Berechnung der sichtbaren Zeilen anhand des Scroll-Offsets (Viewport Culling)
+  - [ ] Synchronisation zwischen Clay-ScrollContainer und Editor-State
+  - [ ] Auto-Scroll, wenn Cursor den sichtbaren Bereich verlässt
 
 ## 📚 Verfügbare Libraries
 

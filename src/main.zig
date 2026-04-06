@@ -7,6 +7,7 @@ const text = @import("text/mod.zig");
 const ui = @import("ui/mod.zig");
 const clay_renderer_mod = @import("clay_renderer/mod.zig");
 const editor = @import("editor/mod.zig");
+// const vkvg_mod = @import("vkvg/mod.zig"); // TODO: vkvg muss als System-Library installiert werden
 
 const log = std.log.scoped(.main);
 
@@ -111,18 +112,28 @@ pub fn main() !void {
     );
     defer clay_rdr.deinit();
 
+    // TODO: vkvg Renderer (wenn vkvg installiert ist)
+    // var vkvg_rdr = try vkvg_mod.Renderer.init(...);
+    // defer vkvg_rdr.deinit();
+
     log.info("=== vulkan-ed ready ===", .{});
     log.info("Press Ctrl+C to exit (or close window)", .{});
 
     // Render Loop
     var frame_count: u32 = 0;
+    var mouse_x: f32 = 0;
+    var mouse_y: f32 = 0;
+    var mouse_down: bool = false;
+    
     while (plat.isRunning()) {
+        const delta_time_ms: f32 = 16.0;
+
         // Event-basierter Render Loop mit wio.wait (Timeout für CPU-Effizienz)
-        wio.wait(.{ .timeout_ns = 16 * std.time.ns_per_ms });
+        wio.wait(.{ .timeout_ns = @intFromFloat(delta_time_ms * std.time.ns_per_ms) });
         wio.update();
 
         // UI updaten (Animationen) - ca. 60 FPS
-        ui_system.update(16.0);
+        ui_system.update(delta_time_ms);
 
         // Theme-Wechsel für Verifizierung (0-300: Light, 301-600: Dark)
         const cycle_frames = 600;
@@ -136,6 +147,7 @@ pub fn main() !void {
         }
 
         // Events verarbeiten
+        var scroll_delta_y: f32 = 0;
         if (plat.window) |*win| {
             while (win.getEvent()) |event| {
                 switch (event) {
@@ -145,10 +157,31 @@ pub fn main() !void {
                         text_gpu.setViewport(@intCast(sz.width), @intCast(sz.height));
                         ui_system.resize(@intCast(sz.width), @intCast(sz.height));
                     },
+                    .mouse => |pos| {
+                        mouse_x = @floatFromInt(pos.x);
+                        mouse_y = @floatFromInt(pos.y);
+                    },
+                    .button_press => |btn| {
+                        if (btn == .mouse_left) mouse_down = true;
+                    },
+                    .button_release => |btn| {
+                        if (btn == .mouse_left) mouse_down = false;
+                    },
+                    .scroll_vertical => |delta| {
+                        scroll_delta_y = @floatCast(delta);
+                    },
                     else => {},
                 }
                 plat.handleEventExternal(event);
             }
+        }
+
+        // Pointer-Status an Clay (immer pro Frame vor updateScroll)
+        ui_system.setPointerState(mouse_x, mouse_y, mouse_down);
+        
+        // Scroll-Events an Clay (Scroll-Multiplikator 10.0 für bessere Geschwindigkeit)
+        if (scroll_delta_y != 0) {
+            ui_system.updateScroll(0, scroll_delta_y * 10.0, delta_time_ms);
         }
 
         // Clay Layout berechnen

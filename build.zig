@@ -76,6 +76,8 @@ pub fn build(b: *std.Build) void {
         // FreeType + HarfBuzz für Text/SVG Rendering
         exe.root_module.linkSystemLibrary("freetype2", .{});
         exe.root_module.linkSystemLibrary("harfbuzz", .{});
+        // vkvg für 2D Graphics - TODO: als System-Library installieren oder aus Submodule bauen
+        // exe.linkLibrary(vkvg_lib);
         exe.root_module.link_libc = true;
     }
 
