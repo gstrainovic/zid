@@ -237,6 +237,7 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
 - [x] vkvg Bindings erstellt (src/vkvg/bindings.zig)
   - [x] Vollständige Zig-Bindings für vkvg C-API
   - [x] Device, Surface, Context, Pattern, SVG Rendering
+  - [x] Screenshot beweis: screenshots/phase7_vkvg_bindings.png (Build funktioniert)
   - [ ] vkvg Library muss als System-Package installiert werden (z.B. `pacman -S vkvg`)
 - [x] vkvg Renderer Modul (src/vkvg/renderer.zig)
   - [x] Icon Loading und Caching
