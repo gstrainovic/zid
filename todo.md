@@ -203,7 +203,10 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
   - [x] Quad (Rechtecke) - funktioniert mit Clay
   - [x] GlyphInstance (Text) - funktioniert mit Clay + GPURenderer
   - [ ] Shadow (Drop Shadows) - *In Clay-Zig Bindings v0.2.2 nicht direkt verfügbar*
-- [x] UI Primitives (Box, Text, Image)
+- [x] UI Primitives (Box, Text)
+  - [x] Box (Rechtecke mit Clay)
+  - [x] Text (FreeType + GPU Rendering)
+  - [ ] Image - *Später bei Bedarf (aktuell nicht benötigt)*
 - [x] Button, TextInput, TextArea, ScrollContainer
   - [x] Button (primary Farbe)
   - [x] TextInput (surface Farbe)
