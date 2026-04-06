@@ -9,6 +9,7 @@ const animation = @import("animation.zig");
 const Animation = animation.Animation;
 const AnimationType = animation.AnimationType;
 const AnimationManager = animation.AnimationManager;
+const editor_mod = @import("../editor/mod.zig");
 
 const log = std.log.scoped(.ui);
 
@@ -33,6 +34,9 @@ pub const UI = struct {
     // Animationen
     anim_manager: AnimationManager,
 
+    // Code Editor
+    code_editor: editor_mod.CodeEditor,
+
     // Text Renderer (für Measurement)
     text_renderer: ?*@import("../text/mod.zig").TextRenderer = null,
 
@@ -48,6 +52,16 @@ pub const UI = struct {
 
         const clay_memory = try allocator.alloc(u8, min_memory);
 
+        var code_editor = editor_mod.CodeEditor.init(allocator);
+        code_editor.setText(
+            \\pub fn main() !void {
+            \\    std.log.info("Hello World", .{});
+            \\const x: u32 = 42;
+            \\// This is a comment
+            \\var y = x + 1;
+            \\}
+        );
+
         return Self{
             .allocator = allocator,
             .config = config,
@@ -55,6 +69,7 @@ pub const UI = struct {
             .clay_memory = clay_memory,
             .initialized = false,
             .anim_manager = AnimationManager.init(allocator),
+            .code_editor = code_editor,
         };
     }
 
@@ -234,117 +249,8 @@ pub const UI = struct {
                     });
                 });
 
-                // Code Editor (dunkel mit Line Numbers, Syntax Highlighting, Current Line Highlight)
-                clay.UI()(.{
-                    .id = clay.ElementId.ID("CodeEditor"),
-                    .layout = .{
-                        .sizing = .{ .w = .grow, .h = .fixed(250) },
-                        .direction = .left_to_right,
-                    },
-                    .background_color = .{ 30, 30, 46, 255 },
-                    .corner_radius = .all(4),
-                })({
-                    // Line Numbers Gutter (links, dunkler)
-                    clay.UI()(.{
-                        .id = clay.ElementId.ID("LineNumbers"),
-                        .layout = .{
-                            .sizing = .{ .w = .fixed(50), .h = .grow },
-                            .padding = .{ .left = 8, .right = 8, .top = 8, .bottom = 8 },
-                            .direction = .top_to_bottom,
-                            .child_gap = 4,
-                        },
-                        .background_color = .{ 24, 24, 37, 255 },
-                    })({
-                        clay.text("1", .{ .font_size = 24, .color = .{ 108, 112, 134, 255 } });
-                        clay.text("2", .{ .font_size = 24, .color = .{ 138, 173, 244, 255 } }); // Current line
-                        clay.text("3", .{ .font_size = 24, .color = .{ 108, 112, 134, 255 } });
-                        clay.text("4", .{ .font_size = 24, .color = .{ 108, 112, 134, 255 } });
-                        clay.text("5", .{ .font_size = 24, .color = .{ 108, 112, 134, 255 } });
-                        clay.text("6", .{ .font_size = 24, .color = .{ 108, 112, 134, 255 } });
-                    });
-
-                    // Scrollable Editor Content
-                    components.ScrollContainer("EditorScroll", t)({
-                        clay.UI()(.{
-                            .id = clay.ElementId.ID("EditorContent"),
-                            .layout = .{
-                                .sizing = .{ .w = .grow, .h = .fit },
-                                .direction = .top_to_bottom,
-                                .child_gap = 4,
-                            },
-                        })({
-                            // Zeile 1: pub fn main() !void {
-                            clay.UI()(.{
-                                .layout = .{ .direction = .left_to_right, .child_gap = 0 },
-                            })({
-                                clay.text("pub ", .{ .font_size = 24, .color = .{ 199, 146, 234, 255 } }); // keyword - lila
-                                clay.text("fn ", .{ .font_size = 24, .color = .{ 199, 146, 234, 255 } }); // keyword
-                                clay.text("main", .{ .font_size = 24, .color = .{ 202, 211, 245, 255 } }); // function name
-                                clay.text("() ", .{ .font_size = 24, .color = .{ 202, 211, 245, 255 } });
-                                clay.text("!void ", .{ .font_size = 24, .color = .{ 166, 209, 137, 255 } }); // type - grün
-                                clay.text("{", .{ .font_size = 24, .color = .{ 202, 211, 245, 255 } });
-                            });
-
-                            // Zeile 2: Current Line Highlight + std.log.info(...)
-                            clay.UI()(.{
-                                .id = clay.ElementId.ID("CurrentLine"),
-                                .layout = .{
-                                    .sizing = .{ .w = .grow, .h = .fixed(28) },
-                                    .direction = .left_to_right,
-                                    .child_gap = 0,
-                                    .child_alignment = .{ .x = .left, .y = .center },
-                                },
-                                .background_color = .{ 49, 54, 74, 128 }, // Current line highlight (halbtransparent)
-                            })({
-                                clay.text("    ", .{ .font_size = 24, .color = .{ 202, 211, 245, 255 } });
-                                clay.text("std", .{ .font_size = 24, .color = .{ 138, 173, 244, 255 } }); // builtin - blau
-                                clay.text(".log.info(", .{ .font_size = 24, .color = .{ 202, 211, 245, 255 } });
-                                clay.text("\"Hello World\"", .{ .font_size = 24, .color = .{ 166, 209, 137, 255 } }); // string - grün
-                                clay.text(", .{});", .{ .font_size = 24, .color = .{ 202, 211, 245, 255 } });
-                            });
-
-                            // Zeile 3: const x: u32 = 42;
-                            clay.UI()(.{
-                                .layout = .{ .direction = .left_to_right, .child_gap = 0 },
-                            })({
-                                clay.text("const ", .{ .font_size = 24, .color = .{ 199, 146, 234, 255 } }); // keyword
-                                clay.text("x", .{ .font_size = 24, .color = .{ 202, 211, 245, 255 } });
-                                clay.text(": ", .{ .font_size = 24, .color = .{ 202, 211, 245, 255 } });
-                                clay.text("u32 ", .{ .font_size = 24, .color = .{ 166, 209, 137, 255 } }); // type
-                                clay.text("= ", .{ .font_size = 24, .color = .{ 202, 211, 245, 255 } });
-                                clay.text("42", .{ .font_size = 24, .color = .{ 250, 179, 135, 255 } }); // number - orange
-                                clay.text(";", .{ .font_size = 24, .color = .{ 202, 211, 245, 255 } });
-                            });
-
-                            // Zeile 4: // This is a comment
-                            clay.UI()(.{
-                                .layout = .{ .direction = .left_to_right, .child_gap = 0 },
-                            })({
-                                clay.text("// This is a comment", .{ .font_size = 24, .color = .{ 108, 112, 134, 255 } }); // comment - grau
-                            });
-
-                            // Zeile 5: var y = x + 1;
-                            clay.UI()(.{
-                                .layout = .{ .direction = .left_to_right, .child_gap = 0 },
-                            })({
-                                clay.text("var ", .{ .font_size = 24, .color = .{ 199, 146, 234, 255 } }); // keyword
-                                clay.text("y ", .{ .font_size = 24, .color = .{ 202, 211, 245, 255 } });
-                                clay.text("= ", .{ .font_size = 24, .color = .{ 202, 211, 245, 255 } });
-                                clay.text("x ", .{ .font_size = 24, .color = .{ 202, 211, 245, 255 } });
-                                clay.text("+ ", .{ .font_size = 24, .color = .{ 138, 173, 244, 255 } }); // operator - blau
-                                clay.text("1", .{ .font_size = 24, .color = .{ 250, 179, 135, 255 } }); // number
-                                clay.text(";", .{ .font_size = 24, .color = .{ 202, 211, 245, 255 } });
-                            });
-
-                            // Zeile 6: }
-                            clay.UI()(.{
-                                .layout = .{ .direction = .left_to_right, .child_gap = 0 },
-                            })({
-                                clay.text("}", .{ .font_size = 24, .color = .{ 202, 211, 245, 255 } });
-                            });
-                        });
-                    });
-                });
+                // Code Editor (mit Syntax Highlighting, Current Line Highlight, Scrollable Content)
+                self.code_editor.render();
             });
         });
 

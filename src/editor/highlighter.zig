@@ -83,9 +83,13 @@ pub const Highlighter = struct {
 
         var i: usize = 0;
         while (i < line.len) {
-            // Whitespace überspringen
+            // Whitespace als eigenes Token
             if (std.ascii.isWhitespace(line[i])) {
-                i += 1;
+                const start = i;
+                while (i < line.len and std.ascii.isWhitespace(line[i])) {
+                    i += 1;
+                }
+                try tokens.append(Token{ .start = start, .end = i, .token_type = .plain });
                 continue;
             }
 
