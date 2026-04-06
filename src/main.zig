@@ -48,7 +48,6 @@ pub fn main() !void {
         .vsync = true,
         .clear_color = .{ 0.05, 0.05, 0.05, 1.0 },
     });
-    defer renderer.deinit();
 
     // 2. Platform initialisieren (wio - NACH wgpu, vermeidet EGL-Konflikt)
     var plat = try platform.Platform.init(allocator, .{
@@ -56,7 +55,10 @@ pub fn main() !void {
         .width = 1200,
         .height = 800,
     });
-    defer plat.deinit();
+
+    // defer wird REVERSE ausgeführt: plat.deinit() ZUERST geschrieben → ZULETZT ausgeführt
+    defer plat.deinit();     // wird zuletzt ausgeführt (nach renderer)
+    defer renderer.deinit(); // wird zuerst ausgeführt (vor plat)
 
     // Window erstellen (NACH renderer)
     try plat.createWindow();
