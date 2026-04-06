@@ -199,23 +199,23 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
   - [ ] **Windows: DirectWrite Integration** (MUSS sein!) - *Ausstehend für Windows-Build*
 
 ### Phase 5: UI Components (von Gooey lernen, mit wgpu+wio bauen)
-- [ ] Scene-System (Gooey's `scene.zig` → WGPU Buffers)
-  - [ ] Quad (Rechtecke) - funktioniert mit Clay
-  - [ ] GlyphInstance (Text)
-  - [ ] Shadow (Drop Shadows)
-- [ ] UI Primitives (Box, Text, Image)
-- [ ] Button, TextInput, TextArea, ScrollContainer
-  - [ ] Button (primary Farbe)
-  - [ ] TextInput (surface Farbe)
-  - [ ] TextArea (overlay Farbe)
-  - [ ] ScrollContainer (accent Farbe)
-- [ ] Theme System (Catppuccin Light/Dark)
-  - [ ] Dark Theme (Macchiato) - aktiv
-  - [ ] Light Theme (Latte) - verfügbar
-- [ ] Animation System
-  - [ ] Fade, Slide, Scale Animationen
-  - [ ] Easing functions
-  - [ ] AnimationManager
+- [x] Scene-System (Gooey's `scene.zig` → WGPU Buffers)
+  - [x] Quad (Rechtecke) - funktioniert mit Clay
+  - [x] GlyphInstance (Text) - funktioniert mit Clay + GPURenderer
+  - [ ] Shadow (Drop Shadows) - *In Clay-Zig Bindings v0.2.2 nicht direkt verfügbar*
+- [x] UI Primitives (Box, Text, Image)
+- [x] Button, TextInput, TextArea, ScrollContainer
+  - [x] Button (primary Farbe)
+  - [x] TextInput (surface Farbe)
+  - [x] TextArea (overlay Farbe)
+  - [x] ScrollContainer (accent Farbe)
+- [x] Theme System (Catppuccin Light/Dark)
+  - [x] Dark Theme (Macchiato) - aktiv
+  - [x] Light Theme (Latte) - verfügbar
+- [x] Animation System
+  - [x] Fade, Slide, Scale Animationen
+  - [x] Easing functions
+  - [x] AnimationManager
 
 ### Phase 6: Code Editor
 - [ ] Code Editor Container mit Line Numbers Gutter

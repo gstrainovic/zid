@@ -180,13 +180,15 @@ pub const ClayRenderer = struct {
     pub fn renderClayLayout(
         self: *Self,
         render_pass: *wgpu.RenderPassEncoder,
+        text_gpu: anytype,
+        text_renderer: anytype,
         render_commands: []clay.RenderCommand,
     ) !void {
         if (render_commands.len == 0) return {};
 
-        // Vertices sammeln
-        var vertices = std.ArrayList(RectangleVertex){};
-        defer vertices.deinit(self.allocator);
+        // Vertices für Rechtecke sammeln
+        var rect_vertices = std.ArrayList(RectangleVertex){};
+        defer rect_vertices.deinit(self.allocator);
 
         for (render_commands) |cmd| {
             switch (cmd.command_type) {
@@ -194,65 +196,93 @@ pub const ClayRenderer = struct {
                     const bbox = cmd.bounding_box;
                     const color = cmd.render_data.rectangle.background_color;
 
-                    // Rectangle zu 2 Dreiecken (6 Vertices)
-                    const x0 = self.normalizeX(bbox.x);
-                    const y0 = self.normalizeY(bbox.y);
-                    const x1 = self.normalizeX(bbox.x + bbox.width);
-                    const y1 = self.normalizeY(bbox.y + bbox.height);
-
                     const r = color[0] / 255.0;
                     const g = color[1] / 255.0;
                     const b = color[2] / 255.0;
                     const a = color[3] / 255.0;
 
-                    // Dreieck 1: oben-links, oben-rechts, unten-links
-                    try vertices.append(self.allocator, .{
-                        .position = .{ x0, y0 },
-                        .color = .{ r, g, b, a },
-                    });
-                    try vertices.append(self.allocator, .{
-                        .position = .{ x1, y0 },
-                        .color = .{ r, g, b, a },
-                    });
-                    try vertices.append(self.allocator, .{
-                        .position = .{ x0, y1 },
-                        .color = .{ r, g, b, a },
-                    });
-
-                    // Dreieck 2: oben-rechts, unten-rechts, unten-links
-                    try vertices.append(self.allocator, .{
-                        .position = .{ x1, y0 },
-                        .color = .{ r, g, b, a },
-                    });
-                    try vertices.append(self.allocator, .{
-                        .position = .{ x1, y1 },
-                        .color = .{ r, g, b, a },
-                    });
-                    try vertices.append(self.allocator, .{
-                        .position = .{ x0, y1 },
-                        .color = .{ r, g, b, a },
-                    });
+                    try self.appendRect(&rect_vertices, bbox.x, bbox.y, bbox.width, bbox.height, r, g, b, a);
                 },
-                else => {}, // TEXT, IMAGE, etc. später
+                .border => {
+                    const bbox = cmd.bounding_box;
+                    const border = cmd.render_data.border;
+                    const color = border.color;
+                    const r = color[0] / 255.0;
+                    const g = color[1] / 255.0;
+                    const b = color[2] / 255.0;
+                    const a = color[3] / 255.0;
+
+                    // Top border
+                    if (border.width.top > 0) {
+                        try self.appendRect(&rect_vertices, bbox.x, bbox.y, bbox.width, @floatFromInt(border.width.top), r, g, b, a);
+                    }
+                    // Bottom border
+                    if (border.width.bottom > 0) {
+                        try self.appendRect(&rect_vertices, bbox.x, bbox.y + bbox.height - @as(f32, @floatFromInt(border.width.bottom)), bbox.width, @floatFromInt(border.width.bottom), r, g, b, a);
+                    }
+                    // Left border
+                    if (border.width.left > 0) {
+                        try self.appendRect(&rect_vertices, bbox.x, bbox.y, @floatFromInt(border.width.left), bbox.height, r, g, b, a);
+                    }
+                    // Right border
+                    if (border.width.right > 0) {
+                        try self.appendRect(&rect_vertices, bbox.x + bbox.width - @as(f32, @floatFromInt(border.width.right)), bbox.y, @floatFromInt(border.width.right), bbox.height, r, g, b, a);
+                    }
+                },
+                .text => {
+                    // Wenn wir Rechtecke gepuffert haben, diese zuerst rendern um Z-Order zu erhalten
+                    if (rect_vertices.items.len > 0) {
+                        try self.flushRects(render_pass, rect_vertices.items);
+                        rect_vertices.clearRetainingCapacity();
+                    }
+
+                    // Text rendern
+                    const text_data = cmd.render_data.text;
+                    const text_str = text_data.string_contents.chars[0..@intCast(text_data.string_contents.length)];
+                    const bbox = cmd.bounding_box;
+                    
+                    // Baseline: bbox.y + ascent (vereinfacht: bbox.y + font_size * 0.8)
+                    const baseline_y = bbox.y + @as(f32, @floatFromInt(text_data.font_size)) * 0.8;
+                    
+                    try text_gpu.renderText(render_pass, text_renderer, text_str, bbox.x, baseline_y);
+                },
+                else => {},
             }
         }
 
-        if (vertices.items.len == 0) return;
+        // Restliche Rechtecke flashen
+        if (rect_vertices.items.len > 0) {
+            try self.flushRects(render_pass, rect_vertices.items);
+        }
+    }
 
-        // Vertex Buffer updaten
-        try self.ensureVertexBuffer(vertices.items.len);
-        const data_size = vertices.items.len * @sizeOf(RectangleVertex);
+    fn appendRect(self: *Self, vertices: *std.ArrayList(RectangleVertex), x: f32, y: f32, w: f32, h: f32, r: f32, g: f32, b: f32, a: f32) !void {
+        const x0 = self.normalizeX(x);
+        const y0 = self.normalizeY(y);
+        const x1 = self.normalizeX(x + w);
+        const y1 = self.normalizeY(y + h);
+
+        try vertices.append(self.allocator, .{ .position = .{ x0, y0 }, .color = .{ r, g, b, a } });
+        try vertices.append(self.allocator, .{ .position = .{ x1, y0 }, .color = .{ r, g, b, a } });
+        try vertices.append(self.allocator, .{ .position = .{ x0, y1 }, .color = .{ r, g, b, a } });
+        try vertices.append(self.allocator, .{ .position = .{ x1, y0 }, .color = .{ r, g, b, a } });
+        try vertices.append(self.allocator, .{ .position = .{ x1, y1 }, .color = .{ r, g, b, a } });
+        try vertices.append(self.allocator, .{ .position = .{ x0, y1 }, .color = .{ r, g, b, a } });
+    }
+
+    fn flushRects(self: *Self, render_pass: *wgpu.RenderPassEncoder, vertices: []const RectangleVertex) !void {
+        try self.ensureVertexBuffer(vertices.len);
+        const data_size = vertices.len * @sizeOf(RectangleVertex);
         self.queue.writeBuffer(
             self.vertex_buffer.?,
             0,
-            @as(*const anyopaque, @ptrCast(vertices.items.ptr)),
+            @as(*const anyopaque, @ptrCast(vertices.ptr)),
             data_size,
         );
 
-        // Rendern
         render_pass.setPipeline(self.render_pipeline.?);
         render_pass.setVertexBuffer(0, self.vertex_buffer.?, 0, self.vertex_buffer_size);
-        render_pass.draw(@intCast(vertices.items.len), 1, 0, 0);
+        render_pass.draw(@intCast(vertices.len), 1, 0, 0);
     }
 
     /// X-Koordinate normalisieren (Pixel → NDC -1..1)

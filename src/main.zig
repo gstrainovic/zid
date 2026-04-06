@@ -72,6 +72,9 @@ pub fn main() !void {
 
     try ui_system.setupClay(plat.getSize().width, plat.getSize().height);
 
+    // Start eine Test-Animation (2 Sekunden)
+    _ = try ui_system.anim_manager.addAnimation(.scale_up, 2000.0);
+
     // 6. Clay Renderer initialisieren (WGPU)
     var clay_rdr = try clay_renderer_mod.ClayRenderer.init(
         allocator,
@@ -92,6 +95,9 @@ pub fn main() !void {
         // Event-basierter Render Loop mit wio.wait (Timeout für CPU-Effizienz)
         wio.wait(.{ .timeout_ns = 16 * std.time.ns_per_ms });
         wio.update();
+
+        // UI updaten (Animationen) - ca. 60 FPS
+        ui_system.update(16.0);
 
         // Events verarbeiten
         if (plat.window) |*win| {

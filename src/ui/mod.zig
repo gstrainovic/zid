@@ -5,8 +5,10 @@
 const std = @import("std");
 const clay = @import("clay");
 const Theme = @import("theme.zig").Theme;
-const Animation = @import("animation.zig").Animation;
-const AnimationType = @import("animation.zig").AnimationType;
+const animation = @import("animation.zig");
+const Animation = animation.Animation;
+const AnimationType = animation.AnimationType;
+const AnimationManager = animation.AnimationManager;
 
 const log = std.log.scoped(.ui);
 
@@ -18,6 +20,7 @@ pub const UIConfig = struct {
 };
 
 /// UI Hauptstruktur
+pub const components = @import("components/mod.zig");
 pub const UI = struct {
     allocator: std.mem.Allocator,
     config: UIConfig,
@@ -26,6 +29,9 @@ pub const UI = struct {
 
     // Clay Memory Arena
     clay_memory: []u8 = &[_]u8{},
+
+    // Animationen
+    anim_manager: AnimationManager,
 
     const Self = @This();
 
@@ -45,12 +51,14 @@ pub const UI = struct {
             .theme = Theme.dark(),
             .clay_memory = clay_memory,
             .initialized = false,
+            .anim_manager = AnimationManager.init(allocator),
         };
     }
 
     /// UI aufräumen
     pub fn deinit(self: *Self) void {
         log.info("UI system shutdown", .{});
+        self.anim_manager.deinit();
         self.allocator.free(self.clay_memory);
     }
 
@@ -64,6 +72,11 @@ pub const UI = struct {
 
         self.initialized = true;
         log.info("Clay initialized", .{});
+    }
+
+    /// UI updaten (pro Frame)
+    pub fn update(self: *Self, delta_ms: f32) void {
+        self.anim_manager.update(delta_ms);
     }
 
     /// Layout beginnen
@@ -111,25 +124,35 @@ pub const UI = struct {
                 },
                 .background_color = t.surface,
             })({
-                // Button im Header mit Fade-In Animation
-                clay.UI()(.{
-                    .id = clay.ElementId.ID("TestButton"),
-                    .layout = .{
-                        .sizing = .{ .w = .fixed(80), .h = .fixed(30) },
-                    },
-                    .background_color = t.primary,
-                    .corner_radius = .all(4),
-                })({});
+                // Button im Header
+                components.Button("TestButton", "HELLO CLAY", t);
 
                 // Animierter Button (scale-up)
+                var scale: f32 = 1.0;
+                if (self.anim_manager.animations.items.len > 0) {
+                    scale = self.anim_manager.animations.items[0].scale();
+                }
+
+                var accent_theme = t;
+                accent_theme.primary = t.accent;
+                accent_theme.text_on_primary = t.text_on_accent;
+                
+                // Wir nutzen UI() direkt statt Button(), um Scale anzuwenden
                 clay.UI()(.{
                     .id = clay.ElementId.ID("AnimatedButton"),
                     .layout = .{
-                        .sizing = .{ .w = .fixed(80), .h = .fixed(30) },
+                        .sizing = .{ .w = .fixed(120 * scale), .h = .fixed(40 * scale) },
+                        .padding = .axes(@intFromFloat(8 * scale), @intFromFloat(16 * scale)),
+                        .child_alignment = .{ .x = .center, .y = .center },
                     },
-                    .background_color = t.accent,
-                    .corner_radius = .all(4),
-                })({});
+                    .background_color = accent_theme.primary,
+                    .corner_radius = .all(4 * scale),
+                })({
+                    clay.text("ACCENT", .{ 
+                        .font_size = @intFromFloat(16 * scale), 
+                        .color = accent_theme.text_on_primary,
+                    });
+                });
             });
 
             // Content Area mit TextInput, TextArea, ScrollContainer
@@ -138,39 +161,30 @@ pub const UI = struct {
                 .layout = .{
                     .sizing = .grow,
                     .padding = .all(16),
-                    .child_gap = 8,
+                    .child_gap = 16,
                 },
                 .background_color = t.bg,
             })({
-                // TextInput (surface color)
-                clay.UI()(.{
-                    .id = clay.ElementId.ID("TextInput"),
-                    .layout = .{
-                        .sizing = .{ .w = .fixed(200), .h = .fixed(35) },
-                    },
-                    .background_color = t.surface,
-                    .corner_radius = .all(4),
-                })({});
+                // TextInput
+                components.TextInput("MyInput", "", "Type something...", t);
 
-                // TextArea (overlay color)
-                clay.UI()(.{
-                    .id = clay.ElementId.ID("TextArea"),
-                    .layout = .{
-                        .sizing = .{ .w = .fixed(300), .h = .fixed(100) },
-                    },
-                    .background_color = t.overlay,
-                    .corner_radius = .all(4),
-                })({});
+                // TextArea
+                components.TextArea("MyTextArea", "This is a multiline\ntext area component\nwith multiple lines.", t);
 
-                // ScrollContainer (accent color)
-                clay.UI()(.{
-                    .id = clay.ElementId.ID("ScrollContainer"),
-                    .layout = .{
-                        .sizing = .{ .w = .fixed(150), .h = .fixed(100) },
-                    },
-                    .background_color = t.accent,
-                    .corner_radius = .all(4),
-                })({});
+                // ScrollContainer
+                components.ScrollContainer("MyScroll", t)({
+                    clay.UI()(.{
+                        .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(300) }, .padding = .all(10), .child_gap = 10 },
+                        .background_color = t.overlay,
+                    })({
+                        clay.text("SCROLLABLE CONTENT", .{ .font_size = 16, .color = t.text });
+                        clay.text("Line 1...", .{ .font_size = 14, .color = t.subtext });
+                        clay.text("Line 2...", .{ .font_size = 14, .color = t.subtext });
+                        clay.text("Line 3...", .{ .font_size = 14, .color = t.subtext });
+                        clay.text("Line 4...", .{ .font_size = 14, .color = t.subtext });
+                        clay.text("Line 5...", .{ .font_size = 14, .color = t.subtext });
+                    });
+                });
 
                 // Code Editor (dunkel mit Line Numbers)
                 clay.UI()(.{
@@ -186,9 +200,13 @@ pub const UI = struct {
                         .id = clay.ElementId.ID("LineNumbers"),
                         .layout = .{
                             .sizing = .{ .w = .fixed(50), .h = .grow },
+                            .padding = .all(8),
                         },
                         .background_color = .{ 24, 24, 37, 255 },
-                    })({});
+                    })({
+                        clay.text("1", .{ .font_size = 14, .color = .{ 108, 112, 134, 255 } });
+                        clay.text("2", .{ .font_size = 14, .color = .{ 108, 112, 134, 255 } });
+                    });
                 });
             });
         });

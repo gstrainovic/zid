@@ -92,26 +92,29 @@ pub const Animation = struct {
 /// Animation Manager - verwaltet mehrere Animationen
 pub const AnimationManager = struct {
     allocator: std.mem.Allocator,
-    animations: std.ArrayList(Animation),
+    animations: std.ArrayListUnmanaged(Animation),
 
     const Self = @This();
 
     pub fn init(allocator: std.mem.Allocator) Self {
         return Self{
             .allocator = allocator,
-            .animations = std.ArrayList(Animation).init(allocator),
+            .animations = .{},
         };
     }
 
     pub fn deinit(self: *Self) void {
-        self.animations.deinit();
+        self.animations.deinit(self.allocator);
     }
 
     /// Neue Animation hinzufügen
     pub fn addAnimation(self: *Self, anim_type: AnimationType, duration: f32) !*Animation {
-        try self.animations.append(Animation{});
+        try self.animations.append(self.allocator, Animation{
+            .type = anim_type,
+            .duration_ms = duration,
+        });
         const anim = &self.animations.items[self.animations.items.len - 1];
-        anim.start(anim_type, duration);
+        anim.is_running = true;
         return anim;
     }
 

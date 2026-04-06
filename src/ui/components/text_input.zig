@@ -1,48 +1,28 @@
-//! TextInput Component für vulkan-ed
-//!
-//! Einfaches Text-Input Feld mit Clay Layout.
-
 const std = @import("std");
 const clay = @import("clay");
+const Theme = @import("../theme.zig").Theme;
 
-pub const TextInput = struct {
-    placeholder: []const u8,
-    value: []const u8,
-    x: f32,
-    y: f32,
-    width: f32 = 200.0,
-    height: f32 = 35.0,
-    is_focused: bool = false,
+pub fn TextInput(id: []const u8, value: []const u8, placeholder: []const u8, theme: Theme) void {
+    const text_to_show = if (value.len > 0) value else placeholder;
+    const text_color = if (value.len > 0) theme.text else theme.muted;
 
-    const Self = @This();
-
-    /// TextInput rendern
-    pub fn render(self: Self) void {
-        const bg_color = if (self.is_focused)
-            clay.Color{ .r = 40, .g = 40, .b = 60, .a = 255 }
-        else
-            clay.Color{ .r = 30, .g = 30, .b = 50, .a = 255 };
-
-        const border_color = if (self.is_focused)
-            clay.Color{ .r = 100, .g = 150, .b = 255, .a = 255 }
-        else
-            clay.Color{ .r = 60, .g = 60, .b = 80, .a = 255 };
-
-        // Hintergrund
-        clay.UI()(.{
-            .id = clay.ElementId.ID("textinput_bg"),
-            .layout = .{
-                .sizing = .{ .w = .fixed(self.width), .h = .fixed(self.height) },
-                .padding = .all(8),
-            },
-            .background_color = bg_color,
-            .corner_radius = .all(4),
-            .border = .{
-                .color = border_color,
-                .width = .all(1),
-            },
-        })({
-            // Placeholder oder Value Text
+    clay.UI()(.{
+        .id = clay.ElementId.ID(id),
+        .layout = .{
+            .sizing = .{ .w = .grow, .h = .fixed(35) },
+            .padding = .axes(0, 12),
+            .child_alignment = .{ .x = .left, .y = .center },
+        },
+        .background_color = theme.surface,
+        .corner_radius = .all(4),
+        .border = .{
+            .width = .{ .left = 1, .right = 1, .top = 1, .bottom = 1 },
+            .color = theme.border,
+        },
+    })({
+        clay.text(text_to_show, .{ 
+            .font_size = 14, 
+            .color = text_color,
         });
-    }
-};
+    });
+}
