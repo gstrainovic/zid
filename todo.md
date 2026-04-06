@@ -213,7 +213,7 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
   - [x] Dark Theme (Macchiato) - aktiv
   - [x] Light Theme (Latte) - verfügbar
 - [x] Animation System
-  - [x] Fade, Slide, Scale Animationen
+  - [x] Fade, Slide, Scale Animationen (vom User bestätigt - funktionierte live)
   - [x] Easing functions
   - [x] AnimationManager
 

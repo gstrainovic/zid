@@ -129,6 +129,18 @@ pub const UI = struct {
 
         const t = self.theme;
 
+        // Animations-Werte holen
+        var current_scale: f32 = 1.0;
+        var current_opacity: f32 = 1.0;
+        var current_offset_x: f32 = 0.0;
+
+        if (self.anim_manager.animations.items.len > 0) {
+            const anim = self.anim_manager.animations.items[0];
+            current_scale = anim.scale();
+            current_opacity = anim.opacity();
+            current_offset_x = anim.offsetX(100.0);
+        }
+
         // Root Container
         clay.UI()(.{
             .id = clay.ElementId.ID("Root"),
@@ -140,42 +152,42 @@ pub const UI = struct {
             },
             .background_color = t.bg,
         })({
-            // Header mit Button
+            // Header mit Button (Animiert mit Opacity und Offset)
+            var header_bg = t.surface;
+            header_bg[3] = header_bg[3] * current_opacity;
+
             clay.UI()(.{
                 .id = clay.ElementId.ID("Header"),
                 .layout = .{
                     .sizing = .{ .w = .grow, .h = .fixed(80) },
-                    .child_gap = 16,
+                    .child_gap = 32, // Mehr Platz zwischen Buttons
                     .direction = .left_to_right,
                     .child_alignment = .{ .x = .left, .y = .center },
                     .padding = .all(10),
                 },
-                .background_color = t.surface,
+                .background_color = header_bg,
                 .border = .{ .width = .all(2), .color = t.accent },
             })({
-                // Button im Header
+                // Button 1 (Statisch)
                 components.Button("TestButton", "HELLO CLAY", t);
 
-                // Animierter Button (scale-up)
-                var scale: f32 = 1.0;
-                if (self.anim_manager.animations.items.len > 0) {
-                    scale = self.anim_manager.animations.items[0].scale();
-                }
-
+                // Button 2 (Animiert mit Scale und Opacity)
                 var accent_theme = t;
                 accent_theme.primary = t.accent;
                 accent_theme.text_on_primary = t.text_on_accent;
                 
-                // Wir nutzen UI() direkt statt Button(), um Scale anzuwenden
+                // Alpha auch für Button-Hintergrund übernehmen
+                accent_theme.primary[3] = accent_theme.primary[3] * current_opacity;
+
                 clay.UI()(.{
                     .id = clay.ElementId.ID("AnimatedButton"),
                     .layout = .{
-                        .sizing = .{ .w = .fixed(150 * scale), .h = .fixed(45 * scale) },
-                        .padding = .axes(@intFromFloat(8 * scale), @intFromFloat(16 * scale)),
+                        .sizing = .{ .w = .fixed(180 * current_scale), .h = .fixed(50 * current_scale) },
+                        .padding = .axes(@intFromFloat(10 * current_scale), @intFromFloat(20 * current_scale)),
                         .child_alignment = .{ .x = .center, .y = .center },
                     },
                     .background_color = accent_theme.primary,
-                    .corner_radius = .all(4 * scale),
+                    .corner_radius = .all(4 * current_scale),
                     .border = .{ .width = .all(2), .color = t.primary },
                 })({
                     clay.text("ANIMATED", .{ 

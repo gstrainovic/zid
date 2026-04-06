@@ -16,6 +16,27 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
+    // CLI Argumente parsen
+    var theme_override: ?ui.Theme = null;
+    const args = try std.process.argsAlloc(allocator);
+    defer std.process.argsFree(allocator, args);
+
+    var i: usize = 1;
+    while (i < args.len) : (i += 1) {
+        if (std.mem.eql(u8, args[i], "--theme")) {
+            if (i + 1 < args.len) {
+                i += 1;
+                if (std.mem.eql(u8, args[i], "light")) {
+                    theme_override = ui.Theme.light();
+                    log.info("Theme override: light", .{});
+                } else if (std.mem.eql(u8, args[i], "dark")) {
+                    theme_override = ui.Theme.dark();
+                    log.info("Theme override: dark", .{});
+                }
+            }
+        }
+    }
+
     log.info("=== vulkan-ed starting ===", .{});
     log.info("Platform: {s}-{s}", .{
         @tagName(builtin.cpu.arch),
@@ -72,8 +93,10 @@ pub fn main() !void {
 
     try ui_system.setupClay(plat.getSize().width, plat.getSize().height, &text_renderer);
 
-    // Start eine Test-Animation (2 Sekunden)
-    _ = try ui_system.anim_manager.addAnimation(.scale_up, 2000.0);
+    // Start Test-Animationen (3 Sekunden)
+    _ = try ui_system.anim_manager.addAnimation(.fade_in, 3000.0);
+    _ = try ui_system.anim_manager.addAnimation(.slide_in_left, 3000.0);
+    _ = try ui_system.anim_manager.addAnimation(.scale_up, 3000.0);
 
     // 6. Clay Renderer initialisieren (WGPU)
     var clay_rdr = try clay_renderer_mod.ClayRenderer.init(
@@ -99,10 +122,14 @@ pub fn main() !void {
         // UI updaten (Animationen) - ca. 60 FPS
         ui_system.update(16.0);
 
-        // Theme alle 120 Frames wechseln (Beweis für Phase 5)
-        if (frame_count % 240 == 120) {
+        // Theme-Wechsel für Verifizierung (0-300: Light, 301-600: Dark)
+        const cycle_frames = 600;
+        const current_cycle = frame_count % cycle_frames;
+        if (theme_override) |t| {
+            ui_system.theme = t;
+        } else if (current_cycle < 300) {
             ui_system.theme = ui.Theme.light();
-        } else if (frame_count % 240 == 0) {
+        } else {
             ui_system.theme = ui.Theme.dark();
         }
 

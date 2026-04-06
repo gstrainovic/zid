@@ -40,9 +40,9 @@ zig build
 SCREENSHOT_DIR="$HOME/Bilder/Bildschirmfotos"
 BEFORE=$(ls -t "$SCREENSHOT_DIR"/*.png 2>/dev/null | head -1 || echo "")
 
-# Start app in background
-echo "Starting vulkan-ed..."
-./zig-out/bin/vulkan-ed &
+# Start app in background (pass extra args: --theme light/dark)
+echo "Starting vulkan-ed ${@:3}..."
+./zig-out/bin/vulkan-ed ${@:3} &
 APP_PID=$!
 
 # Wait for rendering
