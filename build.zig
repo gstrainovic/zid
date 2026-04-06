@@ -53,6 +53,8 @@ pub fn build(b: *std.Build) void {
     b.getInstallStep().dependOn(&shader_install_text_color.step);
     const shader_install_text_atlas = b.addInstallFileWithDir(b.path("shaders/text_atlas.wgsl"), .{ .custom = "share" }, "text_atlas.wgsl");
     b.getInstallStep().dependOn(&shader_install_text_atlas.step);
+    const shader_install_texture = b.addInstallFileWithDir(b.path("shaders/texture.wgsl"), .{ .custom = "share" }, "texture.wgsl");
+    b.getInstallStep().dependOn(&shader_install_texture.step);
 
     const exe = b.addExecutable(.{
         .name = "vulkan-ed",
@@ -75,6 +77,7 @@ pub fn build(b: *std.Build) void {
         // FreeType + HarfBuzz für Text/SVG Rendering
         exe.root_module.linkSystemLibrary("freetype2", .{});
         exe.root_module.linkSystemLibrary("harfbuzz", .{});
+        exe.root_module.linkSystemLibrary("png", .{});
         exe.root_module.link_libc = true;
     }
 

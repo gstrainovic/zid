@@ -182,6 +182,7 @@ pub const ClayRenderer = struct {
         render_pass: *wgpu.RenderPassEncoder,
         text_gpu: anytype,
         text_renderer: anytype,
+        image_renderer: anytype,
         render_commands: []clay.RenderCommand,
     ) !void {
         if (render_commands.len == 0) return {};
@@ -255,6 +256,38 @@ pub const ClayRenderer = struct {
                     const a = col[3] / 255.0;
 
                     try text_gpu.renderText(render_pass, text_renderer, text_str, bbox.x, baseline_y, .{ r, g, b, a });
+                },
+                .image => {
+                    // Flush rectangles first
+                    if (rect_vertices.items.len > 0) {
+                        try self.flushRects(render_pass, rect_vertices.items);
+                        rect_vertices.clearRetainingCapacity();
+                    }
+
+                    const image_data = cmd.render_data.image;
+                    if (image_data.image_data) |ptr| {
+                        const bbox = cmd.bounding_box;
+                        const tint = image_data.background_color;
+                        const r = tint[0] / 255.0;
+                        const g = tint[1] / 255.0;
+                        const b = tint[2] / 255.0;
+                        const a = if (tint[3] == 0) 1.0 else tint[3] / 255.0; // Fallback alpha if 0
+
+                        const ImageTexture = @import("image_renderer.zig").ImageTexture;
+                        const texture: *const ImageTexture = @ptrCast(@alignCast(ptr));
+                        
+                        if (image_renderer) |ir| {
+                            try ir.renderImage(
+                                render_pass,
+                                texture,
+                                bbox.x,
+                                bbox.y,
+                                bbox.width,
+                                bbox.height,
+                                .{ r, g, b, a },
+                            );
+                        }
+                    }
                 },
                 .scissor_start => {
                     // Flush existing rects before changing scissor

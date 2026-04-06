@@ -8,6 +8,22 @@ const clay = @import("clay");
 
 const log = std.log.scoped(.rendering);
 
+// Forward declaration
+const image_renderer = @import("../clay_renderer/image_renderer.zig");
+
+/// Image Daten für Rendering
+pub const ImageToRender = struct {
+    image: image_renderer.ImageTexture,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    tint_r: f32 = 1.0,
+    tint_g: f32 = 1.0,
+    tint_b: f32 = 1.0,
+    tint_a: f32 = 1.0,
+};
+
 /// Renderer Konfiguration
 pub const RendererConfig = struct {
     vsync: bool = true,
@@ -353,7 +369,7 @@ pub const Renderer = struct {
         self.queue.?.submit(&[_]*wgpu.CommandBuffer{command_buffer});
     }
 
-    /// Frame rendern mit Clay UI + Text (Clear + Clay + Text + Dreieck + Present)
+    /// Frame rendern mit Clay UI + Text + Images (Clear + Clay + Text + Images + Present)
     pub fn renderFrameWithText(
         self: *Self,
         clay_rdr: anytype,
@@ -363,6 +379,8 @@ pub const Renderer = struct {
         text_str: []const u8,
         text_x: f32,
         text_y: f32,
+        image_rdr: ?*image_renderer.ImageRenderer,
+        images: []const ImageToRender,
     ) void {
         const texture_view = self.beginFrame() orelse return;
         defer self.endFrame(texture_view);
@@ -397,9 +415,31 @@ pub const Renderer = struct {
         // 0. Renderer vorbereiten (Buffer Offset reset)
         clay_rdr.beginFrame();
         text_gpu.beginFrame();
+        if (image_rdr) |img_renderer| {
+            img_renderer.beginFrame();
+        }
 
-        // 1. Clay UI rendern (Rechtecke + Text in korrekter Z-Order)
-        clay_rdr.renderClayLayout(render_pass, text_gpu, text_renderer, clay_commands) catch return;
+        // 1. Clay UI rendern (Rechtecke + Text + Images in korrekter Z-Order)
+        clay_rdr.renderClayLayout(render_pass, text_gpu, text_renderer, image_rdr, clay_commands) catch return;
+
+        // 2. Images rendern (über Clay UI - Legacy/Direct Rendering)
+        if (image_rdr) |img_renderer| {
+            if (images.len > 0) {
+                for (images) |img| {
+                    img_renderer.renderImage(
+                        render_pass,
+                        &img.image,
+                        img.x,
+                        img.y,
+                        img.width,
+                        img.height,
+                        .{ img.tint_r, img.tint_g, img.tint_b, img.tint_a },
+                    ) catch |err| {
+                        log.err("Failed to render image: {}", .{err});
+                    };
+                }
+            }
+        }
 
         // 3. Zusätzlicher Text (optional)
         if (text_str.len > 0) {

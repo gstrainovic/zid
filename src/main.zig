@@ -6,6 +6,7 @@ const rendering = @import("rendering/mod.zig");
 const text = @import("text/mod.zig");
 const ui = @import("ui/mod.zig");
 const clay_renderer_mod = @import("clay_renderer/mod.zig");
+const image_renderer_mod = @import("clay_renderer/image_renderer.zig");
 const editor = @import("editor/mod.zig");
 
 const log = std.log.scoped(.main);
@@ -111,6 +112,24 @@ pub fn main() !void {
     );
     defer clay_rdr.deinit();
 
+    // 7. Image Renderer initialisieren
+    var image_rdr = try image_renderer_mod.ImageRenderer.init(
+        allocator,
+        renderer.device.?,
+        renderer.queue.?,
+        renderer.swap_chain_format,
+        plat.getSize().width,
+        plat.getSize().height,
+    );
+    defer image_rdr.deinit();
+
+    // Logo Textur laden (PNG via gooey)
+    var logo_texture = image_rdr.createTextureFromPath(allocator, "libs/gooey/assets/ziglang_logo.png") catch |err| blk: {
+        log.err("Failed to load logo: {}. Falling back to test pattern.", .{err});
+        break :blk try image_rdr.createTestPattern(64, 64);
+    };
+    defer logo_texture.deinit();
+
     log.info("=== vulkan-ed ready ===", .{});
     log.info("Press Ctrl+C to exit (or close window)", .{});
 
@@ -150,6 +169,7 @@ pub fn main() !void {
                         renderer.resize(@intCast(sz.width), @intCast(sz.height)) catch {};
                         clay_rdr.setViewport(@intCast(sz.width), @intCast(sz.height));
                         text_gpu.setViewport(@intCast(sz.width), @intCast(sz.height));
+                        image_rdr.setViewport(@intCast(sz.width), @intCast(sz.height));
                         ui_system.resize(@intCast(sz.width), @intCast(sz.height));
                     },
                     .mouse => |pos| {
@@ -180,7 +200,7 @@ pub fn main() !void {
         }
 
         // Clay Layout berechnen
-        const render_commands = ui_system.renderExample();
+        const render_commands = ui_system.renderExample(&logo_texture);
 
         // Rendern: Clear → Clay UI → Present
         renderer.renderFrameWithText(
@@ -188,9 +208,11 @@ pub fn main() !void {
             &text_gpu,
             &text_renderer,
             render_commands,
-            "", // Kein extra Text
+            "", // Kein zusätzlicher Text
             0,
             0,
+            &image_rdr,
+            &[_]rendering.ImageToRender{}, // Keine Legacy-Bilder
         );
 
         frame_count += 1;

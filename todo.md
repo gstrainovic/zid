@@ -199,11 +199,10 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
 - [x] Scene-System (Gooey's `scene.zig` → WGPU Buffers)
   - [x] Quad (Rechtecke) - funktioniert mit Clay
   - [x] GlyphInstance (Text) - funktioniert mit Clay + GPURenderer
-  - [ ] Shadow (Drop Shadows) - *In Clay-Zig Bindings v0.2.2 nicht direkt verfügbar*
 - [x] UI Primitives (Box, Text)
   - [x] Box (Rechtecke mit Clay)
   - [x] Text (FreeType + GPU Rendering)
-  - [ ] Image - *Später bei Bedarf (aktuell nicht benötigt)*
+  - [x] Image (Pixeldaten → wgpu Texture → Textured Quad) - *Voraussetzung für Phase 7 (SVG Icons) und Phase 9 (Bild-/SVG-Preview)*
 - [x] Button, TextInput, TextArea, ScrollContainer
   - [x] Button (primary Farbe)
   - [x] TextInput (surface Farbe)
@@ -264,6 +263,22 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
   - [ ] Berechnung der sichtbaren Zeilen anhand des Scroll-Offsets (Viewport Culling)
   - [ ] Synchronisation zwischen Clay-ScrollContainer und Editor-State
   - [ ] Auto-Scroll, wenn Cursor den sichtbaren Bereich verlässt
+
+### Phase 9: File Explorer, Tabs & Datei-Vorschau
+- [ ] **Tab-Leiste**
+  - [ ] Offene Dateien als Tabs darstellen (Clay Layout)
+  - [ ] Tab wechseln (Klick), Tab schließen (X-Button)
+  - [ ] Aktiver Tab visuell hervorgehoben
+- [ ] **File Explorer (Sidebar)**
+  - [ ] Verzeichnisbaum anzeigen (Tree-Widget)
+  - [ ] Ordner auf/zuklappen
+  - [ ] Datei-Icons via Gooey SVG-Pipeline (Phase 7)
+  - [ ] Datei öffnen per Klick → neuer Tab
+- [ ] **SVG-Datei Preview**
+  - [ ] SVG-Dateien im Editor-Tab als Bild anzeigen (wie VSCode)
+  - [ ] cairo.zig rasterisiert SVG → wgpu Texture → Textured Quad im Tab
+- [ ] **Bild-Datei Preview**
+  - [ ] PNG/JPG im Editor-Tab anzeigen
 
 ## 📚 Verfügbare Libraries
 

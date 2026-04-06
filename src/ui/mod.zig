@@ -152,7 +152,7 @@ pub const UI = struct {
     }
 
     /// Beispiel: Layout mit Theme rendern
-    pub fn renderExample(self: *Self) []clay.RenderCommand {
+    pub fn renderExample(self: *Self, image_data: ?*const anyopaque) []clay.RenderCommand {
         self.beginLayout();
 
         const t = self.theme;
@@ -160,13 +160,11 @@ pub const UI = struct {
         // Animations-Werte holen
         var current_scale: f32 = 1.0;
         var current_opacity: f32 = 1.0;
-        var current_offset_x: f32 = 0.0;
 
         if (self.anim_manager.animations.items.len > 0) {
             const anim = self.anim_manager.animations.items[0];
             current_scale = anim.scale();
             current_opacity = anim.opacity();
-            current_offset_x = anim.offsetX(100.0);
         }
 
         // Root Container
@@ -188,7 +186,7 @@ pub const UI = struct {
                 .id = clay.ElementId.ID("Header"),
                 .layout = .{
                     .sizing = .{ .w = .grow, .h = .fixed(80) },
-                    .child_gap = 32, // Mehr Platz zwischen Buttons
+                    .child_gap = 16,
                     .direction = .left_to_right,
                     .child_alignment = .{ .x = .left, .y = .center },
                     .padding = .all(10),
@@ -196,6 +194,30 @@ pub const UI = struct {
                 .background_color = header_bg,
                 .border = .{ .width = .all(2), .color = t.accent },
             })({
+                // Logo Image (falls vorhanden)
+                if (image_data) |ptr| {
+                    clay.UI()(.{
+                        .id = clay.ElementId.ID("Logo"),
+                        .layout = .{
+                            .sizing = .{ .w = .fixed(64), .h = .fixed(64) },
+                        },
+                        .image = .{ .image_data = ptr },
+                        // Wir verwenden die background_color von ElementDeclaration als Tint
+                        .background_color = .{ 255, 255, 255, 255 }, 
+                    })({});
+                } else {
+                    // Fallback placeholder
+                    clay.UI()(.{
+                        .id = clay.ElementId.ID("LogoPlaceholder"),
+                        .layout = .{
+                            .sizing = .{ .w = .fixed(64), .h = .fixed(64) },
+                        },
+                        .background_color = t.primary,
+                    })({});
+                }
+
+                clay.text("VULKAN-ED", .{ .font_size = 32, .color = t.text });
+
                 // Button 1 (Statisch)
                 components.Button("TestButton", "HELLO CLAY", t);
 
