@@ -25,7 +25,7 @@ pub fn main() !void {
     // 1. Renderer initialisieren (WGPU - VOR wio, kein EGL-Konflikt)
     var renderer = try rendering.Renderer.init(allocator, .{
         .vsync = true,
-        .clear_color = .{ 0.0, 1.0, 0.0, 1.0 },
+        .clear_color = .{ 0.05, 0.05, 0.05, 1.0 },
     });
     defer renderer.deinit();
 

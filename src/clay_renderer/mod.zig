@@ -24,14 +24,12 @@ pub const ClayRenderer = struct {
     shader_module: ?*wgpu.ShaderModule = null,
     vertex_buffer: ?*wgpu.Buffer = null,
     vertex_buffer_size: u64 = 0,
+    vertex_buffer_cursor: u64 = 0,
     swap_chain_format: wgpu.TextureFormat = .bgra8_unorm,
 
     // Viewport Dimensionen für Normalisierung
     viewport_width: f32 = 1.0,
     viewport_height: f32 = 1.0,
-
-    // Vertex Buffer Kapazität (wächst bei Bedarf)
-    max_vertices: usize = 4096,
 
     const Self = @This();
 
@@ -133,9 +131,6 @@ pub const ClayRenderer = struct {
             .multisample = wgpu.MultisampleState{},
         }) orelse return error.PipelineCreateFailed;
 
-        // Vertex Buffer erstellen
-        try self.ensureVertexBuffer(self.max_vertices);
-
         log.info("Clay renderer initialized", .{});
         return self;
     }
@@ -146,6 +141,10 @@ pub const ClayRenderer = struct {
         if (self.vertex_buffer) |buf| buf.release();
         if (self.render_pipeline) |p| p.release();
         if (self.shader_module) |s| s.release();
+    }
+
+    pub fn beginFrame(self: *Self) void {
+        self.vertex_buffer_cursor = 0;
     }
 
     /// Vertex Buffer sicherstellen (wächst bei Bedarf)
@@ -172,6 +171,7 @@ pub const ClayRenderer = struct {
 
     /// Viewport aktualisieren (bei Resize)
     pub fn setViewport(self: *Self, width: u32, height: u32) void {
+        log.info("Viewport resized to {}x{}", .{ width, height });
         self.viewport_width = @floatFromInt(width);
         self.viewport_height = @floatFromInt(height);
     }
@@ -187,7 +187,7 @@ pub const ClayRenderer = struct {
         if (render_commands.len == 0) return {};
 
         // Vertices für Rechtecke sammeln
-        var rect_vertices = std.ArrayList(RectangleVertex){};
+        var rect_vertices = std.ArrayListUnmanaged(RectangleVertex){};
         defer rect_vertices.deinit(self.allocator);
 
         for (render_commands) |cmd| {
@@ -244,7 +244,13 @@ pub const ClayRenderer = struct {
                     // Baseline: bbox.y + ascent (vereinfacht: bbox.y + font_size * 0.8)
                     const baseline_y = bbox.y + @as(f32, @floatFromInt(text_data.font_size)) * 0.8;
                     
-                    try text_gpu.renderText(render_pass, text_renderer, text_str, bbox.x, baseline_y);
+                    const col = text_data.text_color;
+                    const r = col[0] / 255.0;
+                    const g = col[1] / 255.0;
+                    const b = col[2] / 255.0;
+                    const a = col[3] / 255.0;
+
+                    try text_gpu.renderText(render_pass, text_renderer, text_str, bbox.x, baseline_y, .{ r, g, b, a });
                 },
                 else => {},
             }
@@ -256,7 +262,7 @@ pub const ClayRenderer = struct {
         }
     }
 
-    fn appendRect(self: *Self, vertices: *std.ArrayList(RectangleVertex), x: f32, y: f32, w: f32, h: f32, r: f32, g: f32, b: f32, a: f32) !void {
+    fn appendRect(self: *Self, vertices: *std.ArrayListUnmanaged(RectangleVertex), x: f32, y: f32, w: f32, h: f32, r: f32, g: f32, b: f32, a: f32) !void {
         const x0 = self.normalizeX(x);
         const y0 = self.normalizeY(y);
         const x1 = self.normalizeX(x + w);
@@ -271,17 +277,38 @@ pub const ClayRenderer = struct {
     }
 
     fn flushRects(self: *Self, render_pass: *wgpu.RenderPassEncoder, vertices: []const RectangleVertex) !void {
-        try self.ensureVertexBuffer(vertices.len);
         const data_size = vertices.len * @sizeOf(RectangleVertex);
+        const total_needed = self.vertex_buffer_cursor + data_size;
+
+        // Sicherstellen dass der Buffer gross genug ist für diesen Batch an seinem Offset
+        if (self.vertex_buffer == null or self.vertex_buffer_size < total_needed) {
+            // Wenn Resize nötig, vergrössern wir den Buffer.
+            // Um Fragmentierung zu vermeiden, verdoppeln wir meistens.
+            const new_capacity = @max(total_needed * 2, 65536);
+            if (self.vertex_buffer) |buf| buf.release();
+            
+            self.vertex_buffer = self.device.createBuffer(&wgpu.BufferDescriptor{
+                .label = wgpu.StringView.fromSlice("clay_vertex_buffer"),
+                .size = new_capacity,
+                .usage = wgpu.BufferUsages.vertex | wgpu.BufferUsages.copy_dst,
+                .mapped_at_creation = 0,
+            }) orelse return error.BufferCreateFailed;
+            self.vertex_buffer_size = new_capacity;
+            self.vertex_buffer_cursor = 0; // Reset nach Resize
+            log.info("Vertex buffer resized to {} bytes", .{self.vertex_buffer_size});
+        }
+
+        const offset = self.vertex_buffer_cursor;
         self.queue.writeBuffer(
             self.vertex_buffer.?,
-            0,
+            offset,
             @as(*const anyopaque, @ptrCast(vertices.ptr)),
             data_size,
         );
+        self.vertex_buffer_cursor += data_size;
 
         render_pass.setPipeline(self.render_pipeline.?);
-        render_pass.setVertexBuffer(0, self.vertex_buffer.?, 0, self.vertex_buffer_size);
+        render_pass.setVertexBuffer(0, self.vertex_buffer.?, offset, data_size);
         render_pass.draw(@intCast(vertices.len), 1, 0, 0);
     }
 

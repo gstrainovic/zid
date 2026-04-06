@@ -92,18 +92,21 @@ pub const TextRendererGPU = struct {
                 },
             },
         };
-
-        const vertex_buffers = [_]wgpu.VertexBufferLayout{
-            .{
-                .array_stride = 4 * @sizeOf(f32), // pos(2) + uv(2)
-                .step_mode = .vertex,
-                .attribute_count = 2,
-                .attributes = &[_]wgpu.VertexAttribute{
-                    .{ .format = .float32x2, .offset = 0, .shader_location = 0 },
-                    .{ .format = .float32x2, .offset = 2 * @sizeOf(f32), .shader_location = 1 },
-                },
-            },
-        };
+const vertex_buffers = [_]wgpu.VertexBufferLayout{
+    .{
+        .array_stride = 8 * @sizeOf(f32), // pos: 2, uv: 2, color: 4
+        .step_mode = .vertex,
+        .attribute_count = 3,
+        .attributes = &[_]wgpu.VertexAttribute{
+            // pos
+            .{ .format = .float32x2, .offset = 0, .shader_location = 0 },
+            // uv
+            .{ .format = .float32x2, .offset = 2 * @sizeOf(f32), .shader_location = 1 },
+            // color
+            .{ .format = .float32x4, .offset = 4 * @sizeOf(f32), .shader_location = 2 },
+        },
+    },
+};
 
         // Pipeline erstellen mit bind group layout
         const bind_group_layout_entries = [_]wgpu.BindGroupLayoutEntry{
@@ -260,12 +263,18 @@ pub const TextRendererGPU = struct {
         text_str: []const u8,
         x: f32,
         y: f32,
+        color: [4]f32,
     ) !void {
         if (text_str.len == 0) return;
 
         const ts = text_renderer.ts_ptr;
         const font_size = text_renderer.config.size;
         const scale_factor: f32 = 1.0; // Keine zusätzliche Skalierung
+
+        const r = color[0];
+        const g = color[1];
+        const b = color[2];
+        const a = color[3];
 
         // size_scale = font_size / metrics.point_size
         const size_scale = if (ts.getMetrics()) |metrics|
@@ -340,14 +349,14 @@ pub const TextRendererGPU = struct {
             const ndc_x1 = ((glyph_x + glyph_w) / self.viewport_width) * 2.0 - 1.0;
             const ndc_y1 = -(((glyph_y + glyph_h) / self.viewport_height) * 2.0 - 1.0);
 
-            // 2 Dreiecke = 6 Vertices (pos: 2f32 + uv: 2f32)
+            // 2 Dreiecke = 6 Vertices (pos: 2f32 + uv: 2f32 + color: 4f32)
             try vertices.appendSlice(self.allocator, &.{
-                ndc_x0, ndc_y0, uv.u0, uv.v0,
-                ndc_x1, ndc_y0, uv.u1, uv.v0,
-                ndc_x0, ndc_y1, uv.u0, uv.v1,
-                ndc_x1, ndc_y0, uv.u1, uv.v0,
-                ndc_x1, ndc_y1, uv.u1, uv.v1,
-                ndc_x0, ndc_y1, uv.u0, uv.v1,
+                ndc_x0, ndc_y0, uv.u0, uv.v0, r, g, b, a,
+                ndc_x1, ndc_y0, uv.u1, uv.v0, r, g, b, a,
+                ndc_x0, ndc_y1, uv.u0, uv.v1, r, g, b, a,
+                ndc_x1, ndc_y0, uv.u1, uv.v0, r, g, b, a,
+                ndc_x1, ndc_y1, uv.u1, uv.v1, r, g, b, a,
+                ndc_x0, ndc_y1, uv.u0, uv.v1, r, g, b, a,
             });
         }
 
@@ -381,7 +390,7 @@ pub const TextRendererGPU = struct {
         const total_needed = self.text_vertex_buffer_cursor + needed_size;
         
         if (self.text_vertex_buffer == null or self.text_vertex_buffer_size < total_needed) {
-            if (self.text_vertex_buffer) |b| b.release();
+            if (self.text_vertex_buffer) |buf| buf.release();
             self.text_vertex_buffer_size = @max(total_needed * 2, 65536); // Gross genug für viele Texte
             self.text_vertex_buffer = self.device.createBuffer(&wgpu.BufferDescriptor{
                 .label = wgpu.StringView.fromSlice("text_vertex_buffer"),
@@ -405,7 +414,7 @@ pub const TextRendererGPU = struct {
         render_pass.setPipeline(self.pipeline.?);
         render_pass.setVertexBuffer(0, self.text_vertex_buffer.?, offset, needed_size);
         render_pass.setBindGroup(0, bind_group, 0, null);
-        const vertex_count = vertices.items.len / 4; // 4 floats pro Vertex
+        const vertex_count = vertices.items.len / 8; // 8 floats pro Vertex (pos:2, uv:2, col:4)
         render_pass.draw(@intCast(vertex_count), 1, 0, 0);
     }
 

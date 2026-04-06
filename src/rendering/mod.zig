@@ -394,7 +394,8 @@ pub const Renderer = struct {
 
         const render_pass = command_encoder.beginRenderPass(&render_pass_desc) orelse return;
 
-        // 0. Text Renderer vorbereiten (Buffer Offset reset)
+        // 0. Renderer vorbereiten (Buffer Offset reset)
+        clay_rdr.beginFrame();
         text_gpu.beginFrame();
 
         // 1. Clay UI rendern (Rechtecke + Text in korrekter Z-Order)
@@ -402,7 +403,7 @@ pub const Renderer = struct {
 
         // 3. Zusätzlicher Text (optional)
         if (text_str.len > 0) {
-            text_gpu.renderText(render_pass, text_renderer, text_str, text_x, text_y) catch {};
+            text_gpu.renderText(render_pass, text_renderer, text_str, text_x, text_y, .{ 1.0, 1.0, 1.0, 1.0 }) catch {};
         }
 
         render_pass.end();

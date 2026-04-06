@@ -110,16 +110,10 @@ pub const UI = struct {
                 .sizing = .grow,
                 .padding = .all(16),
                 .child_gap = 16,
+                .layout_direction = .top_to_bottom,
             },
             .background_color = t.bg,
         })({
-            // VERIFICATION RECT
-            clay.UI()(.{
-                .id = clay.ElementId.ID("VerifyRect"),
-                .layout = .{ .sizing = .{ .w = .fixed(100), .h = .fixed(100) } },
-                .background_color = .{ 255, 0, 0, 255 },
-            })({});
-
             // Header mit Button
             clay.UI()(.{
                 .id = clay.ElementId.ID("Header"),
