@@ -224,10 +224,14 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
 - [x] Code Editor Container mit Line Numbers Gutter
   - [x] Editor Container (dunkel)
   - [x] Line Numbers Gutter (dunkler, links)
-  - [x] Screenshot beweis: screenshots/phase6_codeeditor.png
-- [ ] Syntax Highlighting Logic (von Gooey's `code_editor_state.zig`)
-- [ ] Current Line Highlight
-- [ ] Scrollable Editor-Content
+  - [x] Screenshot beweis: screenshots/phase6_codeeditor_v2.png
+- [x] Syntax Highlighting Logic (von Gooey's `code_editor_state.zig`)
+  - [x] Highlighter Modul (src/editor/highlighter.zig)
+  - [x] Keywords, Strings, Comments, Numbers, Types farbig hervorgehoben
+- [x] Current Line Highlight
+  - [x] Helle Hintergrundfarbe für aktuelle Zeile
+- [x] Scrollable Editor-Content
+  - [x] Editor-Content in ScrollContainer
 
 ### Phase 7: 2D Graphics mit vkvg (letzter Punkt - Performance-Option)
 - [ ] vkvg als Dependency integrieren
