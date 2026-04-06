@@ -70,4 +70,17 @@ echo "Cleaning up..."
 kill $APP_PID 2>/dev/null || true
 wait $APP_PID 2>/dev/null || true
 
-echo "Done."
+echo ""
+echo "=========================================="
+echo "PFLICHT: Screenshot JETZT visuell pruefen!"
+echo "=========================================="
+echo ""
+echo "NAECHSTER SCHRITT (nicht ueberspringen!):"
+echo "  Oeffne $OUTPUT_PATH mit ReadFile/Read-Tool als BILD."
+echo "  Pruefe visuell:"
+echo "    - Ist das neue Feature sichtbar?"
+echo "    - Ist Text lesbar (nicht abgeschnitten/ueberlappt)?"
+echo "    - Sind Farben und Positionen korrekt?"
+echo "  Erst wenn alles stimmt: weiter mit todo.md + commit."
+echo "  Falls nicht: Code fixen und erneut Screenshot machen."
+echo ""
