@@ -8,17 +8,22 @@ pub fn TextArea(id: []const u8, value: []const u8, theme: Theme) void {
         .layout = .{
             .sizing = .{ .w = .grow, .h = .fixed(150) },
             .padding = .all(12),
+            .direction = .top_to_bottom,
+            .child_gap = 4,
         },
         .background_color = theme.overlay,
         .corner_radius = .all(4),
         .border = .{
             .width = .{ .left = 1, .right = 1, .top = 1, .bottom = 1 },
-            .color = theme.border,
+            .color = theme.primary, // Brighter border for visibility
         },
     })({
-        clay.text(value, .{ 
-            .font_size = 14, 
-            .color = theme.text,
-        });
+        var it = std.mem.splitScalar(u8, value, '\n');
+        while (it.next()) |line| {
+            clay.text(line, .{ 
+                .font_size = 24, 
+                .color = theme.text,
+            });
+        }
     });
 }

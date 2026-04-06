@@ -13,15 +13,16 @@ pub fn TextInput(id: []const u8, value: []const u8, placeholder: []const u8, the
             .padding = .axes(0, 12),
             .child_alignment = .{ .x = .left, .y = .center },
         },
-        .background_color = theme.surface,
+        .background_color = theme.overlay,
         .corner_radius = .all(4),
         .border = .{
             .width = .{ .left = 1, .right = 1, .top = 1, .bottom = 1 },
-            .color = theme.border,
+            .color = theme.primary, // Primary colored border for better visibility
         },
+
     })({
         clay.text(text_to_show, .{ 
-            .font_size = 14, 
+            .font_size = 24, 
             .color = text_color,
         });
     });

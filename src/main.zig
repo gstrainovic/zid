@@ -70,7 +70,7 @@ pub fn main() !void {
     });
     defer ui_system.deinit();
 
-    try ui_system.setupClay(plat.getSize().width, plat.getSize().height);
+    try ui_system.setupClay(plat.getSize().width, plat.getSize().height, &text_renderer);
 
     // Start eine Test-Animation (2 Sekunden)
     _ = try ui_system.anim_manager.addAnimation(.scale_up, 2000.0);

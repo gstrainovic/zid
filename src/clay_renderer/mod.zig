@@ -241,8 +241,12 @@ pub const ClayRenderer = struct {
                     const text_str = text_data.string_contents.chars[0..@intCast(text_data.string_contents.length)];
                     const bbox = cmd.bounding_box;
                     
-                    // Baseline: bbox.y + ascent (vereinfacht: bbox.y + font_size * 0.8)
-                    const baseline_y = bbox.y + @as(f32, @floatFromInt(text_data.font_size)) * 0.8;
+                    // Baseline berechnen: bbox.y + scaled_ascender
+                    var baseline_y = bbox.y + @as(f32, @floatFromInt(text_data.font_size)) * 0.8; // Fallback
+                    if (text_renderer.ts_ptr.getMetrics()) |metrics| {
+                        const scale = @as(f32, @floatFromInt(text_data.font_size)) / metrics.point_size;
+                        baseline_y = bbox.y + metrics.ascender * scale;
+                    }
                     
                     const col = text_data.text_color;
                     const r = col[0] / 255.0;

@@ -7,18 +7,18 @@ pub fn Button(id: []const u8, text: []const u8, theme: Theme) void {
         .id = clay.ElementId.ID(id),
         .layout = .{
             .sizing = .{ .w = .fit, .h = .fit },
-            .padding = .axes(10, 24),
+            .padding = .axes(12, 24),
             .child_alignment = .{ .x = .center, .y = .center },
         },
         .background_color = theme.primary,
-        .corner_radius = .all(theme.radius_sm),
+        .corner_radius = .all(4),
         .border = .{
-            .width = .{ .left = 1, .right = 1, .top = 1, .bottom = 1 },
-            .color = theme.border,
+            .width = .{ .left = 2, .right = 2, .top = 2, .bottom = 2 },
+            .color = theme.accent, // Accent border for better shape definition
         },
     })({
         clay.text(text, .{ 
-            .font_size = 16, 
+            .font_size = 24, 
             .color = theme.text_on_primary,
         });
     });
