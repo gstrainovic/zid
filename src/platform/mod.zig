@@ -80,6 +80,13 @@ pub const Platform = struct {
         log.info("Platform shutdown", .{});
     }
 
+    /// Mauszeiger-Form ändern
+    pub fn setCursor(self: *Self, shape: wio.Cursor) void {
+        if (self.window) |*win| {
+            win.setCursor(shape);
+        }
+    }
+
     /// Window erstellen
     pub fn createWindow(self: *Self) !void {
         log.debug("Creating window: {s} {}x{}", .{
