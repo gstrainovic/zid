@@ -287,19 +287,30 @@ pub const ImageRenderer = struct {
         };
     }
 
-    /// Lade eine Textur aus einer Datei (PNG, JPEG via gooey)
+    /// Lade eine Textur aus einer Datei (PNG via zigimg)
     pub fn createTextureFromPath(
         self: *Self,
         allocator: std.mem.Allocator,
         path: []const u8,
     ) !ImageTexture {
         log.info("Loading image from path: {s}", .{path});
-        const gooey_image = @import("gooey").image;
-        
-        var decoded = try gooey_image.loader.loadFromPath(allocator, path);
-        defer decoded.deinit();
+        const zigimg = @import("zigimg");
 
-        return self.createTextureFromPixels(decoded.pixels, decoded.width, decoded.height);
+        const file_data = try std.fs.cwd().readFileAlloc(allocator, path, 64 * 1024 * 1024);
+        defer allocator.free(file_data);
+
+        var img = try zigimg.Image.fromMemory(allocator, file_data);
+        defer img.deinit(allocator);
+
+        try img.convert(allocator, .rgba32);
+
+        const src_pixels = switch (img.pixels) {
+            .rgba32 => |buf| buf,
+            else => return error.UnsupportedFormat,
+        };
+        const pixels = std.mem.sliceAsBytes(src_pixels);
+
+        return self.createTextureFromPixels(pixels, @intCast(img.width), @intCast(img.height));
     }
 
     /// Erstelle ein Test-Pattern (Checkerboard)

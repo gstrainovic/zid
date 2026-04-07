@@ -134,6 +134,27 @@ Warum diese Wahl:
 - **Effort medium statt high:** Reviews sind kein Research, keine Algorithmen.
   Medium reicht fuer Bildvergleich + Diff-Check und spart Thinking-Tokens.
 
+## Submodule-Sync zwischen Linux und Windows
+
+`libs/wio` war lange in `.gitignore` und wurde nicht als Submodule getrackt.
+Änderungen in `libs/wio` werden **nur gesichert, wenn sie direkt in `gstrainovic/wio` gepusht wurden**.
+
+Vor dem Wechsel zwischen Linux ↔ Windows prüfen:
+
+```bash
+# Auf Linux:
+cd ~/projects/vulkan-ed/libs/wio
+git status
+git log --oneline origin/master..HEAD
+
+# Falls lokale Commits vorhanden:
+git push
+
+# Danach auf Windows pullen:
+cd /c/Users/g.strainovic/projects/vulkan-ed/libs/wio
+git pull
+```
+
 ## Current Status
 
 Siehe todo.md für aktuellen Projektstatus. Letzter ACK-Anker:
