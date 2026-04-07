@@ -9,6 +9,9 @@ const Token = @import("highlighter.zig").Token;
 const TokenType = @import("highlighter.zig").TokenType;
 const wio = @import("wio");
 
+const actions = @import("actions.zig");
+const keymap = @import("keymap.zig");
+
 /// Measurement function type: returns width of text in pixels.
 /// C-kompatibel: ptr + len statt Slice.
 pub const MeasureFn = *const fn (ptr: [*c]const u8, len: usize) f32;
@@ -36,9 +39,11 @@ pub const CodeEditor = struct {
     selection_anchor_line: ?usize = null,
     selection_anchor_col: ?usize = null,
 
-    /// Modifier-State für Shift+Navigation
-    shift_pressed: bool = false,
-    ctrl_pressed: bool = false,
+    /// Modifier-State (Bitmaske)
+    mods: actions.Mods = .{},
+
+    /// Keymap für Command-Dispatching
+    keymap: ?keymap.Keymap = null,
 
     /// Maus-State für Drag-Selektion
     mouse_down: bool = false,
@@ -98,6 +103,7 @@ pub const CodeEditor = struct {
                 .{ 138, 173, 244, 255 }, // punctuation - blau
                 .{ 202, 211, 245, 255 }, // plain - weiß
             ),
+            .keymap = keymap.Keymap.initDefault(allocator) catch null,
         };
         // Initialisiere mit einer leeren Zeile
         const first_line = std.ArrayListUnmanaged(u8){};
@@ -112,6 +118,7 @@ pub const CodeEditor = struct {
         self.lines.deinit(self.allocator);
         for (self.line_tokens.items) |*tokens| tokens.deinit(self.allocator);
         self.line_tokens.deinit(self.allocator);
+        if (self.keymap) |*km| km.deinit();
     }
 
     pub fn setText(self: *Self, text: []const u8) void {
@@ -443,211 +450,271 @@ pub const CodeEditor = struct {
         return true;
     }
 
-    pub fn handleKeyPress(self: *Self, key: wio.Button) void {
+    pub fn dispatchAction(self: *Self, action: actions.Action) void {
         const line = &self.lines.items[self.cursor_line];
-        switch (key) {
-            .left => {
-                // Ctrl+Left: zum vorherigen Wort springen
-                if (self.ctrl_pressed) {
-                    if (self.shift_pressed) {
-                        if (!self.hasSelection()) self.startSelection();
-                    } else {
-                        if (self.hasSelection()) {
-                            self.cursor_line = self.selectionStartLine();
-                            self.cursor_col = self.selectionStartCol();
-                            self.clearSelection();
-                            self.recordCursorMovement();
-                            self.current_line = self.cursor_line + 1;
-                            return;
-                        }
+        switch (action) {
+            .MoveLeft => {
+                if (self.hasSelection()) {
+                    self.cursor_line = self.selectionStartLine();
+                    self.cursor_col = self.selectionStartCol();
+                    self.clearSelection();
+                } else {
+                    if (self.cursor_col > 0) {
+                        self.cursor_col = prevCharBoundary(line.items, self.cursor_col);
+                    } else if (self.cursor_line > 0) {
+                        self.cursor_line -= 1;
+                        self.cursor_col = self.lines.items[self.cursor_line].items.len;
                     }
+                }
+            },
+            .MoveRight => {
+                if (self.hasSelection()) {
+                    self.cursor_line = self.selectionEndLine();
+                    self.cursor_col = self.selectionEndCol();
+                    self.clearSelection();
+                } else {
+                    if (self.cursor_col < line.items.len) {
+                        self.cursor_col = nextCharBoundary(line.items, self.cursor_col);
+                    } else if (self.cursor_line + 1 < self.lines.items.len) {
+                        self.cursor_line += 1;
+                        self.cursor_col = 0;
+                    }
+                }
+            },
+            .MoveUp => {
+                if (self.hasSelection()) {
+                    self.cursor_line = self.selectionStartLine();
+                    self.cursor_col = self.selectionStartCol();
+                    self.clearSelection();
+                } else {
+                    if (self.cursor_line > 0) {
+                        self.cursor_line -= 1;
+                        const target = self.lines.items[self.cursor_line].items;
+                        self.cursor_col = snapToCharBoundary(target, @min(self.cursor_col, target.len));
+                    }
+                }
+            },
+            .MoveDown => {
+                if (self.hasSelection()) {
+                    self.cursor_line = self.selectionEndLine();
+                    self.cursor_col = self.selectionEndCol();
+                    self.clearSelection();
+                } else {
+                    if (self.cursor_line + 1 < self.lines.items.len) {
+                        self.cursor_line += 1;
+                        const target = self.lines.items[self.cursor_line].items;
+                        self.cursor_col = snapToCharBoundary(target, @min(self.cursor_col, target.len));
+                    }
+                }
+            },
+            .MoveWordLeft => {
+                if (self.hasSelection()) {
+                    self.cursor_line = self.selectionStartLine();
+                    self.cursor_col = self.selectionStartCol();
+                    self.clearSelection();
+                } else {
                     if (self.cursor_col > 0) {
                         self.cursor_col = prevWordBoundary(line.items, self.cursor_col);
                     } else if (self.cursor_line > 0) {
                         self.cursor_line -= 1;
                         self.cursor_col = self.lines.items[self.cursor_line].items.len;
                     }
-                } else if (self.shift_pressed) {
-                    if (!self.hasSelection()) self.startSelection();
-                    if (self.cursor_col > 0) {
-                        self.cursor_col = prevCharBoundary(line.items, self.cursor_col);
-                    } else if (self.cursor_line > 0) {
-                        self.cursor_line -= 1;
-                        self.cursor_col = self.lines.items[self.cursor_line].items.len;
-                    }
-                } else {
-                    if (self.hasSelection()) {
-                        self.cursor_line = self.selectionStartLine();
-                        self.cursor_col = self.selectionStartCol();
-                        self.clearSelection();
-                        self.recordCursorMovement();
-                        self.current_line = self.cursor_line + 1;
-                        return;
-                    }
-                    if (self.cursor_col > 0) {
-                        self.cursor_col = prevCharBoundary(line.items, self.cursor_col);
-                    } else if (self.cursor_line > 0) {
-                        self.cursor_line -= 1;
-                        self.cursor_col = self.lines.items[self.cursor_line].items.len;
-                    }
                 }
             },
-            .right => {
-                // Ctrl+Right: zum nächsten Wort springen
-                if (self.ctrl_pressed) {
-                    if (self.shift_pressed) {
-                        if (!self.hasSelection()) self.startSelection();
-                    } else {
-                        if (self.hasSelection()) {
-                            self.cursor_line = self.selectionEndLine();
-                            self.cursor_col = self.selectionEndCol();
-                            self.clearSelection();
-                            self.recordCursorMovement();
-                            self.current_line = self.cursor_line + 1;
-                            return;
-                        }
-                    }
+            .MoveWordRight => {
+                if (self.hasSelection()) {
+                    self.cursor_line = self.selectionEndLine();
+                    self.cursor_col = self.selectionEndCol();
+                    self.clearSelection();
+                } else {
                     if (self.cursor_col < line.items.len) {
                         self.cursor_col = nextWordBoundary(line.items, self.cursor_col);
                     } else if (self.cursor_line + 1 < self.lines.items.len) {
                         self.cursor_line += 1;
                         self.cursor_col = 0;
                     }
-                } else if (self.shift_pressed) {
-                    if (!self.hasSelection()) self.startSelection();
-                    if (self.cursor_col < line.items.len) {
-                        self.cursor_col = nextCharBoundary(line.items, self.cursor_col);
-                    } else if (self.cursor_line + 1 < self.lines.items.len) {
-                        self.cursor_line += 1;
-                        self.cursor_col = 0;
-                    }
-                } else {
-                    if (self.hasSelection()) {
-                        self.cursor_line = self.selectionEndLine();
-                        self.cursor_col = self.selectionEndCol();
-                        self.clearSelection();
-                        self.recordCursorMovement();
-                        self.current_line = self.cursor_line + 1;
-                        return;
-                    }
-                    if (self.cursor_col < line.items.len) {
-                        self.cursor_col = nextCharBoundary(line.items, self.cursor_col);
-                    } else if (self.cursor_line + 1 < self.lines.items.len) {
-                        self.cursor_line += 1;
-                        self.cursor_col = 0;
-                    }
                 }
             },
-            .up => {
-                if (self.ctrl_pressed) {
-                    // Ctrl+Up: Scroll up without moving cursor
-                    self.scrollLines(1);
-                    return;
+            .SelectLeft => {
+                if (!self.hasSelection()) self.startSelection();
+                if (self.cursor_col > 0) {
+                    self.cursor_col = prevCharBoundary(line.items, self.cursor_col);
+                } else if (self.cursor_line > 0) {
+                    self.cursor_line -= 1;
+                    self.cursor_col = self.lines.items[self.cursor_line].items.len;
                 }
-                if (self.shift_pressed) {
-                    if (!self.hasSelection()) self.startSelection();
-                } else {
-                    if (self.hasSelection()) {
-                        self.cursor_line = self.selectionStartLine();
-                        self.cursor_col = self.selectionStartCol();
-                        self.clearSelection();
-                        self.recordCursorMovement();
-                        self.current_line = self.cursor_line + 1;
-                        return;
-                    }
+            },
+            .SelectRight => {
+                if (!self.hasSelection()) self.startSelection();
+                if (self.cursor_col < line.items.len) {
+                    self.cursor_col = nextCharBoundary(line.items, self.cursor_col);
+                } else if (self.cursor_line + 1 < self.lines.items.len) {
+                    self.cursor_line += 1;
+                    self.cursor_col = 0;
                 }
+            },
+            .SelectUp => {
+                if (!self.hasSelection()) self.startSelection();
                 if (self.cursor_line > 0) {
                     self.cursor_line -= 1;
                     const target = self.lines.items[self.cursor_line].items;
                     self.cursor_col = snapToCharBoundary(target, @min(self.cursor_col, target.len));
                 }
             },
-            .down => {
-                if (self.ctrl_pressed) {
-                    // Ctrl+Down: Scroll down without moving cursor
-                    self.scrollLines(-1);
-                    return;
-                }
-                if (self.shift_pressed) {
-                    if (!self.hasSelection()) self.startSelection();
-                } else {
-                    if (self.hasSelection()) {
-                        self.cursor_line = self.selectionEndLine();
-                        self.cursor_col = self.selectionEndCol();
-                        self.clearSelection();
-                        self.recordCursorMovement();
-                        self.current_line = self.cursor_line + 1;
-                        return;
-                    }
-                }
+            .SelectDown => {
+                if (!self.hasSelection()) self.startSelection();
                 if (self.cursor_line + 1 < self.lines.items.len) {
                     self.cursor_line += 1;
                     const target = self.lines.items[self.cursor_line].items;
                     self.cursor_col = snapToCharBoundary(target, @min(self.cursor_col, target.len));
                 }
             },
-            .home => {
-                if (self.ctrl_pressed) {
-                    // Ctrl+Home: Jump to start of document
-                    if (self.shift_pressed) {
-                        if (!self.hasSelection()) self.startSelection();
-                    } else {
-                        self.clearSelection();
-                    }
-                    self.cursor_line = 0;
+            .SelectWordLeft => {
+                if (!self.hasSelection()) self.startSelection();
+                if (self.cursor_col > 0) {
+                    self.cursor_col = prevWordBoundary(line.items, self.cursor_col);
+                } else if (self.cursor_line > 0) {
+                    self.cursor_line -= 1;
+                    self.cursor_col = self.lines.items[self.cursor_line].items.len;
+                }
+            },
+            .SelectWordRight => {
+                if (!self.hasSelection()) self.startSelection();
+                if (self.cursor_col < line.items.len) {
+                    self.cursor_col = nextWordBoundary(line.items, self.cursor_col);
+                } else if (self.cursor_line + 1 < self.lines.items.len) {
+                    self.cursor_line += 1;
                     self.cursor_col = 0;
-                    self.recordCursorMovement();
-                    self.current_line = self.cursor_line + 1;
-                    self.ensureCursorVisible();
-                    return;
                 }
-                if (self.shift_pressed) {
-                    if (!self.hasSelection()) self.startSelection();
+            },
+            .MoveLineStart => {
+                if (self.hasSelection()) {
+                    self.cursor_col = self.selectionStartCol();
+                    self.clearSelection();
                 } else {
-                    if (self.hasSelection()) {
-                        self.cursor_col = self.selectionStartCol();
-                        self.clearSelection();
-                        self.recordCursorMovement();
-                        self.current_line = self.cursor_line + 1;
-                        return;
-                    }
+                    self.cursor_col = 0;
                 }
+            },
+            .MoveLineEnd => {
+                if (self.hasSelection()) {
+                    self.cursor_col = self.selectionEndCol();
+                    self.clearSelection();
+                } else {
+                    self.cursor_col = line.items.len;
+                }
+            },
+            .SelectLineStart => {
+                if (!self.hasSelection()) self.startSelection();
                 self.cursor_col = 0;
             },
-            .end => {
-                if (self.ctrl_pressed) {
-                    // Ctrl+End: Jump to end of document
-                    if (self.shift_pressed) {
-                        if (!self.hasSelection()) self.startSelection();
-                    } else {
-                        self.clearSelection();
-                    }
-                    self.cursor_line = self.lines.items.len - 1;
-                    self.cursor_col = self.lines.items[self.cursor_line].items.len;
-                    self.recordCursorMovement();
-                    self.current_line = self.cursor_line + 1;
-                    self.ensureCursorVisible();
-                    return;
-                }
-                if (self.shift_pressed) {
-                    if (!self.hasSelection()) self.startSelection();
-                } else {
-                    if (self.hasSelection()) {
-                        self.cursor_col = self.selectionEndCol();
-                        self.clearSelection();
-                        self.recordCursorMovement();
-                        self.current_line = self.cursor_line + 1;
-                        return;
-                    }
-                }
+            .SelectLineEnd => {
+                if (!self.hasSelection()) self.startSelection();
+                self.cursor_col = line.items.len;
+            },
+            .MoveFileStart => {
+                self.clearSelection();
+                self.cursor_line = 0;
+                self.cursor_col = 0;
+            },
+            .MoveFileEnd => {
+                self.clearSelection();
+                self.cursor_line = self.lines.items.len - 1;
                 self.cursor_col = self.lines.items[self.cursor_line].items.len;
             },
-            .backspace => {
-                if (self.deleteSelection()) {
-                    self.recordCursorMovement();
-                    self.current_line = self.cursor_line + 1;
-                } else if (self.ctrl_pressed) {
-                    // Ctrl+Backspace: Delete word before cursor
+            .SelectFileStart => {
+                if (!self.hasSelection()) self.startSelection();
+                self.cursor_line = 0;
+                self.cursor_col = 0;
+            },
+            .SelectFileEnd => {
+                if (!self.hasSelection()) self.startSelection();
+                self.cursor_line = self.lines.items.len - 1;
+                self.cursor_col = self.lines.items[self.cursor_line].items.len;
+            },
+            .MovePageUp => {
+                const visible = self.visibleLineCount();
+                if (self.hasSelection()) {
+                    self.cursor_line = if (self.cursor_line > visible) self.cursor_line - visible else 0;
+                    self.clearSelection();
+                } else {
+                    self.cursor_line = if (self.cursor_line > visible) self.cursor_line - visible else 0;
+                    const target = self.lines.items[self.cursor_line].items;
+                    self.cursor_col = snapToCharBoundary(target, @min(self.cursor_col, target.len));
+                }
+            },
+            .MovePageDown => {
+                const visible = self.visibleLineCount();
+                if (self.hasSelection()) {
+                    self.cursor_line = @min(self.cursor_line + visible, self.lines.items.len - 1);
+                    self.clearSelection();
+                } else {
+                    self.cursor_line = @min(self.cursor_line + visible, self.lines.items.len - 1);
+                    const target = self.lines.items[self.cursor_line].items;
+                    self.cursor_col = snapToCharBoundary(target, @min(self.cursor_col, target.len));
+                }
+            },
+            .SelectPageUp => {
+                if (!self.hasSelection()) self.startSelection();
+                const visible = self.visibleLineCount();
+                self.cursor_line = if (self.cursor_line > visible) self.cursor_line - visible else 0;
+                const target = self.lines.items[self.cursor_line].items;
+                self.cursor_col = snapToCharBoundary(target, @min(self.cursor_col, target.len));
+            },
+            .SelectPageDown => {
+                if (!self.hasSelection()) self.startSelection();
+                const visible = self.visibleLineCount();
+                self.cursor_line = @min(self.cursor_line + visible, self.lines.items.len - 1);
+                const target = self.lines.items[self.cursor_line].items;
+                self.cursor_col = snapToCharBoundary(target, @min(self.cursor_col, target.len));
+            },
+            .DeleteBack => {
+                if (!self.deleteSelection()) {
+                    if (self.cursor_col > 0) {
+                        const char_start = prevCharBoundary(line.items, self.cursor_col);
+                        const byte_count = self.cursor_col - char_start;
+                        var removed: usize = 0;
+                        while (removed < byte_count) : (removed += 1) {
+                            _ = line.orderedRemove(char_start);
+                        }
+                        self.cursor_col = char_start;
+                        self.tokenizeLine(self.cursor_line);
+                    } else if (self.cursor_line > 0) {
+                        const prev_line_idx = self.cursor_line - 1;
+                        const prev_len = self.lines.items[prev_line_idx].items.len;
+                        self.lines.items[prev_line_idx].appendSlice(self.allocator, line.items) catch {};
+                        var removed_line = self.lines.orderedRemove(self.cursor_line);
+                        removed_line.deinit(self.allocator);
+                        var removed_tokens = self.line_tokens.orderedRemove(self.cursor_line);
+                        removed_tokens.deinit(self.allocator);
+                        self.cursor_line = prev_line_idx;
+                        self.cursor_col = prev_len;
+                        self.tokenizeLine(self.cursor_line);
+                    }
+                }
+            },
+            .DeleteForward => {
+                if (!self.deleteSelection()) {
+                    if (self.cursor_col < line.items.len) {
+                        const char_end = nextCharBoundary(line.items, self.cursor_col);
+                        const byte_count = char_end - self.cursor_col;
+                        var removed: usize = 0;
+                        while (removed < byte_count) : (removed += 1) {
+                            _ = line.orderedRemove(self.cursor_col);
+                        }
+                        self.tokenizeLine(self.cursor_line);
+                    } else if (self.cursor_line + 1 < self.lines.items.len) {
+                        const next_line_idx = self.cursor_line + 1;
+                        line.appendSlice(self.allocator, self.lines.items[next_line_idx].items) catch {};
+                        var removed_line = self.lines.orderedRemove(next_line_idx);
+                        removed_line.deinit(self.allocator);
+                        var removed_tokens = self.line_tokens.orderedRemove(next_line_idx);
+                        removed_tokens.deinit(self.allocator);
+                        self.tokenizeLine(self.cursor_line);
+                    }
+                }
+            },
+            .DeleteWordBack => {
+                if (!self.deleteSelection()) {
                     if (self.cursor_col > 0) {
                         const start = prevWordBoundary(line.items, self.cursor_col);
                         const count = self.cursor_col - start;
@@ -657,48 +724,14 @@ pub const CodeEditor = struct {
                         }
                         self.cursor_col = start;
                         self.tokenizeLine(self.cursor_line);
-                        self.recordCursorMovement();
-                        self.current_line = self.cursor_line + 1;
                     } else if (self.cursor_line > 0) {
-                        // Just merge like normal backspace
-                        self.handleKeyPress(.backspace);
+                        self.dispatchAction(.DeleteBack);
+                        return;
                     }
-                } else if (self.cursor_col > 0) {
-                    // Remove entire UTF-8 character before cursor.
-                    const char_start = prevCharBoundary(line.items, self.cursor_col);
-                    const byte_count = self.cursor_col - char_start;
-                    var removed: usize = 0;
-                    while (removed < byte_count) : (removed += 1) {
-                        _ = line.orderedRemove(char_start);
-                    }
-                    self.cursor_col = char_start;
-                    self.tokenizeLine(self.cursor_line);
-                    self.recordCursorMovement();
-                    self.current_line = self.cursor_line + 1;
-                } else if (self.cursor_line > 0) {
-                    // Merge with previous line.
-                    const prev_line_idx = self.cursor_line - 1;
-                    const prev_len = self.lines.items[prev_line_idx].items.len;
-                    self.lines.items[prev_line_idx].appendSlice(self.allocator, line.items) catch {};
-                    var removed_line = self.lines.orderedRemove(self.cursor_line);
-                    removed_line.deinit(self.allocator);
-
-                    var removed_tokens = self.line_tokens.orderedRemove(self.cursor_line);
-                    removed_tokens.deinit(self.allocator);
-
-                    self.cursor_line = prev_line_idx;
-                    self.cursor_col = prev_len;
-                    self.tokenizeLine(self.cursor_line);
-                    self.recordCursorMovement();
-                    self.current_line = self.cursor_line + 1;
                 }
             },
-            .delete => {
-                if (self.deleteSelection()) {
-                    self.recordCursorMovement();
-                    self.current_line = self.cursor_line + 1;
-                } else if (self.ctrl_pressed) {
-                    // Ctrl+Delete: Delete word after cursor
+            .DeleteWordForward => {
+                if (!self.deleteSelection()) {
                     if (self.cursor_col < line.items.len) {
                         const end = nextWordBoundary(line.items, self.cursor_col);
                         const count = end - self.cursor_col;
@@ -708,46 +741,42 @@ pub const CodeEditor = struct {
                         }
                         self.tokenizeLine(self.cursor_line);
                     } else if (self.cursor_line + 1 < self.lines.items.len) {
-                        // Just merge like normal delete
-                        self.handleKeyPress(.delete);
+                        self.dispatchAction(.DeleteForward);
+                        return;
                     }
-                } else if (self.cursor_col < line.items.len) {
-                    // Remove entire UTF-8 character at cursor.
-                    const char_end = nextCharBoundary(line.items, self.cursor_col);
-                    const byte_count = char_end - self.cursor_col;
-                    var removed: usize = 0;
-                    while (removed < byte_count) : (removed += 1) {
-                        _ = line.orderedRemove(self.cursor_col);
-                    }
-                    self.tokenizeLine(self.cursor_line);
-                } else if (self.cursor_line + 1 < self.lines.items.len) {
-                    // Merge with next line.
-                    const next_line_idx = self.cursor_line + 1;
-                    line.appendSlice(self.allocator, self.lines.items[next_line_idx].items) catch {};
-                    var removed_line = self.lines.orderedRemove(next_line_idx);
-                    removed_line.deinit(self.allocator);
-
-                    var removed_tokens = self.line_tokens.orderedRemove(next_line_idx);
-                    removed_tokens.deinit(self.allocator);
-
-                    self.tokenizeLine(self.cursor_line);
                 }
             },
-            .enter, .kp_enter => {
-                // Split line
+            .InsertNewline => {
+                _ = self.deleteSelection();
                 var new_line = std.ArrayListUnmanaged(u8){};
                 new_line.appendSlice(self.allocator, line.items[self.cursor_col..]) catch {};
                 line.shrinkRetainingCapacity(self.cursor_col);
-
                 self.lines.insert(self.allocator, self.cursor_line + 1, new_line) catch return;
                 const new_tokens = std.ArrayListUnmanaged(Token){};
                 self.line_tokens.insert(self.allocator, self.cursor_line + 1, new_tokens) catch return;
-
                 self.tokenizeLine(self.cursor_line);
                 self.tokenizeLine(self.cursor_line + 1);
-
                 self.cursor_line += 1;
                 self.cursor_col = 0;
+            },
+            .InsertTab => {
+                _ = self.deleteSelection();
+                const line_ref = &self.lines.items[self.cursor_line];
+                line_ref.insertSlice(self.allocator, self.cursor_col, "    ") catch return;
+                self.cursor_col += 4;
+                self.tokenizeLine(self.cursor_line);
+            },
+            .SelectAll => {
+                self.selection_anchor_line = 0;
+                self.selection_anchor_col = 0;
+                self.cursor_line = self.lines.items.len - 1;
+                self.cursor_col = self.lines.items[self.cursor_line].items.len;
+            },
+            .ScrollUp => {
+                self.scrollLines(1);
+            },
+            .ScrollDown => {
+                self.scrollLines(-1);
             },
             else => {},
         }
@@ -755,13 +784,23 @@ pub const CodeEditor = struct {
         self.current_line = self.cursor_line + 1;
     }
 
+    pub fn handleKeyPress(self: *Self, key: wio.Button) void {
+        if (self.keymap) |km| {
+            if (km.lookup(key, self.mods)) |action| {
+                self.dispatchAction(action);
+                return;
+            }
+        }
+    }
+
+
     /// Modifier-State aktualisieren (wird von main.zig aufgerufen)
     pub fn setShiftState(self: *Self, pressed: bool) void {
-        self.shift_pressed = pressed;
+        self.mods.shift = pressed;
     }
 
     pub fn setCtrlState(self: *Self, pressed: bool) void {
-        self.ctrl_pressed = pressed;
+        self.mods.ctrl = pressed;
     }
 
     // =========================================================================
@@ -1963,6 +2002,24 @@ test "Selection: Mehrzeilige Selektion löschen" {
     try std.testing.expectEqual(@as(usize, 1), ed.lines.items.len);
     // "a" + "hi" = "ahi"
     try std.testing.expectEqualStrings("ahi", ed.lines.items[0].items);
+}
+
+test "CodeEditor: Keypad Enter" {
+    const allocator = std.testing.allocator;
+    var ed = CodeEditor.init(allocator);
+    defer ed.deinit();
+
+    ed.setText("abc");
+    ed.cursor_col = 3;
+
+    // kp_enter should trigger InsertNewline via keymap
+    ed.handleKeyPress(.kp_enter);
+
+    try std.testing.expectEqual(@as(usize, 2), ed.lines.items.len);
+    try std.testing.expectEqualStrings("abc", ed.lines.items[0].items);
+    try std.testing.expectEqualStrings("", ed.lines.items[1].items);
+    try std.testing.expectEqual(@as(usize, 1), ed.cursor_line);
+    try std.testing.expectEqual(@as(usize, 0), ed.cursor_col);
 }
 
 test "Selection: Shift+Home und Shift+End" {
