@@ -390,62 +390,52 @@ pub const CodeEditor = struct {
             .layout = .{ .direction = .left_to_right, .child_alignment = .{ .x = .left, .y = .center } },
         })({
             if (tokens.len == 0) {
-                if (line_idx == self.cursor_line and self.cursor_col == 0) {
-                    self.renderCursor();
-                }
                 clay.text(line, .{ .font_size = self.font_size, .color = .{ 202, 211, 245, 255 } });
+                // Cursor bei leerer Zeile
+                if (line_idx == self.cursor_line) {
+                    self.renderCursor(0);
+                }
             } else {
+                // WICHTIG: Text NICHT splitten!
+                // Alle Tokens komplett rendern
                 for (tokens) |token| {
                     const color = self.highlighter.colorForType(token.token_type);
                     const slice = token.slice(line);
-
-                    // Cursor in this token
-                    if (line_idx == self.cursor_line and self.cursor_col >= token.start and self.cursor_col < token.end) {
-                        const offset = self.cursor_col - token.start;
-                        if (offset > 0) {
-                            clay.text(slice[0..offset], .{ .font_size = self.font_size, .color = color });
-                        }
-                        self.renderCursor();
-                        if (offset < slice.len) {
-                            clay.text(slice[offset..], .{ .font_size = self.font_size, .color = color });
-                        }
-                    } else {
-                        clay.text(slice, .{ .font_size = self.font_size, .color = color });
-                    }
+                    clay.text(slice, .{ .font_size = self.font_size, .color = color });
                 }
 
-                // Cursor at the end of the line
-                if (line_idx == self.cursor_line and self.cursor_col >= line.len) {
-                    self.renderCursor();
+                // Cursor als floating element über dem Text
+                // Funktioniert nur, wenn der Font monospace ist!
+                if (line_idx == self.cursor_line) {
+                    self.renderCursor(line.len);
                 }
             }
         });
     }
 
-    fn renderCursor(self: *Self) void {
+    fn renderCursor(self: *Self, _: usize) void {
         const blink_ms: f32 = 500.0;
         const visible = @mod(self.time_ms, blink_ms * 2.0) < blink_ms;
-        if (!visible) {
-            // Placeholder mit 0 Breite, damit der Textfluss erhalten bleibt
-            clay.UI()(.{
-                .layout = .{ .sizing = .{ .w = .fixed(0), .h = .fixed(@floatFromInt(self.font_size + 16)) } },
-            })({});
-            return;
-        }
+        if (!visible) return;
 
-        // Dieser Container hat 0 Breite im Layout-Fluss, bewegt sich aber mit dem Text mit
+        // Empirische Character-Breite basierend auf Font-Größe
+        // Bei font_size=24: ~14.4px pro Character
+        const char_width: f32 = @as(f32, @floatFromInt(self.font_size)) * 0.6;
+        const cursor_x: f32 = @as(f32, @floatFromInt(self.cursor_col)) * char_width;
+
+        // Cursor als floating Element - 0 Breite im Layout, aber sichtbar an der berechneten Position
         clay.UI()(.{
             .layout = .{ .sizing = .{ .w = .fixed(0), .h = .fixed(@floatFromInt(self.font_size + 16)) } },
+            .floating = .{
+                .attach_to = .to_parent,
+                .attach_points = .{ .element = .left_top, .parent = .left_top },
+                .offset = .{ .x = cursor_x, .y = 0 },
+            },
         })({
-            // Das tatsächliche sichtbare Cursor-Rechteck schwebt über dem 0-Breite-Anker
+            // Sichtbarer 1px Cursor
             clay.UI()(.{
-                .layout = .{ .sizing = .{ .w = .fixed(2), .h = .grow } },
+                .layout = .{ .sizing = .{ .w = .fixed(1), .h = .grow } },
                 .background_color = self.cursor_color,
-                .floating = .{
-                    .attach_to = .to_parent,
-                    .attach_points = .{ .element = .left_center, .parent = .left_center },
-                    .offset = .{ .x = -1, .y = 0 },
-                },
             })({});
         });
     }
