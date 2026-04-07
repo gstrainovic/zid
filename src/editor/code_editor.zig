@@ -6,6 +6,7 @@ const std = @import("std");
 const clay = @import("clay");
 const Highlighter = @import("highlighter.zig").Highlighter;
 const Token = @import("highlighter.zig").Token;
+const TokenType = @import("highlighter.zig").TokenType;
 const wio = @import("wio");
 
 pub const CodeEditor = struct {
@@ -679,4 +680,408 @@ test "CodeEditor: Tokenizer erfasst UTF-8 Zeichen als Token" {
     // Token muss die gesamten 2 Bytes des Umlauts abdecken.
     try std.testing.expectEqual(@as(usize, 0), tokens[0].start);
     try std.testing.expectEqual(@as(usize, 2), tokens[0].end);
+}
+
+// =========================================================================
+// Phase 8: Erweiterte Tests
+// =========================================================================
+
+test "Tokenizer: alle Token-Typen vollständig abgedeckt" {
+    const allocator = std.testing.allocator;
+    var ed = CodeEditor.init(allocator);
+    defer ed.deinit();
+
+    ed.setText("const x = 42; // hi \"s\" $");
+    const tokens = ed.line_tokens.items[0].items;
+
+    // Jedes Byte muss von mindestens einem Token abgedeckt sein.
+    const line = ed.lines.items[0].items;
+    var covered = try allocator.alloc(bool, line.len);
+    defer allocator.free(covered);
+    @memset(covered, false);
+
+    for (tokens) |tok| {
+        for (tok.start..tok.end) |j| {
+            covered[j] = true;
+        }
+    }
+    for (covered, 0..) |c, idx| {
+        if (!c) {
+            std.debug.print("Byte {d} (0x{X:0>2}) nicht in Token!\n", .{ idx, line[idx] });
+        }
+        try std.testing.expect(c);
+    }
+}
+
+test "Tokenizer: Keywords, Strings, Kommentare, Zahlen, Punctuation" {
+    const allocator = std.testing.allocator;
+    var ed = CodeEditor.init(allocator);
+    defer ed.deinit();
+
+    ed.setText("pub fn main() { return 42; } // done");
+    const tokens = ed.line_tokens.items[0].items;
+
+    // Erste Token-Typen prüfen
+    // "pub" → keyword
+    try std.testing.expectEqual(TokenType.keyword, tokens[0].token_type);
+    try std.testing.expectEqualStrings("pub", tokens[0].slice(ed.lines.items[0].items));
+
+    // " " → plain (whitespace)
+    try std.testing.expectEqual(TokenType.plain, tokens[1].token_type);
+
+    // "fn" → keyword
+    try std.testing.expectEqual(TokenType.keyword, tokens[2].token_type);
+
+    // Finde "42" → number
+    var found_number = false;
+    for (tokens) |tok| {
+        if (tok.token_type == .number) {
+            try std.testing.expectEqualStrings("42", tok.slice(ed.lines.items[0].items));
+            found_number = true;
+        }
+    }
+    try std.testing.expect(found_number);
+
+    // Finde "// done" → comment (letztes Token)
+    const last = tokens[tokens.len - 1];
+    try std.testing.expectEqual(TokenType.comment, last.token_type);
+    try std.testing.expectEqualStrings("// done", last.slice(ed.lines.items[0].items));
+}
+
+test "Tokenizer: Sonderzeichen werden nicht verschluckt" {
+    const allocator = std.testing.allocator;
+    var ed = CodeEditor.init(allocator);
+    defer ed.deinit();
+
+    // Zeichen die früher im Fallthrough verloren gingen
+    ed.setText("$#`\\");
+    const tokens = ed.line_tokens.items[0].items;
+
+    // Jedes Zeichen muss ein Token haben
+    try std.testing.expect(tokens.len >= 4);
+
+    // Gesamtabdeckung: Start des ersten = 0, Ende des letzten = len
+    try std.testing.expectEqual(@as(usize, 0), tokens[0].start);
+    try std.testing.expectEqual(ed.lines.items[0].items.len, tokens[tokens.len - 1].end);
+}
+
+test "Tokenizer: String-Literal mit Escape-Sequences" {
+    const allocator = std.testing.allocator;
+    var ed = CodeEditor.init(allocator);
+    defer ed.deinit();
+
+    ed.setText("x = \"hello\\nworld\"");
+    const tokens = ed.line_tokens.items[0].items;
+
+    // Finde String-Token — muss komplett sein inkl. Escapes
+    var found_string = false;
+    for (tokens) |tok| {
+        if (tok.token_type == .string) {
+            try std.testing.expectEqualStrings("\"hello\\nworld\"", tok.slice(ed.lines.items[0].items));
+            found_string = true;
+        }
+    }
+    try std.testing.expect(found_string);
+}
+
+test "setText: CRLF wird zu LF normalisiert" {
+    const allocator = std.testing.allocator;
+    var ed = CodeEditor.init(allocator);
+    defer ed.deinit();
+
+    ed.setText("line1\r\nline2\r\nline3");
+    try std.testing.expectEqual(@as(usize, 3), ed.lines.items.len);
+    try std.testing.expectEqualStrings("line1", ed.lines.items[0].items);
+    try std.testing.expectEqualStrings("line2", ed.lines.items[1].items);
+    try std.testing.expectEqualStrings("line3", ed.lines.items[2].items);
+}
+
+test "setText: leerer String erzeugt eine leere Zeile" {
+    const allocator = std.testing.allocator;
+    var ed = CodeEditor.init(allocator);
+    defer ed.deinit();
+
+    ed.setText("");
+    try std.testing.expectEqual(@as(usize, 1), ed.lines.items.len);
+    try std.testing.expectEqualStrings("", ed.lines.items[0].items);
+    try std.testing.expectEqual(@as(usize, 0), ed.cursor_line);
+    try std.testing.expectEqual(@as(usize, 0), ed.cursor_col);
+}
+
+test "Enter mitten in der Zeile splittet korrekt" {
+    const allocator = std.testing.allocator;
+    var ed = CodeEditor.init(allocator);
+    defer ed.deinit();
+
+    ed.setText("abcdef");
+    ed.cursor_col = 3; // zwischen 'c' und 'd'
+    ed.handleKeyPress(.enter);
+
+    try std.testing.expectEqual(@as(usize, 2), ed.lines.items.len);
+    try std.testing.expectEqualStrings("abc", ed.lines.items[0].items);
+    try std.testing.expectEqualStrings("def", ed.lines.items[1].items);
+    try std.testing.expectEqual(@as(usize, 1), ed.cursor_line);
+    try std.testing.expectEqual(@as(usize, 0), ed.cursor_col);
+}
+
+test "Enter bei UTF-8 Zeichen splittet an Byte-Grenze" {
+    const allocator = std.testing.allocator;
+    var ed = CodeEditor.init(allocator);
+    defer ed.deinit();
+
+    ed.setText("aäb"); // a(1) + ä(2) + b(1) = 4 Bytes
+    ed.cursor_col = 3; // nach ä, vor b
+    ed.handleKeyPress(.enter);
+
+    try std.testing.expectEqual(@as(usize, 2), ed.lines.items.len);
+    try std.testing.expectEqualStrings("a\xC3\xA4", ed.lines.items[0].items);
+    try std.testing.expectEqualStrings("b", ed.lines.items[1].items);
+}
+
+test "Backspace am Zeilenanfang mergt mit vorheriger Zeile" {
+    const allocator = std.testing.allocator;
+    var ed = CodeEditor.init(allocator);
+    defer ed.deinit();
+
+    ed.setText("abc\ndef");
+    ed.cursor_line = 1;
+    ed.cursor_col = 0;
+    ed.handleKeyPress(.backspace);
+
+    try std.testing.expectEqual(@as(usize, 1), ed.lines.items.len);
+    try std.testing.expectEqualStrings("abcdef", ed.lines.items[0].items);
+    try std.testing.expectEqual(@as(usize, 0), ed.cursor_line);
+    try std.testing.expectEqual(@as(usize, 3), ed.cursor_col);
+}
+
+test "Delete am Zeilenende mergt mit nächster Zeile" {
+    const allocator = std.testing.allocator;
+    var ed = CodeEditor.init(allocator);
+    defer ed.deinit();
+
+    ed.setText("abc\ndef");
+    ed.cursor_line = 0;
+    ed.cursor_col = 3; // am Ende von "abc"
+    ed.handleKeyPress(.delete);
+
+    try std.testing.expectEqual(@as(usize, 1), ed.lines.items.len);
+    try std.testing.expectEqualStrings("abcdef", ed.lines.items[0].items);
+    try std.testing.expectEqual(@as(usize, 0), ed.cursor_line);
+    try std.testing.expectEqual(@as(usize, 3), ed.cursor_col);
+}
+
+test "Navigation: Left am Zeilenanfang springt ans Ende der vorherigen Zeile" {
+    const allocator = std.testing.allocator;
+    var ed = CodeEditor.init(allocator);
+    defer ed.deinit();
+
+    ed.setText("abc\ndef");
+    ed.cursor_line = 1;
+    ed.cursor_col = 0;
+    ed.handleKeyPress(.left);
+
+    try std.testing.expectEqual(@as(usize, 0), ed.cursor_line);
+    try std.testing.expectEqual(@as(usize, 3), ed.cursor_col);
+}
+
+test "Navigation: Right am Zeilenende springt an Anfang der nächsten Zeile" {
+    const allocator = std.testing.allocator;
+    var ed = CodeEditor.init(allocator);
+    defer ed.deinit();
+
+    ed.setText("abc\ndef");
+    ed.cursor_line = 0;
+    ed.cursor_col = 3;
+    ed.handleKeyPress(.right);
+
+    try std.testing.expectEqual(@as(usize, 1), ed.cursor_line);
+    try std.testing.expectEqual(@as(usize, 0), ed.cursor_col);
+}
+
+test "Navigation: Home und End" {
+    const allocator = std.testing.allocator;
+    var ed = CodeEditor.init(allocator);
+    defer ed.deinit();
+
+    ed.setText("hello world");
+    ed.cursor_col = 5;
+
+    ed.handleKeyPress(.home);
+    try std.testing.expectEqual(@as(usize, 0), ed.cursor_col);
+
+    ed.handleKeyPress(.end);
+    try std.testing.expectEqual(@as(usize, 11), ed.cursor_col);
+}
+
+test "Navigation: Left/Right an Dateigrenzen bleiben stehen" {
+    const allocator = std.testing.allocator;
+    var ed = CodeEditor.init(allocator);
+    defer ed.deinit();
+
+    ed.setText("abc");
+
+    // Left am Dateianfang → bleibt
+    ed.cursor_col = 0;
+    ed.cursor_line = 0;
+    ed.handleKeyPress(.left);
+    try std.testing.expectEqual(@as(usize, 0), ed.cursor_col);
+    try std.testing.expectEqual(@as(usize, 0), ed.cursor_line);
+
+    // Right am Dateiende → bleibt
+    ed.cursor_col = 3;
+    ed.handleKeyPress(.right);
+    try std.testing.expectEqual(@as(usize, 3), ed.cursor_col);
+    try std.testing.expectEqual(@as(usize, 0), ed.cursor_line);
+}
+
+test "Navigation: Up/Down an Dateigrenzen bleiben stehen" {
+    const allocator = std.testing.allocator;
+    var ed = CodeEditor.init(allocator);
+    defer ed.deinit();
+
+    ed.setText("abc\ndef");
+
+    // Up auf erster Zeile → bleibt
+    ed.cursor_line = 0;
+    ed.handleKeyPress(.up);
+    try std.testing.expectEqual(@as(usize, 0), ed.cursor_line);
+
+    // Down auf letzter Zeile → bleibt
+    ed.cursor_line = 1;
+    ed.handleKeyPress(.down);
+    try std.testing.expectEqual(@as(usize, 1), ed.cursor_line);
+}
+
+test "Navigation: Up/Down clamp auf kürzere Zeile" {
+    const allocator = std.testing.allocator;
+    var ed = CodeEditor.init(allocator);
+    defer ed.deinit();
+
+    ed.setText("longline\nab\nlongline");
+    ed.cursor_line = 0;
+    ed.cursor_col = 7; // weit rechts
+
+    ed.handleKeyPress(.down); // → "ab" (len=2), col clamp auf 2
+    try std.testing.expectEqual(@as(usize, 1), ed.cursor_line);
+    try std.testing.expectEqual(@as(usize, 2), ed.cursor_col);
+
+    ed.handleKeyPress(.down); // → "longline" (len=8), col bleibt 2
+    try std.testing.expectEqual(@as(usize, 2), ed.cursor_line);
+    try std.testing.expectEqual(@as(usize, 2), ed.cursor_col);
+}
+
+test "Einfügen am Zeilenanfang und -ende" {
+    const allocator = std.testing.allocator;
+    var ed = CodeEditor.init(allocator);
+    defer ed.deinit();
+
+    ed.setText("bc");
+
+    // Am Anfang einfügen
+    ed.cursor_col = 0;
+    ed.handleChar('a');
+    try std.testing.expectEqualStrings("abc", ed.lines.items[0].items);
+
+    // Am Ende einfügen
+    ed.cursor_col = 3;
+    ed.handleChar('d');
+    try std.testing.expectEqualStrings("abcd", ed.lines.items[0].items);
+}
+
+test "Steuerzeichen werden ignoriert" {
+    const allocator = std.testing.allocator;
+    var ed = CodeEditor.init(allocator);
+    defer ed.deinit();
+
+    ed.setText("abc");
+    ed.cursor_col = 1;
+
+    // NULL, BEL, DEL — dürfen nichts einfügen
+    ed.handleChar(0);
+    ed.handleChar(7);
+    ed.handleChar(127);
+    try std.testing.expectEqualStrings("abc", ed.lines.items[0].items);
+    try std.testing.expectEqual(@as(usize, 1), ed.cursor_col);
+}
+
+test "Mehrfach-Enter erzeugt leere Zeilen" {
+    const allocator = std.testing.allocator;
+    var ed = CodeEditor.init(allocator);
+    defer ed.deinit();
+
+    ed.setText("a");
+    ed.cursor_col = 1;
+
+    ed.handleKeyPress(.enter);
+    ed.handleKeyPress(.enter);
+    ed.handleKeyPress(.enter);
+
+    try std.testing.expectEqual(@as(usize, 4), ed.lines.items.len);
+    try std.testing.expectEqualStrings("a", ed.lines.items[0].items);
+    try std.testing.expectEqualStrings("", ed.lines.items[1].items);
+    try std.testing.expectEqualStrings("", ed.lines.items[2].items);
+    try std.testing.expectEqualStrings("", ed.lines.items[3].items);
+    try std.testing.expectEqual(@as(usize, 3), ed.cursor_line);
+}
+
+test "Blink-Delay wird bei Cursor-Bewegung zurückgesetzt" {
+    const allocator = std.testing.allocator;
+    var ed = CodeEditor.init(allocator);
+    defer ed.deinit();
+
+    ed.setText("abc");
+    ed.time_ms = 1000.0;
+
+    ed.handleChar('x');
+    try std.testing.expectEqual(@as(f32, 1000.0), ed.last_cursor_movement_ms);
+
+    ed.time_ms = 2000.0;
+    ed.handleKeyPress(.left);
+    try std.testing.expectEqual(@as(f32, 2000.0), ed.last_cursor_movement_ms);
+}
+
+test "3-Byte UTF-8: Japanische Zeichen" {
+    const allocator = std.testing.allocator;
+    var ed = CodeEditor.init(allocator);
+    defer ed.deinit();
+
+    // 日 = U+65E5 = 3 Bytes (0xE6, 0x97, 0xA5)
+    ed.handleChar(0x65E5);
+    ed.handleChar('a');
+
+    try std.testing.expectEqualStrings("\xE6\x97\xA5a", ed.lines.items[0].items);
+    try std.testing.expectEqual(@as(usize, 4), ed.cursor_col);
+
+    // Left über 'a' (1 Byte)
+    ed.handleKeyPress(.left);
+    try std.testing.expectEqual(@as(usize, 3), ed.cursor_col);
+
+    // Left über 日 (3 Bytes)
+    ed.handleKeyPress(.left);
+    try std.testing.expectEqual(@as(usize, 0), ed.cursor_col);
+
+    // Right über 日 (3 Bytes)
+    ed.handleKeyPress(.right);
+    try std.testing.expectEqual(@as(usize, 3), ed.cursor_col);
+
+    // Backspace löscht 日 komplett
+    ed.handleKeyPress(.left);
+    ed.handleKeyPress(.delete);
+    try std.testing.expectEqualStrings("a", ed.lines.items[0].items);
+}
+
+test "4-Byte UTF-8: Emoji" {
+    const allocator = std.testing.allocator;
+    var ed = CodeEditor.init(allocator);
+    defer ed.deinit();
+
+    // 😀 = U+1F600 = 4 Bytes
+    ed.handleChar(0x1F600);
+    try std.testing.expectEqual(@as(usize, 4), ed.cursor_col);
+    try std.testing.expectEqual(@as(usize, 4), ed.lines.items[0].items.len);
+
+    // Backspace löscht alle 4 Bytes
+    ed.handleKeyPress(.backspace);
+    try std.testing.expectEqual(@as(usize, 0), ed.cursor_col);
+    try std.testing.expectEqualStrings("", ed.lines.items[0].items);
 }
