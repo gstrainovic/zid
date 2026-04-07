@@ -1,6 +1,6 @@
 [submodule "libs/wgpu_native_zig"]
 	path = libs/wgpu_native_zig
-	url = https://github.com/bronter/wgpu_native_zig.git
+	url = https://github.com/gstrainovic/wgpu_native_zig.git
 [submodule "libs/gooey"]
 	path = libs/gooey
 	url = https://github.com/gstrainovic/gooey-vulkan
