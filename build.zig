@@ -63,7 +63,9 @@ pub fn build(b: *std.Build) void {
 
     // Platform-specific linking
     if (target.result.os.tag == .windows) {
-        exe.root_module.linkSystemLibrary("vulkan-1", .{});
+        exe.root_module.linkSystemLibrary("dwrite", .{});
+        exe.root_module.linkSystemLibrary("d2d1", .{});
+        exe.root_module.linkSystemLibrary("ole32", .{});
         exe.root_module.link_libc = true;
     } else if (target.result.os.tag == .linux) {
         // wio (Wayland Backend) benötigt diese Libraries

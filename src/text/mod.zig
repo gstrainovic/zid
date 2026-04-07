@@ -40,13 +40,12 @@ pub const SUBPIXEL_VARIANTS_X = @import("text_system.zig").SUBPIXEL_VARIANTS_X;
 
 // Platform backends
 const is_linux = builtin.os.tag == .linux;
+const is_windows = builtin.os.tag == .windows;
 
-pub const backends = if (is_linux)
-    struct {
-        pub const freetype = @import("backends/freetype/mod.zig");
-    }
-else
-    struct {};
+pub const backends = struct {
+    pub const freetype = if (is_linux) @import("backends/freetype/mod.zig") else struct {};
+    pub const directwrite = if (is_windows) @import("backends/directwrite/mod.zig") else struct {};
+};
 
 // Font config
 pub const FontConfig = struct {

@@ -7,9 +7,11 @@ const std = @import("std");
 const wio = @import("wio");
 const builtin = @import("builtin");
 
-// Wayland Backend Zugriff
-const unix = wio.backend;
-const wayland = unix.wayland;
+const is_linux = builtin.os.tag == .linux;
+
+// Platform-spezifische Backend-Importe
+const unix = if (is_linux) wio.backend else struct {};
+const wayland = if (is_linux) unix.wayland else struct {};
 
 const log = std.log.scoped(.platform);
 

@@ -5,8 +5,7 @@
     .minimum_zig_version = "0.13.0",
     .dependencies = .{
         .wio = .{
-            .url = "https://github.com/ypsvlq/wio/archive/refs/heads/master.tar.gz",
-            .hash = "12202c853a2f1f680d5b277290fd7b51954d5f9f24a54cd3d3c3eb924d0fc459a7d7",
+            .path = "libs/wio",
         },
         .clay = .{
             .path = "libs/clay-zig",

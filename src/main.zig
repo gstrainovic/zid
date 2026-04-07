@@ -67,7 +67,13 @@ pub fn main() !void {
     try plat.createWindow();
 
     // Surface vom Window erstellen
-    try renderer.setWindow(plat.getWaylandDisplay(), plat.getWaylandSurface());
+    if (builtin.os.tag == .linux) {
+        try renderer.setWindow(plat.getWaylandDisplay(), plat.getWaylandSurface());
+    } else {
+        // Auf Windows nimmt WGPU das HWND direkt (wio window handle)
+        // renderer.setWindow für Windows muss implementiert sein oder passend aufgerufen werden
+        try renderer.setWindow(null, plat.window.?.backend.window);
+    }
     try renderer.configureSwapChain(plat.getSize().width, plat.getSize().height);
 
     // 3. Text Renderer initialisieren (DirectWrite/FreeType)

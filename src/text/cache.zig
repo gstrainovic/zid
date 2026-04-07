@@ -565,6 +565,8 @@ pub const GlyphCache = struct {
                 self.render_buffer,
                 self.render_buffer_size,
             );
+        } else if (builtin.os.tag == .windows) {
+            return error.FallbackNotSupported;
         } else blk: {
             const CoreTextFace = @import("backends/coretext/face.zig").CoreTextFace;
             break :blk try CoreTextFace.renderGlyphFromFont(

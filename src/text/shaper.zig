@@ -34,3 +34,56 @@ pub const Shaper = struct {
         self.* = undefined;
     }
 };
+
+/// A basic fallback shaper that maps characters 1:1 to glyphs
+/// without any complex text layout features (no ligatures/kerning).
+pub const SimpleShaper = struct {
+    allocator: std.mem.Allocator,
+
+    pub fn init(allocator: std.mem.Allocator) ?SimpleShaper {
+        return SimpleShaper{
+            .allocator = allocator,
+        };
+    }
+
+    pub fn shape(self: *SimpleShaper, face: anytype, text: []const u8, allocator: std.mem.Allocator) anyerror!ShapedRun {
+        _ = self;
+        var glyphs = std.ArrayListUnmanaged(ShapedGlyph){};
+        errdefer glyphs.deinit(allocator);
+
+        var total_width: f32 = 0;
+        var i: usize = 0;
+        var utf8 = std.unicode.Utf8View.init(text) catch return error.InvalidUtf8;
+        var iter = utf8.iterator();
+
+        while (iter.nextCodepoint()) |cp| {
+            const seq_len: usize = std.unicode.utf8CodepointSequenceLength(cp) catch 0;
+            const cluster = iter.i - seq_len;
+            const glyph_id = face.glyphIndex(cp);
+            const metrics = face.glyphMetrics(glyph_id);
+
+            try glyphs.append(allocator, .{
+                .glyph_id = glyph_id,
+                .x_offset = 0,
+                .y_offset = 0,
+                .x_advance = metrics.advance_x,
+                .y_advance = 0,
+                .cluster = @intCast(cluster),
+                .font_ref = null,
+                .is_color = false,
+            });
+            total_width += metrics.advance_x;
+            i += 1;
+        }
+
+        return ShapedRun{
+            .glyphs = try glyphs.toOwnedSlice(allocator),
+            .width = total_width,
+            .owned = true,
+        };
+    }
+
+    pub fn deinit(self: *SimpleShaper) void {
+        self.* = undefined;
+    }
+};
