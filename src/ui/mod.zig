@@ -246,6 +246,16 @@ pub const UI = struct {
             self.code_editor.render(self.frame_arena.allocator());
         });
 
-        return self.endLayout();
+        const commands = self.endLayout();
+
+        // Content-Position vom Editor für Maus-Konversion speichern (sev-Pattern)
+        const editor_data = clay.getElementData(clay.ElementId.ID("code_editor"));
+        if (editor_data.found) {
+            self.code_editor.content_origin_y = editor_data.bounding_box.y;
+            self.code_editor.content_origin_x = editor_data.bounding_box.x;
+            self.code_editor.height = editor_data.bounding_box.height;
+        }
+
+        return commands;
     }
 };
