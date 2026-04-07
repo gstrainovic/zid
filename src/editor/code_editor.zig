@@ -281,33 +281,59 @@ pub const CodeEditor = struct {
         return prevCharBoundary(text, pos);
     }
 
+    fn isWordChar(c: u8) bool {
+        return std.ascii.isAlphanumeric(c) or c == '_';
+    }
+
     /// Find previous word boundary (byte offset).
     fn prevWordBoundary(text: []const u8, pos: usize) usize {
         if (pos == 0) return 0;
-        var i = prevCharBoundary(text, pos);
-        // If currently on whitespace, skip to non-whitespace.
-        const in_ws = std.ascii.isWhitespace(text[i]);
+        var i = pos;
+
+        // Skip leading whitespace before the word
         while (i > 0) {
             const prev = prevCharBoundary(text, i);
-            const is_ws = std.ascii.isWhitespace(text[prev]);
-            if (is_ws != in_ws) break;
+            if (!std.ascii.isWhitespace(text[prev])) break;
             i = prev;
         }
+
+        if (i == 0) return 0;
+
+        // If we are at a word char, skip the whole word
+        const start_is_word = isWordChar(text[prevCharBoundary(text, i)]);
+        while (i > 0) {
+            const prev = prevCharBoundary(text, i);
+            if (isWordChar(text[prev]) != start_is_word or std.ascii.isWhitespace(text[prev])) break;
+            i = prev;
+        }
+        
         return i;
     }
 
     /// Find next word boundary (byte offset).
     fn nextWordBoundary(text: []const u8, pos: usize) usize {
         if (pos >= text.len) return text.len;
-        var i = nextCharBoundary(text, pos);
-        // If currently on whitespace, skip to non-whitespace.
-        const in_ws = if (i < text.len) std.ascii.isWhitespace(text[i]) else true;
-        while (i < text.len) {
-            const next = nextCharBoundary(text, i);
-            const is_ws = if (next < text.len) std.ascii.isWhitespace(text[next]) else true;
-            if (is_ws != in_ws) break;
-            i = next;
+        var i = pos;
+
+        // Skip leading whitespace
+        while (i < text.len and std.ascii.isWhitespace(text[i])) {
+            i = nextCharBoundary(text, i);
         }
+
+        if (i >= text.len) return text.len;
+
+        // Skip the word (or block of symbols)
+        const start_is_word = isWordChar(text[i]);
+        while (i < text.len) {
+            if (isWordChar(text[i]) != start_is_word or std.ascii.isWhitespace(text[i])) break;
+            i = nextCharBoundary(text, i);
+        }
+
+        // Standard behavior: also skip trailing whitespace after the word
+        while (i < text.len and std.ascii.isWhitespace(text[i])) {
+            i = nextCharBoundary(text, i);
+        }
+
         return i;
     }
 
@@ -518,6 +544,11 @@ pub const CodeEditor = struct {
                 }
             },
             .up => {
+                if (self.ctrl_pressed) {
+                    // Ctrl+Up: Scroll up without moving cursor
+                    self.scrollLines(1);
+                    return;
+                }
                 if (self.shift_pressed) {
                     if (!self.hasSelection()) self.startSelection();
                 } else {
@@ -537,6 +568,11 @@ pub const CodeEditor = struct {
                 }
             },
             .down => {
+                if (self.ctrl_pressed) {
+                    // Ctrl+Down: Scroll down without moving cursor
+                    self.scrollLines(-1);
+                    return;
+                }
                 if (self.shift_pressed) {
                     if (!self.hasSelection()) self.startSelection();
                 } else {
@@ -556,6 +592,20 @@ pub const CodeEditor = struct {
                 }
             },
             .home => {
+                if (self.ctrl_pressed) {
+                    // Ctrl+Home: Jump to start of document
+                    if (self.shift_pressed) {
+                        if (!self.hasSelection()) self.startSelection();
+                    } else {
+                        self.clearSelection();
+                    }
+                    self.cursor_line = 0;
+                    self.cursor_col = 0;
+                    self.recordCursorMovement();
+                    self.current_line = self.cursor_line + 1;
+                    self.ensureCursorVisible();
+                    return;
+                }
                 if (self.shift_pressed) {
                     if (!self.hasSelection()) self.startSelection();
                 } else {
@@ -570,6 +620,20 @@ pub const CodeEditor = struct {
                 self.cursor_col = 0;
             },
             .end => {
+                if (self.ctrl_pressed) {
+                    // Ctrl+End: Jump to end of document
+                    if (self.shift_pressed) {
+                        if (!self.hasSelection()) self.startSelection();
+                    } else {
+                        self.clearSelection();
+                    }
+                    self.cursor_line = self.lines.items.len - 1;
+                    self.cursor_col = self.lines.items[self.cursor_line].items.len;
+                    self.recordCursorMovement();
+                    self.current_line = self.cursor_line + 1;
+                    self.ensureCursorVisible();
+                    return;
+                }
                 if (self.shift_pressed) {
                     if (!self.hasSelection()) self.startSelection();
                 } else {
@@ -587,6 +651,23 @@ pub const CodeEditor = struct {
                 if (self.deleteSelection()) {
                     self.recordCursorMovement();
                     self.current_line = self.cursor_line + 1;
+                } else if (self.ctrl_pressed) {
+                    // Ctrl+Backspace: Delete word before cursor
+                    if (self.cursor_col > 0) {
+                        const start = prevWordBoundary(line.items, self.cursor_col);
+                        const count = self.cursor_col - start;
+                        var removed: usize = 0;
+                        while (removed < count) : (removed += 1) {
+                            _ = line.orderedRemove(start);
+                        }
+                        self.cursor_col = start;
+                        self.tokenizeLine(self.cursor_line);
+                        self.recordCursorMovement();
+                        self.current_line = self.cursor_line + 1;
+                    } else if (self.cursor_line > 0) {
+                        // Just merge like normal backspace
+                        self.handleKeyPress(.backspace);
+                    }
                 } else if (self.cursor_col > 0) {
                     // Remove entire UTF-8 character before cursor.
                     const char_start = prevCharBoundary(line.items, self.cursor_col);
@@ -621,6 +702,20 @@ pub const CodeEditor = struct {
                 if (self.deleteSelection()) {
                     self.recordCursorMovement();
                     self.current_line = self.cursor_line + 1;
+                } else if (self.ctrl_pressed) {
+                    // Ctrl+Delete: Delete word after cursor
+                    if (self.cursor_col < line.items.len) {
+                        const end = nextWordBoundary(line.items, self.cursor_col);
+                        const count = end - self.cursor_col;
+                        var removed: usize = 0;
+                        while (removed < count) : (removed += 1) {
+                            _ = line.orderedRemove(self.cursor_col);
+                        }
+                        self.tokenizeLine(self.cursor_line);
+                    } else if (self.cursor_line + 1 < self.lines.items.len) {
+                        // Just merge like normal delete
+                        self.handleKeyPress(.delete);
+                    }
                 } else if (self.cursor_col < line.items.len) {
                     // Remove entire UTF-8 character at cursor.
                     const char_end = nextCharBoundary(line.items, self.cursor_col);
@@ -1407,6 +1502,33 @@ test "setText: CRLF wird zu LF normalisiert" {
     try std.testing.expectEqualStrings("line1", ed.lines.items[0].items);
     try std.testing.expectEqualStrings("line2", ed.lines.items[1].items);
     try std.testing.expectEqualStrings("line3", ed.lines.items[2].items);
+}
+
+test "Word Boundaries: nextWordBoundary behavior" {
+    const text = "hello  world  next";
+    // Starting at 'h' (0)
+    // 1. skip 'hello' (5)
+    // 2. skip spaces (7) -> lands at 'w'
+    try std.testing.expectEqual(@as(usize, 7), CodeEditor.nextWordBoundary(text, 0));
+    
+    // Starting at end of 'hello' (5)
+    // 1. skip spaces (7)
+    // 2. skip 'world' (12)
+    // 3. skip spaces (14) -> lands at 'n'
+    try std.testing.expectEqual(@as(usize, 14), CodeEditor.nextWordBoundary(text, 5));
+}
+
+test "Word Boundaries: prevWordBoundary behavior" {
+    const text = "hello  world  next";
+    // Starting at 'n' (14)
+    // 1. skip leading spaces (12)
+    // 2. skip 'world' (7) -> lands at 'w'
+    try std.testing.expectEqual(@as(usize, 7), CodeEditor.prevWordBoundary(text, 14));
+    
+    // Starting at 'w' (7)
+    // 1. skip leading spaces (5)
+    // 2. skip 'hello' (0) -> lands at 'h'
+    try std.testing.expectEqual(@as(usize, 0), CodeEditor.prevWordBoundary(text, 7));
 }
 
 test "setText: leerer String erzeugt eine leere Zeile" {
