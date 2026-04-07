@@ -13,6 +13,16 @@ const editor_mod = @import("../editor/mod.zig");
 
 const log = std.log.scoped(.ui);
 
+/// Globaler Measure-Context (thread-local) — wird von CodeEditor.colFromX genutzt
+var g_text_renderer: ?*@import("../text/mod.zig").TextRenderer = null;
+var g_font_size: f32 = 0;
+
+/// C-kompatibler Callback: misst Text-Breite in px
+fn cMeasureText(ptr: [*c]const u8, len: usize) f32 {
+    const tr = g_text_renderer orelse return 0;
+    return tr.measureTextAtSize(ptr[0..len], g_font_size);
+}
+
 /// UI Konfiguration
 pub const UIConfig = struct {
     font_size: f32 = 14.0,
@@ -75,6 +85,7 @@ pub const UI = struct {
             .anim_manager = AnimationManager.init(allocator),
             .frame_arena = std.heap.ArenaAllocator.init(allocator),
             .code_editor = code_editor,
+            .text_renderer = null,
         };
     }
 
@@ -91,6 +102,11 @@ pub const UI = struct {
     pub fn setupClay(self: *Self, width: u32, height: u32, text_renderer: *@import("../text/mod.zig").TextRenderer) !void {
         log.debug("Setting up Clay layout: {}x{}", .{ width, height });
         self.text_renderer = text_renderer;
+
+        // Globalen Measure-Context setzen (für Maus→Spalte)
+        g_text_renderer = text_renderer;
+        g_font_size = @floatFromInt(self.code_editor.font_size);
+        self.code_editor.measure_fn = cMeasureText;
 
         const arena = clay.createArenaWithCapacityAndMemory(self.clay_memory);
 

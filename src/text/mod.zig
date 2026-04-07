@@ -103,6 +103,11 @@ pub const TextRenderer = struct {
         return self.ts_ptr.measureText(text) catch 0;
     }
 
+    /// Text-Messung bei bestimmter Font-Größe (skaliert von Basis-Metriken)
+    pub fn measureTextAtSize(self: *Self, text: []const u8, font_size: f32) f32 {
+        return self.ts_ptr.measureTextAtSize(text, font_size) catch 0;
+    }
+
     pub fn getAtlasData(self: *Self) []const u8 {
         return self.ts_ptr.cache.grayscale_atlas.data;
     }

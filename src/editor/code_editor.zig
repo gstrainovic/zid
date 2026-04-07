@@ -9,6 +9,10 @@ const Token = @import("highlighter.zig").Token;
 const TokenType = @import("highlighter.zig").TokenType;
 const wio = @import("wio");
 
+/// Measurement function type: returns width of text in pixels.
+/// C-kompatibel: ptr + len statt Slice.
+pub const MeasureFn = *const fn (ptr: [*c]const u8, len: usize) f32;
+
 pub const CodeEditor = struct {
     allocator: std.mem.Allocator,
 
@@ -62,6 +66,9 @@ pub const CodeEditor = struct {
 
     /// X-Offset vom Fenster-Left (für Maus→Spalte Konversion)
     content_origin_x: f32 = 0,
+
+    /// Text-Messung (width in px für gegebene String)
+    measure_fn: ?MeasureFn = null,
 
     font_size: u16 = 24,
     time_ms: f32 = 0,
@@ -752,17 +759,42 @@ pub const CodeEditor = struct {
         return @min(@as(usize, @intCast(line)), self.lines.items.len - 1);
     }
 
-    /// X-Koordinate in Spalte umrechnen (mit Content-Offset, approximativ Monospace).
+    /// X-Koordinate in Spalte umrechnen (mit Content-Offset, echte Text-Messung).
     fn colFromX(self: *const Self, x: f32, line_idx: usize) usize {
-        const char_width: f32 = @as(f32, @floatFromInt(self.font_size)) * 0.6;
-        if (char_width <= 0) return 0;
         // Relativ zum Editor-Content, minus Gutter
         const rel_x = x - self.content_origin_x - self.gutter_width;
         if (rel_x <= 0) return 0;
+
+        const line = self.lines.items[line_idx].items;
+        if (line.len == 0) return 0;
+
+        // Wenn Messfunktion vorhanden: linearer Scan mit echter Breite
+        if (self.measure_fn) |measure| {
+            var x_accum: f32 = 0.0;
+            var byte_offset: usize = 0;
+            while (byte_offset < line.len) {
+                // UTF-8: bestimme nächste Byte-Grenze
+                var next_offset = byte_offset + 1;
+                while (next_offset < line.len and (line[next_offset] & 0xC0) == 0x80) {
+                    next_offset += 1;
+                }
+                const char_w = measure(@ptrCast(line.ptr + byte_offset), next_offset - byte_offset);
+                if (rel_x < x_accum + char_w) {
+                    return byte_offset;
+                }
+                x_accum += char_w;
+                byte_offset = next_offset;
+            }
+            // Klick nach letztem Zeichen
+            return line.len;
+        }
+
+        // Fallback: grobe Schätzung
+        const char_width: f32 = @as(f32, @floatFromInt(self.font_size)) * 0.6;
+        if (char_width <= 0) return 0;
         const col_f = @as(isize, @intFromFloat(@floor(rel_x / char_width)));
         if (col_f < 0) return 0;
-        const max_col = self.lines.items[line_idx].items.len;
-        return @min(@as(usize, @intCast(col_f)), max_col);
+        return @min(@as(usize, @intCast(col_f)), line.len);
     }
 
     // =========================================================================
