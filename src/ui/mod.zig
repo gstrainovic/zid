@@ -10,6 +10,7 @@ const Animation = animation.Animation;
 const AnimationType = animation.AnimationType;
 const AnimationManager = animation.AnimationManager;
 const editor_mod = @import("../editor/mod.zig");
+const wio = @import("wio");
 
 const log = std.log.scoped(.ui);
 
@@ -99,9 +100,10 @@ pub const UI = struct {
     }
 
     /// Clay initialisieren (nach Window Creation)
-    pub fn setupClay(self: *Self, width: u32, height: u32, text_renderer: *@import("../text/mod.zig").TextRenderer) !void {
+    pub fn setupClay(self: *Self, window: *wio.Window, width: u32, height: u32, text_renderer: *@import("../text/mod.zig").TextRenderer) !void {
         log.debug("Setting up Clay layout: {}x{}", .{ width, height });
         self.text_renderer = text_renderer;
+        self.code_editor.window = window;
 
         // Globalen Measure-Context setzen (für Maus→Spalte)
         g_text_renderer = text_renderer;

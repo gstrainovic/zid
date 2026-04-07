@@ -264,12 +264,12 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
   - [x] Synchronisation zwischen Clay-ScrollContainer und Editor-State
   - [x] Auto-Scroll, wenn Cursor den sichtbaren Bereich verlässt
   - [x] **Performance-Test mit Großdatei:** `libs/gooey/src/layout/engine.zig` (3363 Zeilen) beim Start laden und Scrolling testen
-  - [ ] **Clipboard Integration**
-    - [ ] Kopieren, Ausschneiden, Einfügen via Tastatur-Shortcuts (Ctrl+C, Ctrl+X, Ctrl+V)
-    - [ ] Integration mit System-Zwischenablage (via wio oder Platform-Code)
-  - [ ] **Maus-Interaktion & Kontextmenü**
-    - [ ] Rechtsklick-Erkennung im Editor
-    - [ ] Einfaches Kontextmenü (Clay UI) mit "Copy", "Cut", "Paste"
+  - [x] **Clipboard Integration**
+    - [x] Kopieren, Ausschneiden, Einfügen via Tastatur-Shortcuts (Ctrl+C, Ctrl+X, Ctrl+V)
+    - [x] Integration mit System-Zwischenablage (via wio oder Platform-Code)
+  - [x] **Maus-Interaktion & Kontextmenü**
+    - [x] Rechtsklick-Erkennung im Editor
+    - [x] Einfaches Kontextmenü (Clay UI) mit "Copy", "Cut", "Paste"
 
 ### Phase 9: File Explorer, Tabs & Datei-Vorschau
 - [ ] **Tab-Leiste**

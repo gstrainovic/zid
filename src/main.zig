@@ -122,7 +122,7 @@ pub fn main() !void {
     });
     defer ui_system.deinit();
 
-    try ui_system.setupClay(plat.getSize().width, plat.getSize().height, &text_renderer);
+    try ui_system.setupClay(&plat.window.?, plat.getSize().width, plat.getSize().height, &text_renderer);
 
     // 6. Clay Renderer initialisieren (WGPU)
     var clay_rdr = try clay_renderer_mod.ClayRenderer.init(
