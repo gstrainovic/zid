@@ -309,44 +309,10 @@ pub const CodeEditor = struct {
             .id = clay.ElementId.ID("code_editor"),
             .layout = .{
                 .sizing = .{ .w = .grow, .h = .grow },
-                .direction = .left_to_right,
+                .direction = .top_to_bottom,
             },
             .background_color = self.bg_color,
         })({
-            // Line Numbers Gutter
-            clay.UI()(.{
-                .id = clay.ElementId.ID("line_numbers"),
-                .layout = .{
-                    .sizing = .{ .w = .fixed(self.gutter_width), .h = .grow },
-                    // .padding = .{ .left = 8, .right = 8, .top = 8, .bottom = 8 },
-                    .direction = .top_to_bottom,
-                    .child_gap = 4,
-                },
-                .background_color = self.gutter_color,
-            })({
-                var i: usize = 0;
-                while (i < self.lines.items.len) : (i += 1) {
-                    const color = if (i == self.cursor_line)
-                        self.current_line_number_color
-                    else
-                        self.line_number_color;
-
-                    // Same fixed-height container as code lines for perfect sync
-                    clay.UI()(.{
-                        .id = clay.ElementId.IDI("line_num_container", @intCast(i)),
-                        .layout = .{
-                            .sizing = .{ .w = .grow, .h = .fixed(@floatFromInt(self.font_size + 4)) },
-                            .child_alignment = .{ .x = .left, .y = .center },
-                        },
-                    })({
-                        var buf: [16]u8 = undefined;
-                        const line_num_str = std.fmt.bufPrint(&buf, "{d}", .{i + 1}) catch "?";
-                        const persistent_str = arena.dupe(u8, line_num_str) catch "";
-                        clay.text(persistent_str, .{ .font_size = self.font_size, .color = color });
-                    });
-                }
-            });
-
             // Scrollable Editor Content
             clay.UI()(.{
                 .id = clay.ElementId.ID("editor_scroll"),
@@ -359,34 +325,57 @@ pub const CodeEditor = struct {
                     .layout = .{
                         .sizing = .{ .w = .grow, .h = .fit },
                         .direction = .top_to_bottom,
-                        .child_gap = 4,
+                        // .child_gap = 2,
                     },
                 })({
                     var i: usize = 0;
                     while (i < self.lines.items.len) : (i += 1) {
                         const line = self.lines.items[i].items;
+                        const is_current = (i == self.cursor_line);
 
-                        // Current Line Highlight
-                        if (i == self.cursor_line) {
+                        // Row Container (Gutter + Code)
+                        clay.UI()(.{
+                            .id = clay.ElementId.IDI("row", @intCast(i)),
+                            .layout = .{
+                                .sizing = .{ .w = .grow, .h = .fixed(@floatFromInt(self.font_size + 16)) },
+                                .direction = .left_to_right,
+                                .child_alignment = .{ .x = .left, .y = .center },
+                            },
+                        })({
+                            // Gutter Element
                             clay.UI()(.{
-                                .id = clay.ElementId.IDI("current_line", @intCast(i)),
+                                .id = clay.ElementId.IDI("gutter", @intCast(i)),
                                 .layout = .{
-                                    .sizing = .{ .w = .grow, .h = .fixed(@floatFromInt(self.font_size + 4)) },
+                                    .sizing = .{ .w = .fixed(self.gutter_width), .h = .fixed(@floatFromInt(self.font_size + 16)) },
+                                    .padding = .{ .left = 8, .right = 16 },
+                                    .child_alignment = .{ .x = .right, .y = .center },
                                 },
-                                .background_color = self.current_line_highlight,
+                                .background_color = if (is_current) self.current_line_highlight else self.gutter_color,
+                            })({
+                                const color = if (is_current)
+                                    self.current_line_number_color
+                                else
+                                    self.line_number_color;
+
+                                var buf: [16]u8 = undefined;
+                                const line_num_str = std.fmt.bufPrint(&buf, "{d}", .{i + 1}) catch "?";
+                                const persistent_str = arena.dupe(u8, line_num_str) catch "";
+                                clay.text(persistent_str, .{ .font_size = self.font_size, .color = color });
+                            });
+
+                            // Code Element
+                            clay.UI()(.{
+                                .id = clay.ElementId.IDI("code", @intCast(i)),
+                                .layout = .{
+                                    .sizing = .{ .w = .grow, .h = .fixed(@floatFromInt(self.font_size + 16)) },
+                                    .padding = .{ .left = 12 },
+                                    .child_alignment = .{ .x = .left, .y = .center },
+                                },
+                                .background_color = if (is_current) self.current_line_highlight else .{ 0, 0, 0, 0 },
                             })({
                                 self.renderLine(i, line);
                             });
-                        } else {
-                            clay.UI()(.{
-                                .id = clay.ElementId.IDI("line", @intCast(i)),
-                                .layout = .{
-                                    .sizing = .{ .w = .grow, .h = .fixed(@floatFromInt(self.font_size + 4)) },
-                                },
-                            })({
-                                self.renderLine(i, line);
-                            });
-                        }
+                        });
                     }
                 });
             });
@@ -397,7 +386,10 @@ pub const CodeEditor = struct {
         const tokens = self.line_tokens.items[line_idx].items;
 
         clay.UI()(.{
-            .layout = .{ .direction = .left_to_right },
+            .layout = .{ 
+                .direction = .left_to_right,
+                .child_alignment = .{ .x = .left, .y = .center }
+            },
         })({
             if (tokens.len == 0) {
                 if (line_idx == self.cursor_line and self.cursor_col == 0) {
@@ -434,7 +426,7 @@ pub const CodeEditor = struct {
 
     fn renderCursor(self: *Self) void {
         clay.UI()(.{
-            .layout = .{ .sizing = .{ .w = .fixed(2), .h = .fixed(@floatFromInt(self.font_size)) } },
+            .layout = .{ .sizing = .{ .w = .fixed(2), .h = .fixed(@floatFromInt(self.font_size + 4)) } },
             .background_color = self.cursor_color,
         })({});
     }
