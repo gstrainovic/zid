@@ -193,7 +193,7 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
     - [x] Verifiziert: "HELLO" als Text sichtbar (Screenshot: phase4_text.png)
     - [x] Text-Atlas Shader vorbereitet (text_atlas.wgsl)
     - [x] Glyph-Atlas Rendering mit echten Font-Glyphen
-  - [ ] **Windows: DirectWrite Integration** (MUSS sein!) - *Ausstehend für Windows-Build*
+  - [x] **Windows: DirectWrite Integration** (MUSS sein!) - *Erfolgreich implementiert*
 
 ### Phase 5: UI Components (von Gooey lernen, mit wgpu+wio bauen)
 - [x] Scene-System (Gooey's `scene.zig` → WGPU Buffers)

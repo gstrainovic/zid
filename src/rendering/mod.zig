@@ -3,6 +3,7 @@
 //! Verwendet WGPU für cross-platform GPU Rendering.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const wgpu = @import("wgpu");
 const clay = @import("clay");
 
@@ -200,16 +201,23 @@ pub const Renderer = struct {
         if (self.instance) |instance| instance.release();
     }
 
-    /// Surface vom wio Window erstellen (Wayland)
-    pub fn setWindow(self: *Self, wayland_display: ?*anyopaque, wayland_surface: ?*anyopaque) !void {
+    /// Surface vom wio Window erstellen (Linux/Wayland oder Windows)
+    pub fn setWindow(self: *Self, display: ?*anyopaque, surface_handle: ?*anyopaque) !void {
         if (self.instance == null) return error.NoInstance;
-        if (wayland_display == null) return error.NoWaylandDisplay;
-        if (wayland_surface == null) return error.NoWaylandSurface;
+        if (surface_handle == null) return error.NoSurfaceHandle;
 
-        const descriptor = wgpu.surfaceDescriptorFromWaylandSurface(.{
-            .display = wayland_display.?,
-            .surface = wayland_surface.?,
-        });
+        const descriptor = if (builtin.os.tag == .linux)
+            wgpu.surfaceDescriptorFromWaylandSurface(.{
+                .display = display orelse return error.NoWaylandDisplay,
+                .surface = surface_handle.?,
+            })
+        else if (builtin.os.tag == .windows)
+            wgpu.surfaceDescriptorFromWindowsHWND(.{
+                .hinstance = @ptrCast(std.os.windows.kernel32.GetModuleHandleW(null) orelse return error.NoHinstance),
+                .hwnd = surface_handle.?,
+            })
+        else
+            @compileError("Unsupported platform for surface creation");
 
         self.surface = self.instance.?.createSurface(&descriptor);
         if (self.surface == null) return error.NoSurface;
