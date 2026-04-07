@@ -175,10 +175,10 @@ pub const CodeEditor = struct {
                 continue;
             }
 
-            // Identifier oder Keyword
-            if (std.ascii.isAlphabetic(line_text[ti]) or line_text[ti] == '_') {
+            // Identifier oder Keyword (ASCII oder UTF-8 Multibyte)
+            if (std.ascii.isAlphabetic(line_text[ti]) or line_text[ti] == '_' or (line_text[ti] & 0x80) != 0) {
                 const tok_start = ti;
-                while (ti < len and (std.ascii.isAlphanumeric(line_text[ti]) or line_text[ti] == '_')) {
+                while (ti < len and (std.ascii.isAlphanumeric(line_text[ti]) or line_text[ti] == '_' or (line_text[ti] & 0x80) != 0)) {
                     ti += 1;
                 }
                 const word = line_text[tok_start..ti];
@@ -200,8 +200,45 @@ pub const CodeEditor = struct {
                 continue;
             }
 
+            // Unbekanntes Zeichen — trotzdem als Token erfassen, damit es gerendert wird.
+            const tok_start = ti;
             ti += 1;
+            tokens.append(self.allocator, Token{ .start = tok_start, .end = ti, .token_type = .plain }) catch {};
         }
+    }
+
+    // =========================================================================
+    // UTF-8 Navigation Helpers
+    // =========================================================================
+
+    /// Find the previous UTF-8 character boundary (byte offset).
+    fn prevCharBoundary(text: []const u8, pos: usize) usize {
+        if (pos == 0) return 0;
+        var i = pos - 1;
+        // Skip continuation bytes (10xxxxxx pattern).
+        while (i > 0 and (text[i] & 0xC0) == 0x80) {
+            i -= 1;
+        }
+        return i;
+    }
+
+    /// Find the next UTF-8 character boundary (byte offset).
+    fn nextCharBoundary(text: []const u8, pos: usize) usize {
+        if (pos >= text.len) return text.len;
+        var i = pos + 1;
+        while (i < text.len and (text[i] & 0xC0) == 0x80) {
+            i += 1;
+        }
+        return i;
+    }
+
+    /// Snap a byte offset to a valid UTF-8 character boundary.
+    /// Moves backward if pos lands on a continuation byte.
+    fn snapToCharBoundary(text: []const u8, pos: usize) usize {
+        if (pos == 0) return 0;
+        if (pos >= text.len) return text.len;
+        if ((text[pos] & 0xC0) != 0x80) return pos;
+        return prevCharBoundary(text, pos);
     }
 
     pub fn handleKeyPress(self: *Self, key: wio.Button) void {
@@ -209,7 +246,7 @@ pub const CodeEditor = struct {
         switch (key) {
             .left => {
                 if (self.cursor_col > 0) {
-                    self.cursor_col -= 1;
+                    self.cursor_col = prevCharBoundary(line.items, self.cursor_col);
                 } else if (self.cursor_line > 0) {
                     self.cursor_line -= 1;
                     self.cursor_col = self.lines.items[self.cursor_line].items.len;
@@ -217,7 +254,7 @@ pub const CodeEditor = struct {
             },
             .right => {
                 if (self.cursor_col < line.items.len) {
-                    self.cursor_col += 1;
+                    self.cursor_col = nextCharBoundary(line.items, self.cursor_col);
                 } else if (self.cursor_line + 1 < self.lines.items.len) {
                     self.cursor_line += 1;
                     self.cursor_col = 0;
@@ -226,13 +263,15 @@ pub const CodeEditor = struct {
             .up => {
                 if (self.cursor_line > 0) {
                     self.cursor_line -= 1;
-                    self.cursor_col = @min(self.cursor_col, self.lines.items[self.cursor_line].items.len);
+                    const target = self.lines.items[self.cursor_line].items;
+                    self.cursor_col = snapToCharBoundary(target, @min(self.cursor_col, target.len));
                 }
             },
             .down => {
                 if (self.cursor_line + 1 < self.lines.items.len) {
                     self.cursor_line += 1;
-                    self.cursor_col = @min(self.cursor_col, self.lines.items[self.cursor_line].items.len);
+                    const target = self.lines.items[self.cursor_line].items;
+                    self.cursor_col = snapToCharBoundary(target, @min(self.cursor_col, target.len));
                 }
             },
             .home => {
@@ -243,11 +282,17 @@ pub const CodeEditor = struct {
             },
             .backspace => {
                 if (self.cursor_col > 0) {
-                    _ = line.orderedRemove(self.cursor_col - 1);
-                    self.cursor_col -= 1;
+                    // Remove entire UTF-8 character before cursor.
+                    const char_start = prevCharBoundary(line.items, self.cursor_col);
+                    const byte_count = self.cursor_col - char_start;
+                    var removed: usize = 0;
+                    while (removed < byte_count) : (removed += 1) {
+                        _ = line.orderedRemove(char_start);
+                    }
+                    self.cursor_col = char_start;
                     self.tokenizeLine(self.cursor_line);
                 } else if (self.cursor_line > 0) {
-                    // Merge with previous line
+                    // Merge with previous line.
                     const prev_line_idx = self.cursor_line - 1;
                     const prev_len = self.lines.items[prev_line_idx].items.len;
                     self.lines.items[prev_line_idx].appendSlice(self.allocator, line.items) catch {};
@@ -264,10 +309,16 @@ pub const CodeEditor = struct {
             },
             .delete => {
                 if (self.cursor_col < line.items.len) {
-                    _ = line.orderedRemove(self.cursor_col);
+                    // Remove entire UTF-8 character at cursor.
+                    const char_end = nextCharBoundary(line.items, self.cursor_col);
+                    const byte_count = char_end - self.cursor_col;
+                    var removed: usize = 0;
+                    while (removed < byte_count) : (removed += 1) {
+                        _ = line.orderedRemove(self.cursor_col);
+                    }
                     self.tokenizeLine(self.cursor_line);
                 } else if (self.cursor_line + 1 < self.lines.items.len) {
-                    // Merge with next line
+                    // Merge with next line.
                     const next_line_idx = self.cursor_line + 1;
                     line.appendSlice(self.allocator, self.lines.items[next_line_idx].items) catch {};
                     var removed_line = self.lines.orderedRemove(next_line_idx);
@@ -530,4 +581,102 @@ test "CodeEditor: auto-typing simulation" {
         editor_inst.handleChar(c);
     }
     try std.testing.expectEqualStrings("    // test", editor_inst.lines.items[1].items);
+}
+
+test "CodeEditor: Umlaut-Eingabe und UTF-8-Navigation" {
+    const allocator = std.testing.allocator;
+    var editor_inst = CodeEditor.init(allocator);
+    defer editor_inst.deinit();
+
+    // "hällo" tippen: h, ä, l, l, o
+    editor_inst.handleChar('h');
+    editor_inst.handleChar(0xE4); // ä
+    editor_inst.handleChar('l');
+    editor_inst.handleChar('l');
+    editor_inst.handleChar('o');
+    // "hällo" = h(1) + ä(2) + l(1) + l(1) + o(1) = 6 Bytes
+    try std.testing.expectEqualStrings("h\xC3\xA4llo", editor_inst.lines.items[0].items);
+    try std.testing.expectEqual(@as(usize, 6), editor_inst.cursor_col);
+
+    // Links navigieren: von Ende(6) zurück zu 'o'(5)
+    editor_inst.handleKeyPress(.left);
+    try std.testing.expectEqual(@as(usize, 5), editor_inst.cursor_col);
+
+    // Nochmal links: von 'o'(5) zu zweitem 'l'(4)
+    editor_inst.handleKeyPress(.left);
+    try std.testing.expectEqual(@as(usize, 4), editor_inst.cursor_col);
+
+    // Nochmal links: von zweitem 'l'(4) zu erstem 'l'(3)
+    editor_inst.handleKeyPress(.left);
+    try std.testing.expectEqual(@as(usize, 3), editor_inst.cursor_col);
+
+    // Nochmal links: über ä (2 Bytes, Pos 1-2) → vor ä(1)
+    editor_inst.handleKeyPress(.left);
+    try std.testing.expectEqual(@as(usize, 1), editor_inst.cursor_col);
+
+    // Nochmal links: von ä(1) zu 'h'(0)
+    editor_inst.handleKeyPress(.left);
+    try std.testing.expectEqual(@as(usize, 0), editor_inst.cursor_col);
+
+    // Rechts: von 'h'(0) über... nein, nextCharBoundary(0) = 1 (ä Start)
+    editor_inst.handleKeyPress(.right);
+    try std.testing.expectEqual(@as(usize, 1), editor_inst.cursor_col);
+
+    // Rechts: über ä (2 Bytes) zum ersten 'l'(3)
+    editor_inst.handleKeyPress(.right);
+    try std.testing.expectEqual(@as(usize, 3), editor_inst.cursor_col);
+
+    // Backspace: von 'l'(3) → ä (2 Bytes) löschen
+    editor_inst.handleKeyPress(.backspace);
+    try std.testing.expectEqualStrings("hllo", editor_inst.lines.items[0].items);
+    try std.testing.expectEqual(@as(usize, 1), editor_inst.cursor_col);
+
+    // ö einfügen an Position 1
+    editor_inst.handleChar(0xF6); // ö
+    try std.testing.expectEqualStrings("h\xC3\xB6llo", editor_inst.lines.items[0].items);
+
+    // Delete: ö mit Delete vorwärts löschen
+    // Cursor steht nach ö (Pos 3), zurück navigieren
+    editor_inst.handleKeyPress(.left);
+    try std.testing.expectEqual(@as(usize, 1), editor_inst.cursor_col);
+    // Delete löscht ö (2 Bytes)
+    editor_inst.handleKeyPress(.delete);
+    try std.testing.expectEqualStrings("hllo", editor_inst.lines.items[0].items);
+    try std.testing.expectEqual(@as(usize, 1), editor_inst.cursor_col);
+}
+
+test "CodeEditor: Up/Down mit Umlaut snapped auf Zeichengrenze" {
+    const allocator = std.testing.allocator;
+    var editor_inst = CodeEditor.init(allocator);
+    defer editor_inst.deinit();
+
+    // Zeile 0: "ab" (2 Bytes)
+    // Zeile 1: "äx" (3 Bytes: ä=2 + x=1)
+    editor_inst.setText("ab\näx");
+    try std.testing.expectEqual(@as(usize, 2), editor_inst.lines.items.len);
+
+    // Cursor auf Zeile 0, Spalte 1 (zwischen a und b)
+    editor_inst.cursor_line = 0;
+    editor_inst.cursor_col = 1;
+
+    // Down: Zeile 1, cursor_col=1 wäre mitten in ä → muss auf 0 snappen
+    editor_inst.handleKeyPress(.down);
+    try std.testing.expectEqual(@as(usize, 1), editor_inst.cursor_line);
+    try std.testing.expectEqual(@as(usize, 0), editor_inst.cursor_col);
+}
+
+test "CodeEditor: Tokenizer erfasst UTF-8 Zeichen als Token" {
+    const allocator = std.testing.allocator;
+    var editor_inst = CodeEditor.init(allocator);
+    defer editor_inst.deinit();
+
+    // "ä" eingeben — muss als Token tokenisiert werden, damit es gerendert wird.
+    editor_inst.handleChar(0xE4); // ä
+    try std.testing.expectEqualStrings("\xC3\xA4", editor_inst.lines.items[0].items);
+
+    const tokens = editor_inst.line_tokens.items[0].items;
+    try std.testing.expect(tokens.len > 0);
+    // Token muss die gesamten 2 Bytes des Umlauts abdecken.
+    try std.testing.expectEqual(@as(usize, 0), tokens[0].start);
+    try std.testing.expectEqual(@as(usize, 2), tokens[0].end);
 }
