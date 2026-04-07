@@ -161,6 +161,7 @@ pub fn main() !void {
     var mouse_x: f32 = 0;
     var mouse_y: f32 = 0;
     var mouse_down: bool = false;
+    var shift_held: bool = false;
     
     while (plat.isRunning()) {
         const delta_time_ms: f32 = 16.0;
@@ -196,16 +197,28 @@ pub fn main() !void {
                     .mouse => |pos| {
                         mouse_x = @floatFromInt(pos.x);
                         mouse_y = @floatFromInt(pos.y);
+                        ui_system.handleMouseMove(mouse_x, mouse_y);
                     },
                     .button_press => |btn| {
                         if (btn == .mouse_left) {
                             mouse_down = true;
+                            ui_system.handleMouseDown(mouse_x, mouse_y);
+                        } else if (btn == .left_shift or btn == .right_shift) {
+                            shift_held = true;
+                            ui_system.setShiftState(true);
                         } else {
                             ui_system.handleKeyPress(btn);
                         }
                     },
                     .button_release => |btn| {
-                        if (btn == .mouse_left) mouse_down = false;
+                        if (btn == .mouse_left) {
+                            mouse_down = false;
+                            ui_system.handleMouseUp();
+                        }
+                        if (btn == .left_shift or btn == .right_shift) {
+                            shift_held = false;
+                            ui_system.setShiftState(false);
+                        }
                     },
                     .char => |char_code| {
                         ui_system.handleChar(char_code);
@@ -216,6 +229,9 @@ pub fn main() !void {
                     },
                     .scroll_vertical => |delta| {
                         scroll_delta_y = @floatCast(delta);
+                        // Auch an Editor für zeilen-basiertes Scroll-Handling (Zeilen pro Frame)
+                        const lines_delta: i32 = @intFromFloat(@round(scroll_delta_y / 3.0));
+                        if (lines_delta != 0) ui_system.handleScroll(lines_delta);
                     },
                     else => {},
                 }
