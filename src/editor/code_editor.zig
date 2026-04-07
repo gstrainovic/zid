@@ -56,6 +56,13 @@ pub const CodeEditor = struct {
     height: f32 = 400,
     gutter_width: f32 = 50,
     scrollbar_width: f32 = 10,
+
+    /// Content-Offset vom Fenster-Top (für Maus→Zeile Konversion)
+    content_origin_y: f32 = 0,
+
+    /// X-Offset vom Fenster-Left (für Maus→Spalte Konversion)
+    content_origin_x: f32 = 0,
+
     font_size: u16 = 24,
     time_ms: f32 = 0,
 
@@ -732,24 +739,27 @@ pub const CodeEditor = struct {
         self.mouse_down = false;
     }
 
-    /// Y-Koordinate in Zeilen-Index umrechnen (mit Scroll-Offset).
+    /// Y-Koordinate in Zeilen-Index umrechnen (mit Content-Offset und Scroll-Offset).
     fn lineFromY(self: *const Self, y: f32) usize {
         const line_height: f32 = @floatFromInt(self.font_size + 16);
         if (line_height <= 0) return 0;
-        const raw_line = @as(isize, @intFromFloat(@floor(y / line_height)));
+        // Relativ zum Editor-Content (Fenster-Y minus Content-Offset)
+        const rel_y = y - self.content_origin_y;
+        if (rel_y < 0) return 0;
+        const raw_line = @as(isize, @intFromFloat(@floor(rel_y / line_height)));
         const line = raw_line + @as(isize, @intCast(self.scroll_offset_first_line));
         if (line < 0) return 0;
         return @min(@as(usize, @intCast(line)), self.lines.items.len - 1);
     }
 
-    /// X-Koordinate in Spalte umrechnen (approximativ, Monospace).
+    /// X-Koordinate in Spalte umrechnen (mit Content-Offset, approximativ Monospace).
     fn colFromX(self: *const Self, x: f32, line_idx: usize) usize {
         const char_width: f32 = @as(f32, @floatFromInt(self.font_size)) * 0.6;
         if (char_width <= 0) return 0;
-        // Gutter-Offset abziehen
-        const text_x = x - self.gutter_width;
-        if (text_x <= 0) return 0;
-        const col_f = @as(isize, @intFromFloat(@floor(text_x / char_width)));
+        // Relativ zum Editor-Content, minus Gutter
+        const rel_x = x - self.content_origin_x - self.gutter_width;
+        if (rel_x <= 0) return 0;
+        const col_f = @as(isize, @intFromFloat(@floor(rel_x / char_width)));
         if (col_f < 0) return 0;
         const max_col = self.lines.items[line_idx].items.len;
         return @min(@as(usize, @intCast(col_f)), max_col);
