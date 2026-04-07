@@ -31,6 +31,12 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    // zigimg for Windows PNG loading
+    const zigimg_dep = b.dependency("zigimg", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
     const exe_mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
@@ -42,6 +48,7 @@ pub fn build(b: *std.Build) void {
     exe_mod.addImport("wio", wio_dep.module("wio"));
     exe_mod.addImport("wgpu", wgpu_dep.module("wgpu"));
     exe_mod.addImport("gooey", gooey_dep.module("gooey"));
+    exe_mod.addImport("zigimg", zigimg_dep.module("zigimg"));
     // Shader als Resource-File installieren
     const shader_install_triangle = b.addInstallFileWithDir(b.path("shaders/triangle.wgsl"), .{ .custom = "share" }, "triangle.wgsl");
     b.getInstallStep().dependOn(&shader_install_triangle.step);

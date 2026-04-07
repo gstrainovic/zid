@@ -174,16 +174,6 @@ pub const UI = struct {
 
         const t = self.theme;
 
-        // Animations-Werte holen
-        var current_scale: f32 = 1.0;
-        var current_opacity: f32 = 1.0;
-
-        if (self.anim_manager.animations.items.len > 0) {
-            const anim = self.anim_manager.animations.items[0];
-            current_scale = anim.scale();
-            current_opacity = anim.opacity();
-        }
-
         // Root Container
         clay.UI()(.{
             .id = clay.ElementId.ID("Root"),
@@ -195,20 +185,17 @@ pub const UI = struct {
             },
             .background_color = t.bg,
         })({
-            // Header mit Button (Animiert mit Opacity und Offset)
-            var header_bg = t.surface;
-            header_bg[3] = header_bg[3] * current_opacity;
-
+            // Header mit Logo und Titel
             clay.UI()(.{
                 .id = clay.ElementId.ID("Header"),
                 .layout = .{
-                    .sizing = .{ .w = .grow, .h = .fixed(80) },
+                    .sizing = .{ .w = .grow, .h = .fixed(64) },
                     .child_gap = 16,
                     .direction = .left_to_right,
                     .child_alignment = .{ .x = .left, .y = .center },
                     .padding = .all(10),
                 },
-                .background_color = header_bg,
+                .background_color = t.surface,
                 .border = .{ .width = .all(2), .color = t.accent },
             })({
                 // Logo Image (falls vorhanden)
@@ -216,100 +203,18 @@ pub const UI = struct {
                     clay.UI()(.{
                         .id = clay.ElementId.ID("Logo"),
                         .layout = .{
-                            .sizing = .{ .w = .fixed(64), .h = .fixed(64) },
+                            .sizing = .{ .w = .fixed(48), .h = .fixed(48) },
                         },
                         .image = .{ .image_data = ptr },
-                        // Wir verwenden die background_color von ElementDeclaration als Tint
-                        .background_color = .{ 255, 255, 255, 255 }, 
-                    })({});
-                } else {
-                    // Fallback placeholder
-                    clay.UI()(.{
-                        .id = clay.ElementId.ID("LogoPlaceholder"),
-                        .layout = .{
-                            .sizing = .{ .w = .fixed(64), .h = .fixed(64) },
-                        },
-                        .background_color = t.primary,
+                        .background_color = .{ 255, 255, 255, 255 },
                     })({});
                 }
 
-                clay.text("VULKAN-ED", .{ .font_size = 32, .color = t.text });
-
-                // SVG Icons Test
-                const fa = self.frame_arena.allocator();
-                components.Svg(fa, "IconSearch", components.Lucide.search, 24, t.accent);
-                components.Svg(fa, "IconSettings", components.Lucide.settings, 24, t.subtext);
-                components.Svg(fa, "IconHeart", components.Lucide.heart, 24, .{ 255, 100, 100, 255 });
-
-                // Button 1 (Statisch)
-                components.Button("TestButton", "HELLO CLAY", t);
-
-                // Button 2 (Animiert mit Scale und Opacity)
-                var accent_theme = t;
-                accent_theme.primary = t.accent;
-                accent_theme.text_on_primary = t.text_on_accent;
-                
-                // Alpha auch für Button-Hintergrund übernehmen
-                accent_theme.primary[3] = accent_theme.primary[3] * current_opacity;
-
-                clay.UI()(.{
-                    .id = clay.ElementId.ID("AnimatedButton"),
-                    .layout = .{
-                        .sizing = .{ .w = .fixed(180 * current_scale), .h = .fixed(50 * current_scale) },
-                        .padding = .axes(@intFromFloat(10 * current_scale), @intFromFloat(20 * current_scale)),
-                        .child_alignment = .{ .x = .center, .y = .center },
-                    },
-                    .background_color = accent_theme.primary,
-                    .corner_radius = .all(4 * current_scale),
-                    .border = .{ .width = .all(2), .color = t.primary },
-                })({
-                    clay.text("ANIMATED", .{ 
-                        .font_size = 24, 
-                        .color = accent_theme.text_on_primary,
-                    });
-                });
+                clay.text("VULKAN-ED", .{ .font_size = 28, .color = t.text });
             });
 
-            // Content Area mit TextInput, TextArea, ScrollContainer
-            clay.UI()(.{
-                .id = clay.ElementId.ID("Content"),
-                .layout = .{
-                    .sizing = .grow,
-                    .padding = .all(16),
-                    .child_gap = 16,
-                    .direction = .top_to_bottom,
-                },
-                .background_color = t.bg,
-            })({
-                // TextInput
-                components.TextInput("MyInput", "", "Type something...", t);
-
-                // TextArea
-                components.TextArea("MyTextArea", "This is a multiline\ntext area component\nwith multiple lines.", t);
-
-                // ScrollContainer
-                components.ScrollContainer("MyScroll", t)({
-                    clay.UI()(.{
-                        .layout = .{ 
-                            .sizing = .{ .w = .grow, .h = .fixed(400) }, 
-                            .padding = .all(10), 
-                            .child_gap = 10,
-                            .direction = .top_to_bottom,
-                        },
-                        .background_color = t.overlay,
-                    })({
-                        clay.text("SCROLLABLE CONTENT", .{ .font_size = 24, .color = t.text });
-                        clay.text("Line 1: Clay now has measureText!", .{ .font_size = 24, .color = t.subtext });
-                        clay.text("Line 2: UI elements should no longer overlap.", .{ .font_size = 24, .color = t.subtext });
-                        clay.text("Line 3: Spacing is handled by child_gap.", .{ .font_size = 24, .color = t.subtext });
-                        clay.text("Line 4: This is a scrollable area.", .{ .font_size = 24, .color = t.subtext });
-                        clay.text("Line 5: Multiple lines of text are now working.", .{ .font_size = 24, .color = t.subtext });
-                    });
-                });
-
-                // Code Editor (mit Syntax Highlighting, Current Line Highlight, Scrollable Content)
-                self.code_editor.render(self.frame_arena.allocator());
-            });
+            // Nur Code Editor - füllt den restlichen Raum
+            self.code_editor.render(self.frame_arena.allocator());
         });
 
         return self.endLayout();
