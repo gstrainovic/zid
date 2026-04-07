@@ -119,11 +119,6 @@ pub fn main() !void {
 
     try ui_system.setupClay(plat.getSize().width, plat.getSize().height, &text_renderer);
 
-    // Start Test-Animationen (3 Sekunden)
-    _ = try ui_system.anim_manager.addAnimation(.fade_in, 3000.0);
-    _ = try ui_system.anim_manager.addAnimation(.slide_in_left, 3000.0);
-    _ = try ui_system.anim_manager.addAnimation(.scale_up, 3000.0);
-
     // 6. Clay Renderer initialisieren (WGPU)
     var clay_rdr = try clay_renderer_mod.ClayRenderer.init(
         allocator,
