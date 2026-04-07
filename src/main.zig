@@ -221,6 +221,9 @@ pub fn main() !void {
                             ui_system.handleKeyPress(btn);
                         }
                     },
+                    .button_repeat => |btn| {
+                        ui_system.handleKeyPress(btn);
+                    },
                     .button_release => |btn| {
                         if (btn == .mouse_left) {
                             mouse_down = false;

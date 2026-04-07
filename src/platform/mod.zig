@@ -217,6 +217,16 @@ pub const Platform = struct {
                     }
                 }
             },
+            .button_repeat => |button| {
+                if (!isMouseButton(button)) {
+                    if (self.event_callback) |cb| {
+                        cb(WindowEvent{ .key_pressed = .{
+                            .key = @intFromEnum(button),
+                            .mods = 0,
+                        } }, self.user_data);
+                    }
+                }
+            },
             .button_release => |button| {
                 if (isMouseButton(button)) {
                     if (self.event_callback) |cb| {
