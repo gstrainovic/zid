@@ -336,7 +336,7 @@ pub const CodeEditor = struct {
                         .id = clay.ElementId.IDI("line_num_container", @intCast(i)),
                         .layout = .{
                             .sizing = .{ .w = .grow, .h = .fixed(@floatFromInt(self.font_size + 4)) },
-                            .child_alignment = .{ .x = .right, .y = .center },
+                            .child_alignment = .{ .x = .left, .y = .center },
                         },
                     })({
                         var buf: [16]u8 = undefined;
