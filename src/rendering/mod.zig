@@ -53,7 +53,7 @@ pub const Renderer = struct {
 
     /// Renderer initialisieren
     pub fn init(allocator: std.mem.Allocator, config: RendererConfig) !Self {
-        log.info("Initializing renderer (WGPU backend, Vulkan forced via WGPU_BACKEND=vulkan)", .{});
+        log.debug("Initializing renderer (WGPU backend, Vulkan forced via WGPU_BACKEND=vulkan)", .{});
 
         // WGPU Instance erstellen (Vulkan Backend forcieren)
         var extras = wgpu.InstanceExtras{
@@ -175,7 +175,7 @@ pub const Renderer = struct {
             return error.PipelineCreateFailed;
         };
 
-        log.info("WGPU initialized: instance={*} adapter={*} device={*}", .{ instance, adapter, device });
+        log.debug("WGPU initialized: instance={*} adapter={*} device={*}", .{ instance, adapter, device });
 
         return Self{
             .allocator = allocator,
@@ -222,7 +222,7 @@ pub const Renderer = struct {
         self.surface = self.instance.?.createSurface(&descriptor);
         if (self.surface == null) return error.NoSurface;
 
-        log.info("WGPU surface created: {*}", .{self.surface});
+        log.debug("WGPU surface created: {*}", .{self.surface});
     }
 
     /// Swap Chain konfigurieren
@@ -246,7 +246,7 @@ pub const Renderer = struct {
         };
 
         self.surface.?.configure(&config);
-        log.info("Swap chain configured: {}x{}", .{ width, height });
+        log.debug("Swap chain configured: {}x{}", .{ width, height });
     }
 
     /// Frame starten
@@ -271,7 +271,7 @@ pub const Renderer = struct {
     /// Viewport Resize
     pub fn resize(self: *Self, width: u32, height: u32) !void {
         if (width == 0 or height == 0) return;
-        log.info("Viewport resized: {}x{}", .{ width, height });
+        log.debug("Viewport resized: {}x{}", .{ width, height });
         try self.configureSwapChain(width, height);
     }
 

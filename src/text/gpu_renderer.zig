@@ -49,7 +49,7 @@ pub const TextRendererGPU = struct {
         viewport_width: u32,
         viewport_height: u32,
     ) !Self {
-        log.info("Initializing GPU text renderer", .{});
+        log.debug("Initializing GPU text renderer", .{});
 
         // Shader laden
         const shader_code = try std.fs.cwd().readFileAlloc(
@@ -183,7 +183,7 @@ const vertex_buffers = [_]wgpu.VertexBufferLayout{
     }
 
     pub fn deinit(self: *Self) void {
-        log.info("GPU text renderer shutdown", .{});
+        log.debug("GPU text renderer shutdown", .{});
         if (self.text_vertex_buffer) |b| b.release();
         if (self.vertex_buffer) |b| b.release();
         if (self.atlas_texture_view) |v| v.release();
@@ -251,7 +251,7 @@ const vertex_buffers = [_]wgpu.VertexBufferLayout{
         self.atlas_texture = texture;
         self.atlas_texture_view = view;
 
-        log.info("Atlas updated: {}x{}", .{ atlas_size, atlas_size });
+        log.debug("Atlas updated: {}x{}", .{ atlas_size, atlas_size });
     }
 
     /// Text rendern mit echtem Glyph-Atlas Rendering

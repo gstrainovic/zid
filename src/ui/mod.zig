@@ -47,12 +47,12 @@ pub const UI = struct {
 
     /// UI initialisieren
     pub fn init(allocator: std.mem.Allocator, config: UIConfig) !Self {
-        log.info("Initializing UI system", .{});
+        log.debug("Initializing UI system", .{});
 
         // Clay Memory allozieren (großzügiger Puffer für viele Elemente/Zeilen)
         const min_memory = clay.minMemorySize();
         const generous_memory = @max(min_memory, 10 * 1024 * 1024); // 10 MB
-        log.info("Clay requires {} bytes, allocating {} bytes", .{ min_memory, generous_memory });
+        log.debug("Clay requires {} bytes, allocating {} bytes", .{ min_memory, generous_memory });
 
         const clay_memory = try allocator.alloc(u8, generous_memory);
 
@@ -80,7 +80,7 @@ pub const UI = struct {
 
     /// UI aufräumen
     pub fn deinit(self: *Self) void {
-        log.info("UI system shutdown", .{});
+        log.debug("UI system shutdown", .{});
         self.anim_manager.deinit();
         self.frame_arena.deinit();
         self.allocator.free(self.clay_memory);
@@ -89,7 +89,7 @@ pub const UI = struct {
 
     /// Clay initialisieren (nach Window Creation)
     pub fn setupClay(self: *Self, width: u32, height: u32, text_renderer: *@import("../text/mod.zig").TextRenderer) !void {
-        log.info("Setting up Clay layout: {}x{}", .{ width, height });
+        log.debug("Setting up Clay layout: {}x{}", .{ width, height });
         self.text_renderer = text_renderer;
 
         const arena = clay.createArenaWithCapacityAndMemory(self.clay_memory);
@@ -100,7 +100,7 @@ pub const UI = struct {
         clay.setMeasureTextFunction(*Self, self, clayMeasureText);
 
         self.initialized = true;
-        log.info("Clay initialized", .{});
+        log.debug("Clay initialized", .{});
     }
 
     /// Clay Measure Text Callback

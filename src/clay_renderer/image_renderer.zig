@@ -64,7 +64,7 @@ pub const ImageRenderer = struct {
         viewport_width: u32,
         viewport_height: u32,
     ) !Self {
-        log.info("Initializing Image Renderer", .{});
+        log.debug("Initializing Image Renderer", .{});
 
         var self = Self{
             .allocator = allocator,
@@ -197,12 +197,12 @@ pub const ImageRenderer = struct {
             .multisample = wgpu.MultisampleState{},
         }) orelse return error.PipelineCreateFailed;
 
-        log.info("Image Renderer initialized", .{});
+        log.debug("Image Renderer initialized", .{});
         return self;
     }
 
     pub fn deinit(self: *Self) void {
-        log.info("Image Renderer shutdown", .{});
+        log.debug("Image Renderer shutdown", .{});
         if (self.vertex_buffer) |b| b.release();
         self.bind_group_layout.release();
         if (self.render_pipeline) |p| p.release();
@@ -220,7 +220,7 @@ pub const ImageRenderer = struct {
         width: u32,
         height: u32,
     ) !ImageTexture {
-        log.info("Creating texture {}x{}", .{ width, height });
+        log.debug("Creating texture {}x{}", .{ width, height });
 
         const texture = self.device.createTexture(&wgpu.TextureDescriptor{
             .label = wgpu.StringView.fromSlice("image_texture"),
@@ -293,7 +293,7 @@ pub const ImageRenderer = struct {
         allocator: std.mem.Allocator,
         path: []const u8,
     ) !ImageTexture {
-        log.info("Loading image from path: {s}", .{path});
+        log.debug("Loading image from path: {s}", .{path});
         const zigimg = @import("zigimg");
 
         const file_data = try std.fs.cwd().readFileAlloc(allocator, path, 64 * 1024 * 1024);
@@ -341,7 +341,7 @@ pub const ImageRenderer = struct {
 
     /// Viewport aktualisieren (bei Resize)
     pub fn setViewport(self: *Self, width: u32, height: u32) void {
-        log.info("Image Renderer viewport resized to {}x{}", .{ width, height });
+        log.debug("Image Renderer viewport resized to {}x{}", .{ width, height });
         self.viewport_width = @floatFromInt(width);
         self.viewport_height = @floatFromInt(height);
     }
@@ -391,7 +391,7 @@ pub const ImageRenderer = struct {
             }) orelse return error.BufferCreateFailed;
             self.vertex_buffer_size = new_capacity;
             self.vertex_buffer_cursor = 0;
-            log.info("Image vertex buffer resized to {} bytes", .{self.vertex_buffer_size});
+            log.debug("Image vertex buffer resized to {} bytes", .{self.vertex_buffer_size});
         }
 
         const offset = self.vertex_buffer_cursor;

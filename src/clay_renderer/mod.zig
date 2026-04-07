@@ -42,7 +42,7 @@ pub const ClayRenderer = struct {
         viewport_width: u32,
         viewport_height: u32,
     ) !Self {
-        log.info("Initializing Clay renderer", .{});
+        log.debug("Initializing Clay renderer", .{});
 
         var self = Self{
             .allocator = allocator,
@@ -131,13 +131,13 @@ pub const ClayRenderer = struct {
             .multisample = wgpu.MultisampleState{},
         }) orelse return error.PipelineCreateFailed;
 
-        log.info("Clay renderer initialized", .{});
+        log.debug("Clay renderer initialized", .{});
         return self;
     }
 
     /// Renderer aufräumen
     pub fn deinit(self: *Self) void {
-        log.info("Clay renderer shutdown", .{});
+        log.debug("Clay renderer shutdown", .{});
         if (self.vertex_buffer) |buf| buf.release();
         if (self.render_pipeline) |p| p.release();
         if (self.shader_module) |s| s.release();
@@ -166,12 +166,12 @@ pub const ClayRenderer = struct {
         }) orelse return error.BufferCreateFailed;
 
         self.vertex_buffer_size = buffer_size;
-        log.info("Vertex buffer resized to {} vertices", .{self.max_vertices});
+        log.debug("Vertex buffer resized to {} vertices", .{self.max_vertices});
     }
 
     /// Viewport aktualisieren (bei Resize)
     pub fn setViewport(self: *Self, width: u32, height: u32) void {
-        log.info("Viewport resized to {}x{}", .{ width, height });
+        log.debug("Viewport resized to {}x{}", .{ width, height });
         self.viewport_width = @floatFromInt(width);
         self.viewport_height = @floatFromInt(height);
     }
@@ -382,7 +382,7 @@ pub const ClayRenderer = struct {
             }) orelse return error.BufferCreateFailed;
             self.vertex_buffer_size = new_capacity;
             self.vertex_buffer_cursor = 0; // Reset nach Resize
-            log.info("Vertex buffer resized to {} bytes", .{self.vertex_buffer_size});
+            log.debug("Vertex buffer resized to {} bytes", .{self.vertex_buffer_size});
         }
 
         const offset = self.vertex_buffer_cursor;

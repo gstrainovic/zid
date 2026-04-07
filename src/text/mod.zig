@@ -68,22 +68,22 @@ pub const TextRenderer = struct {
     }
 
     pub fn init(allocator: std.mem.Allocator, config: FontConfig) !Self {
-        log.info("Initializing text renderer", .{});
-        log.info("Platform: {s}", .{@tagName(builtin.os.tag)});
-        log.info("Font: {s} size={d}", .{ config.font_path, config.size });
+        log.debug("Initializing text renderer", .{});
+        log.debug("Platform: {s}", .{@tagName(builtin.os.tag)});
+        log.debug("Font: {s} size={d}", .{ config.font_path, config.size });
 
         // TextSystem ist ~1.7MB gross - muss auf Heap alloziert werden
         var ts_ptr = try allocator.create(TextSystem);
         errdefer allocator.destroy(ts_ptr);
 
-        log.info("Creating TextSystem on heap...", .{});
+        log.debug("Creating TextSystem on heap...", .{});
         try ts_ptr.initInPlace(allocator, 1.0);
-        log.info("TextSystem created successfully", .{});
+        log.debug("TextSystem created successfully", .{});
 
         // Font laden (Direkt vom Pfad, KEINE Discovery/Fontconfig!)
-        log.info("Loading font from path: {s}...", .{config.font_path});
+        log.debug("Loading font from path: {s}...", .{config.font_path});
         try ts_ptr.loadFont(config.font_path, config.size);
-        log.info("Font loaded successfully", .{});
+        log.debug("Font loaded successfully", .{});
 
         return Self{
             .allocator = allocator,
@@ -94,7 +94,7 @@ pub const TextRenderer = struct {
     }
 
     pub fn deinit(self: *Self) void {
-        log.info("Text renderer shutdown", .{});
+        log.debug("Text renderer shutdown", .{});
         self.ts_ptr.deinit();
         self.allocator.destroy(self.ts_ptr);
     }
