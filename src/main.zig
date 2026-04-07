@@ -210,6 +210,10 @@ pub fn main() !void {
                     .char => |char_code| {
                         ui_system.handleChar(char_code);
                     },
+                    .focused => {
+                        // Text-Input nach Fokus-Erhalt re-aktivieren (wichtig für Wayland)
+                        plat.setTextInput(true);
+                    },
                     .scroll_vertical => |delta| {
                         scroll_delta_y = @floatCast(delta);
                     },
