@@ -950,15 +950,14 @@ pub const CodeEditor = struct {
                                     .padding = .{ .left = 12 },
                                     .child_alignment = .{ .x = .left, .y = .center },
                                 },
-                                .background_color = if (is_current and !is_selected) self.current_line_highlight else if (is_selected) self.selection_color else .{ 0, 0, 0, 0 },
-                            })({
-                                self.renderLine(i, line);
-                            });
-                        });
-                    }
-                });
-            });
-
+                                .background_color = if (is_current) self.current_line_highlight else .{ 0, 0, 0, 0 },
+                                })({
+                                 self.renderLine(i, line);
+                                });
+                                });
+                                }
+                                });
+                                });
             // Rechts: Scrollbar
             if (self.lines.items.len > self.visibleLineCount()) {
                 self.renderScrollbar();
@@ -1010,6 +1009,10 @@ pub const CodeEditor = struct {
         clay.UI()(.{
             .layout = .{ .direction = .left_to_right, .child_alignment = .{ .x = .left, .y = .center } },
         })({
+            if (self.hasSelection()) {
+                self.renderSelection(line_idx);
+            }
+
             if (tokens.len == 0) {
                 clay.text(line, .{ .font_size = self.font_size, .color = .{ 202, 211, 245, 255 } });
                 // Cursor bei leerer Zeile
@@ -1031,6 +1034,58 @@ pub const CodeEditor = struct {
                     self.renderCursor(line.len);
                 }
             }
+        });
+    }
+
+    fn renderSelection(self: *Self, line_idx: usize) void {
+        const sl = self.selectionStartLine();
+        const el = self.selectionEndLine();
+        const sc = self.selectionStartCol();
+        const ec = self.selectionEndCol();
+
+        if (line_idx < sl or line_idx > el) return;
+
+        const line = self.lines.items[line_idx].items;
+        
+        // Bereich dieser Zeile, der selektiert ist
+        const start_col = if (line_idx == sl) sc else 0;
+        const end_col = if (line_idx == el) ec else line.len;
+
+        if (start_col > line.len) return;
+        const end_clamped = @min(end_col, line.len);
+        
+        const prefix = line[0..start_col];
+        const selected_text = line[start_col..end_clamped];
+        
+        // Selektions-Rechteck als floating element
+        clay.UI()(.{
+            .layout = .{ .sizing = .{ .w = .fixed(0), .h = .fixed(@floatFromInt(self.font_size + 16)) } },
+            .floating = .{
+                .attach_to = .to_parent,
+                .attach_points = .{ .element = .left_top, .parent = .left_top },
+                .offset = .{ .x = 0, .y = 0 },
+            },
+        })({
+            clay.UI()(.{
+                .layout = .{ .sizing = .{ .w = .fit, .h = .grow }, .direction = .left_to_right },
+            })({
+                // Prefix (unsichtbar)
+                clay.text(prefix, .{ .font_size = self.font_size, .color = .{ 0, 0, 0, 0 } });
+                
+                // Selektion
+                clay.UI()(.{
+                    .layout = .{ .sizing = .{ .w = .fit, .h = .grow } },
+                    .background_color = self.selection_color,
+                })({
+                    // Wir rendern den Text nochmal unsichtbar darin, damit .fit die Breite findet
+                    clay.text(selected_text, .{ .font_size = self.font_size, .color = .{ 0, 0, 0, 0 } });
+                    
+                    // Bei mehrzeiliger Selektion: Falls am Ende der Zeile, noch ein kleines Stück extra (für das Newline-Gefühl)
+                    if (line_idx < el) {
+                        clay.UI()(.{ .layout = .{ .sizing = .{ .w = .fixed(10), .h = .grow } } })({});
+                    }
+                });
+            });
         });
     }
 

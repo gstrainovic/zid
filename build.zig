@@ -105,7 +105,10 @@ pub fn build(b: *std.Build) void {
     });
     editor_tests.root_module.addImport("clay", clay_dep.module("zclay"));
     editor_tests.root_module.addImport("wio", wio_dep.module("wio"));
+
     const test_step = b.step("test", "Run tests");
+
     const run_editor_tests = b.addRunArtifact(editor_tests);
+    run_editor_tests.has_side_effects = true;
     test_step.dependOn(&run_editor_tests.step);
-    }
+}
