@@ -11,6 +11,11 @@ const svg = @import("svg/mod.zig");
 const svg_gpu_mod = @import("svg/gpu_renderer.zig");
 const editor = @import("editor/mod.zig");
 
+// Log-Level: Nur info und höher anzeigen (debug unterdrücken)
+pub const std_options: std.Options = .{
+    .log_level = .info,
+};
+
 const log = std.log.scoped(.main);
 
 pub fn main() !void {
