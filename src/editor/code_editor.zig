@@ -11,7 +11,7 @@ const wio = @import("wio");
 pub const CodeEditor = struct {
     allocator: std.mem.Allocator,
     
-    /// Code-Zeilen dynamisch
+    /// Code-Zeilen dynamisch (Unmanaged für präzise Speicherrolle)
     lines: std.ArrayListUnmanaged(std.ArrayListUnmanaged(u8)),
     
     /// Tokenisierte Zeilen
@@ -57,9 +57,11 @@ pub const CodeEditor = struct {
                 .{ 202, 211, 245, 255 },  // plain - weiß
             ),
         };
-        // Add one empty line initially
-        self.lines.append(allocator, .{}) catch {};
-        self.line_tokens.append(allocator, .{}) catch {};
+        // Initialisiere mit einer leeren Zeile
+        const first_line = std.ArrayListUnmanaged(u8){};
+        self.lines.append(allocator, first_line) catch {};
+        const first_tokens = std.ArrayListUnmanaged(Token){};
+        self.line_tokens.append(allocator, first_tokens) catch {};
         return self;
     }
 
@@ -78,18 +80,20 @@ pub const CodeEditor = struct {
 
         var lines_iter = std.mem.splitScalar(u8, text, '\n');
         while (lines_iter.next()) |raw_line| {
-            var line = std.ArrayList(u8){};
+            var line = std.ArrayListUnmanaged(u8){};
             const trimmed = if (raw_line.len > 0 and raw_line[raw_line.len - 1] == '\r') raw_line[0 .. raw_line.len - 1] else raw_line;
             line.appendSlice(self.allocator, trimmed) catch continue;
             self.lines.append(self.allocator, line) catch continue;
 
-            const tokens = std.ArrayList(Token){};
+            const tokens = std.ArrayListUnmanaged(Token){};
             self.line_tokens.append(self.allocator, tokens) catch continue;
             self.tokenizeLine(self.lines.items.len - 1);
         }
         if (self.lines.items.len == 0) {
-            self.lines.append(self.allocator, .{}) catch {};
-            self.line_tokens.append(self.allocator, .{}) catch {};
+            const line = std.ArrayListUnmanaged(u8){};
+            self.lines.append(self.allocator, line) catch {};
+            const tokens = std.ArrayListUnmanaged(Token){};
+            self.line_tokens.append(self.allocator, tokens) catch {};
         }
         self.cursor_line = 0;
         self.cursor_col = 0;
@@ -267,12 +271,13 @@ pub const CodeEditor = struct {
             },
             .enter, .kp_enter => {
                 // Split line
-                var new_line = std.ArrayList(u8){};
+                var new_line = std.ArrayListUnmanaged(u8){};
                 new_line.appendSlice(self.allocator, line.items[self.cursor_col..]) catch {};
                 line.shrinkRetainingCapacity(self.cursor_col);
 
                 self.lines.insert(self.allocator, self.cursor_line + 1, new_line) catch return;
-                self.line_tokens.insert(self.allocator, self.cursor_line + 1, .{}) catch return;
+                const new_tokens = std.ArrayListUnmanaged(Token){};
+                self.line_tokens.insert(self.allocator, self.cursor_line + 1, new_tokens) catch return;
 
                 self.tokenizeLine(self.cursor_line);
                 self.tokenizeLine(self.cursor_line + 1);
@@ -391,31 +396,30 @@ pub const CodeEditor = struct {
                     self.renderCursor();
                 }
                 clay.text(line, .{ .font_size = self.font_size, .color = .{ 202, 211, 245, 255 } });
-                return;
-            }
-
-            for (tokens) |token| {
-                const color = self.highlighter.colorForType(token.token_type);
-                const slice = token.slice(line);
-                
-                // Cursor in this token
-                if (line_idx == self.cursor_line and self.cursor_col >= token.start and self.cursor_col < token.end) {
-                    const offset = self.cursor_col - token.start;
-                    if (offset > 0) {
-                        clay.text(slice[0..offset], .{ .font_size = self.font_size, .color = color });
+            } else {
+                for (tokens) |token| {
+                    const color = self.highlighter.colorForType(token.token_type);
+                    const slice = token.slice(line);
+                    
+                    // Cursor in this token
+                    if (line_idx == self.cursor_line and self.cursor_col >= token.start and self.cursor_col < token.end) {
+                        const offset = self.cursor_col - token.start;
+                        if (offset > 0) {
+                            clay.text(slice[0..offset], .{ .font_size = self.font_size, .color = color });
+                        }
+                        self.renderCursor();
+                        if (offset < slice.len) {
+                            clay.text(slice[offset..], .{ .font_size = self.font_size, .color = color });
+                        }
+                    } else {
+                        clay.text(slice, .{ .font_size = self.font_size, .color = color });
                     }
-                    self.renderCursor();
-                    if (offset < slice.len) {
-                        clay.text(slice[offset..], .{ .font_size = self.font_size, .color = color });
-                    }
-                } else {
-                    clay.text(slice, .{ .font_size = self.font_size, .color = color });
                 }
-            }
-            
-            // Cursor at the end of the line
-            if (line_idx == self.cursor_line and self.cursor_col >= line.len) {
-                self.renderCursor();
+                
+                // Cursor at the end of the line
+                if (line_idx == self.cursor_line and self.cursor_col >= line.len) {
+                    self.renderCursor();
+                }
             }
         });
     }
@@ -462,4 +466,28 @@ test "CodeEditor: basic interaction" {
     try std.testing.expectEqualStrings("hello!", editor_inst.lines.items[0].items);
     try std.testing.expectEqual(@as(usize, 0), editor_inst.cursor_line);
     try std.testing.expectEqual(@as(usize, 6), editor_inst.cursor_col);
+}
+
+test "CodeEditor: auto-typing simulation" {
+    const allocator = std.testing.allocator;
+    var editor_inst = CodeEditor.init(allocator);
+    defer editor_inst.deinit();
+
+    // Simulation: "pub fn main() {" tippen
+    const input = "pub fn main() {";
+    for (input) |c| {
+        editor_inst.handleChar(c);
+    }
+    try std.testing.expectEqualStrings("pub fn main() {", editor_inst.lines.items[0].items);
+    
+    // Enter drücken
+    editor_inst.handleKeyPress(.enter);
+    try std.testing.expectEqual(@as(usize, 2), editor_inst.lines.items.len);
+    
+    // In der neuen Zeile einrücken und kommentieren
+    const line2 = "    // test";
+    for (line2) |c| {
+        editor_inst.handleChar(c);
+    }
+    try std.testing.expectEqualStrings("    // test", editor_inst.lines.items[1].items);
 }

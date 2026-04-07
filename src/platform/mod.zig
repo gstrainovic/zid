@@ -143,6 +143,17 @@ pub const Platform = struct {
         log.info("Event loop ended", .{});
     }
 
+    /// Text-Input Modus umschalten (wichtig für wio/Windows)
+    pub fn setTextInput(self: *Self, enabled: bool) void {
+        if (self.window) |*win| {
+            if (enabled) {
+                win.enableTextInput(.{});
+            } else {
+                win.disableTextInput();
+            }
+        }
+    }
+
     /// Läuft die App noch?
     pub fn isRunning(self: *const Self) bool {
         return self.running;
