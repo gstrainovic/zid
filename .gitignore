@@ -18,6 +18,5 @@ archives/
 
 # External libs (not tracked in main repo)
 libs/wgpu-native/
-libs/wio/
 libs/wio_test_vulkan/
 temp_*.png

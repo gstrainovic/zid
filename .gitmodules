@@ -7,3 +7,9 @@
 [submodule "libs/clay-zig"]
 	path = libs/clay-zig
 	url = https://github.com/johan0A/clay-zig-bindings
+[submodule "libs/zigimg"]
+	path = libs/zigimg
+	url = https://github.com/zigimg/zigimg
+[submodule "libs/wio"]
+	path = libs/wio
+	url = https://github.com/gstrainovic/wio.git
