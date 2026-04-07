@@ -31,6 +31,7 @@ pub const CodeEditor = struct {
     height: f32 = 400,
     gutter_width: f32 = 50,
     font_size: u16 = 24,
+    time_ms: f32 = 0,
 
     /// Farben
     bg_color: clay.Color = .{ 30, 30, 46, 255 },
@@ -386,10 +387,7 @@ pub const CodeEditor = struct {
         const tokens = self.line_tokens.items[line_idx].items;
 
         clay.UI()(.{
-            .layout = .{ 
-                .direction = .left_to_right,
-                .child_alignment = .{ .x = .left, .y = .center }
-            },
+            .layout = .{ .direction = .left_to_right, .child_alignment = .{ .x = .left, .y = .center } },
         })({
             if (tokens.len == 0) {
                 if (line_idx == self.cursor_line and self.cursor_col == 0) {
@@ -425,10 +423,31 @@ pub const CodeEditor = struct {
     }
 
     fn renderCursor(self: *Self) void {
+        const blink_ms: f32 = 500.0;
+        const visible = @mod(self.time_ms, blink_ms * 2.0) < blink_ms;
+        if (!visible) {
+            // Placeholder mit 0 Breite, damit der Textfluss erhalten bleibt
+            clay.UI()(.{
+                .layout = .{ .sizing = .{ .w = .fixed(0), .h = .fixed(@floatFromInt(self.font_size + 16)) } },
+            })({});
+            return;
+        }
+
+        // Dieser Container hat 0 Breite im Layout-Fluss, bewegt sich aber mit dem Text mit
         clay.UI()(.{
-            .layout = .{ .sizing = .{ .w = .fixed(2), .h = .fixed(@floatFromInt(self.font_size + 4)) } },
-            .background_color = self.cursor_color,
-        })({});
+            .layout = .{ .sizing = .{ .w = .fixed(0), .h = .fixed(@floatFromInt(self.font_size + 16)) } },
+        })({
+            // Das tatsächliche sichtbare Cursor-Rechteck schwebt über dem 0-Breite-Anker
+            clay.UI()(.{
+                .layout = .{ .sizing = .{ .w = .fixed(2), .h = .grow } },
+                .background_color = self.cursor_color,
+                .floating = .{
+                    .attach_to = .to_parent,
+                    .attach_points = .{ .element = .left_center, .parent = .left_center },
+                    .offset = .{ .x = -1, .y = 0 },
+                },
+            })({});
+        });
     }
 };
 
