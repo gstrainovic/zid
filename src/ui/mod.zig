@@ -137,6 +137,10 @@ pub const UI = struct {
         self.code_editor.setShiftState(pressed);
     }
 
+    pub fn setCtrlState(self: *Self, pressed: bool) void {
+        self.code_editor.setCtrlState(pressed);
+    }
+
     /// Maus-Events an Editor weiterleiten
     pub fn handleMouseDown(self: *Self, x: f32, y: f32) void {
         self.code_editor.handleMouseDown(x, y);
@@ -175,8 +179,9 @@ pub const UI = struct {
 
     /// Window Resize behandeln
     pub fn resize(self: *Self, width: u32, height: u32) void {
-        _ = self;
         clay.setLayoutDimensions(.{ .w = @floatFromInt(width), .h = @floatFromInt(height) });
+        // Editor-Höhe aktualisieren für korrekte visibleLineCount-Berechnung
+        self.code_editor.height = @floatFromInt(height);
     }
 
     /// Maus-Position und Button-Status an Clay weiterleiten

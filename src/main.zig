@@ -162,6 +162,7 @@ pub fn main() !void {
     var mouse_y: f32 = 0;
     var mouse_down: bool = false;
     var shift_held: bool = false;
+    var ctrl_held: bool = false;
     
     while (plat.isRunning()) {
         const delta_time_ms: f32 = 16.0;
@@ -206,6 +207,9 @@ pub fn main() !void {
                         } else if (btn == .left_shift or btn == .right_shift) {
                             shift_held = true;
                             ui_system.setShiftState(true);
+                        } else if (btn == .left_control or btn == .right_control) {
+                            ctrl_held = true;
+                            ui_system.setCtrlState(true);
                         } else {
                             ui_system.handleKeyPress(btn);
                         }
@@ -219,6 +223,10 @@ pub fn main() !void {
                             shift_held = false;
                             ui_system.setShiftState(false);
                         }
+                        if (btn == .left_control or btn == .right_control) {
+                            ctrl_held = false;
+                            ui_system.setCtrlState(false);
+                        }
                     },
                     .char => |char_code| {
                         ui_system.handleChar(char_code);
@@ -229,8 +237,9 @@ pub fn main() !void {
                     },
                     .scroll_vertical => |delta| {
                         scroll_delta_y = @floatCast(delta);
-                        // Auch an Editor für zeilen-basiertes Scroll-Handling (Zeilen pro Frame)
-                        const lines_delta: i32 = @intFromFloat(@round(scroll_delta_y / 3.0));
+                        // Mausrad-Events an Editor weiterleiten
+                        // delta ist typisch ~1.0 pro Klick → direkt als Zeilen-Offset
+                        const lines_delta: i32 = @intFromFloat(@round(scroll_delta_y));
                         if (lines_delta != 0) ui_system.handleScroll(lines_delta);
                     },
                     else => {},

@@ -34,11 +34,17 @@ pub const CodeEditor = struct {
 
     /// Modifier-State für Shift+Navigation
     shift_pressed: bool = false,
+    ctrl_pressed: bool = false,
 
     /// Maus-State für Drag-Selektion
     mouse_down: bool = false,
     mouse_x: f32 = 0,
     mouse_y: f32 = 0,
+
+    /// Double-Click Erkennung
+    last_mouse_click_ms: f32 = 0,
+    last_mouse_click_line: usize = 0,
+    last_mouse_click_col: usize = 0,
 
     /// Scrolling: Erste sichtbare Zeile (Viewport Culling)
     scroll_offset_first_line: usize = 0,
@@ -49,6 +55,7 @@ pub const CodeEditor = struct {
     /// Layout
     height: f32 = 400,
     gutter_width: f32 = 50,
+    scrollbar_width: f32 = 10,
     font_size: u16 = 24,
     time_ms: f32 = 0,
 
@@ -260,6 +267,36 @@ pub const CodeEditor = struct {
         return prevCharBoundary(text, pos);
     }
 
+    /// Find previous word boundary (byte offset).
+    fn prevWordBoundary(text: []const u8, pos: usize) usize {
+        if (pos == 0) return 0;
+        var i = prevCharBoundary(text, pos);
+        // If currently on whitespace, skip to non-whitespace.
+        const in_ws = std.ascii.isWhitespace(text[i]);
+        while (i > 0) {
+            const prev = prevCharBoundary(text, i);
+            const is_ws = std.ascii.isWhitespace(text[prev]);
+            if (is_ws != in_ws) break;
+            i = prev;
+        }
+        return i;
+    }
+
+    /// Find next word boundary (byte offset).
+    fn nextWordBoundary(text: []const u8, pos: usize) usize {
+        if (pos >= text.len) return text.len;
+        var i = nextCharBoundary(text, pos);
+        // If currently on whitespace, skip to non-whitespace.
+        const in_ws = if (i < text.len) std.ascii.isWhitespace(text[i]) else true;
+        while (i < text.len) {
+            const next = nextCharBoundary(text, i);
+            const is_ws = if (next < text.len) std.ascii.isWhitespace(text[next]) else true;
+            if (is_ws != in_ws) break;
+            i = next;
+        }
+        return i;
+    }
+
     // =========================================================================
     // Selection Helpers
     // =========================================================================
@@ -375,8 +412,34 @@ pub const CodeEditor = struct {
         const line = &self.lines.items[self.cursor_line];
         switch (key) {
             .left => {
-                if (self.shift_pressed) {
+                // Ctrl+Left: zum vorherigen Wort springen
+                if (self.ctrl_pressed) {
+                    if (self.shift_pressed) {
+                        if (!self.hasSelection()) self.startSelection();
+                    } else {
+                        if (self.hasSelection()) {
+                            self.cursor_line = self.selectionStartLine();
+                            self.cursor_col = self.selectionStartCol();
+                            self.clearSelection();
+                            self.recordCursorMovement();
+                            self.current_line = self.cursor_line + 1;
+                            return;
+                        }
+                    }
+                    if (self.cursor_col > 0) {
+                        self.cursor_col = prevWordBoundary(line.items, self.cursor_col);
+                    } else if (self.cursor_line > 0) {
+                        self.cursor_line -= 1;
+                        self.cursor_col = self.lines.items[self.cursor_line].items.len;
+                    }
+                } else if (self.shift_pressed) {
                     if (!self.hasSelection()) self.startSelection();
+                    if (self.cursor_col > 0) {
+                        self.cursor_col = prevCharBoundary(line.items, self.cursor_col);
+                    } else if (self.cursor_line > 0) {
+                        self.cursor_line -= 1;
+                        self.cursor_col = self.lines.items[self.cursor_line].items.len;
+                    }
                 } else {
                     if (self.hasSelection()) {
                         self.cursor_line = self.selectionStartLine();
@@ -386,17 +449,43 @@ pub const CodeEditor = struct {
                         self.current_line = self.cursor_line + 1;
                         return;
                     }
-                }
-                if (self.cursor_col > 0) {
-                    self.cursor_col = prevCharBoundary(line.items, self.cursor_col);
-                } else if (self.cursor_line > 0) {
-                    self.cursor_line -= 1;
-                    self.cursor_col = self.lines.items[self.cursor_line].items.len;
+                    if (self.cursor_col > 0) {
+                        self.cursor_col = prevCharBoundary(line.items, self.cursor_col);
+                    } else if (self.cursor_line > 0) {
+                        self.cursor_line -= 1;
+                        self.cursor_col = self.lines.items[self.cursor_line].items.len;
+                    }
                 }
             },
             .right => {
-                if (self.shift_pressed) {
+                // Ctrl+Right: zum nächsten Wort springen
+                if (self.ctrl_pressed) {
+                    if (self.shift_pressed) {
+                        if (!self.hasSelection()) self.startSelection();
+                    } else {
+                        if (self.hasSelection()) {
+                            self.cursor_line = self.selectionEndLine();
+                            self.cursor_col = self.selectionEndCol();
+                            self.clearSelection();
+                            self.recordCursorMovement();
+                            self.current_line = self.cursor_line + 1;
+                            return;
+                        }
+                    }
+                    if (self.cursor_col < line.items.len) {
+                        self.cursor_col = nextWordBoundary(line.items, self.cursor_col);
+                    } else if (self.cursor_line + 1 < self.lines.items.len) {
+                        self.cursor_line += 1;
+                        self.cursor_col = 0;
+                    }
+                } else if (self.shift_pressed) {
                     if (!self.hasSelection()) self.startSelection();
+                    if (self.cursor_col < line.items.len) {
+                        self.cursor_col = nextCharBoundary(line.items, self.cursor_col);
+                    } else if (self.cursor_line + 1 < self.lines.items.len) {
+                        self.cursor_line += 1;
+                        self.cursor_col = 0;
+                    }
                 } else {
                     if (self.hasSelection()) {
                         self.cursor_line = self.selectionEndLine();
@@ -406,12 +495,12 @@ pub const CodeEditor = struct {
                         self.current_line = self.cursor_line + 1;
                         return;
                     }
-                }
-                if (self.cursor_col < line.items.len) {
-                    self.cursor_col = nextCharBoundary(line.items, self.cursor_col);
-                } else if (self.cursor_line + 1 < self.lines.items.len) {
-                    self.cursor_line += 1;
-                    self.cursor_col = 0;
+                    if (self.cursor_col < line.items.len) {
+                        self.cursor_col = nextCharBoundary(line.items, self.cursor_col);
+                    } else if (self.cursor_line + 1 < self.lines.items.len) {
+                        self.cursor_line += 1;
+                        self.cursor_col = 0;
+                    }
                 }
             },
             .up => {
@@ -567,6 +656,10 @@ pub const CodeEditor = struct {
         self.shift_pressed = pressed;
     }
 
+    pub fn setCtrlState(self: *Self, pressed: bool) void {
+        self.ctrl_pressed = pressed;
+    }
+
     // =========================================================================
     // Mouse Handling
     // =========================================================================
@@ -581,11 +674,43 @@ pub const CodeEditor = struct {
     pub fn handleMouseDown(self: *Self, x: f32, y: f32) void {
         const line_idx = self.lineFromY(y);
         const col = self.colFromX(x, line_idx);
-        self.cursor_line = line_idx;
-        self.cursor_col = col;
-        self.selection_anchor_line = line_idx;
-        self.selection_anchor_col = col;
+
+        // Double-Click Erkennung (innerhalb 500ms)
+        const is_double_click = (self.time_ms - self.last_mouse_click_ms < 500.0) and
+            self.last_mouse_click_line == line_idx and
+            self.last_mouse_click_col == col;
+
+        if (is_double_click) {
+            // Wort am Klickpunkt selektieren
+            const line = self.lines.items[line_idx].items;
+            const word_start = if (col < line.len and std.ascii.isAlphanumeric(line[col]))
+                prevWordBoundary(line, col)
+            else if (col > 0 and std.ascii.isAlphanumeric(line[col - 1]))
+                prevWordBoundary(line, col)
+            else
+                col;
+            const word_end = if (col < line.len and std.ascii.isAlphanumeric(line[col]))
+                nextWordBoundary(line, col)
+            else if (col > 0 and std.ascii.isAlphanumeric(line[col - 1]))
+                nextWordBoundary(line, word_start)
+            else
+                col;
+
+            self.cursor_line = line_idx;
+            self.cursor_col = word_start;
+            self.selection_anchor_line = line_idx;
+            self.selection_anchor_col = word_end;
+        } else {
+            self.cursor_line = line_idx;
+            self.cursor_col = col;
+            self.selection_anchor_line = line_idx;
+            self.selection_anchor_col = col;
+        }
+
         self.mouse_down = true;
+        self.last_mouse_click_ms = self.time_ms;
+        self.last_mouse_click_line = line_idx;
+        self.last_mouse_click_col = col;
         self.recordCursorMovement();
         self.current_line = self.cursor_line + 1;
     }
@@ -607,11 +732,12 @@ pub const CodeEditor = struct {
         self.mouse_down = false;
     }
 
-    /// Y-Koordinate in Zeilen-Index umrechnen.
+    /// Y-Koordinate in Zeilen-Index umrechnen (mit Scroll-Offset).
     fn lineFromY(self: *const Self, y: f32) usize {
         const line_height: f32 = @floatFromInt(self.font_size + 16);
         if (line_height <= 0) return 0;
-        const line = @as(isize, @intFromFloat(@floor(y / line_height)));
+        const raw_line = @as(isize, @intFromFloat(@floor(y / line_height)));
+        const line = raw_line + @as(isize, @intCast(self.scroll_offset_first_line));
         if (line < 0) return 0;
         return @min(@as(usize, @intCast(line)), self.lines.items.len - 1);
     }
@@ -656,13 +782,12 @@ pub const CodeEditor = struct {
 
     /// Anzahl sichtbarer Zeilen basierend auf Container-Höhe.
     fn visibleLineCount(self: *const Self) usize {
-        const line_height = self.font_size + 16;
-        if (line_height == 0) return 10;
-        // height ist die Editor-Höhe, abzüglich Padding
-        const visible = @as(f32, @floatFromInt(line_height));
-        const available = self.height - 20.0; // Padding
+        const line_height: f32 = @floatFromInt(self.font_size + 16);
+        if (line_height <= 0) return 10;
+        // height ist die Editor-Höhe (ganze Fensterhöhe)
+        const available = self.height;
         if (available <= 0) return 10;
-        return @max(1, @as(usize, @intFromFloat(@floor(available / visible))));
+        return @max(1, @as(usize, @intFromFloat(@floor(available / line_height))));
     }
 
     /// Sicherstellen dass der Cursor sichtbar ist (Auto-Scroll).
@@ -710,16 +835,16 @@ pub const CodeEditor = struct {
     }
 
     pub fn render(self: *Self, arena: std.mem.Allocator) void {
-        // Editor Container - fills full available space
+        // Editor Container
         clay.UI()(.{
             .id = clay.ElementId.ID("code_editor"),
             .layout = .{
                 .sizing = .{ .w = .grow, .h = .grow },
-                .direction = .top_to_bottom,
+                .direction = .left_to_right,
             },
             .background_color = self.bg_color,
         })({
-            // Scrollable Editor Content
+            // Links: Scrollbarer Content
             clay.UI()(.{
                 .id = clay.ElementId.ID("editor_scroll"),
                 .layout = .{ .sizing = .grow },
@@ -731,7 +856,6 @@ pub const CodeEditor = struct {
                     .layout = .{
                         .sizing = .{ .w = .grow, .h = .fit },
                         .direction = .top_to_bottom,
-                        // .child_gap = 2,
                     },
                 })({
                     const visible_count = self.visibleLineCount();
@@ -743,14 +867,12 @@ pub const CodeEditor = struct {
                         const line = self.lines.items[i].items;
                         const is_current = (i == self.cursor_line);
 
-                        // Prüfen ob diese Zeile zur Selektion gehört
                         const is_selected = if (self.hasSelection()) blk: {
                             const sl = self.selectionStartLine();
                             const el = self.selectionEndLine();
                             break :blk i >= sl and i <= el;
                         } else false;
 
-                        // Row Container (Gutter + Code)
                         clay.UI()(.{
                             .id = clay.ElementId.IDI("row", @intCast(i)),
                             .layout = .{
@@ -759,7 +881,6 @@ pub const CodeEditor = struct {
                                 .child_alignment = .{ .x = .left, .y = .center },
                             },
                         })({
-                            // Gutter Element
                             clay.UI()(.{
                                 .id = clay.ElementId.IDI("gutter", @intCast(i)),
                                 .layout = .{
@@ -780,7 +901,6 @@ pub const CodeEditor = struct {
                                 clay.text(persistent_str, .{ .font_size = self.font_size, .color = color });
                             });
 
-                            // Code Element
                             clay.UI()(.{
                                 .id = clay.ElementId.IDI("code", @intCast(i)),
                                 .layout = .{
@@ -796,6 +916,49 @@ pub const CodeEditor = struct {
                     }
                 });
             });
+
+            // Rechts: Scrollbar
+            if (self.lines.items.len > self.visibleLineCount()) {
+                self.renderScrollbar();
+            }
+        });
+    }
+
+    fn renderScrollbar(self: *Self) void {
+        const total = self.lines.items.len;
+        const visible = self.visibleLineCount();
+        if (total <= visible) return;
+
+        const track_height = self.height;
+        const thumb_ratio: f32 = @as(f32, @floatFromInt(visible)) / @as(f32, @floatFromInt(total));
+        const thumb_height = @max(20.0, track_height * thumb_ratio);
+        const max_offset: usize = total - visible;
+        const scroll_frac: f32 = if (max_offset > 0)
+            @as(f32, @floatFromInt(self.scroll_offset_first_line)) / @as(f32, @floatFromInt(max_offset))
+        else
+            0.0;
+        const thumb_y = scroll_frac * (track_height - thumb_height);
+
+        const track_color: clay.Color = .{ 30, 30, 46, 100 };
+        const thumb_color: clay.Color = .{ 88, 88, 120, 180 };
+
+        // Track (Hintergrund)
+        clay.UI()(.{
+            .id = clay.ElementId.ID("scrollbar_track"),
+            .layout = .{
+                .sizing = .{ .w = .fixed(self.scrollbar_width), .h = .fit },
+            },
+            .background_color = track_color,
+        })({
+            // Thumb (beweglicher Teil)
+            clay.UI()(.{
+                .id = clay.ElementId.ID("scrollbar_thumb"),
+                .layout = .{
+                    .sizing = .{ .w = .grow, .h = .fixed(thumb_height) },
+                    .padding = .{ .top = @intFromFloat(thumb_y) },
+                },
+                .background_color = thumb_color,
+            })({});
         });
     }
 
