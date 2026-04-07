@@ -95,6 +95,9 @@ pub const Keymap = struct {
         // Selection All
         try km.bind(.a, .{ .ctrl = true }, .SelectAll);
 
+        // Context Menu
+        try km.bind(.mouse_right, .{}, .ShowContextMenu);
+
         return km;
     }
 };

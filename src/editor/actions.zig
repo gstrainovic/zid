@@ -74,6 +74,7 @@ pub const Action = enum {
     Save,
     ScrollUp,
     ScrollDown,
+    ShowContextMenu,
 };
 
 pub const KeyEvent = struct {

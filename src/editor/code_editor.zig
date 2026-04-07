@@ -87,6 +87,14 @@ pub const CodeEditor = struct {
     cursor_color: clay.Color = .{ 249, 226, 175, 255 },
     selection_color: clay.Color = .{ 100, 120, 200, 160 },
 
+    /// Referenz auf das Fenster für Clipboard-Zugriff
+    window: ?*wio.Window = null,
+
+    /// Kontextmenü-State
+    show_context_menu: bool = false,
+    context_menu_x: f32 = 0,
+    context_menu_y: f32 = 0,
+
     const Self = @This();
 
     pub fn init(allocator: std.mem.Allocator) Self {
@@ -395,6 +403,87 @@ pub const CodeEditor = struct {
     fn startSelection(self: *Self) void {
         self.selection_anchor_line = self.cursor_line;
         self.selection_anchor_col = self.cursor_col;
+    }
+
+    /// Get the currently selected text as an allocated string.
+    pub fn getSelectedText(self: *const Self, allocator: std.mem.Allocator) !?[]u8 {
+        if (!self.hasSelection()) return null;
+
+        const start_l = self.selectionStartLine();
+        const start_c = self.selectionStartCol();
+        const end_l = self.selectionEndLine();
+        const end_c = self.selectionEndCol();
+
+        var list = std.ArrayListUnmanaged(u8){};
+        errdefer list.deinit(allocator);
+
+        if (start_l == end_l) {
+            try list.appendSlice(allocator, self.lines.items[start_l].items[start_c..end_c]);
+        } else {
+            // First line
+            try list.appendSlice(allocator, self.lines.items[start_l].items[start_c..]);
+            try list.append(allocator, '\n');
+
+            // Middle lines
+            var li = start_l + 1;
+            while (li < end_l) : (li += 1) {
+                try list.appendSlice(allocator, self.lines.items[li].items);
+                try list.append(allocator, '\n');
+            }
+
+            // Last line
+            try list.appendSlice(allocator, self.lines.items[end_l].items[0..end_c]);
+        }
+
+        return try list.toOwnedSlice(allocator);
+    }
+
+    /// Insert a string at the current cursor position.
+    pub fn insertString(self: *Self, text: []const u8) !void {
+        if (text.len == 0) return;
+
+        // Selection is deleted first.
+        _ = self.deleteSelection();
+
+        var i: usize = 0;
+        while (i < text.len) {
+            if (text[i] == '\n') {
+                // Split line
+                const current_line = &self.lines.items[self.cursor_line];
+                var new_line = try std.ArrayListUnmanaged(u8).initCapacity(self.allocator, current_line.items.len - self.cursor_col);
+                new_line.appendSlice(self.allocator, current_line.items[self.cursor_col..]) catch {};
+                current_line.shrinkRetainingCapacity(self.cursor_col);
+
+                try self.lines.insert(self.allocator, self.cursor_line + 1, new_line);
+                
+                const new_tokens = std.ArrayListUnmanaged(Token){};
+                try self.line_tokens.insert(self.allocator, self.cursor_line + 1, new_tokens);
+
+                self.tokenizeLine(self.cursor_line);
+                self.cursor_line += 1;
+                self.cursor_col = 0;
+                self.tokenizeLine(self.cursor_line);
+                i += 1;
+            } else if (text[i] == '\r') {
+                // Skip \r, handle \n normally
+                i += 1;
+                if (i < text.len and text[i] == '\n') {
+                    // Handled in next iteration
+                }
+            } else {
+                // Find next char boundary
+                const start = i;
+                const end = nextCharBoundary(text, i);
+                const char_bytes = text[start..end];
+
+                const line = &self.lines.items[self.cursor_line];
+                try line.insertSlice(self.allocator, self.cursor_col, char_bytes);
+                self.cursor_col += char_bytes.len;
+                self.tokenizeLine(self.cursor_line);
+                i = end;
+            }
+        }
+        self.last_cursor_movement_ms = self.time_ms;
     }
 
     /// Delete selected text. Returns true if text was deleted.
@@ -778,6 +867,46 @@ pub const CodeEditor = struct {
             .ScrollDown => {
                 self.scrollLines(-1);
             },
+            .Copy => {
+                if (self.getSelectedText(self.allocator)) |text_opt| {
+                    if (text_opt) |text| {
+                        defer self.allocator.free(text);
+                        if (self.window) |win| {
+                            win.setClipboardText(text);
+                        }
+                    }
+                } else |err| {
+                    std.log.err("Failed to copy text: {}", .{err});
+                }
+            },
+            .Cut => {
+                if (self.getSelectedText(self.allocator)) |text_opt| {
+                    if (text_opt) |text| {
+                        defer self.allocator.free(text);
+                        if (self.window) |win| {
+                            win.setClipboardText(text);
+                        }
+                        _ = self.deleteSelection();
+                    }
+                } else |err| {
+                    std.log.err("Failed to cut text: {}", .{err});
+                }
+            },
+            .Paste => {
+                if (self.window) |win| {
+                    if (win.getClipboardText(self.allocator)) |text| {
+                        defer self.allocator.free(text);
+                        self.insertString(text) catch |err| {
+                            std.log.err("Failed to paste text: {}", .{err});
+                        };
+                    }
+                }
+            },
+            .ShowContextMenu => {
+                self.show_context_menu = true;
+                self.context_menu_x = self.mouse_x;
+                self.context_menu_y = self.mouse_y;
+            },
             else => {},
         }
         self.recordCursorMovement();
@@ -815,6 +944,32 @@ pub const CodeEditor = struct {
 
     /// Maus-Down Event verarbeiten
     pub fn handleMouseDown(self: *Self, x: f32, y: f32) void {
+        self.mouse_x = x;
+        self.mouse_y = y;
+        self.mouse_down = true;
+
+        if (self.show_context_menu) {
+            // Check if we clicked a context menu item
+            if (clay.pointerOver(clay.getElementId("Copy"))) {
+                self.dispatchAction(.Copy);
+                self.show_context_menu = false;
+                return;
+            }
+            if (clay.pointerOver(clay.getElementId("Cut"))) {
+                self.dispatchAction(.Cut);
+                self.show_context_menu = false;
+                return;
+            }
+            if (clay.pointerOver(clay.getElementId("Paste"))) {
+                self.dispatchAction(.Paste);
+                self.show_context_menu = false;
+                return;
+            }
+            
+            // Otherwise, close the menu if we clicked elsewhere
+            self.show_context_menu = false;
+        }
+
         const line_idx = self.lineFromY(y);
         const col = self.colFromX(x, line_idx);
 
@@ -860,6 +1015,8 @@ pub const CodeEditor = struct {
 
     /// Maus-Move Event verarbeiten (für Drag-Selektion)
     pub fn handleMouseMove(self: *Self, x: f32, y: f32) void {
+        self.mouse_x = x;
+        self.mouse_y = y;
         if (!self.mouse_down) return;
         const line_idx = self.lineFromY(y);
         const col = self.colFromX(x, line_idx);
@@ -1092,6 +1249,77 @@ pub const CodeEditor = struct {
                 self.renderScrollbar();
             }
         });
+
+        // Kontextmenü (Floating)
+        if (self.show_context_menu) {
+            self.renderContextMenu(arena);
+        }
+    }
+
+    fn renderContextMenu(self: *Self, arena: std.mem.Allocator) void {
+        const item_height = @as(f32, @floatFromInt(self.font_size)) + 16;
+        const menu_width: f32 = 120;
+        const menu_height = item_height * 3;
+
+        clay.UI()(.{
+            .id = clay.ElementId.ID("context_menu_anchor"),
+            .layout = .{ .sizing = .{ .w = .fixed(0), .h = .fixed(0) } },
+            .floating = .{
+                .attach_to = .to_root,
+                .attach_points = .{ .element = .left_top, .parent = .left_top },
+                .offset = .{ .x = self.context_menu_x, .y = self.context_menu_y },
+                .z_index = 1000,
+            },
+        })({
+            clay.UI()(.{
+                .id = clay.ElementId.ID("context_menu_bg"),
+                .layout = .{
+                    .sizing = .{ .w = .fixed(menu_width), .h = .fixed(menu_height) },
+                    .direction = .top_to_bottom,
+                    .padding = .all(4),
+                },
+                .background_color = .{ 45, 45, 60, 255 },
+                .border = .{ .width = .all(1), .color = .{ 100, 100, 120, 255 } },
+                .corner_radius = .all(4),
+            })({
+                self.renderContextMenuItem("Copy", .Copy, arena);
+                self.renderContextMenuItem("Cut", .Cut, arena);
+                self.renderContextMenuItem("Paste", .Paste, arena);
+            });
+        });
+    }
+
+    fn renderContextMenuItem(self: *Self, label: []const u8, _action: actions.Action, arena: std.mem.Allocator) void {
+        _ = _action;
+        _ = arena;
+        const is_hovered = clay.hovered();
+        
+        clay.UI()(.{
+            .id = clay.ElementId.ID(label),
+            .layout = .{
+                .sizing = .{ .w = .grow, .h = .fixed(@floatFromInt(self.font_size + 12)) },
+                .padding = .{ .left = 8, .right = 8 },
+                .child_alignment = .{ .x = .left, .y = .center },
+            },
+            .background_color = if (is_hovered) .{ 80, 80, 100, 255 } else .{ 0, 0, 0, 0 },
+            .corner_radius = .all(2),
+        })({
+            clay.text(label, .{ .font_size = self.font_size - 2, .color = .{ 220, 220, 240, 255 } });
+            
+            if (is_hovered and clay.pointerOver(clay.getElementId(label))) {
+                // Bei Klick Aktion ausführen
+                // Clay selbst hat keinen "onClick" Handler für UI Elemente direkt im Layout,
+                // wir prüfen den Pointer-Status in handleMouseDown oder hier falls möglich.
+                // In diesem Fall nutzen wir handleMouseDown für die globale Logik.
+            }
+        });
+
+        // Wir registrieren den Klick-Zustand für dieses Element
+        if (is_hovered) {
+            // Wenn Maus gedrückt wird während gehovered, Aktion auslösen
+            // Dies ist etwas tricky in Immediate Mode ohne globalen State-Bus für Events.
+            // Aber wir können CodeEditor.handleMouseDown nutzen.
+        }
     }
 
     fn renderScrollbar(self: *Self) void {
