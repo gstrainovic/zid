@@ -39,7 +39,7 @@ pub const CodeEditor = struct {
     line_number_color: clay.Color = .{ 108, 112, 134, 255 },
     current_line_number_color: clay.Color = .{ 138, 173, 244, 255 },
     current_line_highlight: clay.Color = .{ 60, 70, 100, 200 },
-    cursor_color: clay.Color = .{ 202, 211, 245, 255 },
+    cursor_color: clay.Color = .{ 249, 226, 175, 255 },
 
     const Self = @This();
 
