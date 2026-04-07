@@ -263,6 +263,7 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
   - [ ] Berechnung der sichtbaren Zeilen anhand des Scroll-Offsets (Viewport Culling)
   - [ ] Synchronisation zwischen Clay-ScrollContainer und Editor-State
   - [ ] Auto-Scroll, wenn Cursor den sichtbaren Bereich verlässt
+  - [ ] **Performance-Test mit Großdatei:** `libs/gooey/src/layout/engine.zig` (3363 Zeilen) beim Start laden und Scrolling testen
 
 ### Phase 9: File Explorer, Tabs & Datei-Vorschau
 - [ ] **Tab-Leiste**
