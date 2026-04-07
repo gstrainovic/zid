@@ -418,25 +418,38 @@ pub const CodeEditor = struct {
         const visible = @mod(self.time_ms, blink_ms * 2.0) < blink_ms;
         if (!visible) return;
 
-        // Empirische Character-Breite basierend auf Font-Größe
-        // Bei font_size=24: ~14.4px pro Character
-        const char_width: f32 = @as(f32, @floatFromInt(self.font_size)) * 0.6;
-        const cursor_x: f32 = @as(f32, @floatFromInt(self.cursor_col)) * char_width;
+        // Text vor dem Cursor extrahieren
+        const line = self.lines.items[self.cursor_line].items;
+        const text_before_cursor = if (self.cursor_col <= line.len) 
+            line[0..self.cursor_col] 
+        else 
+            line;
 
-        // Cursor als floating Element - 0 Breite im Layout, aber sichtbar an der berechneten Position
+        // Floating Container mit 0 Breite im Parent-Layout
         clay.UI()(.{
             .layout = .{ .sizing = .{ .w = .fixed(0), .h = .fixed(@floatFromInt(self.font_size + 16)) } },
             .floating = .{
                 .attach_to = .to_parent,
                 .attach_points = .{ .element = .left_top, .parent = .left_top },
-                .offset = .{ .x = cursor_x, .y = 0 },
+                .offset = .{ .x = 0, .y = 0 },
             },
         })({
-            // Sichtbarer 1px Cursor
+            // Innerer Container: misst Text-Breite mit .fit
             clay.UI()(.{
-                .layout = .{ .sizing = .{ .w = .fixed(1), .h = .grow } },
-                .background_color = self.cursor_color,
-            })({});
+                .layout = .{ .sizing = .{ .w = .fit, .h = .grow }, .direction = .left_to_right },
+            })({
+                // Unsichtbaren Text rendern für das Width-Measuring
+                clay.text(text_before_cursor, .{ 
+                    .font_size = self.font_size, 
+                    .color = .{ 0, 0, 0, 0 },
+                });
+                
+                // Cursor am Ende des gemessenen Textes
+                clay.UI()(.{
+                    .layout = .{ .sizing = .{ .w = .fixed(1), .h = .grow } },
+                    .background_color = self.cursor_color,
+                })({});
+            });
         });
     }
 };
