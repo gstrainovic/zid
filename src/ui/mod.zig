@@ -135,6 +135,7 @@ pub const UI = struct {
     /// UI updaten (pro Frame)
     pub fn update(self: *Self, delta_ms: f32) void {
         self.anim_manager.update(delta_ms);
+        self.code_editor.time_ms += delta_ms;
     }
 
     /// Layout beginnen
