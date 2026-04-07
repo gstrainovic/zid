@@ -304,15 +304,14 @@ pub const CodeEditor = struct {
     }
 
     pub fn render(self: *Self, arena: std.mem.Allocator) void {
-        // Editor Container
+        // Editor Container - fills full available space
         clay.UI()(.{
             .id = clay.ElementId.ID("code_editor"),
             .layout = .{
-                .sizing = .{ .w = .grow, .h = .fixed(self.height) },
+                .sizing = .{ .w = .grow, .h = .grow },
                 .direction = .left_to_right,
             },
             .background_color = self.bg_color,
-            .corner_radius = .all(4),
         })({
             // Line Numbers Gutter
             clay.UI()(.{

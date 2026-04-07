@@ -16,6 +16,9 @@
         .gooey = .{
             .path = "libs/gooey",
         },
+        .zigimg = .{
+            .path = "libs/zigimg",
+        },
     },
     .paths = .{
         "build.zig",
