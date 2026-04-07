@@ -250,19 +250,19 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
   - [x] Echte Datenstruktur für Text (z.B. Gap-Buffer, Line-Array oder Rope) statt statischer Strings (`src/editor/code_editor.zig`)
   - [x] Cursor-Position (Zeile/Spalte) verwalten und visuell rendern (Blinkender Cursor)
   - [x] Cursor-Navigation (Pfeiltasten, Pos1, Ende, Bild auf/ab)
-- [ ] **Text Selection (Markieren)**
-  - [ ] Start- und End-Position der Markierung verwalten
-  - [ ] Maus-Drag-Logik zum Erstellen von Markierungen (Event-Listener in UI)
-  - [ ] Markierten Text visuell hervorheben (Hintergrundfarbe hinter Glyph-Instanzen rendern)
+- [x] **Text Selection (Markieren)**
+  - [x] Start- und End-Position der Markierung verwalten
+  - [x] Maus-Drag-Logik zum Erstellen von Markierungen (Event-Listener in UI)
+  - [x] Markierten Text visuell hervorheben (Hintergrundfarbe hinter Glyph-Instanzen rendern)
 - [x] **Text Editing**
   - [x] Zeichen einfügen an Cursor-Position (Keyboard Text-Input)
   - [x] Zeichen löschen (Backspace, Delete)
   - [x] Neue Zeilen einfügen (Enter)
-  - [ ] Berücksichtigung von markiertem Text beim Tippen (Ersetzen)
-- [ ] **Viewport & Scrolling Logik (Editor)**
-  - [ ] Berechnung der sichtbaren Zeilen anhand des Scroll-Offsets (Viewport Culling)
-  - [ ] Synchronisation zwischen Clay-ScrollContainer und Editor-State
-  - [ ] Auto-Scroll, wenn Cursor den sichtbaren Bereich verlässt
+  - [x] Berücksichtigung von markiertem Text beim Tippen (Ersetzen)
+- [x] **Viewport & Scrolling Logik (Editor)**
+  - [x] Berechnung der sichtbaren Zeilen anhand des Scroll-Offsets (Viewport Culling)
+  - [x] Synchronisation zwischen Clay-ScrollContainer und Editor-State
+  - [x] Auto-Scroll, wenn Cursor den sichtbaren Bereich verlässt
   - [ ] **Performance-Test mit Großdatei:** `libs/gooey/src/layout/engine.zig` (3363 Zeilen) beim Start laden und Scrolling testen
 
 ### Phase 9: File Explorer, Tabs & Datei-Vorschau

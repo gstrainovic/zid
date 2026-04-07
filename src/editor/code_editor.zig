@@ -24,9 +24,24 @@ pub const CodeEditor = struct {
     /// Aktuelle Zeile (für Highlight)
     current_line: usize = 1,
 
-    /// Cursor Position
+    /// Cursor Position (Zeile/Spalte als Byte-Offset)
     cursor_line: usize = 0,
     cursor_col: usize = 0,
+
+    /// Selection Anchor (Zeile/Spalte), null = keine Selektion
+    selection_anchor_line: ?usize = null,
+    selection_anchor_col: ?usize = null,
+
+    /// Modifier-State für Shift+Navigation
+    shift_pressed: bool = false,
+
+    /// Maus-State für Drag-Selektion
+    mouse_down: bool = false,
+    mouse_x: f32 = 0,
+    mouse_y: f32 = 0,
+
+    /// Scrolling: Erste sichtbare Zeile (Viewport Culling)
+    scroll_offset_first_line: usize = 0,
 
     /// Zeitpunkt der letzten Cursor-Bewegung (für Blink-Delay)
     last_cursor_movement_ms: f32 = 0,
@@ -44,6 +59,7 @@ pub const CodeEditor = struct {
     current_line_number_color: clay.Color = .{ 138, 173, 244, 255 },
     current_line_highlight: clay.Color = .{ 60, 70, 100, 200 },
     cursor_color: clay.Color = .{ 249, 226, 175, 255 },
+    selection_color: clay.Color = .{ 137, 180, 250, 100 },
 
     const Self = @This();
 
@@ -102,13 +118,15 @@ pub const CodeEditor = struct {
         }
         self.cursor_line = 0;
         self.cursor_col = 0;
+        self.scroll_offset_first_line = 0;
         self.last_cursor_movement_ms = self.time_ms;
         self.current_line = 1;
     }
 
-    /// Cursor-Bewegung registrieren (setzt Blink-Delay zurück)
+    /// Cursor-Bewegung registrieren (setzt Blink-Delay zurück, scrollt falls nötig)
     fn recordCursorMovement(self: *Self) void {
         self.last_cursor_movement_ms = self.time_ms;
+        self.ensureCursorVisible();
     }
 
     fn tokenizeLine(self: *Self, line_idx: usize) void {
@@ -242,10 +260,133 @@ pub const CodeEditor = struct {
         return prevCharBoundary(text, pos);
     }
 
+    // =========================================================================
+    // Selection Helpers
+    // =========================================================================
+
+    /// Returns true if there's an active selection (anchor != cursor).
+    pub fn hasSelection(self: *const Self) bool {
+        if (self.selection_anchor_line == null) return false;
+        const al = self.selection_anchor_line.?;
+        const ac = self.selection_anchor_col.?;
+        return al != self.cursor_line or ac != self.cursor_col;
+    }
+
+    /// Returns the selection start as {line, col} (min of anchor/cursor in document order).
+    pub fn selectionStartLine(self: *const Self) usize {
+        if (self.selection_anchor_line == null) return self.cursor_line;
+        const al = self.selection_anchor_line.?;
+        if (al < self.cursor_line) return al;
+        if (al > self.cursor_line) return self.cursor_line;
+        // Same line
+        return self.cursor_line;
+    }
+
+    pub fn selectionStartCol(self: *const Self) usize {
+        if (self.selection_anchor_line == null) return self.cursor_col;
+        const al = self.selection_anchor_line.?;
+        if (al < self.cursor_line) return self.selection_anchor_col.?;
+        if (al > self.cursor_line) return self.cursor_col;
+        return @min(self.selection_anchor_col.?, self.cursor_col);
+    }
+
+    /// Returns the selection end as {line, col} (max of anchor/cursor in document order).
+    pub fn selectionEndLine(self: *const Self) usize {
+        if (self.selection_anchor_line == null) return self.cursor_line;
+        const al = self.selection_anchor_line.?;
+        if (al > self.cursor_line) return al;
+        return self.cursor_line;
+    }
+
+    pub fn selectionEndCol(self: *const Self) usize {
+        if (self.selection_anchor_line == null) return self.cursor_col;
+        const al = self.selection_anchor_line.?;
+        if (al > self.cursor_line) return self.selection_anchor_col.?;
+        if (al < self.cursor_line) return self.cursor_col;
+        return @max(self.selection_anchor_col.?, self.cursor_col);
+    }
+
+    /// Clear the current selection (set anchor to null).
+    fn clearSelection(self: *Self) void {
+        self.selection_anchor_line = null;
+        self.selection_anchor_col = null;
+    }
+
+    /// Start a selection at the current cursor position.
+    fn startSelection(self: *Self) void {
+        self.selection_anchor_line = self.cursor_line;
+        self.selection_anchor_col = self.cursor_col;
+    }
+
+    /// Delete selected text. Returns true if text was deleted.
+    fn deleteSelection(self: *Self) bool {
+        if (!self.hasSelection()) return false;
+
+        const start_line = self.selectionStartLine();
+        const start_col = self.selectionStartCol();
+        const end_line = self.selectionEndLine();
+        const end_col = self.selectionEndCol();
+
+        if (start_line == end_line) {
+            // Single-line selection: remove bytes from start_col to end_col.
+            const line = &self.lines.items[start_line];
+            var removed: usize = 0;
+            const count = end_col - start_col;
+            while (removed < count) : (removed += 1) {
+                _ = line.orderedRemove(start_col);
+            }
+            self.tokenizeLine(start_line);
+        } else {
+            // Multi-line selection: merge start_line prefix with end_line suffix.
+            const start_line_buf = &self.lines.items[start_line];
+            const end_line_buf = &self.lines.items[end_line];
+
+            // Build merged content: prefix of start_line + suffix of end_line.
+            var merged = std.ArrayListUnmanaged(u8){};
+            merged.appendSlice(self.allocator, start_line_buf.items[0..start_col]) catch {};
+            merged.appendSlice(self.allocator, end_line_buf.items[end_col..]) catch {};
+
+            // Replace start_line with merged content.
+            start_line_buf.clearRetainingCapacity();
+            start_line_buf.appendSlice(self.allocator, merged.items) catch {};
+            merged.deinit(self.allocator);
+
+            // Remove lines between start_line+1 and end_line (inclusive).
+            var i: usize = end_line;
+            while (i > start_line) : (i -= 1) {
+                var removed_line = self.lines.orderedRemove(i);
+                removed_line.deinit(self.allocator);
+                var removed_tokens = self.line_tokens.orderedRemove(i);
+                removed_tokens.deinit(self.allocator);
+            }
+
+            // Remove tokens for deleted lines.
+            self.tokenizeLine(start_line);
+        }
+
+        // Move cursor to selection start.
+        self.cursor_line = start_line;
+        self.cursor_col = start_col;
+        self.clearSelection();
+        return true;
+    }
+
     pub fn handleKeyPress(self: *Self, key: wio.Button) void {
         const line = &self.lines.items[self.cursor_line];
         switch (key) {
             .left => {
+                if (self.shift_pressed) {
+                    if (!self.hasSelection()) self.startSelection();
+                } else {
+                    if (self.hasSelection()) {
+                        self.cursor_line = self.selectionStartLine();
+                        self.cursor_col = self.selectionStartCol();
+                        self.clearSelection();
+                        self.recordCursorMovement();
+                        self.current_line = self.cursor_line + 1;
+                        return;
+                    }
+                }
                 if (self.cursor_col > 0) {
                     self.cursor_col = prevCharBoundary(line.items, self.cursor_col);
                 } else if (self.cursor_line > 0) {
@@ -254,6 +395,18 @@ pub const CodeEditor = struct {
                 }
             },
             .right => {
+                if (self.shift_pressed) {
+                    if (!self.hasSelection()) self.startSelection();
+                } else {
+                    if (self.hasSelection()) {
+                        self.cursor_line = self.selectionEndLine();
+                        self.cursor_col = self.selectionEndCol();
+                        self.clearSelection();
+                        self.recordCursorMovement();
+                        self.current_line = self.cursor_line + 1;
+                        return;
+                    }
+                }
                 if (self.cursor_col < line.items.len) {
                     self.cursor_col = nextCharBoundary(line.items, self.cursor_col);
                 } else if (self.cursor_line + 1 < self.lines.items.len) {
@@ -262,6 +415,18 @@ pub const CodeEditor = struct {
                 }
             },
             .up => {
+                if (self.shift_pressed) {
+                    if (!self.hasSelection()) self.startSelection();
+                } else {
+                    if (self.hasSelection()) {
+                        self.cursor_line = self.selectionStartLine();
+                        self.cursor_col = self.selectionStartCol();
+                        self.clearSelection();
+                        self.recordCursorMovement();
+                        self.current_line = self.cursor_line + 1;
+                        return;
+                    }
+                }
                 if (self.cursor_line > 0) {
                     self.cursor_line -= 1;
                     const target = self.lines.items[self.cursor_line].items;
@@ -269,6 +434,18 @@ pub const CodeEditor = struct {
                 }
             },
             .down => {
+                if (self.shift_pressed) {
+                    if (!self.hasSelection()) self.startSelection();
+                } else {
+                    if (self.hasSelection()) {
+                        self.cursor_line = self.selectionEndLine();
+                        self.cursor_col = self.selectionEndCol();
+                        self.clearSelection();
+                        self.recordCursorMovement();
+                        self.current_line = self.cursor_line + 1;
+                        return;
+                    }
+                }
                 if (self.cursor_line + 1 < self.lines.items.len) {
                     self.cursor_line += 1;
                     const target = self.lines.items[self.cursor_line].items;
@@ -276,13 +453,38 @@ pub const CodeEditor = struct {
                 }
             },
             .home => {
+                if (self.shift_pressed) {
+                    if (!self.hasSelection()) self.startSelection();
+                } else {
+                    if (self.hasSelection()) {
+                        self.cursor_col = self.selectionStartCol();
+                        self.clearSelection();
+                        self.recordCursorMovement();
+                        self.current_line = self.cursor_line + 1;
+                        return;
+                    }
+                }
                 self.cursor_col = 0;
             },
             .end => {
+                if (self.shift_pressed) {
+                    if (!self.hasSelection()) self.startSelection();
+                } else {
+                    if (self.hasSelection()) {
+                        self.cursor_col = self.selectionEndCol();
+                        self.clearSelection();
+                        self.recordCursorMovement();
+                        self.current_line = self.cursor_line + 1;
+                        return;
+                    }
+                }
                 self.cursor_col = self.lines.items[self.cursor_line].items.len;
             },
             .backspace => {
-                if (self.cursor_col > 0) {
+                if (self.deleteSelection()) {
+                    self.recordCursorMovement();
+                    self.current_line = self.cursor_line + 1;
+                } else if (self.cursor_col > 0) {
                     // Remove entire UTF-8 character before cursor.
                     const char_start = prevCharBoundary(line.items, self.cursor_col);
                     const byte_count = self.cursor_col - char_start;
@@ -292,6 +494,8 @@ pub const CodeEditor = struct {
                     }
                     self.cursor_col = char_start;
                     self.tokenizeLine(self.cursor_line);
+                    self.recordCursorMovement();
+                    self.current_line = self.cursor_line + 1;
                 } else if (self.cursor_line > 0) {
                     // Merge with previous line.
                     const prev_line_idx = self.cursor_line - 1;
@@ -306,10 +510,15 @@ pub const CodeEditor = struct {
                     self.cursor_line = prev_line_idx;
                     self.cursor_col = prev_len;
                     self.tokenizeLine(self.cursor_line);
+                    self.recordCursorMovement();
+                    self.current_line = self.cursor_line + 1;
                 }
             },
             .delete => {
-                if (self.cursor_col < line.items.len) {
+                if (self.deleteSelection()) {
+                    self.recordCursorMovement();
+                    self.current_line = self.cursor_line + 1;
+                } else if (self.cursor_col < line.items.len) {
                     // Remove entire UTF-8 character at cursor.
                     const char_end = nextCharBoundary(line.items, self.cursor_col);
                     const byte_count = char_end - self.cursor_col;
@@ -353,9 +562,142 @@ pub const CodeEditor = struct {
         self.current_line = self.cursor_line + 1;
     }
 
+    /// Modifier-State aktualisieren (wird von main.zig aufgerufen)
+    pub fn setShiftState(self: *Self, pressed: bool) void {
+        self.shift_pressed = pressed;
+    }
+
+    // =========================================================================
+    // Mouse Handling
+    // =========================================================================
+
+    /// Mausposition aktualisieren (wird von main.zig aufgerufen)
+    pub fn updateMousePosition(self: *Self, x: f32, y: f32) void {
+        self.mouse_x = x;
+        self.mouse_y = y;
+    }
+
+    /// Maus-Down Event verarbeiten
+    pub fn handleMouseDown(self: *Self, x: f32, y: f32) void {
+        const line_idx = self.lineFromY(y);
+        const col = self.colFromX(x, line_idx);
+        self.cursor_line = line_idx;
+        self.cursor_col = col;
+        self.selection_anchor_line = line_idx;
+        self.selection_anchor_col = col;
+        self.mouse_down = true;
+        self.recordCursorMovement();
+        self.current_line = self.cursor_line + 1;
+    }
+
+    /// Maus-Move Event verarbeiten (für Drag-Selektion)
+    pub fn handleMouseMove(self: *Self, x: f32, y: f32) void {
+        if (!self.mouse_down) return;
+        const line_idx = self.lineFromY(y);
+        const col = self.colFromX(x, line_idx);
+        self.cursor_line = line_idx;
+        self.cursor_col = col;
+        // Anchor bleibt gesetzt von handleMouseDown
+        self.ensureCursorVisible();
+        self.current_line = self.cursor_line + 1;
+    }
+
+    /// Maus-Release Event verarbeiten
+    pub fn handleMouseUp(self: *Self) void {
+        self.mouse_down = false;
+    }
+
+    /// Y-Koordinate in Zeilen-Index umrechnen.
+    fn lineFromY(self: *const Self, y: f32) usize {
+        const line_height: f32 = @floatFromInt(self.font_size + 16);
+        if (line_height <= 0) return 0;
+        const line = @as(isize, @intFromFloat(@floor(y / line_height)));
+        if (line < 0) return 0;
+        return @min(@as(usize, @intCast(line)), self.lines.items.len - 1);
+    }
+
+    /// X-Koordinate in Spalte umrechnen (approximativ, Monospace).
+    fn colFromX(self: *const Self, x: f32, line_idx: usize) usize {
+        const char_width: f32 = @as(f32, @floatFromInt(self.font_size)) * 0.6;
+        if (char_width <= 0) return 0;
+        // Gutter-Offset abziehen
+        const text_x = x - self.gutter_width;
+        if (text_x <= 0) return 0;
+        const col_f = @as(isize, @intFromFloat(@floor(text_x / char_width)));
+        if (col_f < 0) return 0;
+        const max_col = self.lines.items[line_idx].items.len;
+        return @min(@as(usize, @intCast(col_f)), max_col);
+    }
+
+    // =========================================================================
+    // Scrolling
+    // =========================================================================
+
+    /// Scroll-Offset aktualisieren (Mausrad). Zeilen-basiert.
+    pub fn scrollLines(self: *Self, delta: i32) void {
+        if (delta > 0) {
+            // Scroll up: mehr Zeilen oben sichtbar
+            const amount = @as(usize, @intCast(delta));
+            self.scroll_offset_first_line = if (amount > self.scroll_offset_first_line)
+                0
+            else
+                self.scroll_offset_first_line - amount;
+        } else if (delta < 0) {
+            // Scroll down: Zeilen unten verschwinden
+            const amount = @as(usize, @intCast(-delta));
+            const max_offset = if (self.lines.items.len > self.visibleLineCount())
+                self.lines.items.len - self.visibleLineCount()
+            else
+                0;
+            const new_offset = self.scroll_offset_first_line + amount;
+            self.scroll_offset_first_line = @min(new_offset, max_offset);
+        }
+    }
+
+    /// Anzahl sichtbarer Zeilen basierend auf Container-Höhe.
+    fn visibleLineCount(self: *const Self) usize {
+        const line_height = self.font_size + 16;
+        if (line_height == 0) return 10;
+        // height ist die Editor-Höhe, abzüglich Padding
+        const visible = @as(f32, @floatFromInt(line_height));
+        const available = self.height - 20.0; // Padding
+        if (available <= 0) return 10;
+        return @max(1, @as(usize, @intFromFloat(@floor(available / visible))));
+    }
+
+    /// Sicherstellen dass der Cursor sichtbar ist (Auto-Scroll).
+    pub fn ensureCursorVisible(self: *Self) void {
+        const visible = self.visibleLineCount();
+        const total = self.lines.items.len;
+        if (total <= visible) {
+            self.scroll_offset_first_line = 0;
+            return;
+        }
+
+        // Cursor unterhalb des sichtbaren Bereichs?
+        const cursor_visible_line = self.cursor_line;
+        if (cursor_visible_line >= self.scroll_offset_first_line + visible) {
+            // Nach unten scrollen
+            self.scroll_offset_first_line = cursor_visible_line - visible + 1;
+        }
+        // Cursor oberhalb des sichtbaren Bereichs?
+        if (cursor_visible_line < self.scroll_offset_first_line) {
+            self.scroll_offset_first_line = cursor_visible_line;
+        }
+
+        // Clamp
+        const max_offset = total - visible;
+        self.scroll_offset_first_line = @min(self.scroll_offset_first_line, max_offset);
+    }
+
     pub fn handleChar(self: *Self, char_code: u21) void {
         // Ignoriere Steuerzeichen
         if (char_code < 32 or char_code == 127) return;
+
+        // Ersetze Selektion falls vorhanden
+        if (self.deleteSelection()) {
+            // Cursor steht jetzt am Selektionsanfang
+        }
 
         var buf: [4]u8 = undefined;
         const len = std.unicode.utf8Encode(char_code, &buf) catch return;
@@ -392,10 +734,21 @@ pub const CodeEditor = struct {
                         // .child_gap = 2,
                     },
                 })({
-                    var i: usize = 0;
-                    while (i < self.lines.items.len) : (i += 1) {
+                    const visible_count = self.visibleLineCount();
+                    const start_line = @min(self.scroll_offset_first_line, self.lines.items.len);
+                    const end_line = @min(start_line + visible_count + 1, self.lines.items.len);
+
+                    var i: usize = start_line;
+                    while (i < end_line) : (i += 1) {
                         const line = self.lines.items[i].items;
                         const is_current = (i == self.cursor_line);
+
+                        // Prüfen ob diese Zeile zur Selektion gehört
+                        const is_selected = if (self.hasSelection()) blk: {
+                            const sl = self.selectionStartLine();
+                            const el = self.selectionEndLine();
+                            break :blk i >= sl and i <= el;
+                        } else false;
 
                         // Row Container (Gutter + Code)
                         clay.UI()(.{
@@ -414,7 +767,7 @@ pub const CodeEditor = struct {
                                     .padding = .{ .left = 8, .right = 16 },
                                     .child_alignment = .{ .x = .right, .y = .center },
                                 },
-                                .background_color = if (is_current) self.current_line_highlight else self.gutter_color,
+                                .background_color = if (is_current) self.current_line_highlight else if (is_selected) self.selection_color else self.gutter_color,
                             })({
                                 const color = if (is_current)
                                     self.current_line_number_color
@@ -435,7 +788,7 @@ pub const CodeEditor = struct {
                                     .padding = .{ .left = 12 },
                                     .child_alignment = .{ .x = .left, .y = .center },
                                 },
-                                .background_color = if (is_current) self.current_line_highlight else .{ 0, 0, 0, 0 },
+                                .background_color = if (is_current and !is_selected) self.current_line_highlight else if (is_selected) self.selection_color else .{ 0, 0, 0, 0 },
                             })({
                                 self.renderLine(i, line);
                             });
@@ -1084,4 +1437,361 @@ test "4-Byte UTF-8: Emoji" {
     ed.handleKeyPress(.backspace);
     try std.testing.expectEqual(@as(usize, 0), ed.cursor_col);
     try std.testing.expectEqualStrings("", ed.lines.items[0].items);
+}
+
+// =========================================================================
+// Selection Tests
+// =========================================================================
+
+test "Selection: Shift+Right erweitert Selektion" {
+    const allocator = std.testing.allocator;
+    var ed = CodeEditor.init(allocator);
+    defer ed.deinit();
+
+    ed.setText("hello");
+    ed.cursor_col = 0;
+
+    ed.setShiftState(true);
+    ed.handleKeyPress(.right); // h markiert
+    try std.testing.expect(ed.hasSelection());
+    try std.testing.expectEqual(@as(usize, 0), ed.selectionStartCol());
+    try std.testing.expectEqual(@as(usize, 1), ed.selectionEndCol());
+
+    ed.handleKeyPress(.right); // he markiert
+    try std.testing.expectEqual(@as(usize, 2), ed.selectionEndCol());
+    ed.setShiftState(false);
+}
+
+test "Selection: Shift+Left erweitert Selektion rückwärts" {
+    const allocator = std.testing.allocator;
+    var ed = CodeEditor.init(allocator);
+    defer ed.deinit();
+
+    ed.setText("hello");
+    ed.cursor_col = 3; // bei 'l'
+
+    ed.setShiftState(true);
+    ed.handleKeyPress(.left); // hel → l markiert
+    try std.testing.expect(ed.hasSelection());
+    try std.testing.expectEqual(@as(usize, 2), ed.selectionStartCol());
+    try std.testing.expectEqual(@as(usize, 3), ed.selectionEndCol());
+    ed.setShiftState(false);
+}
+
+test "Selection: Navigation ohne Shift löscht Selektion" {
+    const allocator = std.testing.allocator;
+    var ed = CodeEditor.init(allocator);
+    defer ed.deinit();
+
+    ed.setText("hello world");
+    ed.cursor_col = 0;
+    ed.setShiftState(true);
+    ed.handleKeyPress(.right);
+    ed.handleKeyPress(.right); // "he" markiert
+    try std.testing.expect(ed.hasSelection());
+
+    // Ohne Shift: Selektion löschen + bewegen
+    ed.setShiftState(false);
+    ed.handleKeyPress(.right);
+    try std.testing.expect(!ed.hasSelection());
+    try std.testing.expectEqual(@as(usize, 2), ed.cursor_col); // zum Selektionsende gesprungen
+}
+
+test "Selection: Backspace löscht markierten Text" {
+    const allocator = std.testing.allocator;
+    var ed = CodeEditor.init(allocator);
+    defer ed.deinit();
+
+    ed.setText("hello");
+    ed.cursor_col = 1;
+    ed.setShiftState(true);
+    ed.handleKeyPress(.right);
+    ed.handleKeyPress(.right);
+    ed.handleKeyPress(.right); // "hell" markiert (col 1-4)
+    ed.setShiftState(false);
+
+    ed.handleKeyPress(.backspace);
+    try std.testing.expect(!ed.hasSelection());
+    try std.testing.expectEqualStrings("ho", ed.lines.items[0].items);
+    try std.testing.expectEqual(@as(usize, 1), ed.cursor_col);
+}
+
+test "Selection: Delete löscht markierten Text" {
+    const allocator = std.testing.allocator;
+    var ed = CodeEditor.init(allocator);
+    defer ed.deinit();
+
+    ed.setText("hello");
+    ed.cursor_col = 0;
+    ed.setShiftState(true);
+    ed.handleKeyPress(.right);
+    ed.handleKeyPress(.right); // "he" markiert (col 0-2)
+    ed.setShiftState(false);
+
+    ed.handleKeyPress(.delete);
+    try std.testing.expect(!ed.hasSelection());
+    try std.testing.expectEqualStrings("llo", ed.lines.items[0].items);
+    try std.testing.expectEqual(@as(usize, 0), ed.cursor_col);
+}
+
+test "Selection: Tippen ersetzt markierten Text" {
+    const allocator = std.testing.allocator;
+    var ed = CodeEditor.init(allocator);
+    defer ed.deinit();
+
+    ed.setText("hello");
+    ed.cursor_col = 0;
+    ed.setShiftState(true);
+    ed.handleKeyPress(.right);
+    ed.handleKeyPress(.right); // "he" markiert (col 0-2)
+    ed.setShiftState(false);
+
+    ed.handleChar('x');
+    try std.testing.expect(!ed.hasSelection());
+    try std.testing.expectEqualStrings("xllo", ed.lines.items[0].items);
+    try std.testing.expectEqual(@as(usize, 1), ed.cursor_col);
+}
+
+test "Selection: Shift+Up/Down multi-line Selektion" {
+    const allocator = std.testing.allocator;
+    var ed = CodeEditor.init(allocator);
+    defer ed.deinit();
+
+    ed.setText("abc\ndef\nghi");
+    ed.cursor_line = 0;
+    ed.cursor_col = 1; // bei 'b'
+
+    ed.setShiftState(true);
+    ed.handleKeyPress(.down); // Zeile 1
+    try std.testing.expect(ed.hasSelection());
+    try std.testing.expectEqual(@as(usize, 0), ed.selectionStartLine());
+    try std.testing.expectEqual(@as(usize, 1), ed.selectionEndLine());
+
+    ed.handleKeyPress(.down); // Zeile 2
+    try std.testing.expectEqual(@as(usize, 2), ed.selectionEndLine());
+    ed.setShiftState(false);
+}
+
+test "Selection: Mehrzeilige Selektion löschen" {
+    const allocator = std.testing.allocator;
+    var ed = CodeEditor.init(allocator);
+    defer ed.deinit();
+
+    ed.setText("abc\ndef\nghi");
+    ed.cursor_line = 0;
+    ed.cursor_col = 1;
+    ed.setShiftState(true);
+    ed.handleKeyPress(.down); // Zeile 1 ("def"), col wird auf 1 gesnappt (da "abc" col=1)
+    ed.handleKeyPress(.down); // Zeile 2 ("ghi"), col wird auf 1 gesnappt
+    ed.setShiftState(false);
+
+    // Anchor (0,1), Cursor (2,1) → "bc\ndef\ng" löschen
+    ed.handleKeyPress(.backspace);
+    try std.testing.expect(!ed.hasSelection());
+    try std.testing.expectEqual(@as(usize, 1), ed.lines.items.len);
+    // "a" + "hi" = "ahi"
+    try std.testing.expectEqualStrings("ahi", ed.lines.items[0].items);
+}
+
+test "Selection: Shift+Home und Shift+End" {
+    const allocator = std.testing.allocator;
+    var ed = CodeEditor.init(allocator);
+    defer ed.deinit();
+
+    ed.setText("hello world");
+    ed.cursor_col = 6; // bei 'w'
+
+    ed.setShiftState(true);
+    ed.handleKeyPress(.home);
+    try std.testing.expect(ed.hasSelection());
+    try std.testing.expectEqual(@as(usize, 0), ed.selectionStartCol());
+    try std.testing.expectEqual(@as(usize, 6), ed.selectionEndCol());
+
+    // Weiter zu End — erweitert Selektion
+    ed.handleKeyPress(.end);
+    // Anchor bleibt bei 6, Cursor bei 11 → Selektion ist col 6-11
+    try std.testing.expectEqual(@as(usize, 6), ed.selectionStartCol());
+    try std.testing.expectEqual(@as(usize, 11), ed.selectionEndCol());
+    ed.setShiftState(false);
+}
+
+test "Selection: Rückwärts selektieren (Anchor > Cursor)" {
+    const allocator = std.testing.allocator;
+    var ed = CodeEditor.init(allocator);
+    defer ed.deinit();
+
+    ed.setText("hello");
+    ed.cursor_col = 4; // bei erstem 'l' von rechts
+    ed.setShiftState(true);
+    ed.handleKeyPress(.left);
+    ed.handleKeyPress(.left);
+    ed.handleKeyPress(.left); // von col 4 auf col 1
+    ed.setShiftState(false);
+
+    try std.testing.expect(ed.hasSelection());
+    try std.testing.expectEqual(@as(usize, 1), ed.selectionStartCol());
+    try std.testing.expectEqual(@as(usize, 4), ed.selectionEndCol());
+}
+
+test "Selection: Home ohne Shift auf Selektion springt zum Start" {
+    const allocator = std.testing.allocator;
+    var ed = CodeEditor.init(allocator);
+    defer ed.deinit();
+
+    ed.setText("hello world");
+    ed.cursor_col = 5;
+    ed.setShiftState(true);
+    ed.handleKeyPress(.end); // " world" markiert
+    try std.testing.expect(ed.hasSelection());
+    ed.setShiftState(false);
+
+    ed.handleKeyPress(.home); // Soll zum Selektionsanfang (col 5)
+    try std.testing.expect(!ed.hasSelection());
+    try std.testing.expectEqual(@as(usize, 5), ed.cursor_col);
+}
+
+// =========================================================================
+// Scrolling Tests
+// =========================================================================
+
+test "Scrolling: Viewport Culling rendert nur sichtbare Zeilen" {
+    const allocator = std.testing.allocator;
+    var ed = CodeEditor.init(allocator);
+    defer ed.deinit();
+
+    // 20 Zeilen erzeugen
+    var buf: [16]u8 = undefined;
+    var lines_text = std.ArrayList(u8).empty;
+    defer lines_text.deinit(allocator);
+    var i: usize = 0;
+    while (i < 20) : (i += 1) {
+        if (i > 0) lines_text.append(allocator, '\n') catch {};
+        const s = std.fmt.bufPrint(&buf, "line{}", .{i}) catch "";
+        lines_text.appendSlice(allocator, s) catch {};
+    }
+    ed.setText(lines_text.items);
+
+    // Default: scroll_offset = 0, visible ~9 Zeilen (height=400, line_height=40)
+    try std.testing.expectEqual(@as(usize, 0), ed.scroll_offset_first_line);
+    const visible = ed.visibleLineCount();
+    try std.testing.expect(visible >= 8 and visible <= 12);
+
+    // 5 Zeilen runter scrollen (negatives delta = Content nach oben = offset erhöht)
+    ed.scrollLines(-5);
+    try std.testing.expectEqual(@as(usize, 5), ed.scroll_offset_first_line);
+
+    // 3 Zeilen hoch scrollen (positives delta = Content nach unten = offset reduziert)
+    ed.scrollLines(3);
+    try std.testing.expectEqual(@as(usize, 2), ed.scroll_offset_first_line);
+}
+
+test "Scrolling: scrollLines clamp an Grenzen" {
+    const allocator = std.testing.allocator;
+    var ed = CodeEditor.init(allocator);
+    defer ed.deinit();
+
+    ed.setText("a\nb\nc"); // 3 Zeilen
+
+    // Runter scrollen über Ende hinaus
+    ed.scrollLines(100);
+    // Max offset = 3 - visible (mindestens 1)
+    const max_offset = if (ed.lines.items.len > ed.visibleLineCount())
+        ed.lines.items.len - ed.visibleLineCount()
+    else
+        0;
+    try std.testing.expectEqual(max_offset, ed.scroll_offset_first_line);
+
+    // Hoch scrollen über Anfang hinaus
+    ed.scrollLines(-100);
+    try std.testing.expectEqual(@as(usize, 0), ed.scroll_offset_first_line);
+}
+
+test "Scrolling: Auto-Scroll wenn Cursor nach unten wandert" {
+    const allocator = std.testing.allocator;
+    var ed = CodeEditor.init(allocator);
+    defer ed.deinit();
+
+    // Viele Zeilen erzeugen
+    var text = std.ArrayList(u8).empty;
+    defer text.deinit(allocator);
+    var i: usize = 0;
+    while (i < 30) : (i += 1) {
+        if (i > 0) text.append(allocator, '\n') catch {};
+        text.appendSlice(allocator, "x") catch {};
+    }
+    ed.setText(text.items);
+
+    // Cursor auf Zeile 20 bewegen
+    ed.cursor_line = 20;
+    ed.ensureCursorVisible();
+
+    // Scroll-Offset sollte jetzt so sein dass Zeile 20 sichtbar ist
+    const visible = ed.visibleLineCount();
+    try std.testing.expect(ed.scroll_offset_first_line <= 20);
+    try std.testing.expect(ed.scroll_offset_first_line + visible > 20);
+}
+
+test "Scrolling: Auto-Scroll wenn Cursor nach oben wandert" {
+    const allocator = std.testing.allocator;
+    var ed = CodeEditor.init(allocator);
+    defer ed.deinit();
+
+    var text = std.ArrayList(u8).empty;
+    defer text.deinit(allocator);
+    var i: usize = 0;
+    while (i < 30) : (i += 1) {
+        if (i > 0) text.append(allocator, '\n') catch {};
+        text.appendSlice(allocator, "x") catch {};
+    }
+    ed.setText(text.items);
+
+    // Erst runter scrollen (negatives delta = offset erhöht)
+    ed.scrollLines(-15);
+    try std.testing.expect(ed.scroll_offset_first_line > 0);
+
+    // Cursor nach oben bewegen
+    ed.cursor_line = 0;
+    ed.ensureCursorVisible();
+    try std.testing.expectEqual(@as(usize, 0), ed.scroll_offset_first_line);
+}
+
+test "Scrolling: setText reset scroll_offset" {
+    const allocator = std.testing.allocator;
+    var ed = CodeEditor.init(allocator);
+    defer ed.deinit();
+
+    ed.setText("a\nb\nc\nd\ne");
+    ed.scrollLines(10);
+
+    ed.setText("new text");
+    try std.testing.expectEqual(@as(usize, 0), ed.scroll_offset_first_line);
+}
+
+test "Scrolling: Mouse-Drag Scrollt Auto" {
+    const allocator = std.testing.allocator;
+    var ed = CodeEditor.init(allocator);
+    defer ed.deinit();
+
+    // 30 Zeilen
+    var text = std.ArrayList(u8).empty;
+    defer text.deinit(allocator);
+    var i: usize = 0;
+    while (i < 30) : (i += 1) {
+        if (i > 0) text.append(allocator, '\n') catch {};
+        text.appendSlice(allocator, "x") catch {};
+    }
+    ed.setText(text.items);
+    ed.height = 400; // ~9 visible lines
+
+    // Mouse down bei Zeile 0
+    ed.handleMouseDown(100, 20);
+    try std.testing.expectEqual(@as(usize, 0), ed.cursor_line);
+
+    // Mouse move zu Zeile 25 (y = 25 * 40 = 1000)
+    ed.handleMouseMove(100, 1000);
+    try std.testing.expectEqual(@as(usize, 25), ed.cursor_line);
+
+    // Auto-Scroll sollte Zeile 25 sichtbar machen
+    const visible = ed.visibleLineCount();
+    try std.testing.expect(ed.scroll_offset_first_line + visible > 25);
 }

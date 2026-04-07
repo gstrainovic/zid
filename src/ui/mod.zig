@@ -132,6 +132,29 @@ pub const UI = struct {
         self.code_editor.handleChar(char_code);
     }
 
+    /// Modifier-State aktualisieren
+    pub fn setShiftState(self: *Self, pressed: bool) void {
+        self.code_editor.setShiftState(pressed);
+    }
+
+    /// Maus-Events an Editor weiterleiten
+    pub fn handleMouseDown(self: *Self, x: f32, y: f32) void {
+        self.code_editor.handleMouseDown(x, y);
+    }
+
+    pub fn handleMouseMove(self: *Self, x: f32, y: f32) void {
+        self.code_editor.handleMouseMove(x, y);
+    }
+
+    pub fn handleMouseUp(self: *Self) void {
+        self.code_editor.handleMouseUp();
+    }
+
+    /// Scroll-Events an Editor weiterleiten
+    pub fn handleScroll(self: *Self, delta: i32) void {
+        self.code_editor.scrollLines(delta);
+    }
+
     /// UI updaten (pro Frame)
     pub fn update(self: *Self, delta_ms: f32) void {
         self.anim_manager.update(delta_ms);
