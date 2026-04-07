@@ -201,10 +201,17 @@ pub fn main() !void {
                         mouse_y = @floatFromInt(pos.y);
                     },
                     .button_press => |btn| {
-                        if (btn == .mouse_left) mouse_down = true;
+                        if (btn == .mouse_left) {
+                            mouse_down = true;
+                        } else {
+                            ui_system.handleKeyPress(btn);
+                        }
                     },
                     .button_release => |btn| {
                         if (btn == .mouse_left) mouse_down = false;
+                    },
+                    .char => |char_code| {
+                        ui_system.handleChar(char_code);
                     },
                     .scroll_vertical => |delta| {
                         scroll_delta_y = @floatCast(delta);
@@ -219,9 +226,8 @@ pub fn main() !void {
         ui_system.setPointerState(mouse_x, mouse_y, mouse_down);
         
         // Scroll-Events an Clay (Scroll-Multiplikator 10.0 für bessere Geschwindigkeit)
-        if (scroll_delta_y != 0) {
-            ui_system.updateScroll(0, scroll_delta_y * 10.0, delta_time_ms);
-        }
+        // Muss jeden Frame aufgerufen werden, auch wenn delta == 0, da sonst Drag-Scrolling nicht geht!
+        ui_system.updateScroll(0, scroll_delta_y * 10.0, delta_time_ms);
 
         // Clay Layout berechnen
         const render_commands = ui_system.renderExample(&logo_texture);

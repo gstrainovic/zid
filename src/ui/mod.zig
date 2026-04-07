@@ -83,6 +83,7 @@ pub const UI = struct {
         self.anim_manager.deinit();
         self.frame_arena.deinit();
         self.allocator.free(self.clay_memory);
+        self.code_editor.deinit();
     }
 
     /// Clay initialisieren (nach Window Creation)
@@ -118,6 +119,16 @@ pub const UI = struct {
             .w = width,
             .h = height,
         };
+    }
+
+    /// Keyboard Input verarbeiten
+    pub fn handleKeyPress(self: *Self, key: @import("wio").Button) void {
+        self.code_editor.handleKeyPress(key);
+    }
+
+    /// Text Input verarbeiten
+    pub fn handleChar(self: *Self, char_code: u21) void {
+        self.code_editor.handleChar(char_code);
     }
 
     /// UI updaten (pro Frame)
@@ -296,7 +307,7 @@ pub const UI = struct {
                 });
 
                 // Code Editor (mit Syntax Highlighting, Current Line Highlight, Scrollable Content)
-                self.code_editor.render();
+                self.code_editor.render(self.frame_arena.allocator());
             });
         });
 

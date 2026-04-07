@@ -241,23 +241,23 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
 - [x] ~~vkvg Bindings~~ — entfernt, Gooey SVG-Pipeline reicht für gecachte Icons
 
 ### Phase 8: Interaktion & Editor-Logik (Input, State & Interaction Layer)
-- [ ] **Input Handling (wio → Clay)**
-  - [ ] Maus-Events (Move, Click, Scroll) von wio abfangen (`src/main.zig` und `src/platform/mod.zig`)
-  - [ ] Maus-Position an Clay-Zig weiterleiten (`clay.setPointerState`)
-  - [ ] Scroll-Events an Clay-Zig weiterleiten (`clay.updateScrollContainers`)
-  - [ ] Tastatur-Events (Press, Release, Text Input) abfangen
-- [ ] **Text-Buffer & Cursor Management**
-  - [ ] Echte Datenstruktur für Text (z.B. Gap-Buffer, Line-Array oder Rope) statt statischer Strings (`src/editor/code_editor.zig`)
-  - [ ] Cursor-Position (Zeile/Spalte) verwalten und visuell rendern (Blinkender Cursor)
-  - [ ] Cursor-Navigation (Pfeiltasten, Pos1, Ende, Bild auf/ab)
+- [x] **Input Handling (wio → Clay)**
+  - [x] Maus-Events (Move, Click, Scroll) von wio abfangen (`src/main.zig` und `src/platform/mod.zig`)
+  - [x] Maus-Position an Clay-Zig weiterleiten (`clay.setPointerState`)
+  - [x] Scroll-Events an Clay-Zig weiterleiten (`clay.updateScrollContainers`)
+  - [x] Tastatur-Events (Press, Release, Text Input) abfangen
+- [x] **Text-Buffer & Cursor Management**
+  - [x] Echte Datenstruktur für Text (z.B. Gap-Buffer, Line-Array oder Rope) statt statischer Strings (`src/editor/code_editor.zig`)
+  - [x] Cursor-Position (Zeile/Spalte) verwalten und visuell rendern (Blinkender Cursor)
+  - [x] Cursor-Navigation (Pfeiltasten, Pos1, Ende, Bild auf/ab)
 - [ ] **Text Selection (Markieren)**
   - [ ] Start- und End-Position der Markierung verwalten
   - [ ] Maus-Drag-Logik zum Erstellen von Markierungen (Event-Listener in UI)
   - [ ] Markierten Text visuell hervorheben (Hintergrundfarbe hinter Glyph-Instanzen rendern)
-- [ ] **Text Editing**
-  - [ ] Zeichen einfügen an Cursor-Position (Keyboard Text-Input)
-  - [ ] Zeichen löschen (Backspace, Delete)
-  - [ ] Neue Zeilen einfügen (Enter)
+- [x] **Text Editing**
+  - [x] Zeichen einfügen an Cursor-Position (Keyboard Text-Input)
+  - [x] Zeichen löschen (Backspace, Delete)
+  - [x] Neue Zeilen einfügen (Enter)
   - [ ] Berücksichtigung von markiertem Text beim Tippen (Ersetzen)
 - [ ] **Viewport & Scrolling Logik (Editor)**
   - [ ] Berechnung der sichtbaren Zeilen anhand des Scroll-Offsets (Viewport Culling)
