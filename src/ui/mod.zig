@@ -49,11 +49,12 @@ pub const UI = struct {
     pub fn init(allocator: std.mem.Allocator, config: UIConfig) !Self {
         log.info("Initializing UI system", .{});
 
-        // Clay Memory allozieren
+        // Clay Memory allozieren (großzügiger Puffer für viele Elemente/Zeilen)
         const min_memory = clay.minMemorySize();
-        log.info("Clay requires {} bytes", .{min_memory});
+        const generous_memory = @max(min_memory, 10 * 1024 * 1024); // 10 MB
+        log.info("Clay requires {} bytes, allocating {} bytes", .{ min_memory, generous_memory });
 
-        const clay_memory = try allocator.alloc(u8, min_memory);
+        const clay_memory = try allocator.alloc(u8, generous_memory);
 
         var code_editor = editor_mod.CodeEditor.init(allocator);
         code_editor.setText(

@@ -65,6 +65,7 @@ pub fn main() !void {
 
     // Window erstellen (NACH renderer)
     try plat.createWindow();
+    plat.setTextInput(true);
 
     // Surface vom Window erstellen
     if (builtin.os.tag == .linux) {
