@@ -27,6 +27,9 @@ pub const CodeEditor = struct {
     cursor_line: usize = 0,
     cursor_col: usize = 0,
 
+    /// Zeitpunkt der letzten Cursor-Bewegung (für Blink-Delay)
+    last_cursor_movement_ms: f32 = 0,
+
     /// Layout
     height: f32 = 400,
     gutter_width: f32 = 50,
@@ -98,7 +101,13 @@ pub const CodeEditor = struct {
         }
         self.cursor_line = 0;
         self.cursor_col = 0;
+        self.last_cursor_movement_ms = self.time_ms;
         self.current_line = 1;
+    }
+
+    /// Cursor-Bewegung registrieren (setzt Blink-Delay zurück)
+    fn recordCursorMovement(self: *Self) void {
+        self.last_cursor_movement_ms = self.time_ms;
     }
 
     fn tokenizeLine(self: *Self, line_idx: usize) void {
@@ -288,6 +297,7 @@ pub const CodeEditor = struct {
             },
             else => {},
         }
+        self.recordCursorMovement();
         self.current_line = self.cursor_line + 1;
     }
 
@@ -301,6 +311,7 @@ pub const CodeEditor = struct {
         const line = &self.lines.items[self.cursor_line];
         line.insertSlice(self.allocator, self.cursor_col, buf[0..len]) catch return;
         self.cursor_col += len;
+        self.recordCursorMovement();
         self.tokenizeLine(self.cursor_line);
     }
 
@@ -415,7 +426,14 @@ pub const CodeEditor = struct {
 
     fn renderCursor(self: *Self, _: usize) void {
         const blink_ms: f32 = 500.0;
-        const visible = @mod(self.time_ms, blink_ms * 2.0) < blink_ms;
+        const blink_delay_ms: f32 = 400.0; // Cursor bleibt sichtbar für 400ms nach Bewegung
+        
+        // Prüfen ob Cursor sich gerade bewegt (Blink-Delay)
+        const time_since_movement = self.time_ms - self.last_cursor_movement_ms;
+        const is_moving = time_since_movement < blink_delay_ms;
+        
+        // Blink-Logik: sichtbar wenn sich bewegend ODER in der sichtbaren Blink-Phase
+        const visible = is_moving or (@mod(self.time_ms, blink_ms * 2.0) < blink_ms);
         if (!visible) return;
 
         // Text vor dem Cursor extrahieren
