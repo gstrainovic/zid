@@ -229,7 +229,7 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
 - [x] Scrollable Editor-Content
   - [x] Editor-Content in ScrollContainer
 
-### Phase 7: SVG Icons (Gooey SVG-Pipeline)
+### Phase 7: SVG Icons (Gooey SVG-Pipeline) - *durch Benutzer verifiziert*
 - [x] Gooey SVG-Module integrieren
   - [x] `svg/rasterizer.zig` (Platform-Dispatcher → cairo.zig auf Linux)
   - [x] `svg/atlas.zig` (Texture Atlas Cache für gerasterte Icons)
