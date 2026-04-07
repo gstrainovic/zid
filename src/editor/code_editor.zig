@@ -315,23 +315,18 @@ pub const CodeEditor = struct {
         if (pos >= text.len) return text.len;
         var i = pos;
 
-        // Skip leading whitespace
-        while (i < text.len and std.ascii.isWhitespace(text[i])) {
-            i = nextCharBoundary(text, i);
-        }
-
-        if (i >= text.len) return text.len;
-
-        // Skip the word (or block of symbols)
-        const start_is_word = isWordChar(text[i]);
-        while (i < text.len) {
-            if (isWordChar(text[i]) != start_is_word or std.ascii.isWhitespace(text[i])) break;
-            i = nextCharBoundary(text, i);
-        }
-
-        // Standard behavior: also skip trailing whitespace after the word
-        while (i < text.len and std.ascii.isWhitespace(text[i])) {
-            i = nextCharBoundary(text, i);
+        if (std.ascii.isWhitespace(text[i])) {
+            // If at whitespace, skip to the start of the next word/block
+            while (i < text.len and std.ascii.isWhitespace(text[i])) {
+                i = nextCharBoundary(text, i);
+            }
+        } else {
+            // If in a word/block, skip to the end of this word/block
+            const start_is_word = isWordChar(text[i]);
+            while (i < text.len) {
+                if (isWordChar(text[i]) != start_is_word or std.ascii.isWhitespace(text[i])) break;
+                i = nextCharBoundary(text, i);
+            }
         }
 
         return i;
@@ -1506,16 +1501,11 @@ test "setText: CRLF wird zu LF normalisiert" {
 
 test "Word Boundaries: nextWordBoundary behavior" {
     const text = "hello  world  next";
-    // Starting at 'h' (0)
-    // 1. skip 'hello' (5)
-    // 2. skip spaces (7) -> lands at 'w'
-    try std.testing.expectEqual(@as(usize, 7), CodeEditor.nextWordBoundary(text, 0));
+    // Starting at 'h' (0) -> should jump to end of 'hello' (5)
+    try std.testing.expectEqual(@as(usize, 5), CodeEditor.nextWordBoundary(text, 0));
     
-    // Starting at end of 'hello' (5)
-    // 1. skip spaces (7)
-    // 2. skip 'world' (12)
-    // 3. skip spaces (14) -> lands at 'n'
-    try std.testing.expectEqual(@as(usize, 14), CodeEditor.nextWordBoundary(text, 5));
+    // Starting at end of 'hello' (5, which is a space) -> should jump to start of 'world' (7)
+    try std.testing.expectEqual(@as(usize, 7), CodeEditor.nextWordBoundary(text, 5));
 }
 
 test "Word Boundaries: prevWordBoundary behavior" {
