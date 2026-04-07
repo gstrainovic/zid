@@ -10,10 +10,10 @@ const wio = @import("wio");
 
 pub const CodeEditor = struct {
     allocator: std.mem.Allocator,
-    
+
     /// Code-Zeilen dynamisch (Unmanaged für präzise Speicherrolle)
     lines: std.ArrayListUnmanaged(std.ArrayListUnmanaged(u8)),
-    
+
     /// Tokenisierte Zeilen
     line_tokens: std.ArrayListUnmanaged(std.ArrayListUnmanaged(Token)),
 
@@ -48,13 +48,13 @@ pub const CodeEditor = struct {
             .lines = .{},
             .line_tokens = .{},
             .highlighter = Highlighter.init(
-                .{ 199, 146, 234, 255 },  // keyword - lila
-                .{ 166, 209, 137, 255 },  // string - grün
-                .{ 108, 112, 134, 255 },  // comment - grau
-                .{ 250, 179, 135, 255 },  // number - orange
-                .{ 138, 173, 244, 255 },  // builtin - blau
-                .{ 138, 173, 244, 255 },  // punctuation - blau
-                .{ 202, 211, 245, 255 },  // plain - weiß
+                .{ 199, 146, 234, 255 }, // keyword - lila
+                .{ 166, 209, 137, 255 }, // string - grün
+                .{ 108, 112, 134, 255 }, // comment - grau
+                .{ 250, 179, 135, 255 }, // number - orange
+                .{ 138, 173, 244, 255 }, // builtin - blau
+                .{ 138, 173, 244, 255 }, // punctuation - blau
+                .{ 202, 211, 245, 255 }, // plain - weiß
             ),
         };
         // Initialisiere mit einer leeren Zeile
@@ -104,7 +104,7 @@ pub const CodeEditor = struct {
         if (line_idx >= self.lines.items.len) return;
         var tokens = &self.line_tokens.items[line_idx];
         tokens.clearRetainingCapacity();
-        
+
         const line_text = self.lines.items[line_idx].items;
         const len = line_text.len;
         var ti: usize = 0;
@@ -243,7 +243,7 @@ pub const CodeEditor = struct {
                     self.lines.items[prev_line_idx].appendSlice(self.allocator, line.items) catch {};
                     var removed_line = self.lines.orderedRemove(self.cursor_line);
                     removed_line.deinit(self.allocator);
-                    
+
                     var removed_tokens = self.line_tokens.orderedRemove(self.cursor_line);
                     removed_tokens.deinit(self.allocator);
 
@@ -262,7 +262,7 @@ pub const CodeEditor = struct {
                     line.appendSlice(self.allocator, self.lines.items[next_line_idx].items) catch {};
                     var removed_line = self.lines.orderedRemove(next_line_idx);
                     removed_line.deinit(self.allocator);
-                    
+
                     var removed_tokens = self.line_tokens.orderedRemove(next_line_idx);
                     removed_tokens.deinit(self.allocator);
 
@@ -285,7 +285,7 @@ pub const CodeEditor = struct {
                 self.cursor_line += 1;
                 self.cursor_col = 0;
             },
-            else => {}
+            else => {},
         }
         self.current_line = self.cursor_line + 1;
     }
@@ -296,7 +296,7 @@ pub const CodeEditor = struct {
 
         var buf: [4]u8 = undefined;
         const len = std.unicode.utf8Encode(char_code, &buf) catch return;
-        
+
         const line = &self.lines.items[self.cursor_line];
         line.insertSlice(self.allocator, self.cursor_col, buf[0..len]) catch return;
         self.cursor_col += len;
@@ -318,7 +318,7 @@ pub const CodeEditor = struct {
                 .id = clay.ElementId.ID("line_numbers"),
                 .layout = .{
                     .sizing = .{ .w = .fixed(self.gutter_width), .h = .grow },
-                    .padding = .{ .left = 8, .right = 8, .top = 8, .bottom = 8 },
+                    // .padding = .{ .left = 8, .right = 8, .top = 8, .bottom = 8 },
                     .direction = .top_to_bottom,
                     .child_gap = 4,
                 },
@@ -330,11 +330,20 @@ pub const CodeEditor = struct {
                         self.current_line_number_color
                     else
                         self.line_number_color;
-                    
-                    var buf: [16]u8 = undefined;
-                    const line_num_str = std.fmt.bufPrint(&buf, "{d}", .{i + 1}) catch "?";
-                    const persistent_str = arena.dupe(u8, line_num_str) catch "";
-                    clay.text(persistent_str, .{ .font_size = self.font_size, .color = color });
+
+                    // Same fixed-height container as code lines for perfect sync
+                    clay.UI()(.{
+                        .id = clay.ElementId.IDI("line_num_container", @intCast(i)),
+                        .layout = .{
+                            .sizing = .{ .w = .grow, .h = .fixed(@floatFromInt(self.font_size + 4)) },
+                            .child_alignment = .{ .x = .right, .y = .center },
+                        },
+                    })({
+                        var buf: [16]u8 = undefined;
+                        const line_num_str = std.fmt.bufPrint(&buf, "{d}", .{i + 1}) catch "?";
+                        const persistent_str = arena.dupe(u8, line_num_str) catch "";
+                        clay.text(persistent_str, .{ .font_size = self.font_size, .color = color });
+                    });
                 }
             });
 
@@ -356,7 +365,7 @@ pub const CodeEditor = struct {
                     var i: usize = 0;
                     while (i < self.lines.items.len) : (i += 1) {
                         const line = self.lines.items[i].items;
-                        
+
                         // Current Line Highlight
                         if (i == self.cursor_line) {
                             clay.UI()(.{
@@ -386,7 +395,7 @@ pub const CodeEditor = struct {
 
     fn renderLine(self: *Self, line_idx: usize, line: []const u8) void {
         const tokens = self.line_tokens.items[line_idx].items;
-        
+
         clay.UI()(.{
             .layout = .{ .direction = .left_to_right },
         })({
@@ -399,7 +408,7 @@ pub const CodeEditor = struct {
                 for (tokens) |token| {
                     const color = self.highlighter.colorForType(token.token_type);
                     const slice = token.slice(line);
-                    
+
                     // Cursor in this token
                     if (line_idx == self.cursor_line and self.cursor_col >= token.start and self.cursor_col < token.end) {
                         const offset = self.cursor_col - token.start;
@@ -414,7 +423,7 @@ pub const CodeEditor = struct {
                         clay.text(slice, .{ .font_size = self.font_size, .color = color });
                     }
                 }
-                
+
                 // Cursor at the end of the line
                 if (line_idx == self.cursor_line and self.cursor_col >= line.len) {
                     self.renderCursor();
@@ -437,7 +446,7 @@ test "CodeEditor: basic interaction" {
     defer editor_inst.deinit();
 
     editor_inst.setText("hello");
-    
+
     // Test char insertion
     editor_inst.cursor_col = 5;
     editor_inst.handleChar('!');
@@ -478,11 +487,11 @@ test "CodeEditor: auto-typing simulation" {
         editor_inst.handleChar(c);
     }
     try std.testing.expectEqualStrings("pub fn main() {", editor_inst.lines.items[0].items);
-    
+
     // Enter drücken
     editor_inst.handleKeyPress(.enter);
     try std.testing.expectEqual(@as(usize, 2), editor_inst.lines.items.len);
-    
+
     // In der neuen Zeile einrücken und kommentieren
     const line2 = "    // test";
     for (line2) |c| {
