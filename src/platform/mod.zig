@@ -56,7 +56,7 @@ pub const Platform = struct {
 
     /// Platform initialisieren
     pub fn init(allocator: std.mem.Allocator, config: PlatformConfig) !Self {
-        log.info("Initializing platform: {s} on {s}", .{
+        log.debug("Initializing platform: {s} on {s}", .{
             @tagName(builtin.cpu.arch),
             @tagName(builtin.os.tag),
         });
@@ -82,7 +82,7 @@ pub const Platform = struct {
 
     /// Window erstellen
     pub fn createWindow(self: *Self) !void {
-        log.info("Creating window: {s} {}x{}", .{
+        log.debug("Creating window: {s} {}x{}", .{
             self.config.title,
             self.config.width,
             self.config.height,
@@ -100,7 +100,7 @@ pub const Platform = struct {
         self.current_width = self.config.width;
         self.current_height = self.config.height;
 
-        log.info("Window created successfully", .{});
+        log.debug("Window created successfully", .{});
     }
 
     /// Native Window Handle für WGPU Surface

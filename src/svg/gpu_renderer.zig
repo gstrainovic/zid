@@ -38,7 +38,7 @@ pub const SvgRendererGPU = struct {
         viewport_width: u32,
         viewport_height: u32,
     ) !Self {
-        log.info("Initializing GPU SVG renderer", .{});
+        log.debug("Initializing GPU SVG renderer", .{});
 
         // Wir nutzen den gleichen Shader wie für Text, da beide Quads mit Textur rendern.
         // Falls wir spezielle SVG-Shader brauchen (z.B. für Tinting), können wir sie später hinzufügen.

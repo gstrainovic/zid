@@ -64,7 +64,7 @@ pub const FreeTypeFace = struct {
 
     /// Load a font directly from a file path
     pub fn init(path: []const u8, size: f32) !Self {
-        std.log.info("FreeTypeFace.init: path={s} size={d}", .{ path, size });
+        std.log.debug("FreeTypeFace.init: path={s} size={d}", .{ path, size });
         const library = try ensureLibraryInit();
         
         // Ensure path is null-terminated for FT_New_Face
