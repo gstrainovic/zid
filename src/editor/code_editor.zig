@@ -930,7 +930,7 @@ pub const CodeEditor = struct {
                                     .padding = .{ .left = 8, .right = 16 },
                                     .child_alignment = .{ .x = .right, .y = .center },
                                 },
-                                .background_color = if (is_current) self.current_line_highlight else if (is_selected) self.selection_color else self.gutter_color,
+                                .background_color = if (is_selected) self.selection_color else if (is_current) self.current_line_highlight else self.gutter_color,
                             })({
                                 const color = if (is_current)
                                     self.current_line_number_color
