@@ -172,13 +172,9 @@ pub fn main() !void {
         // UI updaten (Animationen) - ca. 60 FPS
         ui_system.update(delta_time_ms);
 
-        // Theme-Wechsel für Verifizierung (0-300: Light, 301-600: Dark)
-        const cycle_frames = 600;
-        const current_cycle = frame_count % cycle_frames;
+        // Theme-Wechsel für Verifizierung entfernt — Standard: Dark
         if (theme_override) |t| {
             ui_system.theme = t;
-        } else if (current_cycle < 300) {
-            ui_system.theme = ui.Theme.light();
         } else {
             ui_system.theme = ui.Theme.dark();
         }
