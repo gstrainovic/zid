@@ -136,23 +136,26 @@ Warum diese Wahl:
 
 ## Submodule-Sync zwischen Linux und Windows
 
-`libs/wio` war lange in `.gitignore` und wurde nicht als Submodule getrackt.
-Änderungen in `libs/wio` werden **nur gesichert, wenn sie direkt in `gstrainovic/wio` gepusht wurden**.
+Eigene Forks: `libs/gooey`, `libs/wgpu_native_zig`, `libs/wio`.
+Diese koennen lokale Commits haben, die gepusht werden muessen.
 
-Vor dem Wechsel zwischen Linux ↔ Windows prüfen:
+**Automatische Absicherung:**
+- **Pre-push Hook** (`.githooks/pre-push`): Blockiert `git push` im Superproject
+  wenn eigene Submodule unpushed Commits haben.
+- **Sync-Script** (`scripts/sync.sh`): Bei jedem PC-Wechsel ausfuehren.
 
 ```bash
-# Auf Linux:
-cd ~/projects/vulkan-ed/libs/wio
-git status
-git log --oneline origin/master..HEAD
+# Neuen PC einrichten (einmalig):
+git config core.hooksPath .githooks
 
-# Falls lokale Commits vorhanden:
-git push
+# PC-Wechsel — vor dem Verlassen:
+./scripts/sync.sh --push    # Submodule + Superproject pushen
 
-# Danach auf Windows pullen:
-cd /c/Users/g.strainovic/projects/vulkan-ed/libs/wio
-git pull
+# PC-Wechsel — auf dem neuen PC:
+./scripts/sync.sh            # Pull alles
+
+# Nur Status pruefen:
+./scripts/sync.sh --status
 ```
 
 ## Current Status
