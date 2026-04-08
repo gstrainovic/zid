@@ -270,6 +270,9 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
   - [x] **Maus-Interaktion & Kontextmenü**
     - [x] Rechtsklick-Erkennung im Editor
     - [x] Einfaches Kontextmenü (Clay UI) mit "Copy", "Cut", "Paste"
+- [ ] **Undo/Redo**
+  - [ ] Undo-Stack (Ctrl+Z)
+  - [ ] Redo-Stack (Ctrl+Y / Ctrl+Shift+Z)
 
 ### Phase 9: File Explorer, Tabs & Datei-Vorschau
 - [ ] **Tab-Leiste**

@@ -16,6 +16,13 @@ const keymap = @import("keymap.zig");
 /// C-kompatibel: ptr + len statt Slice.
 pub const MeasureFn = *const fn (ptr: [*c]const u8, len: usize) f32;
 
+pub const UndoEntry = struct {
+    text: []u8,
+    cursor_line: usize,
+    cursor_col: usize,
+    scroll_offset: usize,
+};
+
 pub const CodeEditor = struct {
     allocator: std.mem.Allocator,
 
@@ -69,6 +76,11 @@ pub const CodeEditor = struct {
     scrollbar_thumb_y: f32 = 0,
     scrollbar_thumb_height: f32 = 0,
     scrollbar_container_width: f32 = 0,
+
+    /// Undo/Redo History
+    undo_stack: std.ArrayListUnmanaged(UndoEntry) = .{},
+    redo_stack: std.ArrayListUnmanaged(UndoEntry) = .{},
+    typing_in_progress: bool = false,
 
     /// Zeitpunkt der letzten Cursor-Bewegung (für Blink-Delay)
     last_cursor_movement_ms: f32 = 0,
@@ -143,6 +155,64 @@ pub const CodeEditor = struct {
         for (self.line_tokens.items) |*tokens| tokens.deinit(self.allocator);
         self.line_tokens.deinit(self.allocator);
         if (self.keymap) |*km| km.deinit();
+        for (self.undo_stack.items) |e| self.allocator.free(e.text);
+        self.undo_stack.deinit(self.allocator);
+        for (self.redo_stack.items) |e| self.allocator.free(e.text);
+        self.redo_stack.deinit(self.allocator);
+    }
+
+    /// Aktuellen Textinhalt als heap-allokierten String serialisieren.
+    fn getTextAsSlice(self: *Self) ![]u8 {
+        var total_len: usize = 0;
+        for (self.lines.items) |line| total_len += line.items.len + 1;
+        if (total_len > 0) total_len -= 1; // kein trailing '\n'
+        const text = try self.allocator.alloc(u8, total_len);
+        var offset: usize = 0;
+        for (self.lines.items, 0..) |line, i| {
+            @memcpy(text[offset..][0..line.items.len], line.items);
+            offset += line.items.len;
+            if (i + 1 < self.lines.items.len) {
+                text[offset] = '\n';
+                offset += 1;
+            }
+        }
+        return text;
+    }
+
+    /// Snapshot des aktuellen Zustands auf den Undo-Stack legen.
+    /// Löscht den Redo-Stack (neue Aktion bricht Redo-Kette).
+    fn snapshotForUndo(self: *Self) void {
+        const text = self.getTextAsSlice() catch return;
+
+        // Redo-Stack leeren
+        for (self.redo_stack.items) |e| self.allocator.free(e.text);
+        self.redo_stack.clearRetainingCapacity();
+
+        // Ältesten Eintrag droppen wenn Stack voll
+        if (self.undo_stack.items.len >= 100) {
+            const oldest = self.undo_stack.orderedRemove(0);
+            self.allocator.free(oldest.text);
+        }
+
+        self.undo_stack.append(self.allocator, .{
+            .text = text,
+            .cursor_line = self.cursor_line,
+            .cursor_col = self.cursor_col,
+            .scroll_offset = self.scroll_offset_first_line,
+        }) catch self.allocator.free(text);
+    }
+
+    /// Zustand aus einem UndoEntry wiederherstellen. Entry.text wird NICHT freigegeben.
+    fn restoreFromEntry(self: *Self, entry: UndoEntry) void {
+        self.setText(entry.text);
+        self.cursor_line = @min(entry.cursor_line, if (self.lines.items.len > 0) self.lines.items.len - 1 else 0);
+        self.cursor_col = @min(entry.cursor_col, self.lines.items[self.cursor_line].items.len);
+        const max_scroll = if (self.lines.items.len > self.visibleLineCount())
+            self.lines.items.len - self.visibleLineCount()
+        else
+            0;
+        self.scroll_offset_first_line = @min(entry.scroll_offset, max_scroll);
+        self.clearSelection();
     }
 
     pub fn setText(self: *Self, text: []const u8) void {
@@ -556,6 +626,17 @@ pub const CodeEditor = struct {
     }
 
     pub fn dispatchAction(self: *Self, action: actions.Action) void {
+        // Vor jeder text-mutierenden Aktion: Tipp-Session beenden + Snapshot
+        switch (action) {
+            .InsertNewline, .InsertTab,
+            .DeleteBack, .DeleteForward, .DeleteWordBack, .DeleteWordForward, .DeleteLine,
+            .Cut, .Paste => {
+                self.typing_in_progress = false;
+                self.snapshotForUndo();
+            },
+            else => {},
+        }
+
         const line = &self.lines.items[self.cursor_line];
         switch (action) {
             .MoveLeft => {
@@ -923,6 +1004,36 @@ pub const CodeEditor = struct {
                 self.context_menu_x = self.mouse_x;
                 self.context_menu_y = self.mouse_y;
             },
+            .Undo => {
+                if (self.undo_stack.items.len == 0) return;
+                self.typing_in_progress = false;
+                const current = self.getTextAsSlice() catch return;
+                self.redo_stack.append(self.allocator, .{
+                    .text = current,
+                    .cursor_line = self.cursor_line,
+                    .cursor_col = self.cursor_col,
+                    .scroll_offset = self.scroll_offset_first_line,
+                }) catch { self.allocator.free(current); return; };
+                const entry = self.undo_stack.pop().?;
+                self.restoreFromEntry(entry);
+                self.allocator.free(entry.text);
+                return;
+            },
+            .Redo => {
+                if (self.redo_stack.items.len == 0) return;
+                self.typing_in_progress = false;
+                const current = self.getTextAsSlice() catch return;
+                self.undo_stack.append(self.allocator, .{
+                    .text = current,
+                    .cursor_line = self.cursor_line,
+                    .cursor_col = self.cursor_col,
+                    .scroll_offset = self.scroll_offset_first_line,
+                }) catch { self.allocator.free(current); return; };
+                const entry = self.redo_stack.pop().?;
+                self.restoreFromEntry(entry);
+                self.allocator.free(entry.text);
+                return;
+            },
             else => {},
         }
         self.recordCursorMovement();
@@ -1183,6 +1294,12 @@ pub const CodeEditor = struct {
         // Wenn Strg gedrückt ist, ignorieren wir Zeicheneingaben (Shortcuts wie Ctrl+C/V/X).
         // Ausnahme: AltGr (wird oft als Ctrl+Alt gemeldet oder wir lassen Alt generell durch)
         if (self.mods.ctrl and !self.mods.alt) return;
+
+        // Snapshot beim ersten Zeichen einer Tipp-Session (alle folgenden Zeichen = gleicher Undo-Step)
+        if (!self.typing_in_progress) {
+            self.snapshotForUndo();
+            self.typing_in_progress = true;
+        }
 
         // Ersetze Selektion falls vorhanden
         if (self.deleteSelection()) {
