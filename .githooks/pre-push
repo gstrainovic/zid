@@ -1,0 +1,42 @@
+#!/bin/bash
+# Pre-push hook: Blockiert push wenn eigene Submodule unpushed Commits haben.
+# Eigene Forks, die lokale Commits haben koennen:
+OWN_SUBMODULES=("libs/gooey" "libs/wgpu_native_zig" "libs/wio")
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+ERRORS=()
+
+for SUB in "${OWN_SUBMODULES[@]}"; do
+    SUB_PATH="$REPO_ROOT/$SUB"
+    [[ -e "$SUB_PATH/.git" ]] || continue
+
+    # Default-Branch ermitteln (master oder main)
+    DEFAULT_BRANCH=$(git -C "$SUB_PATH" symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||')
+    if [[ -z "$DEFAULT_BRANCH" ]]; then
+        # Fallback: main oder master pruefen
+        if git -C "$SUB_PATH" rev-parse --verify origin/main &>/dev/null; then
+            DEFAULT_BRANCH="main"
+        else
+            DEFAULT_BRANCH="master"
+        fi
+    fi
+
+    UNPUSHED=$(git -C "$SUB_PATH" log --oneline "origin/$DEFAULT_BRANCH..HEAD" 2>/dev/null)
+    if [[ -n "$UNPUSHED" ]]; then
+        ERRORS+=("$SUB hat unpushed Commits auf $DEFAULT_BRANCH:")
+        ERRORS+=("$UNPUSHED")
+        ERRORS+=("")
+    fi
+done
+
+if [[ ${#ERRORS[@]} -gt 0 ]]; then
+    echo "=== PRE-PUSH BLOCKED ===" >&2
+    echo "Submodule haben unpushed Commits:" >&2
+    echo "" >&2
+    for LINE in "${ERRORS[@]}"; do
+        echo "  $LINE" >&2
+    done
+    echo "Erst 'cd $SUB && git push' ausfuehren, dann erneut pushen." >&2
+    echo "Oder: ./scripts/sync.sh --push" >&2
+    exit 1
+fi
