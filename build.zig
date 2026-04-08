@@ -109,6 +109,18 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run tests");
 
     const run_editor_tests = b.addRunArtifact(editor_tests);
+    if (target.result.os.tag == .linux) {
+        editor_tests.root_module.linkSystemLibrary("wayland-client", .{});
+        editor_tests.root_module.linkSystemLibrary("wayland-egl", .{});
+        editor_tests.root_module.linkSystemLibrary("xkbcommon", .{});
+        editor_tests.root_module.linkSystemLibrary("decor-0", .{});
+        editor_tests.root_module.linkSystemLibrary("EGL", .{});
+        editor_tests.root_module.linkSystemLibrary("vulkan", .{});
+        editor_tests.root_module.linkSystemLibrary("freetype2", .{});
+        editor_tests.root_module.linkSystemLibrary("harfbuzz", .{});
+        editor_tests.root_module.linkSystemLibrary("png", .{});
+        editor_tests.root_module.link_libc = true;
+    }
     run_editor_tests.has_side_effects = true;
     test_step.dependOn(&run_editor_tests.step);
 }

@@ -159,6 +159,10 @@ pub const UI = struct {
         self.code_editor.setCtrlState(pressed);
     }
 
+    pub fn setAltState(self: *Self, pressed: bool) void {
+        self.code_editor.setAltState(pressed);
+    }
+
     /// Maus-Events an Editor weiterleiten
     pub fn handleMouseDown(self: *Self, x: f32, y: f32) void {
         self.code_editor.handleMouseDown(x, y);

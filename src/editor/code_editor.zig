@@ -932,6 +932,10 @@ pub const CodeEditor = struct {
         self.mods.ctrl = pressed;
     }
 
+    pub fn setAltState(self: *Self, pressed: bool) void {
+        self.mods.alt = pressed;
+    }
+
     // =========================================================================
     // Mouse Handling
     // =========================================================================
@@ -1146,6 +1150,10 @@ pub const CodeEditor = struct {
     pub fn handleChar(self: *Self, char_code: u21) void {
         // Ignoriere Steuerzeichen
         if (char_code < 32 or char_code == 127) return;
+
+        // Wenn Strg gedrückt ist, ignorieren wir Zeicheneingaben (Shortcuts wie Ctrl+C/V/X).
+        // Ausnahme: AltGr (wird oft als Ctrl+Alt gemeldet oder wir lassen Alt generell durch)
+        if (self.mods.ctrl and !self.mods.alt) return;
 
         // Ersetze Selektion falls vorhanden
         if (self.deleteSelection()) {
