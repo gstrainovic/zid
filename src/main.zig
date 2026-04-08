@@ -163,9 +163,9 @@ pub fn main() !void {
     var mouse_down: bool = false;
     var shift_held: bool = false;
     var ctrl_held: bool = false;
-    
-    while (plat.isRunning()) {
-        const delta_time_ms: f32 = 16.0;
+    var alt_held: bool = false;
+
+    while (plat.isRunning()) {        const delta_time_ms: f32 = 16.0;
 
         // Event-basierter Render Loop mit wio.wait (Timeout für CPU-Effizienz)
         wio.wait(.{ .timeout_ns = @intFromFloat(delta_time_ms * std.time.ns_per_ms) });
@@ -215,30 +215,36 @@ pub fn main() !void {
                             shift_held = true;
                             ui_system.setShiftState(true);
                         } else if (btn == .left_control or btn == .right_control) {
-                            ctrl_held = true;
-                            ui_system.setCtrlState(true);
+                           ctrl_held = true;
+                           ui_system.setCtrlState(true);
+                        } else if (btn == .left_alt or btn == .right_alt) {
+                           alt_held = true;
+                           ui_system.setAltState(true);
                         } else {
-                            ui_system.handleKeyPress(btn);
+                           ui_system.handleKeyPress(btn);
                         }
-                    },
-                    .button_repeat => |btn| {
+                        },
+                        .button_repeat => |btn| {
                         ui_system.handleKeyPress(btn);
-                    },
-                    .button_release => |btn| {
+                        },
+                        .button_release => |btn| {
                         if (btn == .mouse_left) {
-                            mouse_down = false;
-                            ui_system.handleMouseUp();
+                           mouse_down = false;
+                           ui_system.handleMouseUp();
                         }
                         if (btn == .left_shift or btn == .right_shift) {
-                            shift_held = false;
-                            ui_system.setShiftState(false);
+                           shift_held = false;
+                           ui_system.setShiftState(false);
                         }
                         if (btn == .left_control or btn == .right_control) {
-                            ctrl_held = false;
-                            ui_system.setCtrlState(false);
+                           ctrl_held = false;
+                           ui_system.setCtrlState(false);
                         }
-                    },
-                    .char => |char_code| {
+                        if (btn == .left_alt or btn == .right_alt) {
+                           alt_held = false;
+                           ui_system.setAltState(false);
+                        }
+                        },                    .char => |char_code| {
                         ui_system.handleChar(char_code);
                     },
                     .focused => {
