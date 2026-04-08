@@ -95,6 +95,9 @@ pub const CodeEditor = struct {
     context_menu_x: f32 = 0,
     context_menu_y: f32 = 0,
 
+    /// Aktueller Mauszeiger-Typ (wird im Render-Loop gesetzt)
+    desired_cursor: wio.CursorType = .arrow,
+
     const Self = @This();
 
     pub fn init(allocator: std.mem.Allocator) Self {
@@ -112,6 +115,7 @@ pub const CodeEditor = struct {
                 .{ 202, 211, 245, 255 }, // plain - weiß
             ),
             .keymap = keymap.Keymap.initDefault(allocator) catch null,
+            .desired_cursor = .arrow,
         };
         // Initialisiere mit einer leeren Zeile
         const first_line = std.ArrayListUnmanaged(u8){};
@@ -1171,6 +1175,8 @@ pub const CodeEditor = struct {
     }
 
     pub fn render(self: *Self, arena: std.mem.Allocator) void {
+        self.desired_cursor = .arrow;
+
         // Editor Container
         clay.UI()(.{
             .id = clay.ElementId.ID("code_editor"),
@@ -1180,6 +1186,9 @@ pub const CodeEditor = struct {
             },
             .background_color = self.bg_color,
         })({
+            if (clay.hovered()) {
+                self.desired_cursor = .text;
+            }
             // Links: Scrollbarer Content
             clay.UI()(.{
                 .id = clay.ElementId.ID("editor_scroll"),
@@ -1280,7 +1289,7 @@ pub const CodeEditor = struct {
             },
         })({
             clay.UI()(.{
-                .id = clay.ElementId.ID("context_menu_bg"),
+                .id = clay.ElementId.ID("context_menu_container"),
                 .layout = .{
                     .sizing = .{ .w = .fixed(menu_width), .h = .fixed(menu_height) },
                     .direction = .top_to_bottom,
@@ -1290,6 +1299,9 @@ pub const CodeEditor = struct {
                 .border = .{ .width = .all(1), .color = .{ 100, 100, 120, 255 } },
                 .corner_radius = .all(4),
             })({
+                if (clay.hovered()) {
+                    self.desired_cursor = .arrow;
+                }
                 self.renderContextMenuItem("Copy", .Copy, arena);
                 self.renderContextMenuItem("Cut", .Cut, arena);
                 self.renderContextMenuItem("Paste", .Paste, arena);
@@ -1300,10 +1312,14 @@ pub const CodeEditor = struct {
     fn renderContextMenuItem(self: *Self, label: []const u8, _action: actions.Action, arena: std.mem.Allocator) void {
         _ = _action;
         _ = arena;
-        const is_hovered = clay.hovered();
-        
+        const item_id = clay.getElementId(label);
+        const is_hovered = clay.pointerOver(item_id);
+        if (is_hovered) {
+            self.desired_cursor = .arrow;
+        }
+
         clay.UI()(.{
-            .id = clay.ElementId.ID(label),
+            .id = item_id,
             .layout = .{
                 .sizing = .{ .w = .grow, .h = .fixed(@floatFromInt(self.font_size + 12)) },
                 .padding = .{ .left = 8, .right = 8 },
@@ -1312,6 +1328,7 @@ pub const CodeEditor = struct {
             .background_color = if (is_hovered) .{ 80, 80, 100, 255 } else .{ 0, 0, 0, 0 },
             .corner_radius = .all(2),
         })({
+
             clay.text(label, .{ .font_size = self.font_size - 2, .color = .{ 220, 220, 240, 255 } });
             
             if (is_hovered and clay.pointerOver(clay.getElementId(label))) {
