@@ -199,13 +199,6 @@ pub fn main() !void {
                         mouse_x = @floatFromInt(pos.x);
                         mouse_y = @floatFromInt(pos.y);
                         ui_system.handleMouseMove(mouse_x, mouse_y);
-
-                        // Cursor-Form anpassen: I-Beam über Editor, Pfeil sonst
-                        if (mouse_y >= ui_system.code_editor.content_origin_y) {
-                            plat.setCursor(.text);
-                        } else {
-                            plat.setCursor(.arrow);
-                        }
                     },
                     .button_press => |btn| {
                         if (btn == .mouse_left) {
@@ -273,6 +266,9 @@ pub fn main() !void {
 
         // Clay Layout berechnen
         const render_commands = ui_system.renderExample(&logo_texture);
+
+        // Cursor-Form anpassen basierend auf Layout-Ergebnis
+        plat.setCursor(ui_system.code_editor.desired_cursor);
 
         // Rendern: Clear → Clay UI → Present
         renderer.renderFrameWithText(
