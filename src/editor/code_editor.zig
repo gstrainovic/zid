@@ -1504,12 +1504,21 @@ pub const CodeEditor = struct {
                     self.renderCursor(0);
                 }
             } else {
-                // WICHTIG: Text NICHT splitten!
-                // Alle Tokens komplett rendern
+                // Tokens stale? Zeile als plain fallback rendern und neu tokenisieren.
+                var tokens_valid = true;
+                for (tokens) |token| {
+                    if (token.end > line.len) { tokens_valid = false; break; }
+                }
+                if (!tokens_valid) {
+                    self.tokenizeLine(line_idx);
+                    clay.text(line, .{ .font_size = self.font_size, .color = .{ 202, 211, 245, 255 } });
+                } else {
+                // Alle Tokens rendern
                 for (tokens) |token| {
                     const color = self.highlighter.colorForType(token.token_type);
                     const slice = token.slice(line);
                     clay.text(slice, .{ .font_size = self.font_size, .color = color });
+                }
                 }
 
                 // Cursor als floating element über dem Text
