@@ -58,6 +58,18 @@ pub const CodeEditor = struct {
     /// Scrolling: Erste sichtbare Zeile (Viewport Culling)
     scroll_offset_first_line: usize = 0,
 
+    /// Scrollbar-Dragging State
+    scrollbar_dragging: bool = false,
+    scrollbar_drag_start_y: f32 = 0,
+    scrollbar_scroll_offset_at_drag_start: f32 = 0,
+    
+    /// Scrollbar Bounds (werden beim Render gesetzt für Hit-Tests)
+    scrollbar_track_x: f32 = 0,
+    scrollbar_track_y: f32 = 0,
+    scrollbar_thumb_y: f32 = 0,
+    scrollbar_thumb_height: f32 = 0,
+    scrollbar_container_width: f32 = 0,
+
     /// Zeitpunkt der letzten Cursor-Bewegung (für Blink-Delay)
     last_cursor_movement_ms: f32 = 0,
 
@@ -96,7 +108,7 @@ pub const CodeEditor = struct {
     context_menu_y: f32 = 0,
 
     /// Aktueller Mauszeiger-Typ (wird im Render-Loop gesetzt)
-    desired_cursor: wio.CursorType = .arrow,
+    desired_cursor: wio.Cursor = .arrow,
 
     const Self = @This();
 
@@ -958,13 +970,13 @@ pub const CodeEditor = struct {
 
         if (self.show_context_menu) {
             // Check if we clicked a context menu item
-            if (clay.pointerOver(clay.getElementId("Copy"))) {
-                self.dispatchAction(.Copy);
+            if (clay.pointerOver(clay.getElementId("Cut"))) {
+                self.dispatchAction(.Cut);
                 self.show_context_menu = false;
                 return;
             }
-            if (clay.pointerOver(clay.getElementId("Cut"))) {
-                self.dispatchAction(.Cut);
+            if (clay.pointerOver(clay.getElementId("Copy"))) {
+                self.dispatchAction(.Copy);
                 self.show_context_menu = false;
                 return;
             }
@@ -973,9 +985,14 @@ pub const CodeEditor = struct {
                 self.show_context_menu = false;
                 return;
             }
-            
+
             // Otherwise, close the menu if we clicked elsewhere
             self.show_context_menu = false;
+        }
+
+        // Prüfen ob Scrollbar geklickt wurde
+        if (self.handleScrollbarMouseDown(x, y)) {
+            return;
         }
 
         const line_idx = self.lineFromY(y);
@@ -1025,6 +1042,13 @@ pub const CodeEditor = struct {
     pub fn handleMouseMove(self: *Self, x: f32, y: f32) void {
         self.mouse_x = x;
         self.mouse_y = y;
+        
+        // Scrollbar-Dragging
+        if (self.scrollbar_dragging) {
+            self.handleScrollbarMouseMove(x, y);
+            return;
+        }
+        
         if (!self.mouse_down) return;
         const line_idx = self.lineFromY(y);
         const col = self.colFromX(x, line_idx);
@@ -1038,6 +1062,7 @@ pub const CodeEditor = struct {
     /// Maus-Release Event verarbeiten
     pub fn handleMouseUp(self: *Self) void {
         self.mouse_down = false;
+        self.scrollbar_dragging = false;
     }
 
     /// Y-Koordinate in Zeilen-Index umrechnen (mit Content-Offset und Scroll-Offset).
@@ -1302,8 +1327,8 @@ pub const CodeEditor = struct {
                 if (clay.hovered()) {
                     self.desired_cursor = .arrow;
                 }
-                self.renderContextMenuItem("Copy", .Copy, arena);
                 self.renderContextMenuItem("Cut", .Cut, arena);
+                self.renderContextMenuItem("Copy", .Copy, arena);
                 self.renderContextMenuItem("Paste", .Paste, arena);
             });
         });
@@ -1352,6 +1377,13 @@ pub const CodeEditor = struct {
         const visible = self.visibleLineCount();
         if (total <= visible) return;
 
+        // Echte Bounds aus dem letzten Frame auslesen (ein Frame Delay, unmerklich)
+        const track_data = clay.getElementData(clay.ElementId.ID("scrollbar_track"));
+        if (track_data.found) {
+            self.scrollbar_track_x = track_data.bounding_box.x;
+            self.scrollbar_track_y = track_data.bounding_box.y;
+        }
+
         const track_height = self.height;
         const thumb_ratio: f32 = @as(f32, @floatFromInt(visible)) / @as(f32, @floatFromInt(total));
         const thumb_height = @max(20.0, track_height * thumb_ratio);
@@ -1362,27 +1394,94 @@ pub const CodeEditor = struct {
             0.0;
         const thumb_y = scroll_frac * (track_height - thumb_height);
 
+        // Thumb-Bounds für Hit-Tests speichern
+        self.scrollbar_thumb_y = self.scrollbar_track_y + thumb_y;
+        self.scrollbar_thumb_height = thumb_height;
+
         const track_color: clay.Color = .{ 30, 30, 46, 100 };
         const thumb_color: clay.Color = .{ 88, 88, 120, 180 };
 
-        // Track (Hintergrund)
+        // Track (füllt den verfügbaren Platz)
         clay.UI()(.{
             .id = clay.ElementId.ID("scrollbar_track"),
             .layout = .{
-                .sizing = .{ .w = .fixed(self.scrollbar_width), .h = .fit },
+                .sizing = .{ .w = .fixed(self.scrollbar_width), .h = .grow },
+                .direction = .top_to_bottom,
             },
             .background_color = track_color,
         })({
-            // Thumb (beweglicher Teil)
+            // Spacer drückt den Thumb an die richtige Y-Position
+            clay.UI()(.{
+                .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(thumb_y) } },
+            })({});
+            // Thumb
             clay.UI()(.{
                 .id = clay.ElementId.ID("scrollbar_thumb"),
-                .layout = .{
-                    .sizing = .{ .w = .grow, .h = .fixed(thumb_height) },
-                    .padding = .{ .top = @intFromFloat(thumb_y) },
-                },
+                .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(thumb_height) } },
                 .background_color = thumb_color,
+                .corner_radius = .all(3),
             })({});
         });
+    }
+
+    /// Scrollbar MouseDown: Start Dragging oder Klick auf Track
+    fn handleScrollbarMouseDown(self: *Self, x: f32, y: f32) bool {
+        const total = self.lines.items.len;
+        const visible = self.visibleLineCount();
+        if (total <= visible) return false;
+
+        // Gegen echte Bounds (aus ElementData, kein Hardcode) prüfen
+        if (x < self.scrollbar_track_x) return false;
+        if (x > self.scrollbar_track_x + self.scrollbar_width) return false;
+        if (y < self.scrollbar_track_y) return false;
+        if (y > self.scrollbar_track_y + self.height) return false;
+
+        // Prüfen ob Klick auf dem Thumb (gespeicherte Bounds aus renderScrollbar)
+        if (y >= self.scrollbar_thumb_y and y <= self.scrollbar_thumb_y + self.scrollbar_thumb_height) {
+            self.scrollbar_dragging = true;
+            self.scrollbar_drag_start_y = y;
+            self.scrollbar_scroll_offset_at_drag_start = @as(f32, @floatFromInt(self.scroll_offset_first_line));
+            return true;
+        }
+
+        // Track geklickt (oberhalb oder unterhalb vom Thumb) - Seite scrollen
+        if (y < self.scrollbar_thumb_y) {
+            // Oberhalb: Eine Seite hoch
+            self.scrollLines(@as(i32, @intCast(visible)));
+        } else {
+            // Unterhalb: Eine Seite runter
+            self.scrollLines(-@as(i32, @intCast(visible)));
+        }
+        return true;
+    }
+
+    /// Scrollbar MouseMove: Thumb bewegen
+    fn handleScrollbarMouseMove(self: *Self, _: f32, y: f32) void {
+        const total = self.lines.items.len;
+        const visible = self.visibleLineCount();
+        if (total <= visible) return;
+
+        const track_height = self.height;
+        const thumb_ratio: f32 = @as(f32, @floatFromInt(visible)) / @as(f32, @floatFromInt(total));
+        const thumb_height = @max(20.0, track_height * thumb_ratio);
+        const max_offset: usize = total - visible;
+        const scrollable_height = track_height - thumb_height;
+
+        if (scrollable_height <= 0) return;
+
+        // deltaY berechnen (wie weit wurde der Thumb bewegt)
+        const delta_y = y - self.scrollbar_drag_start_y;
+        
+        // Scroll-Fraktion berechnen
+        const scroll_delta_frac = delta_y / scrollable_height;
+        const scroll_delta_lines = scroll_delta_frac * @as(f32, @floatFromInt(max_offset));
+        const scroll_delta_int: i32 = @intFromFloat(@round(scroll_delta_lines));
+
+        // Neuen Scroll-Offset berechnen (plus: nach unten ziehen → weiter scrollen)
+        var new_offset: isize = @as(isize, @intFromFloat(self.scrollbar_scroll_offset_at_drag_start)) + @as(isize, scroll_delta_int);
+        new_offset = @max(0, @min(new_offset, @as(isize, @intCast(max_offset))));
+
+        self.scroll_offset_first_line = @as(usize, @intCast(new_offset));
     }
 
     fn renderLine(self: *Self, line_idx: usize, line: []const u8) void {

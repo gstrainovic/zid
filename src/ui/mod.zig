@@ -276,6 +276,7 @@ pub const UI = struct {
             self.code_editor.content_origin_y = editor_data.bounding_box.y;
             self.code_editor.content_origin_x = editor_data.bounding_box.x;
             self.code_editor.height = editor_data.bounding_box.height;
+            self.code_editor.scrollbar_container_width = editor_data.bounding_box.width;
         }
 
         return commands;
