@@ -1410,6 +1410,7 @@ pub const CodeEditor = struct {
             },
             .background_color = track_color,
         })({
+            if (clay.hovered()) self.desired_cursor = .arrow;
             // Spacer drückt den Thumb an die richtige Y-Position
             clay.UI()(.{
                 .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(thumb_y) } },
@@ -1420,7 +1421,9 @@ pub const CodeEditor = struct {
                 .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(thumb_height) } },
                 .background_color = thumb_color,
                 .corner_radius = .all(3),
-            })({});
+            })({
+                if (clay.hovered()) self.desired_cursor = .arrow;
+            });
         });
     }
 
