@@ -60,6 +60,8 @@ pub const FileExplorerState = struct {
     selected_index: ?usize = null,
     /// Datei die geöffnet werden soll (wird von main.zig abgefragt und zurückgesetzt)
     file_to_open: ?[]const u8 = null,
+    /// Deferred Action: Folder-Toggle pending (wird nach Rendering ausgeführt)
+    pending_toggle: ?u32 = null,
 
     const Self = @This();
 
@@ -178,62 +180,60 @@ pub const FileExplorerState = struct {
         }
     }
 
-    /// Sichtbare Einträge neu berechnen (DFS)
+    /// Sichtbare Einträge neu berechnen (DFS wie Gooey's flattenNode)
     fn rebuildVisible(self: *Self) void {
         self.visible_entries.clearRetainingCapacity();
         if (self.nodes.items.len == 0) return;
 
-        var stack = std.ArrayList(struct { node_index: u32, depth: u32, sibling_mask: u32 }).empty;
-        defer stack.deinit(self.allocator);
+        // Root durchlaufen
+        self.flattenNode(0, 0, false, 0);
+    }
 
-        // Root pushen
-        stack.append(self.allocator, .{ .node_index = 0, .depth = 0, .sibling_mask = 0 }) catch return;
+    /// Einen Knoten und seine sichtbaren Nachfahren flattieren
+    fn flattenNode(self: *Self, node_index: u32, depth: u32, has_next_sibling: bool, ancestry_mask: u32) void {
+        if (node_index >= self.nodes.items.len) return;
+        if (depth >= MAX_TREE_DEPTH) return;
 
-        while (stack.pop()) |frame| {
-            const node = self.nodes.items[frame.node_index];
-            const is_expanded = self.expanded_nodes.contains(frame.node_index);
-            const is_last = (frame.node_index == 0) or 
-                (self.nodes.items[frame.node_index - 1].parent != node.parent);
+        const node = &self.nodes.items[node_index];
+        const is_expanded = self.expanded_nodes.contains(node_index);
 
-            self.visible_entries.append(self.allocator, .{
-                .node_index = frame.node_index,
-                .ancestry_mask = frame.sibling_mask,
-                .depth = frame.depth,
-                .is_folder = node.is_folder,
-                .is_expanded = is_expanded,
-                .has_next_sibling = !is_last,
-            }) catch return;
+        self.visible_entries.append(self.allocator, .{
+            .node_index = node_index,
+            .ancestry_mask = ancestry_mask,
+            .depth = depth,
+            .is_folder = node.is_folder,
+            .is_expanded = is_expanded,
+            .has_next_sibling = has_next_sibling,
+        }) catch return;
 
-            // Kinder pushen (in umgekehrter Reihenfolge für korrekte Stack-Order)
-            if (is_expanded and node.first_child != null) {
-                var child = node.first_child.?;
-                var count: u32 = 0;
-                while (count < node.child_count) : (count += 1) {
-                    const next_child: ?u32 = if (count + 1 < node.child_count) 
-                        self.nodes.items[child + 1].first_child 
-                    else 
-                        null;
-                    _ = next_child; // Für spätere Verwendung
-                    
-                    const new_mask = if (!is_last) 
-                        frame.sibling_mask | (@as(u32, 1) << @intCast(frame.depth)) 
-                    else 
-                        frame.sibling_mask;
-                    
-                    stack.append(self.allocator, .{ 
-                        .node_index = child, 
-                        .depth = frame.depth + 1, 
-                        .sibling_mask = new_mask 
-                    }) catch break;
-                    
-                    // Zum nächsten Geschwister
-                    if (count + 1 < node.child_count) {
-                        child += 1;
-                    } else {
-                        break;
-                    }
-                }
-            }
+        // Wenn aufgeklappt und Ordner mit Kindern: Kinder flatten
+        if (node.is_folder and is_expanded and node.first_child != null) {
+            const child_ancestry = if (has_next_sibling)
+                ancestry_mask | (@as(u32, 1) << @intCast(depth))
+            else
+                ancestry_mask;
+            self.flattenChildren(node_index, depth + 1, child_ancestry);
+        }
+    }
+
+    /// Alle Kinder eines Elternknotens flattieren
+    fn flattenChildren(self: *Self, parent_index: u32, depth: u32, ancestry_mask: u32) void {
+        const parent = &self.nodes.items[parent_index];
+        if (parent.first_child == null) return;
+
+        var child_idx = parent.first_child.?;
+        var children_found: u32 = 0;
+        while (children_found < parent.child_count) : (children_found += 1) {
+            if (child_idx >= self.nodes.items.len) break;
+
+            // Sicherstellen dass es wirklich ein Kind ist
+            if (self.nodes.items[child_idx].parent != parent_index) break;
+
+            const has_next = children_found + 1 < parent.child_count;
+            self.flattenNode(child_idx, depth, has_next, ancestry_mask);
+
+            // Nächstes sequentielles Kind
+            child_idx += 1;
         }
     }
 
@@ -254,7 +254,16 @@ pub const FileExplorerState = struct {
                 }
             }
         }
-    }};
+    }
+
+    /// Deferred Toggle ausführen (nach dem Rendering aufrufen)
+    pub fn processPendingToggle(self: *Self) void {
+        if (self.pending_toggle) |node_index| {
+            self.pending_toggle = null;
+            self.toggleNode(node_index) catch {};
+        }
+    }
+};
 
 /// Tree-Lines zeichnen (│ ├ └)
 fn renderTreeLines(
@@ -336,9 +345,11 @@ fn renderTreeEntry(
     const element_id = clay.ElementId.ID(entry_id_str);
     const is_hovered = clay.pointerOver(element_id);
 
+    // Klick-Handling: visible_entries darf NICHT während der Iteration geändert werden!
+    // Wir setzen pending_toggle und führen es nach dem Rendering aus.
     if (is_hovered and mouse_pressed) {
         if (node.is_folder) {
-            state.toggleNode(entry.node_index) catch {};
+            state.pending_toggle = entry.node_index;
         } else {
             state.selectEntry(index);
             state.openSelectedFile();
