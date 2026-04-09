@@ -99,15 +99,15 @@ trap 'rm -f "$RESPONSE_FILE" "$RESPONSE_FILE.err"' EXIT
 SUCCESS=false
 
 if [[ "$CLAUDE_AVAIL" == "true" ]]; then
-    # Hinweis zu --bare: Wir verwenden es NICHT, weil --bare OAuth/Keychain
-    # ignoriert und nur ANTHROPIC_API_KEY akzeptiert.
+    # --dangerously-skip-permissions: Reviewer ist read-only, braucht keine Bestaetigungen.
+    # Verhindert auch Haenger wenn das Script aus einer anderen Claude-Instanz (Qwen) aufgerufen wird.
     set +e
     claude -p "$USER_PROMPT" \
         --model sonnet \
         --effort medium \
         --output-format json \
         --json-schema "$SCHEMA" \
-        --permission-mode default \
+        --dangerously-skip-permissions \
         --append-system-prompt "$SYSTEM_PROMPT" \
         --add-dir "$REPO_ROOT" \
         --allowedTools "Read" "Glob" "Grep" "Bash(git log:*)" "Bash(git diff:*)" "Bash(git show:*)" "Bash(git tag:*)" "Bash(ls:*)" "Bash(sha256sum:*)" \
@@ -197,7 +197,13 @@ if outer.get("is_error"):
     }))
     sys.exit(0)
 
-# Detect format: Claude uses 'result', Gemini uses 'response'
+# Claude with --json-schema puts result in 'structured_output', not 'result'
+structured = outer.get("structured_output")
+if isinstance(structured, dict) and "verdict" in structured:
+    print(json.dumps(structured))
+    sys.exit(0)
+
+# Fallback: Claude uses 'result', Gemini uses 'response'
 result = outer.get("result")
 if result is None:
     result = outer.get("response", "")
@@ -214,7 +220,6 @@ if cleaned.startswith("```"):
 
 try:
     inner = json.loads(cleaned)
-    # Ensure it has the minimum required fields
     if "verdict" not in inner:
         raise ValueError("Missing 'verdict' in response")
     print(json.dumps(inner))

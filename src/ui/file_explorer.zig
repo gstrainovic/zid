@@ -371,7 +371,7 @@ fn renderTreeEntry(
             var chevron_id_buf: [40]u8 = undefined;
             const chevron_id = std.fmt.bufPrint(&chevron_id_buf, "chevron_{d}", .{index}) catch "chevron";
             const chevron_path = if (entry.is_expanded) svg.Lucide.chevron_down else svg.Lucide.chevron_right;
-            svg.Svg(arena, chevron_id, chevron_path, 12, if (is_selected) theme.text_on_primary else theme.muted);
+            svg.Svg(arena, chevron_id, chevron_path, 20, if (is_selected) theme.text_on_primary else theme.muted);
         } else {
             // Spacer für Dateien
             var spacer_id_buf: [40]u8 = undefined;
@@ -379,7 +379,7 @@ fn renderTreeEntry(
             clay.UI()(.{
                 .id = clay.ElementId.ID(spacer_id),
                 .layout = .{
-                    .sizing = .{ .w = .fixed(12), .h = .grow },
+                    .sizing = .{ .w = .fixed(20), .h = .grow },
                 },
                 .background_color = .{ 0, 0, 0, 0 },
             })({});
@@ -389,7 +389,7 @@ fn renderTreeEntry(
         var icon_id_buf: [40]u8 = undefined;
         const icon_id = std.fmt.bufPrint(&icon_id_buf, "icon_{d}", .{index}) catch "icon";
         const icon_path = if (node.is_folder) svg.Lucide.folder else fileIcon(node.name);
-        svg.Svg(arena, icon_id, icon_path, 14, if (is_selected) theme.text_on_primary else theme.text);
+        svg.Svg(arena, icon_id, icon_path, 24, if (is_selected) theme.text_on_primary else theme.text);
 
         // Dateiname
         clay.text(node.name, .{
