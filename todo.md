@@ -273,7 +273,7 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
 - [x] **Undo/Redo**
   - [x] Undo-Stack (Ctrl+Z)
   - [x] Redo-Stack (Ctrl+Y / Ctrl+Shift+Z)
-  - ✅ **Von Benutzer verifiziert**
+  - [x] **Verifiziert:** Alle Phase-8 Features visuell bestätigt (screenshot: phase8_verify.png)
 
 ### Phase 9: File Explorer, Tabs & Datei-Vorschau
 - [ ] **Tab-Leiste**
