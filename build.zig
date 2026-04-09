@@ -102,7 +102,7 @@ pub fn build(b: *std.Build) void {
     // Tests
     const editor_tests = b.addTest(.{
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/editor/code_editor.zig"),
+            .root_source_file = b.path("src/editor/test_root.zig"),
             .target = target,
             .optimize = optimize,
         }),
