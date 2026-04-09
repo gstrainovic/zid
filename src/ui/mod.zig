@@ -57,7 +57,7 @@ pub const UI = struct {
     const Self = @This();
 
     /// UI initialisieren
-    pub fn init(allocator: std.mem.Allocator, config: UIConfig) !Self {
+    pub fn init(allocator: std.mem.Allocator, config: UIConfig, default_file_path: ?[]const u8) !Self {
         log.debug("Initializing UI system", .{});
 
         // Clay Memory allozieren (großzügiger Puffer für viele Elemente/Zeilen)
@@ -68,14 +68,44 @@ pub const UI = struct {
         const clay_memory = try allocator.alloc(u8, generous_memory);
 
         var code_editor = editor_mod.CodeEditor.init(allocator);
-        code_editor.setText(
-            \\pub fn main() !void {
-            \\    std.log.info("Hello World", .{});
-            \\const x: u32 = 42;
-            \\// This is a comment
-            \\var y = x + 1;
-            \\}
-        );
+
+        // Default-Inhalt: Entweder Datei laden oder Hardcoded-Beispiel
+        if (default_file_path) |path| {
+            const file_content = std.fs.cwd().readFileAlloc(allocator, path, 64 * 1024 * 1024) catch |err| {
+                log.err("Failed to load default file '{s}': {}. Using fallback content.", .{ path, err });
+                code_editor.setText(
+                    \\// Failed to load file: {s}
+                    \\// Error: {}
+                );
+                // Formatiere Fehlermeldung in den Text
+                var buf: [256]u8 = undefined;
+                const msg = std.fmt.bufPrint(&buf, "// Failed to load: {s}\n// Error: {}", .{ path, err }) catch "// Failed to load file";
+                code_editor.setText(msg);
+                return Self{
+                    .allocator = allocator,
+                    .config = config,
+                    .theme = Theme.dark(),
+                    .clay_memory = clay_memory,
+                    .initialized = false,
+                    .anim_manager = AnimationManager.init(allocator),
+                    .frame_arena = std.heap.ArenaAllocator.init(allocator),
+                    .code_editor = code_editor,
+                    .text_renderer = null,
+                };
+            };
+            defer allocator.free(file_content);
+            code_editor.setText(file_content);
+            log.info("Loaded default file: {s} ({d} bytes)", .{ path, file_content.len });
+        } else {
+            code_editor.setText(
+                \\pub fn main() !void {
+                \\    std.log.info("Hello World", .{});
+                \\const x: u32 = 42;
+                \\// This is a comment
+                \\var y = x + 1;
+                \\}
+            );
+        }
 
         return Self{
             .allocator = allocator,
