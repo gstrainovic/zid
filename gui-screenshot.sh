@@ -13,7 +13,7 @@ cd "$(dirname "$0")"
 
 YDOTOOL_SOCKET="${YDOTOOL_SOCKET:-/tmp/.ydotool_socket}"
 OUTPUT_PATH="${1:-screenshots/screenshot_gui.png}"
-WAIT_SECONDS="${2:-5}"
+WAIT_SECONDS="${2:-15}"
 
 # Ensure ydotoold is running
 if [[ ! -S "$YDOTOOL_SOCKET" ]]; then
