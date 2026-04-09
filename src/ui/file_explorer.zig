@@ -58,8 +58,8 @@ pub const FileExplorerState = struct {
     expanded_nodes: std.AutoHashMap(u32, void),
     /// Aktuell selektierter Eintrag (Index in visible_entries)
     selected_index: ?usize = null,
-    /// Callback wenn Datei geöffnet wird
-    on_file_open: ?*const fn ([]const u8) void = null,
+    /// Datei die geöffnet werden soll (wird von main.zig abgefragt und zurückgesetzt)
+    file_to_open: ?[]const u8 = null,
 
     const Self = @This();
 
@@ -242,20 +242,19 @@ pub const FileExplorerState = struct {
         self.selected_index = index;
     }
 
-    /// Datei öffnen (Callback aufrufen)
+    /// Datei öffnen (setzt file_to_open)
     pub fn openSelectedFile(self: *Self) void {
         if (self.selected_index) |idx| {
             if (idx < self.visible_entries.items.len) {
                 const entry = self.visible_entries.items[idx];
                 const node = self.nodes.items[entry.node_index];
-                
-                if (!node.is_folder and self.on_file_open) |handler| {
-                    handler(node.path);
+
+                if (!node.is_folder) {
+                    self.file_to_open = node.path;
                 }
             }
         }
-    }
-};
+    }};
 
 /// Tree-Lines zeichnen (│ ├ └)
 fn renderTreeLines(
@@ -274,6 +273,7 @@ pub fn renderFileExplorer(
     arena: std.mem.Allocator,
     state: *FileExplorerState,
     theme: Theme,
+    mouse_pressed: bool,
 ) void {
     // Sidebar Container
     clay.UI()(.{
@@ -313,7 +313,7 @@ pub fn renderFileExplorer(
             .background_color = theme.surface,
         })({
             for (state.visible_entries.items, 0..) |entry, i| {
-                renderTreeEntry(arena, state, entry, i, theme);
+                renderTreeEntry(arena, state, entry, i, theme, mouse_pressed);
             }
         });
     });
@@ -326,15 +326,27 @@ fn renderTreeEntry(
     entry: TreeEntry,
     index: usize,
     theme: Theme,
+    mouse_pressed: bool,
 ) void {
     const node = state.nodes.items[entry.node_index];
     const is_selected = state.selected_index == index;
     const indent = @as(f32, @floatFromInt(entry.depth)) * DEFAULT_INDENT_PX + 8.0;
 
     const entry_id_str = std.fmt.allocPrint(arena, "tree_entry_{d}", .{index}) catch return;
+    const element_id = clay.ElementId.ID(entry_id_str);
+    const is_hovered = clay.pointerOver(element_id);
+
+    if (is_hovered and mouse_pressed) {
+        if (node.is_folder) {
+            state.toggleNode(entry.node_index) catch {};
+        } else {
+            state.selectEntry(index);
+            state.openSelectedFile();
+        }
+    }
 
     clay.UI()(.{
-        .id = clay.ElementId.ID(entry_id_str),
+        .id = element_id,
         .layout = .{
             .sizing = .{ .w = .grow, .h = .fixed(24) },
             .direction = .left_to_right,
@@ -342,7 +354,7 @@ fn renderTreeEntry(
             .child_gap = 4,
             .padding = .{ .left = 0, .right = 8 },
         },
-        .background_color = if (is_selected) theme.primary else .{ 0, 0, 0, 0 },
+        .background_color = if (is_selected) theme.primary else if (is_hovered) [4]f32{ theme.primary[0], theme.primary[1], theme.primary[2], 50.0 } else .{ 0.0, 0.0, 0.0, 0.0 },
     })({
         // Indent Spacer
         clay.UI()(.{
@@ -354,29 +366,30 @@ fn renderTreeEntry(
         })({});
 
         // Chevron (für Ordner)
+        const svg = @import("components/svg.zig");
         if (node.is_folder) {
-            const chevron = if (entry.is_expanded) "▼" else "▶";
-            clay.text(chevron, .{
-                .font_size = 10,
-                .color = if (is_selected) theme.text_on_primary else theme.muted,
-            });
+            var chevron_id_buf: [40]u8 = undefined;
+            const chevron_id = std.fmt.bufPrint(&chevron_id_buf, "chevron_{d}", .{index}) catch "chevron";
+            const chevron_path = if (entry.is_expanded) svg.Lucide.chevron_down else svg.Lucide.chevron_right;
+            svg.Svg(arena, chevron_id, chevron_path, 12, if (is_selected) theme.text_on_primary else theme.muted);
         } else {
             // Spacer für Dateien
+            var spacer_id_buf: [40]u8 = undefined;
+            const spacer_id = std.fmt.bufPrint(&spacer_id_buf, "file_spacer_{d}", .{index}) catch "file_spacer";
             clay.UI()(.{
-                .id = clay.ElementId.ID("file_icon_spacer"),
+                .id = clay.ElementId.ID(spacer_id),
                 .layout = .{
-                    .sizing = .{ .w = .fixed(10), .h = .grow },
+                    .sizing = .{ .w = .fixed(12), .h = .grow },
                 },
                 .background_color = .{ 0, 0, 0, 0 },
             })({});
         }
 
         // Datei-Icon
-        const icon = if (node.is_folder) "📁" else fileIcon(node.name);
-        clay.text(icon, .{
-            .font_size = 14,
-            .color = if (is_selected) theme.text_on_primary else theme.text,
-        });
+        var icon_id_buf: [40]u8 = undefined;
+        const icon_id = std.fmt.bufPrint(&icon_id_buf, "icon_{d}", .{index}) catch "icon";
+        const icon_path = if (node.is_folder) svg.Lucide.folder else fileIcon(node.name);
+        svg.Svg(arena, icon_id, icon_path, 14, if (is_selected) theme.text_on_primary else theme.text);
 
         // Dateiname
         clay.text(node.name, .{
@@ -389,12 +402,13 @@ fn renderTreeEntry(
 /// Datei-Icon basierend auf Extension
 fn fileIcon(filename: []const u8) []const u8 {
     const ext = std.fs.path.extension(filename);
-    if (std.mem.eql(u8, ext, ".zig")) return "⚡";
-    if (std.mem.eql(u8, ext, ".md")) return "📝";
-    if (std.mem.eql(u8, ext, ".json")) return "{}";
-    if (std.mem.eql(u8, ext, ".toml")) return "⚙";
-    if (std.mem.eql(u8, ext, ".svg")) return "🎨";
-    if (std.mem.eql(u8, ext, ".png") or std.mem.eql(u8, ext, ".jpg")) return "🖼";
-    if (std.mem.eql(u8, ext, ".log")) return "📋";
-    return "📄";
+    const svg = @import("components/svg.zig");
+    if (std.mem.eql(u8, ext, ".zig")) return svg.Lucide.zap;
+    if (std.mem.eql(u8, ext, ".md")) return svg.Lucide.file_text;
+    if (std.mem.eql(u8, ext, ".json")) return svg.Lucide.file_code;
+    if (std.mem.eql(u8, ext, ".toml")) return svg.Lucide.settings;
+    if (std.mem.eql(u8, ext, ".svg")) return svg.Lucide.palette;
+    if (std.mem.eql(u8, ext, ".png") or std.mem.eql(u8, ext, ".jpg")) return svg.Lucide.image;
+    if (std.mem.eql(u8, ext, ".log")) return svg.Lucide.clipboard;
+    return svg.Lucide.file;
 }

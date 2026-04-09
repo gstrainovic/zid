@@ -334,6 +334,21 @@ pub fn main() !void {
         // Clay Layout berechnen
         const render_commands = ui_system.renderExample(&logo_texture);
 
+        // Phase 9: Datei öffnen verarbeiten
+        if (ui_system.file_explorer.file_to_open) |path| {
+            ui_system.tab_bar.openFile(path) catch {};
+            
+            // Datei lesen und in Editor laden
+            const content = std.fs.cwd().readFileAlloc(allocator, path, 64 * 1024 * 1024) catch |err| blk: {
+                log.err("Failed to open {s}: {}", .{ path, err });
+                break :blk allocator.dupe(u8, "Fehler beim Öffnen der Datei.") catch unreachable;
+            };
+            ui_system.code_editor.setText(content);
+            allocator.free(content);
+            
+            ui_system.file_explorer.file_to_open = null;
+        }
+
         // Cursor-Form anpassen basierend auf Layout-Ergebnis
         plat.setCursor(ui_system.code_editor.desired_cursor);
 
