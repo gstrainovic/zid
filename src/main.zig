@@ -26,6 +26,7 @@ pub fn main() !void {
 
     // CLI Argumente parsen
     var theme_override: ?ui.Theme = null;
+    var default_file_path: ?[]const u8 = null;
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
 
@@ -42,7 +43,50 @@ pub fn main() !void {
                     log.info("Theme override: dark", .{});
                 }
             }
+        } else if (default_file_path == null) {
+            // Erstes nicht-Flag Argument = Dateipfad
+            default_file_path = args[i];
         }
+    }
+
+    // Falls keine Datei angegeben: test_data/app.log als Default laden
+    // Suchstrategie: (1) CLI-Pfad → (2) CWD (Dev) → (3) installiert (share/)
+    const exe_dir = std.fs.selfExeDirPathAlloc(allocator) catch null;
+    defer if (exe_dir) |d| allocator.free(d);
+
+    const resolved_file_path: ?[]const u8 = if (default_file_path) |p|
+        p
+    else blk: {
+        // 1) Dev-Modus: test_data/app.log im CWD (zig build run)
+        if (std.fs.cwd().access("test_data/app.log", .{}) catch null) |_| {
+            break :blk try std.fs.path.resolve(allocator, &.{"test_data/app.log"});
+        }
+        // 2) Installiert: <exe_dir>/../share/app.log (zig-out/bin -> zig-out/share)
+        if (exe_dir) |dir| {
+            const sp = try std.fs.path.join(allocator, &.{ dir, "..", "share", "app.log" });
+            defer allocator.free(sp);
+            if (std.fs.accessAbsolute(sp, .{}) catch null) |_| {
+                break :blk try std.fs.path.resolve(allocator, &.{sp});
+            }
+        }
+        // 3) Installiert: <exe_dir>/share/app.log
+        if (exe_dir) |dir| {
+            const sp = try std.fs.path.join(allocator, &.{ dir, "share", "app.log" });
+            defer allocator.free(sp);
+            if (std.fs.accessAbsolute(sp, .{}) catch null) |_| {
+                break :blk try std.fs.path.resolve(allocator, &.{sp});
+            }
+        }
+        break :blk null;
+    };
+    defer if (resolved_file_path) |p| {
+        if (default_file_path == null) allocator.free(p);
+    };
+
+    if (resolved_file_path) |p| {
+        log.info("Default file: {s}", .{p});
+    } else {
+        log.info("No default file — using built-in content", .{});
     }
 
     log.info("=== vulkan-ed starting ===", .{});
@@ -119,7 +163,7 @@ pub fn main() !void {
     // 5. UI System initialisieren (Clay)
     var ui_system = try ui.UI.init(allocator, .{
         .font_size = 14.0,
-    });
+    }, resolved_file_path);
     defer ui_system.deinit();
 
     try ui_system.setupClay(&plat.window.?, plat.getSize().width, plat.getSize().height, &text_renderer);

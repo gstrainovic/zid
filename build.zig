@@ -56,6 +56,10 @@ pub fn build(b: *std.Build) void {
     const shader_install_texture = b.addInstallFileWithDir(b.path("shaders/texture.wgsl"), .{ .custom = "share" }, "texture.wgsl");
     b.getInstallStep().dependOn(&shader_install_texture.step);
 
+    // Test-Daten installieren (app.log wird standardmäßig im Editor geladen)
+    const app_log_install = b.addInstallFileWithDir(b.path("test_data/app.log"), .{ .custom = "share" }, "app.log");
+    b.getInstallStep().dependOn(&app_log_install.step);
+
     const exe = b.addExecutable(.{
         .name = "vulkan-ed",
         .root_module = exe_mod,
