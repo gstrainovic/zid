@@ -292,7 +292,11 @@ pub fn main() !void {
                         scroll_delta_y = @floatCast(delta);
                         // Mausrad-Events an Editor weiterleiten
                         // delta ist typisch ~1.0 pro Klick → direkt als Zeilen-Offset
-                        const lines_delta: i32 = @intFromFloat(@round(scroll_delta_y));
+                        // Auf Windows ist das Vorzeichen invertiert (natural scrolling Unterschied)
+                        var lines_delta: i32 = @intFromFloat(@round(scroll_delta_y));
+                        if (builtin.os.tag == .windows) {
+                            lines_delta = -lines_delta;
+                        }
                         if (lines_delta != 0) ui_system.handleScroll(lines_delta);
                     },
                     else => {},
