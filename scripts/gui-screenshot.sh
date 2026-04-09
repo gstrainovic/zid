@@ -16,7 +16,7 @@ cd "$PROJECT_DIR"
 
 YDOTOOL_SOCKET="${YDOTOOL_SOCKET:-/tmp/.ydotool_socket}"
 OUTPUT_PATH="${1:-screenshots/screenshot_gui.png}"
-WAIT_SECONDS="${2:-30}"
+WAIT_TIMEOUT="${2:-30}"
 
 # Ensure ydotoold is running
 if [[ ! -S "$YDOTOOL_SOCKET" ]]; then
@@ -43,14 +43,40 @@ zig build
 SCREENSHOT_DIR="$HOME/Bilder/Bildschirmfotos"
 BEFORE=$(ls -t "$SCREENSHOT_DIR"/*.png 2>/dev/null | head -1 || echo "")
 
-# Start app in background (pass extra args: --theme light/dark)
+# Start app in background, capture output to detect readiness
+APP_LOG=$(mktemp)
 echo "Starting vulkan-ed ${@:3}..."
-./zig-out/bin/vulkan-ed ${@:3} &
+./zig-out/bin/vulkan-ed ${@:3} > "$APP_LOG" 2>&1 &
 APP_PID=$!
 
-# Wait for rendering
-echo "Waiting ${WAIT_SECONDS}s for rendering..."
-sleep "$WAIT_SECONDS"
+# Wait for "vulkan-ed ready" in output (statt fixem sleep)
+echo "Waiting for vulkan-ed to be ready (timeout: ${WAIT_TIMEOUT}s)..."
+READY=false
+for i in $(seq 1 "$((WAIT_TIMEOUT * 10))"); do
+    if ! kill -0 "$APP_PID" 2>/dev/null; then
+        echo "ERROR: vulkan-ed exited prematurely:" >&2
+        cat "$APP_LOG" >&2
+        rm -f "$APP_LOG"
+        exit 1
+    fi
+    if grep -q "vulkan-ed ready" "$APP_LOG" 2>/dev/null; then
+        READY=true
+        break
+    fi
+    sleep 0.1
+done
+
+if ! $READY; then
+    echo "ERROR: vulkan-ed did not become ready within ${WAIT_TIMEOUT}s:" >&2
+    cat "$APP_LOG" >&2
+    kill $APP_PID 2>/dev/null || true
+    rm -f "$APP_LOG"
+    exit 1
+fi
+
+# Extra kurz warten damit der erste Frame gerendert wird
+sleep 1
+echo "vulkan-ed ready (after ~$((i / 10))s). Taking screenshot..."
 
 # Take screenshot via ydotool (Shift+Print)
 echo "Taking screenshot..."
@@ -72,6 +98,7 @@ done
 echo "Cleaning up..."
 kill $APP_PID 2>/dev/null || true
 wait $APP_PID 2>/dev/null || true
+rm -f "$APP_LOG"
 
 echo ""
 echo "=========================================="

@@ -10,6 +10,7 @@ const image_renderer_mod = @import("clay_renderer/image_renderer.zig");
 const svg = @import("svg/mod.zig");
 const svg_gpu_mod = @import("svg/gpu_renderer.zig");
 const editor = @import("editor/mod.zig");
+const e2e_server = @import("e2e_server.zig");
 
 // Log-Level: Nur info und höher anzeigen (debug unterdrücken)
 pub const std_options: std.Options = .{
@@ -27,6 +28,7 @@ pub fn main() !void {
     // CLI Argumente parsen
     var theme_override: ?ui.Theme = null;
     var default_file_path: ?[]const u8 = null;
+    var e2e_mode = false;
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
 
@@ -43,6 +45,9 @@ pub fn main() !void {
                     log.info("Theme override: dark", .{});
                 }
             }
+        } else if (std.mem.eql(u8, args[i], "--e2e")) {
+            e2e_mode = true;
+            log.info("E2E mode enabled — RPC server on port 9999", .{});
         } else if (default_file_path == null) {
             // Erstes nicht-Flag Argument = Dateipfad
             default_file_path = args[i];
@@ -221,6 +226,16 @@ pub fn main() !void {
     log.info("=== vulkan-ed ready ===", .{});
     log.info("Press Ctrl+C to exit (or close window)", .{});
 
+    // E2E RPC Server starten falls --e2e Flag
+    var e2e_thread: ?std.Thread = null;
+    var e2e_ctx: ?e2e_server.E2EContext = null;
+    if (e2e_mode) {
+        const e2e_listen_addr = try std.net.Address.parseIp("127.0.0.1", 9999);
+        const e2e_server_sock = try e2e_listen_addr.listen(.{ .reuse_address = true });
+        e2e_ctx = e2e_server.E2EContext.init(allocator, &ui_system, e2e_server_sock);
+        e2e_thread = try e2e_server.start(&e2e_ctx.?);
+    }
+
     // Render Loop
     var frame_count: u32 = 0;
     var mouse_x: f32 = 330; // 240 (explorer) + ~90 (tab width to reach X button)
@@ -230,13 +245,12 @@ pub fn main() !void {
     var ctrl_held: bool = false;
     var alt_held: bool = false;
 
-    while (plat.isRunning()) {        const delta_time_ms: f32 = 16.0;
+    while (plat.isRunning() and (e2e_ctx == null or !e2e_ctx.?.shutdown_flag.load(.seq_cst))) {
+        const delta_time_ms: f32 = 16.0;
 
-        // Event-basierter Render Loop mit wio.wait (Timeout für CPU-Effizienz)
-        wio.wait(.{ .timeout_ns = @intFromFloat(delta_time_ms * std.time.ns_per_ms) });
         wio.update();
 
-        // UI updaten (Animationen) - ca. 60 FPS
+        // UI updaten (Animationen)
         ui_system.update(delta_time_ms);
 
         // Theme-Wechsel für Verifizierung entfernt — Standard: Dark
@@ -370,6 +384,10 @@ pub fn main() !void {
         );
 
         frame_count += 1;
+
+        // Event-basiert: blockiert bis Wayland-Events kommen (wie Gooey's dispatch).
+        // Muss NACH dem Rendern stehen, damit der erste Frame gezeichnet wird.
+        wio.wait(.{});
     }
 
     log.info("=== vulkan-ed exiting ===", .{});
