@@ -16,6 +16,9 @@
         .zigimg = .{
             .path = "libs/zigimg",
         },
+        .zigjr = .{
+            .path = "libs/zigjr",
+        },
     },
     .paths = .{
         "build.zig",

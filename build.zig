@@ -31,6 +31,12 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    // zigjr for JSON-RPC 2.0 (E2E Testing)
+    const zigjr_dep = b.dependency("zigjr", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
     const exe_mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
@@ -42,6 +48,7 @@ pub fn build(b: *std.Build) void {
     exe_mod.addImport("wio", wio_dep.module("wio"));
     exe_mod.addImport("wgpu", wgpu_dep.module("wgpu"));
     exe_mod.addImport("zigimg", zigimg_dep.module("zigimg"));
+    exe_mod.addImport("zigjr", zigjr_dep.module("zigjr"));
     // Shader als Resource-File installieren
     const shader_install_triangle = b.addInstallFileWithDir(b.path("shaders/triangle.wgsl"), .{ .custom = "share" }, "triangle.wgsl");
     b.getInstallStep().dependOn(&shader_install_triangle.step);
