@@ -16,3 +16,6 @@
 [submodule "libs/sev"]
 	path = libs/sev
 	url = https://github.com/dylancobb/sev
+[submodule "libs/zigjr"]
+	path = libs/zigjr
+	url = https://github.com/williamw520/zigjr
