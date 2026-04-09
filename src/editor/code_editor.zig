@@ -1191,8 +1191,8 @@ pub const CodeEditor = struct {
 
     /// X-Koordinate in Spalte umrechnen (mit Content-Offset, echte Text-Messung).
     fn colFromX(self: *const Self, x: f32, line_idx: usize) usize {
-        // Relativ zum Editor-Content, minus Gutter
-        const rel_x = x - self.content_origin_x - self.gutter_width;
+        // Relativ zum Editor-Content, minus Gutter und Code-Bereich Padding (left: 12)
+        const rel_x = x - self.content_origin_x - self.gutter_width - 12;
         if (rel_x <= 0) return 0;
 
         const line = self.lines.items[line_idx].items;
