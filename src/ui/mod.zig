@@ -11,6 +11,8 @@ const AnimationType = animation.AnimationType;
 const AnimationManager = animation.AnimationManager;
 const editor_mod = @import("../editor/mod.zig");
 const wio = @import("wio");
+const tab_bar_mod = @import("tab_bar.zig");
+const file_explorer_mod = @import("file_explorer.zig");
 
 const log = std.log.scoped(.ui);
 
@@ -54,6 +56,12 @@ pub const UI = struct {
     // Text Renderer (für Measurement)
     text_renderer: ?*@import("../text/mod.zig").TextRenderer = null,
 
+    // Phase 9: Tab-Bar und File Explorer
+    tab_bar: tab_bar_mod.TabBarState,
+    file_explorer: file_explorer_mod.FileExplorerState,
+    show_file_explorer: bool = true,
+    current_directory: ?[]const u8 = null,
+
     const Self = @This();
 
     /// UI initialisieren
@@ -68,6 +76,14 @@ pub const UI = struct {
         const clay_memory = try allocator.alloc(u8, generous_memory);
 
         var code_editor = editor_mod.CodeEditor.init(allocator);
+
+        // Phase 9: Tab-Bar und File Explorer initialisieren
+        const tab_bar = tab_bar_mod.TabBarState.init(allocator);
+        const file_explorer = file_explorer_mod.FileExplorerState.init(allocator);
+
+        // Callback für File Explorer: Wenn Datei geöffnet wird
+        // Hinweis: Callback muss static sein, wir speichern den Pfad direkt im Editor
+        _ = &file_explorer; // Callback wird später gesetzt
 
         // Default-Inhalt: Entweder Datei laden oder Hardcoded-Beispiel
         if (default_file_path) |path| {
@@ -91,6 +107,10 @@ pub const UI = struct {
                     .frame_arena = std.heap.ArenaAllocator.init(allocator),
                     .code_editor = code_editor,
                     .text_renderer = null,
+                    .tab_bar = tab_bar,
+                    .file_explorer = file_explorer,
+                    .show_file_explorer = true,
+                    .current_directory = null,
                 };
             };
             defer allocator.free(file_content);
@@ -117,6 +137,10 @@ pub const UI = struct {
             .frame_arena = std.heap.ArenaAllocator.init(allocator),
             .code_editor = code_editor,
             .text_renderer = null,
+            .tab_bar = tab_bar,
+            .file_explorer = file_explorer,
+            .show_file_explorer = true,
+            .current_directory = null,
         };
     }
 
@@ -127,6 +151,9 @@ pub const UI = struct {
         self.frame_arena.deinit();
         self.allocator.free(self.clay_memory);
         self.code_editor.deinit();
+        self.tab_bar.deinit();
+        self.file_explorer.deinit();
+        if (self.current_directory) |dir| self.allocator.free(dir);
     }
 
     /// Clay initialisieren (nach Window Creation)
@@ -260,8 +287,8 @@ pub const UI = struct {
             .id = clay.ElementId.ID("Root"),
             .layout = .{
                 .sizing = .grow,
-                .padding = .all(16),
-                .child_gap = 16,
+                .padding = .{ .left = 0, .right = 0, .top = 0, .bottom = 0 },
+                .child_gap = 0,
                 .direction = .top_to_bottom,
             },
             .background_color = t.bg,
@@ -270,32 +297,72 @@ pub const UI = struct {
             clay.UI()(.{
                 .id = clay.ElementId.ID("Header"),
                 .layout = .{
-                    .sizing = .{ .w = .grow, .h = .fixed(64) },
+                    .sizing = .{ .w = .grow, .h = .fixed(48) },
                     .child_gap = 16,
                     .direction = .left_to_right,
                     .child_alignment = .{ .x = .left, .y = .center },
-                    .padding = .all(10),
+                    .padding = .{ .left = 16, .right = 16 },
                 },
                 .background_color = t.surface,
-                .border = .{ .width = .all(2), .color = t.accent },
+                .border = .{ .width = .{ .bottom = 1 }, .color = t.border },
             })({
                 // Logo Image (falls vorhanden)
                 if (image_data) |ptr| {
                     clay.UI()(.{
                         .id = clay.ElementId.ID("Logo"),
                         .layout = .{
-                            .sizing = .{ .w = .fixed(48), .h = .fixed(48) },
+                            .sizing = .{ .w = .fixed(32), .h = .fixed(32) },
                         },
                         .image = .{ .image_data = ptr },
-                        .background_color = .{ 255, 255, 255, 255 },
+                        .background_color = .{ 0, 0, 0, 0 },
                     })({});
                 }
 
-                clay.text("VULKAN-ED", .{ .font_size = 28, .color = t.text });
+                clay.text("VULKAN-ED", .{ .font_size = 20, .color = t.text });
             });
 
-            // Nur Code Editor - füllt den restlichen Raum
-            self.code_editor.render(self.frame_arena.allocator());
+            // Main Content Area (Sidebar + Editor)
+            clay.UI()(.{
+                .id = clay.ElementId.ID("MainContent"),
+                .layout = .{
+                    .sizing = .grow,
+                    .direction = .left_to_right,
+                    .child_gap = 0,
+                },
+                .background_color = t.bg,
+            })({
+                // File Explorer Sidebar
+                if (self.show_file_explorer) {
+                    file_explorer_mod.renderFileExplorer(
+                        self.frame_arena.allocator(),
+                        &self.file_explorer,
+                        t,
+                    );
+                }
+
+                // Editor Area (Tabs + Editor)
+                clay.UI()(.{
+                    .id = clay.ElementId.ID("EditorArea"),
+                    .layout = .{
+                        .sizing = .grow,
+                        .direction = .top_to_bottom,
+                        .child_gap = 0,
+                    },
+                    .background_color = t.bg,
+                })({
+                    // Tab-Bar
+                    if (self.tab_bar.count() > 0) {
+                        tab_bar_mod.renderTabBar(
+                            self.frame_arena.allocator(),
+                            &self.tab_bar,
+                            t,
+                        );
+                    }
+
+                    // Code Editor - füllt den restlichen Raum
+                    self.code_editor.render(self.frame_arena.allocator());
+                });
+            });
         });
 
         const commands = self.endLayout();

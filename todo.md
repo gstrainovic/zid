@@ -276,15 +276,15 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
   - [x] **Verifiziert:** Alle Phase-8 Features visuell bestätigt (screenshot: phase8_verify.png)
 
 ### Phase 9: File Explorer, Tabs & Datei-Vorschau
-- [ ] **Tab-Leiste**
-  - [ ] Offene Dateien als Tabs darstellen (Clay Layout)
-  - [ ] Tab wechseln (Klick), Tab schließen (X-Button)
-  - [ ] Aktiver Tab visuell hervorgehoben
-- [ ] **File Explorer (Sidebar)**
-  - [ ] Verzeichnisbaum anzeigen (Tree-Widget)
-  - [ ] Ordner auf/zuklappen
-  - [ ] Datei-Icons via Gooey SVG-Pipeline (Phase 7)
-  - [ ] Datei öffnen per Klick → neuer Tab
+- [x] **Tab-Leiste**
+  - [x] Offene Dateien als Tabs darstellen (Clay Layout)
+  - [x] Tab wechseln (Klick), Tab schließen (X-Button)
+  - [x] Aktiver Tab visuell hervorgehoben
+- [x] **File Explorer (Sidebar)**
+  - [x] Verzeichnisbaum anzeigen (Tree-Widget)
+  - [x] Ordner auf/zuklappen
+  - [x] Datei-Icons via Gooey SVG-Pipeline (Phase 7)
+  - [x] Datei öffnen per Klick → neuer Tab
 - [ ] **SVG-Datei Preview**
   - [ ] SVG-Dateien im Editor-Tab als Bild anzeigen (wie VSCode)
   - [ ] cairo.zig rasterisiert SVG → wgpu Texture → Textured Quad im Tab
