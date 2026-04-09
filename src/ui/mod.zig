@@ -62,6 +62,9 @@ pub const UI = struct {
     show_file_explorer: bool = true,
     current_directory: ?[]const u8 = null,
 
+    // Mouse state for immediate mode UI clicks
+    mouse_pressed_this_frame: bool = false,
+
     const Self = @This();
 
     /// UI initialisieren
@@ -222,6 +225,7 @@ pub const UI = struct {
 
     /// Maus-Events an Editor weiterleiten
     pub fn handleMouseDown(self: *Self, x: f32, y: f32) void {
+        self.mouse_pressed_this_frame = true;
         self.code_editor.handleMouseDown(x, y);
     }
 
@@ -252,8 +256,9 @@ pub const UI = struct {
 
     /// Layout beenden und Render Commands holen
     pub fn endLayout(self: *Self) []clay.RenderCommand {
-        _ = self;
-        return clay.endLayout();
+        const commands = clay.endLayout();
+        self.mouse_pressed_this_frame = false;
+        return commands;
     }
 
     /// Window Resize behandeln
@@ -337,6 +342,7 @@ pub const UI = struct {
                         self.frame_arena.allocator(),
                         &self.file_explorer,
                         t,
+                        self.mouse_pressed_this_frame,
                     );
                 }
 
@@ -350,14 +356,13 @@ pub const UI = struct {
                     },
                     .background_color = t.bg,
                 })({
-                    // Tab-Bar
-                    if (self.tab_bar.count() > 0) {
-                        tab_bar_mod.renderTabBar(
-                            self.frame_arena.allocator(),
-                            &self.tab_bar,
-                            t,
-                        );
-                    }
+                    // Tab-Leiste
+                    tab_bar_mod.renderTabBar(
+                        self.frame_arena.allocator(),
+                        &self.tab_bar,
+                        t,
+                        self.mouse_pressed_this_frame,
+                    );
 
                     // Code Editor - füllt den restlichen Raum
                     self.code_editor.render(self.frame_arena.allocator());

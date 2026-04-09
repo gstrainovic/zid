@@ -115,6 +115,7 @@ pub fn renderTabBar(
     arena: std.mem.Allocator,
     state: *TabBarState,
     theme: Theme,
+    mouse_pressed: bool,
 ) void {
     if (state.tabs.items.len == 0) return;
 
@@ -133,10 +134,12 @@ pub fn renderTabBar(
             const is_active = state.active_index == i;
             renderTab(
                 arena,
+                state,
                 tab.*,
                 i,
                 is_active,
                 theme,
+                mouse_pressed,
             );
         }
     });
@@ -145,25 +148,43 @@ pub fn renderTabBar(
 /// Einzelnen Tab rendern
 fn renderTab(
     arena: std.mem.Allocator,
+    state: *TabBarState,
     tab: Tab,
     index: usize,
     is_active: bool,
     theme: Theme,
+    mouse_pressed: bool,
 ) void {
-    _ = arena;
-
     var tab_id_buf: [32]u8 = undefined;
     const tab_id_str = std.fmt.bufPrint(&tab_id_buf, "tab_{d}", .{index}) catch return;
     var close_id_buf: [32]u8 = undefined;
     const close_id_str = std.fmt.bufPrint(&close_id_buf, "tab_close_{d}", .{index}) catch return;
 
+    const tab_id = clay.ElementId.ID(tab_id_str);
+    const close_id = clay.ElementId.ID(close_id_str);
+
+    const is_tab_hovered = clay.pointerOver(tab_id);
+    const is_close_hovered = clay.pointerOver(close_id);
+
+    if (mouse_pressed) {
+        if (is_close_hovered) {
+            state.closeTab(index);
+            return;
+        } else if (is_tab_hovered) {
+            state.setActive(index);
+            // Wir könnten hier on_file_open triggern, um die Datei in den Editor zu laden.
+            // Aber eigentlich sollte setActive auch die Datei wechseln im State, das muss
+            // vermutlich später von main.zig abgefragt werden.
+        }
+    }
+
     // Tab-Background
-    const bg_color = if (is_active) theme.bg else theme.surface;
+    const bg_color = if (is_active) theme.bg else if (is_tab_hovered) [4]f32{ theme.bg[0], theme.bg[1], theme.bg[2], 128.0 } else theme.surface;
     const text_color = if (is_active) theme.text else theme.muted;
-    const border_color = if (is_active) theme.accent else .{ 0, 0, 0, 0 };
+    const border_color = if (is_active) theme.accent else .{ 0.0, 0.0, 0.0, 0.0 };
 
     clay.UI()(.{
-        .id = clay.ElementId.ID(tab_id_str),
+        .id = tab_id,
         .layout = .{
             .sizing = .{ .w = .fitMinMax(.{ .min = 80, .max = 200 }), .h = .grow },
             .direction = .left_to_right,
@@ -192,17 +213,18 @@ fn renderTab(
 
         // Close Button (X)
         clay.UI()(.{
-            .id = clay.ElementId.ID(close_id_str),
+            .id = close_id,
             .layout = .{
                 .sizing = .{ .w = .fixed(18), .h = .fixed(18) },
                 .child_alignment = .{ .x = .center, .y = .center },
             },
-            .background_color = .{ 0, 0, 0, 0 },
+            .background_color = if (is_close_hovered) .{ 255.0, 0.0, 0.0, 100.0 } else .{ 0.0, 0.0, 0.0, 0.0 },
+            .corner_radius = .all(2),
         })({
-            clay.text("×", .{
-                .font_size = 16,
-                .color = theme.muted,
-            });
+            var close_svg_id_buf: [40]u8 = undefined;
+            const close_svg_id = std.fmt.bufPrint(&close_svg_id_buf, "tab_close_svg_{d}", .{index}) catch "close_svg";
+            const svg = @import("components/svg.zig");
+            svg.Svg(arena, close_svg_id, svg.Lucide.x, 14, theme.muted);
         });
     });
 }

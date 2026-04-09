@@ -13,7 +13,7 @@ cd "$(dirname "$0")"
 
 YDOTOOL_SOCKET="${YDOTOOL_SOCKET:-/tmp/.ydotool_socket}"
 OUTPUT_PATH="${1:-screenshots/screenshot_gui.png}"
-WAIT_SECONDS="${2:-15}"
+WAIT_SECONDS="${2:-30}"
 
 # Ensure ydotoold is running
 if [[ ! -S "$YDOTOOL_SOCKET" ]]; then
@@ -54,7 +54,7 @@ echo "Taking screenshot..."
 ydotool key 42:1 99:1 99:0 42:0
 
 # Wait for new file to appear
-for i in $(seq 1 50); do
+for i in $(seq 1 150); do
     sleep 0.1
     AFTER=$(ls -t "$SCREENSHOT_DIR"/*.png 2>/dev/null | head -1 || echo "")
     if [[ -n "$AFTER" && "$AFTER" != "$BEFORE" ]]; then
