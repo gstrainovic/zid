@@ -344,6 +344,8 @@ pub const UI = struct {
                         t,
                         self.mouse_pressed_this_frame,
                     );
+                    // Deferred Toggle ausführen (nach Rendering, vor endLayout)
+                    self.file_explorer.processPendingToggle();
                 }
 
                 // Editor Area (Tabs + Editor)
