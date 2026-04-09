@@ -168,6 +168,25 @@ pub fn main() !void {
 
     try ui_system.setupClay(&plat.window.?, plat.getSize().width, plat.getSize().height, &text_renderer);
 
+    // Phase 9: File Explorer mit aktuellem Verzeichnis initialisieren
+    const cwd = std.fs.cwd();
+    var cwd_buf: [1024]u8 = undefined;
+    const cwd_path = cwd.realpath(".", &cwd_buf) catch null;
+    if (cwd_path) |path| {
+        ui_system.file_explorer.loadDirectory(path) catch |err| {
+            log.warn("Failed to load directory '{s}': {}", .{ path, err });
+        };
+        // Speicher für current_directory duplizieren (owned)
+        ui_system.current_directory = try allocator.dupe(u8, path);
+    }
+
+    // Phase 9: Aktuelle Datei als Tab öffnen (falls geladen)
+    if (resolved_file_path) |path| {
+        ui_system.tab_bar.openFile(path) catch |err| {
+            log.warn("Failed to open tab for '{s}': {}", .{ path, err });
+        };
+    }
+
     // 6. Clay Renderer initialisieren (WGPU)
     var clay_rdr = try clay_renderer_mod.ClayRenderer.init(
         allocator,
