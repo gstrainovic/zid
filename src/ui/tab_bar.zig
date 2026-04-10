@@ -29,6 +29,8 @@ pub const TabBarState = struct {
     tabs: std.ArrayList(Tab),
     /// Index des aktiven Tabs (null = keine Datei offen)
     active_index: ?usize = null,
+    /// Pending Pfad für Tab-Wechsel (wird von main.zig abgefragt)
+    pending_switch_path: ?[]const u8 = null,
 
     const Self = @This();
 
@@ -45,6 +47,9 @@ pub const TabBarState = struct {
             self.allocator.free(tab.display_name);
         }
         self.tabs.deinit(self.allocator);
+        if (self.pending_switch_path) |p| {
+            self.allocator.free(p);
+        }
     }
 
     /// Neuen Tab öffnen
@@ -90,6 +95,11 @@ pub const TabBarState = struct {
                     self.active_index = @min(active, self.tabs.items.len - 1);
                 } else {
                     self.active_index = null;
+                    // pending_switch_path freigeben wenn letzter Tab geschlossen
+                    if (self.pending_switch_path) |p| {
+                        self.allocator.free(p);
+                        self.pending_switch_path = null;
+                    }
                 }
             } else if (active > index) {
                 // Aktiver Tab war nach dem geschlossenen → Index dekrementieren
@@ -98,10 +108,15 @@ pub const TabBarState = struct {
         }
     }
 
-    /// Aktiven Tab setzen
+    /// Aktiven Tab setzen – setzt pending_switch_path für main.zig
     pub fn setActive(self: *Self, index: usize) void {
         if (index >= self.tabs.items.len) return;
         self.active_index = index;
+        // Pfad duplizieren damit main.zig ihn owned
+        if (self.pending_switch_path) |old| {
+            self.allocator.free(old);
+        }
+        self.pending_switch_path = self.allocator.dupe(u8, self.tabs.items[index].path) catch null;
     }
 
     /// Anzahl offener Tabs
@@ -119,20 +134,23 @@ pub fn renderTabBar(
 ) void {
     if (state.tabs.items.len == 0) return;
 
+    // Tab-Schließen-Request NACH der Schleife verarbeiten (vermeidet Use-After-Free)
+    var tab_to_close: ?usize = null;
+
     // Tab-Bar Container
     clay.UI()(.{
         .id = clay.ElementId.ID("tab_bar_container"),
         .layout = .{
             .sizing = .{ .w = .grow, .h = .fixed(36) },
             .direction = .left_to_right,
-            .child_gap = 2,
-            .padding = .{ .left = 8, .right = 8, .top = 4, .bottom = 4 },
+            .child_gap = 0,
+            .padding = .{ .left = 0, .right = 8, .top = 4, .bottom = 4 },
         },
         .background_color = theme.surface,
     })({
         for (state.tabs.items, 0..) |*tab, i| {
             const is_active = state.active_index == i;
-            renderTab(
+            const close_req = renderTab(
                 arena,
                 state,
                 tab.*,
@@ -141,11 +159,20 @@ pub fn renderTabBar(
                 theme,
                 mouse_pressed,
             );
+            if (close_req) |idx| {
+                tab_to_close = idx;
+            }
         }
     });
+
+    // Tab schließen NACH dem Rendering (keine Listen-Modifikation während Iteration)
+    if (tab_to_close) |idx| {
+        state.closeTab(idx);
+    }
 }
 
 /// Einzelnen Tab rendern
+/// Gibt optional den Index eines zu schließenden Tabs zurück (deferred)
 fn renderTab(
     arena: std.mem.Allocator,
     state: *TabBarState,
@@ -154,11 +181,11 @@ fn renderTab(
     is_active: bool,
     theme: Theme,
     mouse_pressed: bool,
-) void {
+) ?usize {
     var tab_id_buf: [32]u8 = undefined;
-    const tab_id_str = std.fmt.bufPrint(&tab_id_buf, "tab_{d}", .{index}) catch return;
+    const tab_id_str = std.fmt.bufPrint(&tab_id_buf, "tab_{d}", .{index}) catch return null;
     var close_id_buf: [32]u8 = undefined;
-    const close_id_str = std.fmt.bufPrint(&close_id_buf, "tab_close_{d}", .{index}) catch return;
+    const close_id_str = std.fmt.bufPrint(&close_id_buf, "tab_close_{d}", .{index}) catch return null;
 
     const tab_id = clay.ElementId.ID(tab_id_str);
     const close_id = clay.ElementId.ID(close_id_str);
@@ -168,13 +195,10 @@ fn renderTab(
 
     if (mouse_pressed) {
         if (is_close_hovered) {
-            state.closeTab(index);
-            return;
+            // Tab-Schließen-Request deferred zurückgeben (nicht direkt closeTab aufrufen!)
+            return index;
         } else if (is_tab_hovered) {
             state.setActive(index);
-            // Wir könnten hier on_file_open triggern, um die Datei in den Editor zu laden.
-            // Aber eigentlich sollte setActive auch die Datei wechseln im State, das muss
-            // vermutlich später von main.zig abgefragt werden.
         }
     }
 
@@ -186,11 +210,11 @@ fn renderTab(
     clay.UI()(.{
         .id = tab_id,
         .layout = .{
-            .sizing = .{ .w = .fitMinMax(.{ .min = 80, .max = 200 }), .h = .grow },
+            .sizing = .{ .w = .fitMinMax(.{ .min = 0, .max = 0 }), .h = .grow },
             .direction = .left_to_right,
             .child_alignment = .{ .x = .left, .y = .center },
             .child_gap = 6,
-            .padding = .{ .left = 10, .right = 6, .top = 4, .bottom = 4 },
+            .padding = .{ .left = 12, .right = 8, .top = 4, .bottom = 4 },
         },
         .background_color = bg_color,
         .border = .{
@@ -199,16 +223,22 @@ fn renderTab(
         },
         .corner_radius = .{ .top_left = 4, .top_right = 4 },
     })({
-        // Tab Label
-        var label_buf: [256]u8 = undefined;
-        const label_str = if (tab.modified)
-            std.fmt.bufPrint(&label_buf, "{s} *", .{tab.display_name}) catch tab.display_name
-        else
-            tab.display_name;
+        // Tab Label — in eigenem Container für korrektes Sizing
+        clay.UI()(.{
+            .layout = .{
+                .sizing = .{ .w = .fitMinMax(.{ .min = 0, .max = 0 }), .h = .fitMinMax(.{ .min = 0, .max = 0 }) },
+            },
+        })({
+            var label_buf: [256]u8 = undefined;
+            const label_str = if (tab.modified)
+                std.fmt.bufPrint(&label_buf, "{s} *", .{tab.display_name}) catch tab.display_name
+            else
+                tab.display_name;
 
-        clay.text(label_str, .{
-            .font_size = 13,
-            .color = text_color,
+            clay.text(label_str, .{
+                .font_size = 13,
+                .color = text_color,
+            });
         });
 
         // Close Button (X)
@@ -227,4 +257,6 @@ fn renderTab(
             svg.Svg(arena, close_svg_id, svg.Lucide.x, 14, theme.muted);
         });
     });
+
+    return null;
 }
