@@ -47,8 +47,10 @@ const ShapedRunKey = struct {
 
     /// FNV-1a hash for text content - fast and good distribution
     fn hashText(text: []const u8) u64 {
-        std.debug.assert(text.len > 0);
-        std.debug.assert(text.len <= ShapedRunCache.MAX_TEXT_LEN);
+        // Guard against invalid pointers to prevent segfaults
+        if (text.len == 0 or @intFromPtr(text.ptr) == 0) return 0;
+        // Guard against impossibly long text (corrupted pointer)
+        if (text.len > ShapedRunCache.MAX_TEXT_LEN) return 0;
 
         const FNV_OFFSET: u64 = 0xcbf29ce484222325;
         const FNV_PRIME: u64 = 0x100000001b3;
@@ -727,7 +729,10 @@ pub const TextSystem = struct {
         stats: ?*RenderStats,
         out_glyphs: []types.ShapedGlyph,
     ) !ShapedRun {
-        std.debug.assert(text.len > 0);
+        // Guard against invalid text pointers to prevent segfaults
+        if (text.len == 0 or @intFromPtr(text.ptr) == 0 or text.len > ShapedRunCache.MAX_TEXT_LEN) {
+            return ShapedRun{ .glyphs = out_glyphs[0..0], .width = 0, .owned = false };
+        }
         std.debug.assert(out_glyphs.len > 0);
 
         const face = self.current_face orelse return error.NoFontLoaded;

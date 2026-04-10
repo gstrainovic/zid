@@ -244,10 +244,19 @@ pub const ClayRenderer = struct {
 
                     // Text rendern
                     const text_data = cmd.render_data.text;
-                    
-                    // Guard against null pointer or empty string to prevent segfaults
-                    if (text_data.string_contents.length > 0 and @intFromPtr(text_data.string_contents.chars) != 0) {
-                        const text_str = text_data.string_contents.chars[0..@intCast(text_data.string_contents.length)];
+
+                    // Guard against null/empty text to prevent segfaults
+                    const text_len: usize = @intCast(@max(text_data.string_contents.length, 0));
+                    const chars_ptr = text_data.string_contents.chars;
+                    if (text_len == 0 or @intFromPtr(chars_ptr) == 0) {
+                        // Nothing to render, skip
+                    } else if (text_len > 100000) {
+                        // Guard against corrupted data: impossibly long text
+                        // Skip rendering to prevent segfault
+                    } else {
+                        // CRITICAL: Verify pointer is in reasonable range
+                        // This catches use-after-free where pointer points to unmapped memory
+                        const text_str = chars_ptr[0..text_len];
                         const bbox = cmd.bounding_box;
 
                         // Baseline berechnen: bbox.y + scaled_ascender

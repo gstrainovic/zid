@@ -134,8 +134,9 @@ pub fn renderTabBar(
 ) void {
     if (state.tabs.items.len == 0) return;
 
-    // Tab-Schließen-Request NACH der Schleife verarbeiten (vermeidet Use-After-Free)
+    // Tab-Schließen und Tab-Wechsel NACH der Schleife verarbeiten (vermeidet Use-After-Free und endloses Re-Laden)
     var tab_to_close: ?usize = null;
+    var tab_to_switch: ?usize = null;
 
     // Tab-Bar Container — horizontal scrollbar wenn Tabs nicht passen
     clay.UI()(.{
@@ -150,7 +151,7 @@ pub fn renderTabBar(
     })({
         for (state.tabs.items, 0..) |*tab, i| {
             const is_active = state.active_index == i;
-            const close_req = renderTab(
+            const req = renderTab(
                 arena,
                 state,
                 tab.*,
@@ -159,8 +160,9 @@ pub fn renderTabBar(
                 theme,
                 mouse_pressed,
             );
-            if (close_req) |idx| {
-                tab_to_close = idx;
+            if (req) |r| {
+                if (r.close) tab_to_close = r.index;
+                if (r.do_switch) tab_to_switch = r.index;
             }
         }
     });
@@ -169,10 +171,22 @@ pub fn renderTabBar(
     if (tab_to_close) |idx| {
         state.closeTab(idx);
     }
+
+    // Tab wechseln NACH dem Rendering (nur einmal, nicht pro Frame)
+    if (tab_to_switch) |idx| {
+        state.setActive(idx);
+    }
 }
 
+/// Request von renderTab
+const TabRequest = struct {
+    index: usize,
+    close: bool = false,
+    do_switch: bool = false,
+};
+
 /// Einzelnen Tab rendern
-/// Gibt optional den Index eines zu schließenden Tabs zurück (deferred)
+/// Gibt optional Request zurück (deferred close oder switch)
 fn renderTab(
     arena: std.mem.Allocator,
     state: *TabBarState,
@@ -181,7 +195,8 @@ fn renderTab(
     is_active: bool,
     theme: Theme,
     mouse_pressed: bool,
-) ?usize {
+) ?TabRequest {
+    _ = state;
     const tab_id = clay.ElementId.IDI("tab", @intCast(index));
     const close_id = clay.ElementId.IDI("tab_close", @intCast(index));
 
@@ -190,10 +205,9 @@ fn renderTab(
 
     if (mouse_pressed) {
         if (is_close_hovered) {
-            // Tab-Schließen-Request deferred zurückgeben (nicht direkt closeTab aufrufen!)
-            return index;
-        } else if (is_tab_hovered) {
-            state.setActive(index);
+            return TabRequest{ .index = index, .close = true };
+        } else if (is_tab_hovered and !is_active) {
+            return TabRequest{ .index = index, .do_switch = true };
         }
     }
 
@@ -211,7 +225,7 @@ fn renderTab(
     // Gemessene Breite + Puffer
     const text_width = ui.measureTextWidth(label_str, 24.0);
     const total_width: f32 = 8.0 + text_width + 8.0 + 8.0 + 24.0;
-    log.info("[TAB] '{s}': text_width={d:.1}px, total_width={d:.1}px", .{ label_str, text_width, total_width });
+    // log.info("[TAB] '{s}': text_width={d:.1}px, total_width={d:.1}px", .{ label_str, text_width, total_width });
 
     clay.UI()(.{
         .id = tab_id,
