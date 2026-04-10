@@ -2,10 +2,11 @@
 
 # Schritt 1: Zwei verschiedene Dateien öffnen
 Write-Output "=== Schritt 1: Tab 1 (test_data/app.log) öffnen ==="
+$abs_test_data = [System.IO.Path]::GetFullPath("test_data")
 $client = New-Object System.Net.Sockets.TcpClient('127.0.0.1', 9999)
 $stream = $client.GetStream()
 $writer = New-Object System.IO.StreamWriter($stream)
-$writer.WriteLine('{"jsonrpc":"2.0","method":"open_folder","params":["test_data"],"id":1}')
+$writer.WriteLine("`"jsonrpc`":`"2.0`",`"method`":`"open_folder`",`"params`":[`"$($abs_test_data.Replace('\', '/'))`"],`"id`":1}")
 $writer.Flush()
 Start-Sleep -Milliseconds 500
 $reader = New-Object System.IO.StreamReader($stream)
