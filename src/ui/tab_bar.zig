@@ -208,13 +208,11 @@ fn renderTab(
     const text_color = if (is_active) theme.text else theme.muted;
     const border_color = if (is_active) theme.accent else .{ 0.0, 0.0, 0.0, 0.0 };
 
-    // Mindestbreite basierend auf Label-Länge (ca. 8px pro Zeichen + Padding + Close)
-    const min_tab_width: f32 = @as(f32, @floatFromInt(tab.display_name.len)) * 8.0 + 44.0; // 44 = padding(20) + close(18) + gap(6)
-
+    // Tab passt sich dynamisch an Label-Länge an (.fit = exakt nach Inhalt)
     clay.UI()(.{
         .id = tab_id,
         .layout = .{
-            .sizing = .{ .w = .fitMinMax(.{ .min = min_tab_width, .max = 0 }), .h = .fit },
+            .sizing = .{ .w = .fit, .h = .fit },
             .direction = .left_to_right,
             .child_alignment = .{ .x = .left, .y = .center },
             .child_gap = 6,
@@ -227,38 +225,32 @@ fn renderTab(
         },
         .corner_radius = .{ .top_left = 4, .top_right = 4 },
     })({
-        // Tab Label — in eigenem Container für korrektes Sizing
-        clay.UI()(.{
-            .layout = .{
-                .sizing = .{ .w = .fit, .h = .fit },
-            },
-        })({
-            var label_buf: [256]u8 = undefined;
-            const label_str = if (tab.modified)
-                std.fmt.bufPrint(&label_buf, "{s} *", .{tab.display_name}) catch tab.display_name
-            else
-                tab.display_name;
+        var label_buf: [256]u8 = undefined;
+        const label_str = if (tab.modified)
+            std.fmt.bufPrint(&label_buf, "{s} *", .{tab.display_name}) catch tab.display_name
+        else
+            tab.display_name;
 
-            clay.text(label_str, .{
-                .font_size = 13,
-                .color = text_color,
-            });
+        clay.text(label_str, .{
+            .font_size = 13,
+            .color = text_color,
         });
 
-        // Close Button (X)
+        // Close Button (X) — kein Background, nur Icon-Farbe wechselt bei Hover
+        const close_icon_color = if (is_close_hovered) theme.danger else if (is_active) theme.text else theme.muted;
         clay.UI()(.{
             .id = close_id,
             .layout = .{
                 .sizing = .{ .w = .fixed(18), .h = .fixed(18) },
                 .child_alignment = .{ .x = .center, .y = .center },
             },
-            .background_color = if (is_close_hovered) .{ 255.0, 0.0, 0.0, 100.0 } else .{ 0.0, 0.0, 0.0, 0.0 },
+            // Kein background_color — Icon allein reicht
             .corner_radius = .all(2),
         })({
             var close_svg_id_buf: [40]u8 = undefined;
             const close_svg_id = std.fmt.bufPrint(&close_svg_id_buf, "tab_close_svg_{d}", .{index}) catch "close_svg";
             const svg = @import("components/svg.zig");
-            svg.Svg(arena, close_svg_id, svg.Lucide.x, 14, theme.muted);
+            svg.Svg(arena, close_svg_id, svg.Lucide.x, 14, close_icon_color);
         });
     });
 
