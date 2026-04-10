@@ -280,6 +280,9 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
   - [x] Offene Dateien als Tabs darstellen (Clay Layout)
   - [x] Tab wechseln (Klick), Tab schließen (X-Button)
   - [x] Aktiver Tab visuell hervorgehoben
+  - [ ] Tab-Label vollständig sichtbar (nicht abgeschnitten wie ".n.zig")
+  - [ ] Close-Icon (X) korrekt als SVG rendern (statt rotem Quadrat)
+  - [ ] SVG-Icons im File Explorer korrekt farbig (nicht schwarz)
 - [x] **File Explorer (Sidebar)**
   - [x] Verzeichnisbaum anzeigen (Tree-Widget)
   - [x] Ordner auf/zuklappen
