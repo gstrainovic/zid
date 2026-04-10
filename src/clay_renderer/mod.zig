@@ -30,6 +30,7 @@ pub const ClayRenderer = struct {
     // Viewport Dimensionen für Normalisierung
     viewport_width: f32 = 1.0,
     viewport_height: f32 = 1.0,
+    scale_factor: f32 = 1.0,
 
     const Self = @This();
 
@@ -41,8 +42,9 @@ pub const ClayRenderer = struct {
         swap_chain_format: wgpu.TextureFormat,
         viewport_width: u32,
         viewport_height: u32,
+        scale_factor: f32,
     ) !Self {
-        log.debug("Initializing Clay renderer", .{});
+        log.debug("Initializing Clay renderer (scale={d:.2})", .{scale_factor});
 
         var self = Self{
             .allocator = allocator,
@@ -51,6 +53,7 @@ pub const ClayRenderer = struct {
             .swap_chain_format = swap_chain_format,
             .viewport_width = @floatFromInt(viewport_width),
             .viewport_height = @floatFromInt(viewport_height),
+            .scale_factor = scale_factor,
         };
 
         // Shader laden (zur Runtime)
@@ -257,7 +260,16 @@ pub const ClayRenderer = struct {
                     const b = col[2] / 255.0;
                     const a = col[3] / 255.0;
 
-                    try text_gpu.renderText(render_pass, text_renderer, text_str, bbox.x, baseline_y, .{ r, g, b, a });
+                    try text_gpu.renderText(
+                        render_pass,
+                        text_renderer,
+                        text_str,
+                        bbox.x,
+                        baseline_y,
+                        @floatFromInt(text_data.font_size),
+                        self.scale_factor,
+                        .{ r, g, b, a },
+                    );
                 },
                 .image => {
                     // Flush rectangles first

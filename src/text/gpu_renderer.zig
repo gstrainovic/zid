@@ -263,13 +263,13 @@ const vertex_buffers = [_]wgpu.VertexBufferLayout{
         text_str: []const u8,
         x: f32,
         y: f32,
+        font_size: f32,
+        scale_factor: f32,
         color: [4]f32,
     ) !void {
         if (text_str.len == 0) return;
 
         const ts = text_renderer.ts_ptr;
-        const font_size = text_renderer.config.size;
-        const scale_factor: f32 = 1.0; // Keine zusätzliche Skalierung
 
         const r = color[0];
         const g = color[1];

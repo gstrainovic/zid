@@ -202,6 +202,7 @@ pub fn main() !void {
         renderer.swap_chain_format,
         plat.getSize().width,
         plat.getSize().height,
+        1.0, // scale_factor
     );
     defer clay_rdr.deinit();
 

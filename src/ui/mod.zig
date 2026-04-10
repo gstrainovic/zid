@@ -26,6 +26,14 @@ fn cMeasureText(ptr: [*c]const u8, len: usize) f32 {
     return tr.measureTextAtSize(ptr[0..len], g_font_size);
 }
 
+/// Public helper: misst Text-Breite bei beliebiger Font-Size.
+/// Wird von UI-Komponenten (z.B. tab_bar) benötigt, die explizite Breiten
+/// berechnen müssen, weil Clay's .fit Sizing für Text + fixed children unzuverlässig ist.
+pub fn measureTextWidth(text: []const u8, font_size: f32) f32 {
+    const tr = g_text_renderer orelse return 0;
+    return tr.measureTextAtSize(text, font_size);
+}
+
 /// UI Konfiguration
 pub const UIConfig = struct {
     font_size: f32 = 14.0,
@@ -186,7 +194,7 @@ pub const UI = struct {
     /// Clay Measure Text Callback
     fn clayMeasureText(text_str: []const u8, config: *clay.TextElementConfig, user_data: *Self) clay.Dimensions {
         const renderer = user_data.text_renderer orelse return .{ .w = 0, .h = 0 };
-        
+
         // Text messen (mit korrekter Font-Size)
         // Wir fügen einen kleinen Puffer hinzu (1.0px) um Floating-Point Rundungsfehler
         // und Clipping-Probleme in Clay zu vermeiden.
