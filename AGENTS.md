@@ -12,7 +12,7 @@
    1. todo.md gründlich lesen und verstehen
    2. Beispiele finden mit `rg` Suche (example|demo|sample) rekursiv überall, auch in libs/
    3. Implementieren (von Gooey übernehmen statt neu erfinden)
-   4. Mit ./gui-screenshot.sh Screenshot machen
+   4. Mit ./scripts/gui-screenshot.sh (Linux) oder ./scripts/screenshot.ps1 Screenshot machen
    5. Screenshot SELBST PRÜFEN: mit Read-Tool als Bild öffnen und visuell
       kontrollieren ob die Implementierung sichtbar ist. NICHT nur prüfen
       ob die Datei existiert oder ein PNG ist — den INHALT anschauen!
@@ -120,6 +120,11 @@ Beweis ist REJECT.
 4. **Implementierungs-Spuren im Diff** — Wenn die Phase ein neues UI-Element
    behauptet, muss der Render-Pfad im Diff sichtbar sein (neue Draw-Calls,
    Shader-Uniforms, Vertex-Buffer). todo.md-Edit allein ist keine Implementierung.
+
+### Timeout für Reviewer
+
+Der Reviewer-Timeout ist auf **30 Minuten** eingestellt. Falls der Reviewer 
+länger braucht, brich den Vorgang ab und prüfe die Ursache.
 
 ### Token-Budget
 
