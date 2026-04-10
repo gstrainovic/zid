@@ -47,11 +47,14 @@ pub fn main() !void {
 
     std.debug.print("Benchmarking: {s} ({d} iterations)\n", .{ file_path, iterations });
 
+    // Benchmark mode: load_file (misst readFileAlloc + setText)
+    const method = "benchmark_load_file";
+
     // RPC JSON-RPC Request bauen
     var request_buf: [1024]u8 = undefined;
     const request = try std.fmt.bufPrint(&request_buf,
-        \\{{"jsonrpc": "2.0", "method": "benchmark_open_file", "params": ["{s}", {d}], "id": 1}}
-    , .{ file_path, iterations });
+        \\{{"jsonrpc": "2.0", "method": "{s}", "params": ["{s}", {d}], "id": 1}}
+    , .{ method, file_path, iterations });
 
     // Verbindung herstellen
     const address = try std.net.Address.parseIp4(RPC_HOST, RPC_PORT);
@@ -124,7 +127,26 @@ fn printStats(json: []const u8) !void {
     std.debug.print("  Benchmark Results\n", .{});
     std.debug.print("{s}\n", .{"─" ** 60});
 
+    // File size first (escaped quotes im JSON-String)
+    if (std.mem.indexOf(u8, json, "\\\"file_size_bytes\\\":" )) |pos| {
+        const value_start = pos + 21; // len of \"file_size_bytes\":
+        var vs = value_start;
+        while (vs < json.len and (json[vs] == ' ' or json[vs] == '\t')) : (vs += 1) {}
+        var ve = vs;
+        while (ve < json.len and json[ve] != ',' and json[ve] != '}') : (ve += 1) {}
+        const value = json[vs..ve];
+        const size_bytes = std.fmt.parseInt(u64, value, 10) catch 0;
+        const size_kb = @as(f64, @floatFromInt(size_bytes)) / 1024.0;
+        const size_mb = size_kb / 1024.0;
+        if (size_mb >= 1.0) {
+            std.debug.print("  {s:>8}: {d:.2} MB\n", .{ "Size", size_mb });
+        } else {
+            std.debug.print("  {s:>8}: {d:.1} KB\n", .{ "Size", size_kb });
+        }
+    }
+
     inline for (.{
+        .{ "first_load_ms", "First" },
         .{ "min_ms", "Min" },
         .{ "max_ms", "Max" },
         .{ "avg_ms", "Avg" },
