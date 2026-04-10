@@ -244,32 +244,36 @@ pub const ClayRenderer = struct {
 
                     // Text rendern
                     const text_data = cmd.render_data.text;
-                    const text_str = text_data.string_contents.chars[0..@intCast(text_data.string_contents.length)];
-                    const bbox = cmd.bounding_box;
                     
-                    // Baseline berechnen: bbox.y + scaled_ascender
-                    var baseline_y = bbox.y + @as(f32, @floatFromInt(text_data.font_size)) * 0.8; // Fallback
-                    if (text_renderer.ts_ptr.getMetrics()) |metrics| {
-                        const scale = @as(f32, @floatFromInt(text_data.font_size)) / metrics.point_size;
-                        baseline_y = bbox.y + metrics.ascender * scale;
-                    }
-                    
-                    const col = text_data.text_color;
-                    const r = col[0] / 255.0;
-                    const g = col[1] / 255.0;
-                    const b = col[2] / 255.0;
-                    const a = col[3] / 255.0;
+                    // Guard against null pointer or empty string to prevent segfaults
+                    if (text_data.string_contents.length > 0 and @intFromPtr(text_data.string_contents.chars) != 0) {
+                        const text_str = text_data.string_contents.chars[0..@intCast(text_data.string_contents.length)];
+                        const bbox = cmd.bounding_box;
 
-                    try text_gpu.renderText(
-                        render_pass,
-                        text_renderer,
-                        text_str,
-                        bbox.x,
-                        baseline_y,
-                        @floatFromInt(text_data.font_size),
-                        self.scale_factor,
-                        .{ r, g, b, a },
-                    );
+                        // Baseline berechnen: bbox.y + scaled_ascender
+                        var baseline_y = bbox.y + @as(f32, @floatFromInt(text_data.font_size)) * 0.8; // Fallback
+                        if (text_renderer.ts_ptr.getMetrics()) |metrics| {
+                            const scale = @as(f32, @floatFromInt(text_data.font_size)) / metrics.point_size;
+                            baseline_y = bbox.y + metrics.ascender * scale;
+                        }
+
+                        const col = text_data.text_color;
+                        const r = col[0] / 255.0;
+                        const g = col[1] / 255.0;
+                        const b = col[2] / 255.0;
+                        const a = col[3] / 255.0;
+
+                        try text_gpu.renderText(
+                            render_pass,
+                            text_renderer,
+                            text_str,
+                            bbox.x,
+                            baseline_y,
+                            @floatFromInt(text_data.font_size),
+                            self.scale_factor,
+                            .{ r, g, b, a },
+                        );
+                    }
                 },
                 .image => {
                     // Flush rectangles first
