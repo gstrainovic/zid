@@ -46,6 +46,7 @@ pub fn createDispatcher(alloc: std.mem.Allocator, ctx: *E2EContext) !*zigjr.RpcD
     try rpc_dispatcher.addWithCtx("set_active_tab", ctx, setActiveTab);
     try rpc_dispatcher.addWithCtx("click", ctx, click);
     try rpc_dispatcher.addWithCtx("get_state", ctx, getState);
+    try rpc_dispatcher.addWithCtx("benchmark_open_file", ctx, benchmarkOpenFile);
     try rpc_dispatcher.addWithCtx("shutdown", ctx, shutdown);
 
     return rpc_dispatcher;
@@ -193,4 +194,67 @@ fn shutdown(ctx: *E2EContext) zigjr.DispatchResult {
     log.info("RPC: shutdown", .{});
     ctx.shutdown_flag.store(true, .seq_cst);
     return zigjr.DispatchResult.asEndStream();
+}
+
+/// Benchmark: Datei öffnen mit Zeitmessung (mehrere Iterationen)
+/// Parameter: path (string), iterations (i64, default 10)
+/// Rückgabe: JSON mit min, max, avg, total Zeiten in Millisekunden
+fn benchmarkOpenFile(ctx: *E2EContext, dc: *zigjr.DispatchCtx, path: []const u8, iterations_i64: i64) ![]const u8 {
+    _ = dc;
+    const iterations: usize = @intCast(@max(1, @min(iterations_i64, 100)));
+    log.info("RPC: benchmark_open_file('{s}', {d} iterations)", .{ path, iterations });
+
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const bench_alloc = gpa.allocator();
+
+    var total_ms: u128 = 0;
+    var min_ms: u128 = std.math.maxInt(u128);
+    var max_ms: u128 = 0;
+
+    var i: usize = 0;
+    while (i < iterations) : (i += 1) {
+        // Schließe alle bestehenden Tabs für sauberen Benchmark
+        while (ctx.ui_system.tab_bar.count() > 0) {
+            ctx.ui_system.tab_bar.closeTab(0);
+        }
+
+        const t_start = std.time.microTimestamp();
+        ctx.ui_system.tab_bar.openFile(path) catch |err| {
+            const err_msg = try std.fmt.allocPrint(ctx.allocator,
+                \\{{"error": "openFile failed: {}", "iterations_completed": {d}}}
+            , .{ err, i });
+            return err_msg;
+        };
+        const t_end = std.time.microTimestamp();
+
+        const elapsed_us: u128 = @intCast(t_end - t_start);
+        const elapsed_ms: u128 = elapsed_us / 1000;
+        const remainder_us: u128 = elapsed_us % 1000;
+        // Sub-ms Genauigkeit als Dezimalzahl speichern (für spätere Formatierung)
+        const precise_ms_x100 = (elapsed_ms * 100) + (remainder_us * 100 / 1000);
+
+        total_ms += precise_ms_x100;
+        if (precise_ms_x100 < min_ms) min_ms = precise_ms_x100;
+        if (precise_ms_x100 > max_ms) max_ms = precise_ms_x100;
+    }
+
+    const avg_ms_x100 = total_ms / iterations;
+    const min_ms_str = formatMsX100(bench_alloc, min_ms) catch "error";
+    const max_ms_str = formatMsX100(bench_alloc, max_ms) catch "error";
+    const avg_ms_str = formatMsX100(bench_alloc, avg_ms_x100) catch "error";
+    const total_ms_str = formatMsX100(bench_alloc, total_ms) catch "error";
+
+    const json = try std.fmt.allocPrint(ctx.allocator,
+        \\{{"path": "{s}", "iterations": {d}, "min_ms": {s}, "max_ms": {s}, "avg_ms": {s}, "total_ms": {s}}}
+    , .{ path, iterations, min_ms_str, max_ms_str, avg_ms_str, total_ms_str });
+
+    return json;
+}
+
+/// Hilfsfunktion: Formatiere Millisekunden * 100 als "X.XXX" String
+fn formatMsX100(alloc: std.mem.Allocator, ms_x100: u128) ![]const u8 {
+    const whole = ms_x100 / 100;
+    const frac = ms_x100 % 100;
+    return std.fmt.allocPrint(alloc, "{d}.{d:0>2}", .{ whole, frac });
 }
