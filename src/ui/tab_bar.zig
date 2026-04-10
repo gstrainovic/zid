@@ -137,7 +137,7 @@ pub fn renderTabBar(
     // Tab-Schließen-Request NACH der Schleife verarbeiten (vermeidet Use-After-Free)
     var tab_to_close: ?usize = null;
 
-    // Tab-Bar Container
+    // Tab-Bar Container — horizontal scrollbar wenn Tabs nicht passen
     clay.UI()(.{
         .id = clay.ElementId.ID("tab_bar_container"),
         .layout = .{
@@ -147,6 +147,7 @@ pub fn renderTabBar(
             .padding = .{ .left = 0, .right = 8, .top = 4, .bottom = 4 },
         },
         .background_color = theme.surface,
+        .clip = .{ .horizontal = true },
     })({
         for (state.tabs.items, 0..) |*tab, i| {
             const is_active = state.active_index == i;
@@ -207,10 +208,13 @@ fn renderTab(
     const text_color = if (is_active) theme.text else theme.muted;
     const border_color = if (is_active) theme.accent else .{ 0.0, 0.0, 0.0, 0.0 };
 
+    // Mindestbreite basierend auf Label-Länge (ca. 8px pro Zeichen + Padding + Close)
+    const min_tab_width: f32 = @as(f32, @floatFromInt(tab.display_name.len)) * 8.0 + 44.0; // 44 = padding(20) + close(18) + gap(6)
+
     clay.UI()(.{
         .id = tab_id,
         .layout = .{
-            .sizing = .{ .w = .fitMinMax(.{ .min = 0, .max = 0 }), .h = .grow },
+            .sizing = .{ .w = .fitMinMax(.{ .min = min_tab_width, .max = 0 }), .h = .fit },
             .direction = .left_to_right,
             .child_alignment = .{ .x = .left, .y = .center },
             .child_gap = 6,
@@ -226,7 +230,7 @@ fn renderTab(
         // Tab Label — in eigenem Container für korrektes Sizing
         clay.UI()(.{
             .layout = .{
-                .sizing = .{ .w = .fitMinMax(.{ .min = 0, .max = 0 }), .h = .fitMinMax(.{ .min = 0, .max = 0 }) },
+                .sizing = .{ .w = .fit, .h = .fit },
             },
         })({
             var label_buf: [256]u8 = undefined;
