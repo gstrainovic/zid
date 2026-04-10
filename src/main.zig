@@ -353,7 +353,7 @@ pub fn main() !void {
         // Phase 9: Datei öffnen verarbeiten
         if (ui_system.file_explorer.file_to_open) |path| {
             ui_system.tab_bar.openFile(path) catch {};
-            
+
             // Datei lesen und in Editor laden
             const content = std.fs.cwd().readFileAlloc(allocator, path, 64 * 1024 * 1024) catch |err| blk: {
                 log.err("Failed to open {s}: {}", .{ path, err });
@@ -361,8 +361,24 @@ pub fn main() !void {
             };
             ui_system.code_editor.setText(content);
             allocator.free(content);
-            
+
             ui_system.file_explorer.file_to_open = null;
+        }
+
+        // Phase 9: Tab-Wechsel verarbeiten
+        if (ui_system.tab_bar.pending_switch_path) |path| {
+            // Datei lesen und in Editor laden
+            const content = std.fs.cwd().readFileAlloc(allocator, path, 64 * 1024 * 1024) catch |err| blk: {
+                log.err("Failed to load tab content for '{s}': {}", .{ path, err });
+                const msg = try allocator.dupe(u8, "Fehler beim Laden der Datei.");
+                break :blk msg;
+            };
+            ui_system.code_editor.setText(content);
+            allocator.free(content);
+
+            // pending_switch_path freigeben und nullen
+            ui_system.allocator.free(path);
+            ui_system.tab_bar.pending_switch_path = null;
         }
 
         // Cursor-Form anpassen basierend auf Layout-Ergebnis

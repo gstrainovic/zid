@@ -61,6 +61,8 @@ pub const UI = struct {
     file_explorer: file_explorer_mod.FileExplorerState,
     show_file_explorer: bool = true,
     current_directory: ?[]const u8 = null,
+    /// Pending Tab-Wechsel (von Tab-Bar oder RPC gesetzt, von main.zig verarbeitet)
+    pending_tab_switch: ?[]const u8 = null,
 
     // Mouse state for immediate mode UI clicks
     mouse_pressed_this_frame: bool = false,
