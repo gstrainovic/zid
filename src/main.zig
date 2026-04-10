@@ -167,7 +167,7 @@ pub fn main() !void {
 
     // 5. UI System initialisieren (Clay)
     var ui_system = try ui.UI.init(allocator, .{
-        .font_size = 14.0,
+        .font_size = 24.0,
     }, resolved_file_path);
     defer ui_system.deinit();
 

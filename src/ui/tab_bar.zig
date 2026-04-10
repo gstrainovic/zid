@@ -141,7 +141,7 @@ pub fn renderTabBar(
     clay.UI()(.{
         .id = clay.ElementId.ID("tab_bar_container"),
         .layout = .{
-            .sizing = .{ .w = .grow, .h = .fixed(36) },
+            .sizing = .{ .w = .grow, .h = .fixed(44) },
             .direction = .left_to_right,
             .child_gap = 0,
             .padding = .{ .left = 0, .right = 8, .top = 4, .bottom = 4 },
@@ -209,17 +209,17 @@ fn renderTab(
         tab.display_name;
 
     // Gemessene Breite + Puffer
-    const text_width = ui.measureTextWidth(label_str, 13.0);
-    const total_width: f32 = 8.0 + text_width + 4.0 + 6.0 + 20.0;
+    const text_width = ui.measureTextWidth(label_str, 24.0);
+    const total_width: f32 = 8.0 + text_width + 8.0 + 8.0 + 24.0;
     log.info("[TAB] '{s}': text_width={d:.1}px, total_width={d:.1}px", .{ label_str, text_width, total_width });
 
     clay.UI()(.{
         .id = tab_id,
         .layout = .{
-            .sizing = .{ .w = .fixed(total_width), .h = .fixed(28) },
+            .sizing = .{ .w = .fixed(total_width), .h = .fixed(36) },
             .direction = .left_to_right,
             .child_alignment = .{ .x = .left, .y = .center },
-            .padding = .{ .left = 8, .right = 6 },
+            .padding = .{ .left = 8, .right = 8 },
         },
         .background_color = bg_color,
         .border = .{
@@ -232,12 +232,12 @@ fn renderTab(
         clay.UI()(.{
             .id = clay.ElementId.IDI("tab_text_container", @intCast(index)),
             .layout = .{
-                .sizing = .{ .w = .fixed(text_width + 4.0), .h = .fixed(20) },
+                .sizing = .{ .w = .fixed(text_width + 8.0), .h = .fixed(32) },
                 .child_alignment = .{ .y = .center },
             },
         })({
             clay.text(label_str, .{
-                .font_size = 13,
+                .font_size = 24,
                 .color = text_color,
                 .wrap_mode = .none,
             });
@@ -248,7 +248,7 @@ fn renderTab(
         clay.UI()(.{
             .id = close_id,
             .layout = .{
-                .sizing = .{ .w = .fixed(20), .h = .fixed(20) },
+                .sizing = .{ .w = .fixed(24), .h = .fixed(24) },
                 .child_alignment = .{ .x = .center, .y = .center },
             },
             .corner_radius = .all(2),
@@ -257,7 +257,7 @@ fn renderTab(
             // EINDEUTIGE ID für SVG!
             var svg_id_buf: [64]u8 = undefined;
             const svg_id = std.fmt.bufPrint(&svg_id_buf, "tab_close_svg_{d}", .{index}) catch "tab_close_svg";
-            svg.Svg(arena, svg_id, svg.Lucide.x, 16, close_icon_color);
+            svg.Svg(arena, svg_id, svg.Lucide.x, 20, close_icon_color);
         });
     });
 
