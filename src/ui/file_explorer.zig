@@ -288,29 +288,13 @@ pub fn renderFileExplorer(
     clay.UI()(.{
         .id = clay.ElementId.ID("file_explorer"),
         .layout = .{
-            .sizing = .{ .w = .fixed(240), .h = .grow },
+            .sizing = .{ .w = .fixed(300), .h = .grow },
             .direction = .top_to_bottom,
             .child_gap = 0,
         },
         .background_color = theme.surface,
         .border = .{ .width = .{ .right = 1 }, .color = theme.border },
     })({
-        // Header
-        clay.UI()(.{
-            .id = clay.ElementId.ID("file_explorer_header"),
-            .layout = .{
-                .sizing = .{ .w = .grow, .h = .fixed(36) },
-                .child_alignment = .{ .x = .left, .y = .center },
-                .padding = .{ .left = 12, .right = 12 },
-            },
-            .background_color = theme.bg,
-        })({
-            clay.text("EXPLORER", .{
-                .font_size = 11,
-                .color = theme.muted,
-            });
-        });
-
         // Tree Content
         clay.UI()(.{
             .id = clay.ElementId.ID("file_tree_content"),
@@ -359,7 +343,7 @@ fn renderTreeEntry(
     clay.UI()(.{
         .id = element_id,
         .layout = .{
-            .sizing = .{ .w = .grow, .h = .fixed(24) },
+            .sizing = .{ .w = .grow, .h = .fixed(36) },
             .direction = .left_to_right,
             .child_alignment = .{ .x = .left, .y = .center },
             .child_gap = 4,
@@ -382,7 +366,7 @@ fn renderTreeEntry(
             var chevron_id_buf: [40]u8 = undefined;
             const chevron_id = std.fmt.bufPrint(&chevron_id_buf, "chevron_{d}", .{index}) catch "chevron";
             const chevron_path = if (entry.is_expanded) svg.Lucide.chevron_down else svg.Lucide.chevron_right;
-            svg.Svg(arena, chevron_id, chevron_path, 20, if (is_selected) theme.text_on_primary else theme.muted);
+            svg.Svg(arena, chevron_id, chevron_path, 24, if (is_selected) theme.text_on_primary else theme.muted);
         } else {
             // Spacer für Dateien
             var spacer_id_buf: [40]u8 = undefined;
@@ -390,7 +374,7 @@ fn renderTreeEntry(
             clay.UI()(.{
                 .id = clay.ElementId.ID(spacer_id),
                 .layout = .{
-                    .sizing = .{ .w = .fixed(20), .h = .grow },
+                    .sizing = .{ .w = .fixed(24), .h = .grow },
                 },
                 .background_color = .{ 0, 0, 0, 0 },
             })({});
@@ -404,7 +388,7 @@ fn renderTreeEntry(
 
         // Dateiname
         clay.text(node.name, .{
-            .font_size = 13,
+            .font_size = 24,
             .color = if (is_selected) theme.text_on_primary else theme.text,
         });
     });

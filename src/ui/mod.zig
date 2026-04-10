@@ -36,9 +36,9 @@ pub fn measureTextWidth(text: []const u8, font_size: f32) f32 {
 
 /// UI Konfiguration
 pub const UIConfig = struct {
-    font_size: f32 = 14.0,
-    padding: f32 = 8.0,
-    gap: f32 = 4.0,
+    font_size: f32 = 24.0,
+    padding: f32 = 12.0,
+    gap: f32 = 8.0,
 };
 
 /// UI Hauptstruktur
@@ -314,7 +314,7 @@ pub const UI = struct {
             clay.UI()(.{
                 .id = clay.ElementId.ID("Header"),
                 .layout = .{
-                    .sizing = .{ .w = .grow, .h = .fixed(48) },
+                    .sizing = .{ .w = .grow, .h = .fixed(56) },
                     .child_gap = 16,
                     .direction = .left_to_right,
                     .child_alignment = .{ .x = .left, .y = .center },
@@ -335,7 +335,7 @@ pub const UI = struct {
                     })({});
                 }
 
-                clay.text("VULKAN-ED", .{ .font_size = 20, .color = t.text });
+                clay.text("VULKAN-ED", .{ .font_size = 24, .color = t.text });
             });
 
             // Main Content Area (Sidebar + Editor)
