@@ -459,7 +459,16 @@ pub const Renderer = struct {
 
         // 3. Zusätzlicher Text (optional)
         if (text_str.len > 0) {
-            text_gpu.renderText(render_pass, text_renderer, text_str, text_x, text_y, .{ 1.0, 1.0, 1.0, 1.0 }) catch {};
+            text_gpu.renderText(
+                render_pass,
+                text_renderer,
+                text_str,
+                text_x,
+                text_y,
+                text_renderer.config.size,
+                1.0,
+                .{ 1.0, 1.0, 1.0, 1.0 },
+            ) catch {};
         }
 
         render_pass.end();

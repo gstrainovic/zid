@@ -147,7 +147,6 @@ pub fn renderTabBar(
             .padding = .{ .left = 0, .right = 8, .top = 4, .bottom = 4 },
         },
         .background_color = theme.surface,
-        .clip = .{ .horizontal = true },
     })({
         for (state.tabs.items, 0..) |*tab, i| {
             const is_active = state.active_index == i;
@@ -183,13 +182,8 @@ fn renderTab(
     theme: Theme,
     mouse_pressed: bool,
 ) ?usize {
-    var tab_id_buf: [32]u8 = undefined;
-    const tab_id_str = std.fmt.bufPrint(&tab_id_buf, "tab_{d}", .{index}) catch return null;
-    var close_id_buf: [32]u8 = undefined;
-    const close_id_str = std.fmt.bufPrint(&close_id_buf, "tab_close_{d}", .{index}) catch return null;
-
-    const tab_id = clay.ElementId.ID(tab_id_str);
-    const close_id = clay.ElementId.ID(close_id_str);
+    const tab_id = clay.ElementId.IDI("tab", @intCast(index));
+    const close_id = clay.ElementId.IDI("tab_close", @intCast(index));
 
     const is_tab_hovered = clay.pointerOver(tab_id);
     const is_close_hovered = clay.pointerOver(close_id);
@@ -208,15 +202,24 @@ fn renderTab(
     const text_color = if (is_active) theme.text else theme.muted;
     const border_color = if (is_active) theme.accent else .{ 0.0, 0.0, 0.0, 0.0 };
 
-    // Tab passt sich dynamisch an Label-Länge an (.fit = exakt nach Inhalt)
+    // Label vorab erzeugen (für modified-Indikator)
+    const label_str = if (tab.modified)
+        std.fmt.allocPrint(arena, "{s} *", .{tab.display_name}) catch tab.display_name
+    else
+        tab.display_name;
+
+    // Gemessene Breite + Puffer
+    const text_width = ui.measureTextWidth(label_str, 13.0);
+    const total_width: f32 = 8.0 + text_width + 4.0 + 6.0 + 20.0;
+    log.info("[TAB] '{s}': text_width={d:.1}px, total_width={d:.1}px", .{ label_str, text_width, total_width });
+
     clay.UI()(.{
         .id = tab_id,
         .layout = .{
-            .sizing = .{ .w = .fit, .h = .fit },
+            .sizing = .{ .w = .fixed(total_width), .h = .fixed(28) },
             .direction = .left_to_right,
             .child_alignment = .{ .x = .left, .y = .center },
-            .child_gap = 6,
-            .padding = .{ .left = 12, .right = 8, .top = 4, .bottom = 4 },
+            .padding = .{ .left = 8, .right = 6 },
         },
         .background_color = bg_color,
         .border = .{
@@ -225,32 +228,36 @@ fn renderTab(
         },
         .corner_radius = .{ .top_left = 4, .top_right = 4 },
     })({
-        var label_buf: [256]u8 = undefined;
-        const label_str = if (tab.modified)
-            std.fmt.bufPrint(&label_buf, "{s} *", .{tab.display_name}) catch tab.display_name
-        else
-            tab.display_name;
-
-        clay.text(label_str, .{
-            .font_size = 13,
-            .color = text_color,
+        // Tab-Name — Container mit fester Breite für den Text
+        clay.UI()(.{
+            .id = clay.ElementId.IDI("tab_text_container", @intCast(index)),
+            .layout = .{
+                .sizing = .{ .w = .fixed(text_width + 4.0), .h = .fixed(20) },
+                .child_alignment = .{ .y = .center },
+            },
+        })({
+            clay.text(label_str, .{
+                .font_size = 13,
+                .color = text_color,
+                .wrap_mode = .none,
+            });
         });
 
-        // Close Button (X) — kein Background, nur Icon-Farbe wechselt bei Hover
+        // Close Button (X) — feste Breite
         const close_icon_color = if (is_close_hovered) theme.danger else if (is_active) theme.text else theme.muted;
         clay.UI()(.{
             .id = close_id,
             .layout = .{
-                .sizing = .{ .w = .fixed(18), .h = .fixed(18) },
+                .sizing = .{ .w = .fixed(20), .h = .fixed(20) },
                 .child_alignment = .{ .x = .center, .y = .center },
             },
-            // Kein background_color — Icon allein reicht
             .corner_radius = .all(2),
         })({
-            var close_svg_id_buf: [40]u8 = undefined;
-            const close_svg_id = std.fmt.bufPrint(&close_svg_id_buf, "tab_close_svg_{d}", .{index}) catch "close_svg";
             const svg = @import("components/svg.zig");
-            svg.Svg(arena, close_svg_id, svg.Lucide.x, 14, close_icon_color);
+            // EINDEUTIGE ID für SVG!
+            var svg_id_buf: [64]u8 = undefined;
+            const svg_id = std.fmt.bufPrint(&svg_id_buf, "tab_close_svg_{d}", .{index}) catch "tab_close_svg";
+            svg.Svg(arena, svg_id, svg.Lucide.x, 16, close_icon_color);
         });
     });
 
