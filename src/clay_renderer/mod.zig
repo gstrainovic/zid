@@ -269,18 +269,19 @@ pub const ClayRenderer = struct {
                     const image_data = cmd.render_data.image;
                     if (image_data.image_data) |ptr| {
                         const bbox = cmd.bounding_box;
-                        const tint = image_data.background_color;
-                        const r = tint[0] / 255.0;
-                        const g = tint[1] / 255.0;
-                        const b = tint[2] / 255.0;
-                        const a = if (tint[3] == 0) 1.0 else tint[3] / 255.0; // Fallback alpha if 0
 
                         // Check if it's an SVG icon or a normal image
                         const svg = @import("../svg/mod.zig");
                         const magic_ptr: *const u64 = @ptrCast(@alignCast(ptr));
                         if (magic_ptr.* == svg.SvgRenderInfo.MAGIC) {
                             const info: *const svg.SvgRenderInfo = @ptrCast(@alignCast(ptr));
-                            
+
+                            // Farbe aus SvgRenderInfo verwenden (nicht image.background_color)
+                            const r = info.color[0] / 255.0;
+                            const g = info.color[1] / 255.0;
+                            const b = info.color[2] / 255.0;
+                            const a = if (info.color[3] == 0) 1.0 else info.color[3] / 255.0;
+
                             if (svg_gpu) |sg| {
                                 try sg.renderSvg(
                                     render_pass,
@@ -297,7 +298,14 @@ pub const ClayRenderer = struct {
                         } else {
                             const ImageTexture = @import("image_renderer.zig").ImageTexture;
                             const texture: *const ImageTexture = @ptrCast(@alignCast(ptr));
-                            
+
+                            // Für normale Images: background_color als Tint verwenden
+                            const tint = image_data.background_color;
+                            const r = tint[0] / 255.0;
+                            const g = tint[1] / 255.0;
+                            const b = tint[2] / 255.0;
+                            const a = if (tint[3] == 0) 1.0 else tint[3] / 255.0;
+
                             if (image_renderer) |ir| {
                                 try ir.renderImage(
                                     render_pass,

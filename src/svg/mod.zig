@@ -50,6 +50,8 @@ pub const SvgRenderInfo = struct {
     magic: u64 = MAGIC,
     path_data: []const u8,
     viewbox: f32 = 24.0,
+    /// Tint color (RGBA, 0-255 range) — applied to alpha mask in GPU shader
+    color: [4]f32 = .{ 1.0, 1.0, 1.0, 1.0 },
 
     pub const MAGIC: u64 = 0x5356475F49434F4E; // "SVG_ICON"
 };
