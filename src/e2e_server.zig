@@ -47,6 +47,7 @@ pub fn createDispatcher(alloc: std.mem.Allocator, ctx: *E2EContext) !*zigjr.RpcD
     try rpc_dispatcher.addWithCtx("click", ctx, click);
     try rpc_dispatcher.addWithCtx("get_state", ctx, getState);
     try rpc_dispatcher.addWithCtx("benchmark_open_file", ctx, benchmarkOpenFile);
+    try rpc_dispatcher.addWithCtx("benchmark_load_file", ctx, benchmarkLoadFile);
     try rpc_dispatcher.addWithCtx("shutdown", ctx, shutdown);
 
     return rpc_dispatcher;
@@ -257,4 +258,76 @@ fn formatMsX100(alloc: std.mem.Allocator, ms_x100: u128) ![]const u8 {
     const whole = ms_x100 / 100;
     const frac = ms_x100 % 100;
     return std.fmt.allocPrint(alloc, "{d}.{d:0>2}", .{ whole, frac });
+}
+
+/// Benchmark: Datei komplett laden (readFileAlloc + setText) — misst echten I/O + Parsing Overhead
+fn benchmarkLoadFile(ctx: *E2EContext, dc: *zigjr.DispatchCtx, path: []const u8, iterations_i64: i64) ![]const u8 {
+    _ = dc;
+    const iterations: usize = @intCast(@max(1, @min(iterations_i64, 100)));
+    log.info("RPC: benchmark_load_file('{s}', {d} iterations)", .{ path, iterations });
+
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const bench_alloc = gpa.allocator();
+
+    var total_ms: u128 = 0;
+    var min_ms: u128 = std.math.maxInt(u128);
+    var max_ms: u128 = 0;
+    var first_load_ms: u128 = 0;
+
+    var i: usize = 0;
+    while (i < iterations) : (i += 1) {
+        const t_start = std.time.microTimestamp();
+
+        // Phase 1: File lesen (I/O)
+        const t_io_start = std.time.microTimestamp();
+        const content = std.fs.cwd().readFileAlloc(bench_alloc, path, 64 * 1024 * 1024) catch |err| {
+            const err_msg = try std.fmt.allocPrint(ctx.allocator,
+                \\{{"error": "readFileAlloc failed: {}", "iterations_completed": {d}}}
+            , .{ err, i });
+            return err_msg;
+        };
+        defer bench_alloc.free(content);
+        const t_io_end = std.time.microTimestamp();
+
+        // Phase 2: Text parsen + tokenisieren (CPU)
+        const t_parse_start = std.time.microTimestamp();
+        ctx.ui_system.code_editor.setText(content);
+        const t_parse_end = std.time.microTimestamp();
+
+        const t_end = std.time.microTimestamp();
+
+        const elapsed_us: u128 = @intCast(t_end - t_start);
+        const io_us: u128 = @intCast(t_io_end - t_io_start);
+        const parse_us: u128 = @intCast(t_parse_end - t_parse_start);
+
+        const elapsed_ms: u128 = elapsed_us / 1000;
+        const remainder_us: u128 = elapsed_us % 1000;
+        const precise_ms_x100 = (elapsed_ms * 100) + (remainder_us * 100 / 1000);
+
+        if (i == 0) {
+            first_load_ms = precise_ms_x100;
+            log.info("  [iter 0] I/O={d}us, parse={d}us, total={d}us", .{ io_us, parse_us, elapsed_us });
+        }
+
+        total_ms += precise_ms_x100;
+        if (precise_ms_x100 < min_ms) min_ms = precise_ms_x100;
+        if (precise_ms_x100 > max_ms) max_ms = precise_ms_x100;
+    }
+
+    const avg_ms_x100 = total_ms / iterations;
+    const min_ms_str = formatMsX100(bench_alloc, min_ms) catch "error";
+    const max_ms_str = formatMsX100(bench_alloc, max_ms) catch "error";
+    const avg_ms_str = formatMsX100(bench_alloc, avg_ms_x100) catch "error";
+    const total_ms_str = formatMsX100(bench_alloc, total_ms) catch "error";
+
+    // Datei-Größe ermitteln für Kontext
+    const file_stat = std.fs.cwd().statFile(path) catch null;
+    const file_size = if (file_stat) |s| s.size else 0;
+
+    const json = try std.fmt.allocPrint(ctx.allocator,
+        \\{{"path": "{s}", "file_size_bytes": {d}, "iterations": {d}, "first_load_ms": {s}, "min_ms": {s}, "max_ms": {s}, "avg_ms": {s}, "total_ms": {s}}}
+    , .{ path, file_size, iterations, formatMsX100(bench_alloc, first_load_ms) catch "error", min_ms_str, max_ms_str, avg_ms_str, total_ms_str });
+
+    return json;
 }

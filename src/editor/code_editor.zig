@@ -221,23 +221,53 @@ pub const CodeEditor = struct {
         for (self.line_tokens.items) |*tokens| tokens.deinit(self.allocator);
         self.line_tokens.clearRetainingCapacity();
 
-        var lines_iter = std.mem.splitScalar(u8, text, '\n');
-        while (lines_iter.next()) |raw_line| {
-            var line = std.ArrayListUnmanaged(u8){};
-            const trimmed = if (raw_line.len > 0 and raw_line[raw_line.len - 1] == '\r') raw_line[0 .. raw_line.len - 1] else raw_line;
-            line.appendSlice(self.allocator, trimmed) catch continue;
-            self.lines.append(self.allocator, line) catch continue;
+        // Phase 1: Zeilen zählen für Capacity-Planung
+        var line_count: usize = 0;
+        var count_iter = std.mem.splitScalar(u8, text, '\n');
+        while (count_iter.next()) |_| line_count += 1;
 
-            const tokens = std.ArrayListUnmanaged(Token){};
-            self.line_tokens.append(self.allocator, tokens) catch continue;
-            self.tokenizeLine(self.lines.items.len - 1);
-        }
-        if (self.lines.items.len == 0) {
+        if (line_count == 0) {
             const line = std.ArrayListUnmanaged(u8){};
             self.lines.append(self.allocator, line) catch {};
             const tokens = std.ArrayListUnmanaged(Token){};
             self.line_tokens.append(self.allocator, tokens) catch {};
+            self.cursor_line = 0;
+            self.cursor_col = 0;
+            self.scroll_offset_first_line = 0;
+            self.last_cursor_movement_ms = self.time_ms;
+            self.current_line = 1;
+            return;
         }
+
+        // Phase 2: Mit vorab reservierter Kapazität Zeilen parsen
+        const token_count = @min(line_count, 200);
+        self.lines.ensureTotalCapacity(self.allocator, line_count) catch {};
+        self.line_tokens.ensureTotalCapacity(self.allocator, line_count) catch {};
+
+        var lines_iter = std.mem.splitScalar(u8, text, '\n');
+        var idx: usize = 0;
+        while (lines_iter.next()) |raw_line| : (idx += 1) {
+            const trimmed = if (raw_line.len > 0 and raw_line[raw_line.len - 1] == '\r') raw_line[0 .. raw_line.len - 1] else raw_line;
+            var line = std.ArrayListUnmanaged(u8){};
+            // Nur bei kurzen Lines vorab reservieren (vermeidet 30k separate calls bei großen Files)
+            if (trimmed.len <= 512) {
+                line.ensureTotalCapacity(self.allocator, trimmed.len) catch {};
+            }
+            line.appendSlice(self.allocator, trimmed) catch continue;
+            self.lines.appendAssumeCapacity(line);
+
+            var tokens = std.ArrayListUnmanaged(Token){};
+            if (idx < token_count) {
+                tokens.ensureTotalCapacity(self.allocator, token_count) catch {};
+            }
+            self.line_tokens.appendAssumeCapacity(tokens);
+
+            // LAZY: Tokenisiere nur die ersten 200 Zeilen sofort
+            if (idx < token_count) {
+                self.tokenizeLine(idx);
+            }
+        }
+
         self.cursor_line = 0;
         self.cursor_col = 0;
         self.scroll_offset_first_line = 0;
@@ -250,6 +280,9 @@ pub const CodeEditor = struct {
         self.last_cursor_movement_ms = self.time_ms;
         self.ensureCursorVisible();
     }
+
+    // Comptime Keyword-Lookup Table (wird nur einmal erstellt)
+    const KEYWORDS = [_][]const u8{ "const", "var", "fn", "pub", "return", "if", "else", "for", "while", "switch", "case", "break", "continue", "defer", "errdefer", "try", "catch", "orelse", "struct", "enum", "union", "extern", "export", "inline", "noinline", "comptime", "test", "usingnamespace", "and", "or", "not", "true", "false", "null", "undefined", "void", "bool", "type", "anytype", "anyframe", "anyerror" };
 
     fn tokenizeLine(self: *Self, line_idx: usize) void {
         if (line_idx >= self.lines.items.len) return;
@@ -323,9 +356,8 @@ pub const CodeEditor = struct {
                     ti += 1;
                 }
                 const word = line_text[tok_start..ti];
-                const keywords = [_][]const u8{ "const", "var", "fn", "pub", "return", "if", "else", "for", "while", "switch", "case", "break", "continue", "defer", "errdefer", "try", "catch", "orelse", "struct", "enum", "union", "extern", "export", "inline", "noinline", "comptime", "test", "usingnamespace", "and", "or", "not", "true", "false", "null", "undefined", "void", "bool", "type", "anytype", "anyframe", "anyerror" };
                 var is_kw = false;
-                for (keywords) |kw| {
+                for (KEYWORDS) |kw| {
                     if (std.mem.eql(u8, word, kw)) {
                         is_kw = true;
                         break;
@@ -1612,6 +1644,11 @@ pub const CodeEditor = struct {
         })({
             if (self.hasSelection()) {
                 self.renderSelection(line_idx);
+            }
+
+            // LAZY: Nicht tokenisierte Zeile jetzt tokenisieren
+            if (tokens.len == 0 and line.len > 0) {
+                self.tokenizeLine(line_idx);
             }
 
             if (tokens.len == 0) {
