@@ -188,7 +188,9 @@ pub const UI = struct {
         const renderer = user_data.text_renderer orelse return .{ .w = 0, .h = 0 };
         
         // Text messen (mit korrekter Font-Size)
-        const width = renderer.ts_ptr.measureTextAtSize(text_str, @floatFromInt(config.font_size)) catch 0;
+        // Wir fügen einen kleinen Puffer hinzu (1.0px) um Floating-Point Rundungsfehler
+        // und Clipping-Probleme in Clay zu vermeiden.
+        const width = (renderer.ts_ptr.measureTextAtSize(text_str, @floatFromInt(config.font_size)) catch 0) + 1.0;
         
         var height: f32 = @floatFromInt(config.font_size);
         if (renderer.ts_ptr.getMetrics()) |metrics| {
