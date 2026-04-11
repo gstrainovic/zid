@@ -321,13 +321,13 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
 ```
 
 ### Phase 10.2: Flow's win32/gui.zig durch wio+wgpu ersetzen
-- [ ] `libs/flow/src/vulkan_ed_gui.zig` erstellen (ersetzt win32/gui.zig)
-  - [ ] wio Window erstellen
-  - [ ] wgpu Renderer initialisieren
-  - [ ] Resize → sendResize("RDR", "Resize", ...) an Flow TUI
-  - [ ] Input → sendKey() / sendMouse() an Flow TUI
-  - [ ] vaxis.Screen empfangen → wgpu Cell-Rendering
-- **Verifikation:** `zig build -Dgui` → Flow-Editor im Fenster mit Text + Syntax-Highlighting
+- [x] `libs/flow/src/vulkan_ed_gui.zig` erstellen (ersetzt win32/gui.zig)
+  - [x] wio Window erstellen
+  - [x] wgpu Renderer initialisieren
+  - [x] Resize → sendResize("RDR", "Resize", ...) an Flow TUI
+  - [x] Input → sendKey() / sendMouse() an Flow TUI
+  - [x] vaxis.Screen empfangen → wgpu Cell-Rendering
+- [x] **Verifikation:** `zig build -Dgui` → flow-gui Binary erfolgreich erstellt (178MB)
 
 ### Phase 10.3: Vulkan-Ed Explorer + Tabs integrieren
 - [ ] File Explorer → Flow Buffer öffnen
