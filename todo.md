@@ -320,75 +320,19 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
 └──────────────────┘   └──────────────────────┘
 ```
 
-### Phase 10.1: Flow's Thespian-Interface dokumentieren
-- [ ] Protokoll zwischen TUI und Renderer vollständig mappen
-  - [ ] `RDR` Messages (Resize, WindowCreated, fontface)
-  - [ ] `WM_APP_*` Messages (updateScreen, setFontFace, etc.)
-  - [ ] `vaxis.Screen` Struktur (buf, width, height, cursor, style)
-- [ ] Dokument schreiben: `docs/flow_gui_protocol.md`
-- **Verifikation:** Dokument stimmt mit `win32/gui.zig` + `renderer/win32/renderer.zig` überein
+### Phase 10.2: Flow's win32/gui.zig durch wio+wgpu ersetzen
+- [ ] `libs/flow/src/vulkan_ed_gui.zig` erstellen (ersetzt win32/gui.zig)
+  - [ ] wio Window erstellen
+  - [ ] wgpu Renderer initialisieren
+  - [ ] Resize → sendResize("RDR", "Resize", ...) an Flow TUI
+  - [ ] Input → sendKey() / sendMouse() an Flow TUI
+  - [ ] vaxis.Screen empfangen → wgpu Cell-Rendering
+- **Verifikation:** `zig build -Dgui` → Flow-Editor im Fenster mit Text + Syntax-Highlighting
 
-### Phase 10.2: Flow Buffer extrahieren + Unit-Tests
-- [ ] Flow's `Buffer.zig` als Modul in Vulkan-Ed (`src/editor/flow_buffer/`)
-  - [ ] `Buffer.zig` kopieren
-  - [ ] `Cursor.zig`, `View.zig`, `Selection.zig` kopieren
-  - [ ] Dependencies stubben: `cbor`, `TypedInt`, `VcsBlame`, `file_type_config`
-- [ ] Flow's Tests übernehmen (`libs/flow/test/tests_buffer.zig`)
-- **Verifikation:** `zig build test` → alle Buffer-Tests grün
-- **Tests aus Flow:**
-  - `test "buffer"` → load_from_string, store_to_string, balancing
-  - `test "walk_from_line"` → 10.000 Zeilen navigieren
-  - `test "insert_chars"` → Text einfügen
-  - `test "delete_bytes"` → Text löschen
-  - `test "get_byte_pos"` → Position-Berechnung
-  - `test "byte_offset_to_line_and_col"` → Byte-Offset → Cursor
-
-### Phase 10.3: wio Window-Management für Flow
-- [ ] `src/flow_gui/window.zig` erstellen
-  - [ ] wio Window erstellen das Flow's TUI aufnehmen kann
-  - [ ] Resize-Handling → `sendResize()` an Flow's TUI
-- **Verifikation:** `zig build run` → Fenster öffnet sich, Resize-Message wird gesendet
-
-### Phase 10.4: Input-Handling (Keyboard → Flow's Key-Events)
-- [ ] Keyboard-Events mappen (siehe `win32/gui.zig:sendKey()`)
-- [ ] Mouse-Events mappen (siehe `win32/gui.zig:sendMouse()`)
-- [ ] Flow's Key-Handler ansteuern
-- **Verifikation:** Tippen im Fenster → Text erscheint im Editor
-
-### Phase 10.5: wgpu Cell-Renderer
-- [ ] `src/flow_gui/renderer.zig` erstellen
-  - [ ] Font-Atlas für Cell-Rendering
-  - [ ] `updateScreen()` implementiert (kopiert `vaxis.Screen`)
-  - [ ] Cell-Rendering: Pro Zelle → Quad + Glyph + Farbe
-- [ ] Flow's `updateScreen(hwnd, *vaxis.Screen)` → wgpu Textur
-- **Verifikation:** Screenshot → Editor zeigt Text mit Syntax-Highlighting, Farben korrekt
-
-### Phase 10.6: Thespian-Actor Integration
-- [ ] Flow als Thespian-Actor starten
-- [ ] Vulkan-Ed GUI als Renderer-Actor
-- [ ] Message-Loop implementieren
-- **Verifikation:** Flow's TUI startet → GUI empfängt Messages → Screen wird gerendert
-
-### Phase 10.7: Build-System Integration
-- [ ] Flow als Dependency in `build.zig`
-- [ ] `build_options.gui = true` für Flow setzen
-- [ ] Executable bauen das Flow + Vulkan-Ed GUI verbindet
-- **Verifikation:** `zig build` → baut ohne Fehler, `zig build run` → Flow-Editor im Vulkan-Ed Fenster
-
-### Phase 10.8: Explorer + Tabs Integration
-- [ ] File Explorer → Flow's Buffer öffnen
-- [ ] Tabs → pro Tab ein Flow-Buffer
-- [ ] Theme-Integration (Vulkan-Ed Theme → Flow's Syntax-Farben)
-- **Verifikation:** Screenshot → Explorer + Flow-Editor + Tabs sichtbar, Datei öffnen funktioniert
-
-### Risiken & Gegenmaßnahmen
-
-| Risiko | Wahrscheinlichkeit | Gegenmaßnahme |
-|---|---|---|
-| Flow's Thespian-Protokoll unvollständig | Mittel | Phase 10.1: Vollständig dokumentieren |
-| wgpu Font-Rendering langsam | Niedrig | Glyph-Atlas + Batch-Rendering |
-| Flow's `build_options.gui` bricht Linux-Build | Mittel | Flow fork oder build.zig.zon anpassen |
-| vaxis.Screen Struktur ändert sich | Niedrig | Flow's vaxis-Version einfrieren |
+### Phase 10.3: Vulkan-Ed Explorer + Tabs integrieren
+- [ ] File Explorer → Flow Buffer öffnen
+- [ ] Tabs → pro Tab ein Flow Buffer
+- **Verifikation:** Screenshot → Explorer + Flow-Editor + Tabs
 
 ## 📚 Verfügbare Libraries
 
