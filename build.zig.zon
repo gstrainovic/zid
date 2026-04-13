@@ -19,6 +19,9 @@
         .zigjr = .{
             .path = "libs/zigjr",
         },
+        .flow_core = .{
+            .path = "libs/flow-core",
+        },
     },
     .paths = .{
         "build.zig",

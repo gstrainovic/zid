@@ -370,13 +370,13 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
 - **Verifikation 12.B:** `zig build test` in flow-core, alle Buffer-Tests grün
 
 ### Phase 12.C: Diff + Snippet + Keybind-Parser
-- [ ] `libs/flow/src/diff.zig` → `libs/flow-core/src/diff.zig` (Rope-Diffs)
-- [ ] `libs/flow/src/snippet.zig` → `libs/flow-core/src/snippet.zig` (Snippet Expansion)
-- [ ] `libs/flow/src/keybind/parse_flow.zig` → `libs/flow-core/src/keybind/parse_flow.zig` (Flow Keybind Syntax)
-- [ ] `libs/flow/src/keybind/parse_vim.zig` → `libs/flow-core/src/keybind/parse_vim.zig` (Vim Keybind Syntax)
-- [ ] Alle Thespian-Imports entfernen
-- [ ] Public API in `src/root.zig` aktualisieren
-- **Verifikation 12.C:** `zig build` + Tests grün, kein Thespian-Code übrig
+- [x] `libs/flow/src/diff.zig` → `libs/flow-core/src/diff.zig` (Rope-Diffs)
+- [x] `libs/flow/src/snippet.zig` → `libs/flow-core/src/snippet.zig` (Snippet Expansion)
+- [x] `libs/flow/src/keybind/parse_flow.zig` → `libs/flow-core/src/keybind/parse_flow.zig` (Flow Keybind Syntax)
+- [x] `libs/flow/src/keybind/parse_vim.zig` → `libs/flow-core/src/keybind/parse_vim.zig` (Vim Keybind Syntax)
+- [x] Minimales `input`-Interface definiert (keybind/input.zig)
+- [x] Public API in `src/root.zig` aktualisiert
+- **Verifikation 12.C:** `zig build test` ✅ grün, kein Thespian-Code übrig
 
 ### Phase 12.D: flow-syntax integrieren + ColorTag-Output
 - [ ] `flow-syntax` Dep in `libs/flow-core/build.zig.zon` (gleicher Hash wie Flow nutzt)
