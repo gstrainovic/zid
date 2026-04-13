@@ -17,6 +17,30 @@ const keymap = @import("keymap.zig");
 /// Measurement function type: returns width of text in pixels.
 pub const MeasureFn = *const fn (ptr: [*c]const u8, len: usize) f32;
 
+/// Writer adapter: writes into ArrayListUnmanaged(u8), compatible with write_range
+pub fn ArrayListWriter(comptime WriterError: type) type {
+    return struct {
+        allocator: std.mem.Allocator,
+        list: *std.ArrayListUnmanaged(u8),
+
+        const AWriter = @This();
+        pub const Error = WriterError;
+
+        pub fn init(allocator: std.mem.Allocator, list: *std.ArrayListUnmanaged(u8)) AWriter {
+            return .{ .allocator = allocator, .list = list };
+        }
+
+        pub fn write(self: *AWriter, data: []const u8) Error!usize {
+            self.list.appendSlice(self.allocator, data) catch return Error.OutOfMemory;
+            return data.len;
+        }
+
+        pub fn writeAll(self: *AWriter, data: []const u8) Error!void {
+            try self.write(data);
+        }
+    };
+}
+
 pub const CodeEditor = struct {
     allocator: std.mem.Allocator,
 
@@ -370,34 +394,17 @@ pub const CodeEditor = struct {
     pub fn getSelectedText(self: *const Self, alloc: std.mem.Allocator) !?[]u8 {
         const range = self.selectionRange() orelse return null;
 
-        var result = std.ArrayListUnmanaged(u8){};
-        errdefer result.deinit(alloc);
+        var sel_list = std.ArrayListUnmanaged(u8){};
+        errdefer sel_list.deinit(alloc);
 
-        var row = range.begin.row;
-        const end_row = range.end.row;
-        while (row <= end_row) : (row += 1) {
-            if (row > 0) try result.append(alloc, '\n');
-            const line = self.getLine(row);
-            if (row == range.begin.row and row == end_row) {
-                const start_col = @min(range.begin.col, line.len);
-                const end_col = @min(range.end.col, line.len);
-                if (end_col > start_col) try result.appendSlice(alloc, line[start_col..end_col]);
-            } else if (row == range.begin.row) {
-                const start_col = @min(range.begin.col, line.len);
-                try result.appendSlice(alloc, line[start_col..]);
-            } else if (row == end_row) {
-                const end_col = @min(range.end.col, line.len);
-                try result.appendSlice(alloc, line[0..end_col]);
-            } else {
-                try result.appendSlice(alloc, line);
-            }
-        }
+        var writer = ArrayListWriter(std.mem.Allocator.Error).init(alloc, &sel_list);
+        self.buffer.root.write_range(range, &writer, null, self.metrics()) catch return error.WriteFailed;
 
-        if (result.items.len == 0) {
-            result.deinit(alloc);
+        if (sel_list.items.len == 0) {
+            sel_list.deinit(alloc);
             return null;
         }
-        const owned = try result.toOwnedSlice(alloc);
+        const owned = try sel_list.toOwnedSlice(alloc);
         return owned;
     }
 

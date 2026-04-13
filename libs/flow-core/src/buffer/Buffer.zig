@@ -1168,14 +1168,14 @@ const Node = union(enum) {
     pub fn write_range(
         self: *const Node,
         sel: Selection,
-        writer: *std.Io.Writer,
+        writer: anytype,
         wcwidth_: ?*usize,
         metrics: Metrics,
-    ) std.Io.Writer.Error!void {
+    ) anyerror!void {
         const Ctx = struct {
             col: usize = 0,
             sel: Selection,
-            writer: *std.Io.Writer,
+            writer: @TypeOf(writer),
             wcwidth: usize = 0,
             fn walker(ctx_: *anyopaque, egc: []const u8, wcwidth: usize, _: Metrics) Walker {
                 const ctx = @as(*@This(), @ptrCast(@alignCast(ctx_)));
