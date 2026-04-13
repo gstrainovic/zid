@@ -1,10 +1,10 @@
-pub const Buffer = @import("buffer/Buffer.zig");
+pub const Buffer = @import("buffer");
 pub const Cursor = Buffer.Cursor;
 pub const Selection = Buffer.Selection;
 pub const View = Buffer.View;
 pub const Manager = Buffer.Manager;
-pub const diff = @import("diff.zig");
-pub const snippet = @import("snippet.zig");
-pub const keybind = @import("keybind/mod.zig");
+pub const diff = @import("diff");
+pub const snippet = @import("snippet");
+pub const keybind = @import("keybind");
 pub const highlight = @import("highlight/mod.zig");
-pub const file_type_config = @import("file_type_config.zig");
+pub const file_type_config = @import("file_type_config");

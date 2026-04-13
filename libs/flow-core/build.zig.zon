@@ -9,6 +9,10 @@
             .url = "git+https://github.com/neurocyte/cbor?ref=master#b6fc137250b7d3f70459652ee78c7b6cd9ad2826",
             .hash = "cbor-1.0.0-RcQE_HwwAQAiNkKC9ezLxHUMkWgHeVa3QyTfv4hi3VZR",
         },
+        .syntax = .{
+            .url = "git+https://github.com/neurocyte/flow-syntax?ref=zig-0.15#5bc4bcba1552a597d1a6a1f3bf8433ba710b6a90",
+            .hash = "flow_syntax-0.7.2-X8jOoaFbAQBEZWaLbtlj9C8N4zRkNSG2Nq_T40pXRypr",
+        },
     },
 
     .paths = .{

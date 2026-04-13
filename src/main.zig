@@ -361,6 +361,7 @@ pub fn main() !void {
                 break :blk allocator.dupe(u8, "Fehler beim Öffnen der Datei.") catch unreachable;
             };
             ui_system.code_editor.setText(content);
+            ui_system.code_editor.setLanguageFromPath(path);
             allocator.free(content);
 
             ui_system.file_explorer.file_to_open = null;
@@ -375,6 +376,7 @@ pub fn main() !void {
                 break :blk msg;
             };
             ui_system.code_editor.setText(content);
+            ui_system.code_editor.setLanguageFromPath(path);
             allocator.free(content);
 
             // pending_switch_path freigeben und nullen

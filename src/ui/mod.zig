@@ -88,7 +88,7 @@ pub const UI = struct {
 
         const clay_memory = try allocator.alloc(u8, generous_memory);
 
-        var code_editor = editor_mod.CodeEditor.init(allocator);
+        var code_editor = editor_mod.CodeEditor.init(allocator, default_file_path);
 
         // Phase 9: Tab-Bar und File Explorer initialisieren
         const tab_bar = tab_bar_mod.TabBarState.init(allocator);
@@ -128,6 +128,7 @@ pub const UI = struct {
             };
             defer allocator.free(file_content);
             code_editor.setText(file_content);
+            code_editor.setLanguageFromPath(path);
             log.info("Loaded default file: {s} ({d} bytes)", .{ path, file_content.len });
         } else {
             code_editor.setText(
@@ -159,14 +160,21 @@ pub const UI = struct {
 
     /// UI aufräumen
     pub fn deinit(self: *Self) void {
-        log.debug("UI system shutdown", .{});
+        log.debug("UI.deinit: start", .{});
         self.anim_manager.deinit();
+        log.debug("UI.deinit: anim_manager done", .{});
         self.frame_arena.deinit();
+        log.debug("UI.deinit: frame_arena done", .{});
         self.allocator.free(self.clay_memory);
+        log.debug("UI.deinit: clay_memory freed", .{});
         self.code_editor.deinit();
+        log.debug("UI.deinit: code_editor done", .{});
         self.tab_bar.deinit();
+        log.debug("UI.deinit: tab_bar done", .{});
         self.file_explorer.deinit();
+        log.debug("UI.deinit: file_explorer done", .{});
         if (self.current_directory) |dir| self.allocator.free(dir);
+        log.debug("UI.deinit: finished", .{});
     }
 
     /// Clay initialisieren (nach Window Creation)
