@@ -55,7 +55,7 @@ pub const Renderer = struct {
     pub fn init(allocator: std.mem.Allocator, config: RendererConfig) !Self {
         log.debug("Initializing renderer (WGPU backend, Vulkan forced via WGPU_BACKEND=vulkan)", .{});
 
-        // WGPU Instance erstellen (Vulkan Backend forcieren)
+        // WGPU Instance erstellen (NUR Vulkan)
         var extras = wgpu.InstanceExtras{
             .backends = wgpu.InstanceBackends.vulkan,
             .flags = wgpu.InstanceFlags.default,
@@ -75,7 +75,7 @@ pub const Renderer = struct {
 
         const instance = wgpu.Instance.create(&descriptor) orelse return error.NoInstance;
 
-        // Adapter anfordern (nur Vulkan!)
+        // Adapter anfordern (Vulkan)
         const request_options = wgpu.RequestAdapterOptions{
             .backend_type = wgpu.BackendType.vulkan,
             .feature_level = wgpu.FeatureLevel.core,
@@ -89,12 +89,8 @@ pub const Renderer = struct {
             },
         };
 
-        // Device anfordern
-        const device_desc = wgpu.DeviceDescriptor{
-            .required_feature_count = 0,
-            .required_limits = null,
-        };
-        const device_result = adapter.requestDeviceSync(instance, &device_desc, 0);
+        // Device anfordern (null = defaults verwenden)
+        const device_result = adapter.requestDeviceSync(instance, null, 0);
         const device = switch (device_result.status) {
             .success => device_result.device.?,
             else => {
