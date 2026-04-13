@@ -349,13 +349,13 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
 | **Gesamt** | | **~5.5 Tage** | | |
 
 ### Phase 12.A: flow-core Skeleton
-- [ ] Neues Verzeichnis `libs/flow-core/` anlegen
-- [ ] `build.zig` schreiben (Expose `flow-core` Package)
-  - [ ] Zielplattformen: Linux, Windows
-  - [ ] Abhängigkeiten: flow-syntax (später)
-- [ ] `build.zig.zon` erstellen (Versionierung)
-- [ ] `src/root.zig` (Public API Placeholder)
-- **Verifikation 12.A:** `zig build` in flow-core funktioniert (0 Warnings)
+- [x] Neues Verzeichnis `libs/flow-core/` anlegen
+- [x] `build.zig` schreiben (Expose `flow-core` Package)
+  - [x] Zielplattformen: Linux, Windows
+  - [x] Abhängigkeiten: flow-syntax (später)
+- [x] `build.zig.zon` erstellen (Versionierung)
+- [x] `src/root.zig` (Public API Placeholder)
+- [x] **Verifikation 12.A:** `zig build` in flow-core funktioniert (0 Warnings)
 
 ### Phase 12.B: Buffer-Layer kopieren
 - [ ] `libs/flow/src/buffer/` → `libs/flow-core/src/buffer/` kopieren (ohne Thespian)
@@ -398,7 +398,7 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
 ### Phase 12.F: Verifikation (Screenshot)
 - [ ] vulkan-ed Binary bauen (`zig build` — kein renderer-Switch)
 - [ ] vulkan-ed starten, Datei öffnen (z.B. `libs/flow-core/src/buffer/Buffer.zig`)
-- [ ] Screenshot via `scripts/screenshot.ps1` analog Phase 11
+- [ ] Screenshot via `scripts/gui-screenshot.sh` erstellt
 - [ ] Screenshot speichern: `screenshots/phase12_flow_core.png`
 - **Verifikation 12.F:** Screenshot zeigt Datei-Inhalt mit Syntax-Highlighting + Cursor
 
