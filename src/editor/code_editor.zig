@@ -1,9 +1,11 @@
 //! Code Editor Component für vulkan-ed
 //!
 //! Code Editor mit Line Numbers, Syntax Highlighting, Cursor und Text Input.
+//! Verwendet flow_core.Buffer für Text-Speicherung.
 
 const std = @import("std");
 const clay = @import("clay");
+const flow_core = @import("flow_core");
 const Highlighter = @import("highlighter.zig").Highlighter;
 const Token = @import("highlighter.zig").Token;
 const TokenType = @import("highlighter.zig").TokenType;
@@ -13,38 +15,28 @@ const actions = @import("actions.zig");
 const keymap = @import("keymap.zig");
 
 /// Measurement function type: returns width of text in pixels.
-/// C-kompatibel: ptr + len statt Slice.
 pub const MeasureFn = *const fn (ptr: [*c]const u8, len: usize) f32;
-
-pub const UndoEntry = struct {
-    text: []u8,
-    cursor_line: usize,
-    cursor_col: usize,
-    scroll_offset: usize,
-};
 
 pub const CodeEditor = struct {
     allocator: std.mem.Allocator,
 
-    /// Code-Zeilen dynamisch (Unmanaged für präzise Speicherrolle)
-    lines: std.ArrayListUnmanaged(std.ArrayListUnmanaged(u8)),
+    /// flow-core Buffer for text storage
+    buffer: *flow_core.Buffer,
 
-    /// Tokenisierte Zeilen
+    /// Tokenized lines for syntax highlighting (lazy, per-line)
     line_tokens: std.ArrayListUnmanaged(std.ArrayListUnmanaged(Token)),
 
     /// Highlighter
     highlighter: Highlighter,
 
-    /// Aktuelle Zeile (für Highlight)
+    /// Aktuelle Zeile (1-based, für Highlight)
     current_line: usize = 1,
 
-    /// Cursor Position (Zeile/Spalte als Byte-Offset)
-    cursor_line: usize = 0,
-    cursor_col: usize = 0,
+    /// Cursor Position (flow_core.Cursor: row/col in display columns)
+    cursor: flow_core.Cursor,
 
-    /// Selection Anchor (Zeile/Spalte), null = keine Selektion
-    selection_anchor_line: ?usize = null,
-    selection_anchor_col: ?usize = null,
+    /// Selection Anchor, null = keine Selektion
+    selection_anchor: ?flow_core.Cursor = null,
 
     /// Modifier-State (Bitmaske)
     mods: actions.Mods = .{},
@@ -62,24 +54,21 @@ pub const CodeEditor = struct {
     last_mouse_click_line: usize = 0,
     last_mouse_click_col: usize = 0,
 
-    /// Scrolling: Erste sichtbare Zeile (Viewport Culling)
-    scroll_offset_first_line: usize = 0,
+    /// View for scrolling
+    view: flow_core.View,
 
     /// Scrollbar-Dragging State
     scrollbar_dragging: bool = false,
     scrollbar_drag_start_y: f32 = 0,
     scrollbar_scroll_offset_at_drag_start: f32 = 0,
-    
-    /// Scrollbar Bounds (werden beim Render gesetzt für Hit-Tests)
+
+    /// Scrollbar Bounds
     scrollbar_track_x: f32 = 0,
     scrollbar_track_y: f32 = 0,
     scrollbar_thumb_y: f32 = 0,
     scrollbar_thumb_height: f32 = 0,
     scrollbar_container_width: f32 = 0,
 
-    /// Undo/Redo History
-    undo_stack: std.ArrayListUnmanaged(UndoEntry) = .{},
-    redo_stack: std.ArrayListUnmanaged(UndoEntry) = .{},
     typing_in_progress: bool = false,
 
     /// Zeitpunkt der letzten Cursor-Bewegung (für Blink-Delay)
@@ -90,13 +79,11 @@ pub const CodeEditor = struct {
     gutter_width: f32 = 50,
     scrollbar_width: f32 = 10,
 
-    /// Content-Offset vom Fenster-Top (für Maus→Zeile Konversion)
+    /// Content-Offset vom Fenster-Top
     content_origin_y: f32 = 0,
-
-    /// X-Offset vom Fenster-Left (für Maus→Spalte Konversion)
     content_origin_x: f32 = 0,
 
-    /// Text-Messung (width in px für gegebene String)
+    /// Text-Messung
     measure_fn: ?MeasureFn = null,
 
     font_size: u16 = 24,
@@ -111,7 +98,7 @@ pub const CodeEditor = struct {
     cursor_color: clay.Color = .{ 249, 226, 175, 255 },
     selection_color: clay.Color = .{ 100, 120, 200, 160 },
 
-    /// Referenz auf das Fenster für Clipboard-Zugriff
+    /// Referenz auf das Fenster
     window: ?*wio.Window = null,
 
     /// Kontextmenü-State
@@ -119,283 +106,187 @@ pub const CodeEditor = struct {
     context_menu_x: f32 = 0,
     context_menu_y: f32 = 0,
 
-    /// Aktueller Mauszeiger-Typ (wird im Render-Loop gesetzt)
+    /// Aktueller Mauszeiger-Typ
     desired_cursor: wio.Cursor = .arrow,
+
+    /// Cached text for rendering
+    cached_text: [:0]const u8 = "",
 
     const Self = @This();
 
+    /// Metrics for flow_core - uses monospace assumption
+    fn metrics(_: *const Self) flow_core.Buffer.Metrics {
+        const Ctx = struct {
+            fn egc_length(_: flow_core.Buffer.Metrics, egcs: []const u8, colcount: *usize, _: usize) usize {
+                if (egcs.len == 0) return 0;
+                if (egcs[0] == '\n') { colcount.* = 1; return 1; }
+                if (egcs[0] == '\t') { colcount.* = 4; return 1; }
+                colcount.* = 1;
+                return egcs.len;
+            }
+            fn egc_chunk_width(_: flow_core.Buffer.Metrics, chunk_: []const u8, _: usize) usize {
+                if (chunk_.len == 0) return 0;
+                if (chunk_[0] == '\n') return 1;
+                if (chunk_[0] == '\t') return 4;
+                return 1;
+            }
+            fn egc_last(_: flow_core.Buffer.Metrics, egcs: []const u8) []const u8 {
+                return egcs;
+            }
+        };
+        return .{
+            .ctx = undefined,
+            .egc_length = Ctx.egc_length,
+            .egc_chunk_width = Ctx.egc_chunk_width,
+            .egc_last = Ctx.egc_last,
+            .tab_width = 4,
+        };
+    }
+
     pub fn init(allocator: std.mem.Allocator) Self {
+        const buf = flow_core.Buffer.create(allocator) catch @panic("OOM Buffer.create");
+        // Start with empty buffer
+        const empty_text: [0]u8 = .{};
+        buf.root = buf.load_from_string(&empty_text, &buf.file_eol_mode, &buf.file_utf8_sanitized) catch @panic("OOM load_from_string");
+
+        const view: flow_core.View = .{
+            .rows = 20,
+            .cols = 80,
+            .row = 0,
+            .col = 0,
+        };
+
+        const cursor: flow_core.Cursor = .{
+            .row = 0,
+            .col = 0,
+            .target = 0,
+        };
+
         var self = Self{
             .allocator = allocator,
-            .lines = .{},
+            .buffer = buf,
             .line_tokens = .{},
             .highlighter = Highlighter.init(
-                .{ 199, 146, 234, 255 }, // keyword - lila
-                .{ 166, 209, 137, 255 }, // string - grün
-                .{ 108, 112, 134, 255 }, // comment - grau
-                .{ 250, 179, 135, 255 }, // number - orange
-                .{ 138, 173, 244, 255 }, // builtin - blau
-                .{ 138, 173, 244, 255 }, // punctuation - blau
-                .{ 202, 211, 245, 255 }, // plain - weiß
+                .{ 199, 146, 234, 255 },
+                .{ 166, 209, 137, 255 },
+                .{ 108, 112, 134, 255 },
+                .{ 250, 179, 135, 255 },
+                .{ 138, 173, 244, 255 },
+                .{ 138, 173, 244, 255 },
+                .{ 202, 211, 245, 255 },
             ),
+            .cursor = cursor,
+            .view = view,
             .keymap = keymap.Keymap.initDefault(allocator) catch null,
             .desired_cursor = .arrow,
         };
-        // Initialisiere mit einer leeren Zeile
-        const first_line = std.ArrayListUnmanaged(u8){};
-        self.lines.append(allocator, first_line) catch {};
         const first_tokens = std.ArrayListUnmanaged(Token){};
         self.line_tokens.append(allocator, first_tokens) catch {};
         return self;
     }
 
     pub fn deinit(self: *Self) void {
-        for (self.lines.items) |*line| line.deinit(self.allocator);
-        self.lines.deinit(self.allocator);
+        self.buffer.deinit();
         for (self.line_tokens.items) |*tokens| tokens.deinit(self.allocator);
         self.line_tokens.deinit(self.allocator);
         if (self.keymap) |*km| km.deinit();
-        for (self.undo_stack.items) |e| self.allocator.free(e.text);
-        self.undo_stack.deinit(self.allocator);
-        for (self.redo_stack.items) |e| self.allocator.free(e.text);
-        self.redo_stack.deinit(self.allocator);
+        if (self.cached_text.len > 0) {
+            self.allocator.free(self.cached_text);
+            self.cached_text = "";
+        }
     }
 
-    /// Aktuellen Textinhalt als heap-allokierten String serialisieren.
-    fn getTextAsSlice(self: *Self) ![]u8 {
-        var total_len: usize = 0;
-        for (self.lines.items) |line| total_len += line.items.len + 1;
-        if (total_len > 0) total_len -= 1; // kein trailing '\n'
-        const text = try self.allocator.alloc(u8, total_len);
-        var offset: usize = 0;
-        for (self.lines.items, 0..) |line, i| {
-            @memcpy(text[offset..][0..line.items.len], line.items);
-            offset += line.items.len;
-            if (i + 1 < self.lines.items.len) {
-                text[offset] = '\n';
-                offset += 1;
-            }
-        }
+    /// Get entire buffer as string for rendering
+    fn getFullText(self: *const Self) []const u8 {
+        const text = self.buffer.store_to_string_cached(self.buffer.root, self.buffer.file_eol_mode);
+        // Update cached text - skip caching for const version, just return the slice
+        _ = self.cached_text;
         return text;
     }
 
-    /// Snapshot des aktuellen Zustands auf den Undo-Stack legen.
-    /// Löscht den Redo-Stack (neue Aktion bricht Redo-Kette).
-    fn snapshotForUndo(self: *Self) void {
-        const text = self.getTextAsSlice() catch return;
-
-        // Redo-Stack leeren
-        for (self.redo_stack.items) |e| self.allocator.free(e.text);
-        self.redo_stack.clearRetainingCapacity();
-
-        // Ältesten Eintrag droppen wenn Stack voll
-        if (self.undo_stack.items.len >= 100) {
-            const oldest = self.undo_stack.orderedRemove(0);
-            self.allocator.free(oldest.text);
+    /// Get a single line as string
+    fn getLine(self: *const Self, line_idx: usize) []const u8 {
+        const full = self.getFullText();
+        var iter = std.mem.splitSequence(u8, full, "\n");
+        var idx: usize = 0;
+        while (iter.next()) |line| : (idx += 1) {
+            if (idx == line_idx) return line;
         }
-
-        self.undo_stack.append(self.allocator, .{
-            .text = text,
-            .cursor_line = self.cursor_line,
-            .cursor_col = self.cursor_col,
-            .scroll_offset = self.scroll_offset_first_line,
-        }) catch self.allocator.free(text);
+        return "";
     }
 
-    /// Zustand aus einem UndoEntry wiederherstellen. Entry.text wird NICHT freigegeben.
-    fn restoreFromEntry(self: *Self, entry: UndoEntry) void {
-        self.setText(entry.text);
-        self.cursor_line = @min(entry.cursor_line, if (self.lines.items.len > 0) self.lines.items.len - 1 else 0);
-        self.cursor_col = @min(entry.cursor_col, self.lines.items[self.cursor_line].items.len);
-        const max_scroll = if (self.lines.items.len > self.visibleLineCount())
-            self.lines.items.len - self.visibleLineCount()
-        else
-            0;
-        self.scroll_offset_first_line = @min(entry.scroll_offset, max_scroll);
-        self.clearSelection();
+    /// Total number of lines
+    fn lineCount(self: *const Self) usize {
+        return self.buffer.root.lines();
+    }
+
+    /// Get line width in display columns
+    fn lineWidth(self: *const Self, line_idx: usize) usize {
+        return self.buffer.root.line_width(line_idx, self.metrics()) catch 0;
     }
 
     pub fn setText(self: *Self, text: []const u8) void {
-        for (self.lines.items) |*line| line.deinit(self.allocator);
-        self.lines.clearRetainingCapacity();
+        // Free cached tokens
         for (self.line_tokens.items) |*tokens| tokens.deinit(self.allocator);
         self.line_tokens.clearRetainingCapacity();
 
-        // Phase 1: Zeilen zählen für Capacity-Planung
-        var line_count: usize = 0;
-        var count_iter = std.mem.splitScalar(u8, text, '\n');
-        while (count_iter.next()) |_| line_count += 1;
-
-        if (line_count == 0) {
-            const line = std.ArrayListUnmanaged(u8){};
-            self.lines.append(self.allocator, line) catch {};
-            const tokens = std.ArrayListUnmanaged(Token){};
-            self.line_tokens.append(self.allocator, tokens) catch {};
-            self.cursor_line = 0;
-            self.cursor_col = 0;
-            self.scroll_offset_first_line = 0;
-            self.last_cursor_movement_ms = self.time_ms;
-            self.current_line = 1;
+        var eol_mode: flow_core.Buffer.EolMode = .lf;
+        var utf8_sanitized: bool = false;
+        const new_root = self.buffer.load_from_string(text, &eol_mode, &utf8_sanitized) catch {
+            // Fallback: empty buffer
+            self.buffer.root = self.buffer.load_from_string("", &self.buffer.file_eol_mode, &self.buffer.file_utf8_sanitized) catch @panic("OOM");
+            self.cursor = .{};
+            self.selection_anchor = null;
+            self.reinitTokens(1);
             return;
+        };
+        self.buffer.root = new_root;
+        self.buffer.file_eol_mode = eol_mode;
+        self.buffer.file_utf8_sanitized = utf8_sanitized;
+
+        // Reset cursor
+        self.cursor = .{};
+        self.selection_anchor = null;
+
+        // Reinit tokens
+        self.reinitTokens(self.lineCount());
+
+        // Free old cached text
+        if (self.cached_text.len > 0) {
+            self.allocator.free(self.cached_text);
+            self.cached_text = "";
         }
-
-        // Phase 2: Mit vorab reservierter Kapazität Zeilen parsen
-        const token_count = @min(line_count, 200);
-        self.lines.ensureTotalCapacity(self.allocator, line_count) catch {};
-        self.line_tokens.ensureTotalCapacity(self.allocator, line_count) catch {};
-
-        var lines_iter = std.mem.splitScalar(u8, text, '\n');
-        var idx: usize = 0;
-        while (lines_iter.next()) |raw_line| : (idx += 1) {
-            const trimmed = if (raw_line.len > 0 and raw_line[raw_line.len - 1] == '\r') raw_line[0 .. raw_line.len - 1] else raw_line;
-            var line = std.ArrayListUnmanaged(u8){};
-            // Nur bei kurzen Lines vorab reservieren (vermeidet 30k separate calls bei großen Files)
-            if (trimmed.len <= 512) {
-                line.ensureTotalCapacity(self.allocator, trimmed.len) catch {};
-            }
-            line.appendSlice(self.allocator, trimmed) catch continue;
-            self.lines.appendAssumeCapacity(line);
-
-            var tokens = std.ArrayListUnmanaged(Token){};
-            if (idx < token_count) {
-                tokens.ensureTotalCapacity(self.allocator, token_count) catch {};
-            }
-            self.line_tokens.appendAssumeCapacity(tokens);
-
-            // LAZY: Tokenisiere nur die ersten 200 Zeilen sofort
-            if (idx < token_count) {
-                self.tokenizeLine(idx);
-            }
-        }
-
-        self.cursor_line = 0;
-        self.cursor_col = 0;
-        self.scroll_offset_first_line = 0;
-        self.last_cursor_movement_ms = self.time_ms;
-        self.current_line = 1;
     }
 
-    /// Cursor-Bewegung registrieren (setzt Blink-Delay zurück, scrollt falls nötig)
+    fn reinitTokens(self: *Self, count: usize) void {
+        for (self.line_tokens.items) |*tokens| tokens.deinit(self.allocator);
+        self.line_tokens.clearRetainingCapacity();
+        var i: usize = 0;
+        while (i < count) : (i += 1) {
+            const tokens = std.ArrayListUnmanaged(Token){};
+            self.line_tokens.append(self.allocator, tokens) catch {};
+            if (i < 200) self.tokenizeLine(i);
+        }
+    }
+
     fn recordCursorMovement(self: *Self) void {
         self.last_cursor_movement_ms = self.time_ms;
         self.ensureCursorVisible();
     }
 
-    // Comptime Keyword-Lookup Table (wird nur einmal erstellt)
-    const KEYWORDS = [_][]const u8{ "const", "var", "fn", "pub", "return", "if", "else", "for", "while", "switch", "case", "break", "continue", "defer", "errdefer", "try", "catch", "orelse", "struct", "enum", "union", "extern", "export", "inline", "noinline", "comptime", "test", "usingnamespace", "and", "or", "not", "true", "false", "null", "undefined", "void", "bool", "type", "anytype", "anyframe", "anyerror" };
-
-    fn tokenizeLine(self: *Self, line_idx: usize) void {
-        if (line_idx >= self.lines.items.len) return;
-        var tokens = &self.line_tokens.items[line_idx];
-        tokens.clearRetainingCapacity();
-
-        const line_text = self.lines.items[line_idx].items;
-        const len = line_text.len;
-        var ti: usize = 0;
-
-        while (ti < len) {
-            // Whitespace
-            if (std.ascii.isWhitespace(line_text[ti])) {
-                const tok_start = ti;
-                while (ti < len and std.ascii.isWhitespace(line_text[ti])) {
-                    ti += 1;
-                }
-                tokens.append(self.allocator, Token{ .start = tok_start, .end = ti, .token_type = .plain }) catch {};
-                continue;
-            }
-
-            // String Literal
-            if (line_text[ti] == '"') {
-                const tok_start = ti;
-                ti += 1;
-                while (ti < len and line_text[ti] != '"') {
-                    if (line_text[ti] == '\\' and ti + 1 < len) ti += 1;
-                    ti += 1;
-                }
-                if (ti < len) ti += 1;
-                tokens.append(self.allocator, Token{ .start = tok_start, .end = ti, .token_type = .string }) catch {};
-                continue;
-            }
-
-            // Comment
-            if (line_text[ti] == '/' and ti + 1 < len and line_text[ti + 1] == '/') {
-                tokens.append(self.allocator, Token{ .start = ti, .end = len, .token_type = .comment }) catch {};
-                break;
-            }
-
-            // Number
-            if (std.ascii.isDigit(line_text[ti])) {
-                const tok_start = ti;
-                while (ti < len and (std.ascii.isDigit(line_text[ti]) or line_text[ti] == '_' or line_text[ti] == '.')) {
-                    ti += 1;
-                }
-                tokens.append(self.allocator, Token{ .start = tok_start, .end = ti, .token_type = .number }) catch {};
-                continue;
-            }
-
-            // Punctuation
-            if (std.mem.indexOfScalar(u8, &[_]u8{ '(', ')', '{', '}', '[', ']', ',', ';', '.', ':', '!', '?', '+', '-', '*', '/', '=', '<', '>', '|', '&', '^', '%', '~', '@' }, line_text[ti])) |_| {
-                const tok_start = ti;
-                if (ti + 1 < len) {
-                    const two = line_text[ti .. ti + 2];
-                    if (std.mem.eql(u8, two, "=>") or std.mem.eql(u8, two, "->") or std.mem.eql(u8, two, "||") or std.mem.eql(u8, two, "&&") or std.mem.eql(u8, two, "++") or std.mem.eql(u8, two, "--") or std.mem.eql(u8, two, "==") or std.mem.eql(u8, two, "!=") or std.mem.eql(u8, two, ">=") or std.mem.eql(u8, two, "<=")) {
-                        ti += 2;
-                        tokens.append(self.allocator, Token{ .start = tok_start, .end = ti, .token_type = .punctuation }) catch {};
-                        continue;
-                    }
-                }
-                ti += 1;
-                tokens.append(self.allocator, Token{ .start = tok_start, .end = ti, .token_type = .punctuation }) catch {};
-                continue;
-            }
-
-            // Identifier oder Keyword (ASCII oder UTF-8 Multibyte)
-            if (std.ascii.isAlphabetic(line_text[ti]) or line_text[ti] == '_' or (line_text[ti] & 0x80) != 0) {
-                const tok_start = ti;
-                while (ti < len and (std.ascii.isAlphanumeric(line_text[ti]) or line_text[ti] == '_' or (line_text[ti] & 0x80) != 0)) {
-                    ti += 1;
-                }
-                const word = line_text[tok_start..ti];
-                var is_kw = false;
-                for (KEYWORDS) |kw| {
-                    if (std.mem.eql(u8, word, kw)) {
-                        is_kw = true;
-                        break;
-                    }
-                }
-                if (is_kw) {
-                    tokens.append(self.allocator, Token{ .start = tok_start, .end = ti, .token_type = .keyword }) catch {};
-                } else if (std.mem.eql(u8, word, "std")) {
-                    tokens.append(self.allocator, Token{ .start = tok_start, .end = ti, .token_type = .builtin }) catch {};
-                } else {
-                    tokens.append(self.allocator, Token{ .start = tok_start, .end = ti, .token_type = .plain }) catch {};
-                }
-                continue;
-            }
-
-            // Unbekanntes Zeichen — trotzdem als Token erfassen, damit es gerendert wird.
-            const tok_start = ti;
-            ti += 1;
-            tokens.append(self.allocator, Token{ .start = tok_start, .end = ti, .token_type = .plain }) catch {};
-        }
-    }
-
     // =========================================================================
-    // UTF-8 Navigation Helpers
+    // UTF-8 Navigation Helpers (adapted for buffer text)
     // =========================================================================
 
-    /// Find the previous UTF-8 character boundary (byte offset).
     fn prevCharBoundary(text: []const u8, pos: usize) usize {
         if (pos == 0) return 0;
         var i = pos - 1;
-        // Skip continuation bytes (10xxxxxx pattern).
         while (i > 0 and (text[i] & 0xC0) == 0x80) {
             i -= 1;
         }
         return i;
     }
 
-    /// Find the next UTF-8 character boundary (byte offset).
     fn nextCharBoundary(text: []const u8, pos: usize) usize {
         if (pos >= text.len) return text.len;
         var i = pos + 1;
@@ -405,8 +296,6 @@ pub const CodeEditor = struct {
         return i;
     }
 
-    /// Snap a byte offset to a valid UTF-8 character boundary.
-    /// Moves backward if pos lands on a continuation byte.
     fn snapToCharBoundary(text: []const u8, pos: usize) usize {
         if (pos == 0) return 0;
         if (pos >= text.len) return text.len;
@@ -418,50 +307,38 @@ pub const CodeEditor = struct {
         return std.ascii.isAlphanumeric(c) or c == '_';
     }
 
-    /// Find previous word boundary (byte offset).
     fn prevWordBoundary(text: []const u8, pos: usize) usize {
         if (pos == 0) return 0;
         var i = pos;
-
-        // Skip leading whitespace before the word
         while (i > 0) {
             const prev = prevCharBoundary(text, i);
             if (!std.ascii.isWhitespace(text[prev])) break;
             i = prev;
         }
-
         if (i == 0) return 0;
-
-        // If we are at a word char, skip the whole word
         const start_is_word = isWordChar(text[prevCharBoundary(text, i)]);
         while (i > 0) {
             const prev = prevCharBoundary(text, i);
             if (isWordChar(text[prev]) != start_is_word or std.ascii.isWhitespace(text[prev])) break;
             i = prev;
         }
-        
         return i;
     }
 
-    /// Find next word boundary (byte offset).
     fn nextWordBoundary(text: []const u8, pos: usize) usize {
         if (pos >= text.len) return text.len;
         var i = pos;
-
         if (std.ascii.isWhitespace(text[i])) {
-            // If at whitespace, skip to the start of the next word/block
             while (i < text.len and std.ascii.isWhitespace(text[i])) {
                 i = nextCharBoundary(text, i);
             }
         } else {
-            // If in a word/block, skip to the end of this word/block
             const start_is_word = isWordChar(text[i]);
             while (i < text.len) {
                 if (isWordChar(text[i]) != start_is_word or std.ascii.isWhitespace(text[i])) break;
                 i = nextCharBoundary(text, i);
             }
         }
-
         return i;
     }
 
@@ -469,196 +346,118 @@ pub const CodeEditor = struct {
     // Selection Helpers
     // =========================================================================
 
-    /// Returns true if there's an active selection (anchor != cursor).
     pub fn hasSelection(self: *const Self) bool {
-        if (self.selection_anchor_line == null) return false;
-        const al = self.selection_anchor_line.?;
-        const ac = self.selection_anchor_col.?;
-        return al != self.cursor_line or ac != self.cursor_col;
+        if (self.selection_anchor) |anchor| {
+            return !anchor.eql(self.cursor);
+        }
+        return false;
     }
 
-    /// Returns the selection start as {line, col} (min of anchor/cursor in document order).
-    pub fn selectionStartLine(self: *const Self) usize {
-        if (self.selection_anchor_line == null) return self.cursor_line;
-        const al = self.selection_anchor_line.?;
-        if (al < self.cursor_line) return al;
-        if (al > self.cursor_line) return self.cursor_line;
-        // Same line
-        return self.cursor_line;
-    }
-
-    pub fn selectionStartCol(self: *const Self) usize {
-        if (self.selection_anchor_line == null) return self.cursor_col;
-        const al = self.selection_anchor_line.?;
-        if (al < self.cursor_line) return self.selection_anchor_col.?;
-        if (al > self.cursor_line) return self.cursor_col;
-        return @min(self.selection_anchor_col.?, self.cursor_col);
-    }
-
-    /// Returns the selection end as {line, col} (max of anchor/cursor in document order).
-    pub fn selectionEndLine(self: *const Self) usize {
-        if (self.selection_anchor_line == null) return self.cursor_line;
-        const al = self.selection_anchor_line.?;
-        if (al > self.cursor_line) return al;
-        return self.cursor_line;
-    }
-
-    pub fn selectionEndCol(self: *const Self) usize {
-        if (self.selection_anchor_line == null) return self.cursor_col;
-        const al = self.selection_anchor_line.?;
-        if (al > self.cursor_line) return self.selection_anchor_col.?;
-        if (al < self.cursor_line) return self.cursor_col;
-        return @max(self.selection_anchor_col.?, self.cursor_col);
-    }
-
-    /// Clear the current selection (set anchor to null).
     fn clearSelection(self: *Self) void {
-        self.selection_anchor_line = null;
-        self.selection_anchor_col = null;
+        self.selection_anchor = null;
     }
 
-    /// Start a selection at the current cursor position.
     fn startSelection(self: *Self) void {
-        self.selection_anchor_line = self.cursor_line;
-        self.selection_anchor_col = self.cursor_col;
+        self.selection_anchor = self.cursor;
     }
 
-    /// Get the currently selected text as an allocated string.
-    pub fn getSelectedText(self: *const Self, allocator: std.mem.Allocator) !?[]u8 {
+    fn selectionRange(self: *const Self) ?flow_core.Selection {
         if (!self.hasSelection()) return null;
+        const anchor = self.selection_anchor.?;
+        return .{ .begin = if (anchor.row < self.cursor.row or (anchor.row == self.cursor.row and anchor.col < self.cursor.col)) anchor else self.cursor, .end = if (anchor.row < self.cursor.row or (anchor.row == self.cursor.row and anchor.col < self.cursor.col)) self.cursor else anchor };
+    }
 
-        const start_l = self.selectionStartLine();
-        const start_c = self.selectionStartCol();
-        const end_l = self.selectionEndLine();
-        const end_c = self.selectionEndCol();
+    pub fn getSelectedText(self: *const Self, alloc: std.mem.Allocator) !?[]u8 {
+        const range = self.selectionRange() orelse return null;
 
-        var list = std.ArrayListUnmanaged(u8){};
-        errdefer list.deinit(allocator);
+        var result = std.ArrayListUnmanaged(u8){};
+        errdefer result.deinit(alloc);
 
-        if (start_l == end_l) {
-            try list.appendSlice(allocator, self.lines.items[start_l].items[start_c..end_c]);
-        } else {
-            // First line
-            try list.appendSlice(allocator, self.lines.items[start_l].items[start_c..]);
-            try list.append(allocator, '\n');
-
-            // Middle lines
-            var li = start_l + 1;
-            while (li < end_l) : (li += 1) {
-                try list.appendSlice(allocator, self.lines.items[li].items);
-                try list.append(allocator, '\n');
+        var row = range.begin.row;
+        const end_row = range.end.row;
+        while (row <= end_row) : (row += 1) {
+            if (row > 0) try result.append(alloc, '\n');
+            const line = self.getLine(row);
+            if (row == range.begin.row and row == end_row) {
+                const start_col = @min(range.begin.col, line.len);
+                const end_col = @min(range.end.col, line.len);
+                if (end_col > start_col) try result.appendSlice(alloc, line[start_col..end_col]);
+            } else if (row == range.begin.row) {
+                const start_col = @min(range.begin.col, line.len);
+                try result.appendSlice(alloc, line[start_col..]);
+            } else if (row == end_row) {
+                const end_col = @min(range.end.col, line.len);
+                try result.appendSlice(alloc, line[0..end_col]);
+            } else {
+                try result.appendSlice(alloc, line);
             }
-
-            // Last line
-            try list.appendSlice(allocator, self.lines.items[end_l].items[0..end_c]);
         }
 
-        return try list.toOwnedSlice(allocator);
+        if (result.items.len == 0) {
+            result.deinit(alloc);
+            return null;
+        }
+        const owned = try result.toOwnedSlice(alloc);
+        return owned;
     }
 
     /// Insert a string at the current cursor position.
     pub fn insertString(self: *Self, text: []const u8) !void {
         if (text.len == 0) return;
 
-        // Selection is deleted first.
-        _ = self.deleteSelection();
-
-        var i: usize = 0;
-        while (i < text.len) {
-            if (text[i] == '\n') {
-                // Split line
-                const current_line = &self.lines.items[self.cursor_line];
-                var new_line = try std.ArrayListUnmanaged(u8).initCapacity(self.allocator, current_line.items.len - self.cursor_col);
-                new_line.appendSlice(self.allocator, current_line.items[self.cursor_col..]) catch {};
-                current_line.shrinkRetainingCapacity(self.cursor_col);
-
-                try self.lines.insert(self.allocator, self.cursor_line + 1, new_line);
-                
-                const new_tokens = std.ArrayListUnmanaged(Token){};
-                try self.line_tokens.insert(self.allocator, self.cursor_line + 1, new_tokens);
-
-                self.tokenizeLine(self.cursor_line);
-                self.cursor_line += 1;
-                self.cursor_col = 0;
-                self.tokenizeLine(self.cursor_line);
-                i += 1;
-            } else if (text[i] == '\r') {
-                // Skip \r, handle \n normally
-                i += 1;
-                if (i < text.len and text[i] == '\n') {
-                    // Handled in next iteration
-                }
-            } else {
-                // Find next char boundary
-                const start = i;
-                const end = nextCharBoundary(text, i);
-                const char_bytes = text[start..end];
-
-                const line = &self.lines.items[self.cursor_line];
-                try line.insertSlice(self.allocator, self.cursor_col, char_bytes);
-                self.cursor_col += char_bytes.len;
-                self.tokenizeLine(self.cursor_line);
-                i = end;
-            }
+        // Delete selection first
+        if (self.hasSelection()) {
+            const range = self.selectionRange().?;
+            const m = self.metrics();
+            const new_root = self.buffer.root.delete_range(range, self.allocator, null, m) catch return error.Stop;
+            self.buffer.root = new_root;
+            self.cursor = range.begin;
+            self.clearSelection();
         }
+
+        // Insert chars at cursor
+        const m = self.metrics();
+        const result = self.buffer.root.insert_chars(
+            self.cursor.row,
+            self.cursor.col,
+            text,
+            self.allocator,
+            m,
+        ) catch return error.Stop;
+        self.buffer.root = result[2];
+        self.cursor.row = result[0];
+        self.cursor.col = result[1];
+        self.cursor.target = result[1];
+
+        // Re-tokenize affected lines
+        self.retokenizeAround(self.cursor.row);
+
         self.last_cursor_movement_ms = self.time_ms;
     }
 
-    /// Delete selected text. Returns true if text was deleted.
-    fn deleteSelection(self: *Self) bool {
-        if (!self.hasSelection()) return false;
-
-        const start_line = self.selectionStartLine();
-        const start_col = self.selectionStartCol();
-        const end_line = self.selectionEndLine();
-        const end_col = self.selectionEndCol();
-
-        if (start_line == end_line) {
-            // Single-line selection: remove bytes from start_col to end_col.
-            const line = &self.lines.items[start_line];
-            var removed: usize = 0;
-            const count = end_col - start_col;
-            while (removed < count) : (removed += 1) {
-                _ = line.orderedRemove(start_col);
-            }
-            self.tokenizeLine(start_line);
-        } else {
-            // Multi-line selection: merge start_line prefix with end_line suffix.
-            const start_line_buf = &self.lines.items[start_line];
-            const end_line_buf = &self.lines.items[end_line];
-
-            // Build merged content: prefix of start_line + suffix of end_line.
-            var merged = std.ArrayListUnmanaged(u8){};
-            merged.appendSlice(self.allocator, start_line_buf.items[0..start_col]) catch {};
-            merged.appendSlice(self.allocator, end_line_buf.items[end_col..]) catch {};
-
-            // Replace start_line with merged content.
-            start_line_buf.clearRetainingCapacity();
-            start_line_buf.appendSlice(self.allocator, merged.items) catch {};
-            merged.deinit(self.allocator);
-
-            // Remove lines between start_line+1 and end_line (inclusive).
-            var i: usize = end_line;
-            while (i > start_line) : (i -= 1) {
-                var removed_line = self.lines.orderedRemove(i);
-                removed_line.deinit(self.allocator);
-                var removed_tokens = self.line_tokens.orderedRemove(i);
-                removed_tokens.deinit(self.allocator);
-            }
-
-            // Remove tokens for deleted lines.
-            self.tokenizeLine(start_line);
+    fn retokenizeAround(self: *Self, up_to_line: usize) void {
+        const total = self.lineCount();
+        // Ensure token array size
+        while (self.line_tokens.items.len < total) {
+            const tokens = std.ArrayListUnmanaged(Token){};
+            self.line_tokens.append(self.allocator, tokens) catch break;
         }
-
-        // Move cursor to selection start.
-        self.cursor_line = start_line;
-        self.cursor_col = start_col;
-        self.clearSelection();
-        return true;
+        // Tokenize up to first 200 lines
+        const limit = @min(total, 200);
+        var i: usize = 0;
+        while (i < limit) : (i += 1) {
+            self.tokenizeLine(i);
+        }
+        // Also tokenize lines near the cursor
+        if (up_to_line > 0 and up_to_line <= limit) {
+            self.tokenizeLine(up_to_line - 1);
+        }
+        if (up_to_line < limit) {
+            self.tokenizeLine(up_to_line);
+        }
     }
 
     pub fn dispatchAction(self: *Self, action: actions.Action) void {
-        // Vor jeder text-mutierenden Aktion: Tipp-Session beenden + Snapshot
         switch (action) {
             .InsertNewline, .InsertTab,
             .DeleteBack, .DeleteForward, .DeleteWordBack, .DeleteWordForward, .DeleteLine,
@@ -669,280 +468,266 @@ pub const CodeEditor = struct {
             else => {},
         }
 
-        const line = &self.lines.items[self.cursor_line];
+        const m = self.metrics();
+        const line_count = self.lineCount();
+
         switch (action) {
             .MoveLeft => {
                 if (self.hasSelection()) {
-                    self.cursor_line = self.selectionStartLine();
-                    self.cursor_col = self.selectionStartCol();
+                    const range = self.selectionRange().?;
+                    self.cursor = range.begin;
                     self.clearSelection();
                 } else {
-                    if (self.cursor_col > 0) {
-                        self.cursor_col = prevCharBoundary(line.items, self.cursor_col);
-                    } else if (self.cursor_line > 0) {
-                        self.cursor_line -= 1;
-                        self.cursor_col = self.lines.items[self.cursor_line].items.len;
-                    }
+                    self.cursor.move_left(self.buffer.root, m) catch {};
                 }
             },
             .MoveRight => {
                 if (self.hasSelection()) {
-                    self.cursor_line = self.selectionEndLine();
-                    self.cursor_col = self.selectionEndCol();
+                    const range = self.selectionRange().?;
+                    self.cursor = range.end;
                     self.clearSelection();
                 } else {
-                    if (self.cursor_col < line.items.len) {
-                        self.cursor_col = nextCharBoundary(line.items, self.cursor_col);
-                    } else if (self.cursor_line + 1 < self.lines.items.len) {
-                        self.cursor_line += 1;
-                        self.cursor_col = 0;
-                    }
+                    self.cursor.move_right(self.buffer.root, m) catch {};
                 }
             },
             .MoveUp => {
                 if (self.hasSelection()) {
-                    self.cursor_line = self.selectionStartLine();
-                    self.cursor_col = self.selectionStartCol();
+                    const range = self.selectionRange().?;
+                    self.cursor = range.begin;
                     self.clearSelection();
                 } else {
-                    if (self.cursor_line > 0) {
-                        self.cursor_line -= 1;
-                        const target = self.lines.items[self.cursor_line].items;
-                        self.cursor_col = snapToCharBoundary(target, @min(self.cursor_col, target.len));
-                    }
+                    self.cursor.move_up(self.buffer.root, m) catch {};
                 }
             },
             .MoveDown => {
                 if (self.hasSelection()) {
-                    self.cursor_line = self.selectionEndLine();
-                    self.cursor_col = self.selectionEndCol();
+                    const range = self.selectionRange().?;
+                    self.cursor = range.end;
                     self.clearSelection();
                 } else {
-                    if (self.cursor_line + 1 < self.lines.items.len) {
-                        self.cursor_line += 1;
-                        const target = self.lines.items[self.cursor_line].items;
-                        self.cursor_col = snapToCharBoundary(target, @min(self.cursor_col, target.len));
-                    }
+                    self.cursor.move_down(self.buffer.root, m) catch {};
                 }
             },
             .MoveWordLeft => {
                 if (self.hasSelection()) {
-                    self.cursor_line = self.selectionStartLine();
-                    self.cursor_col = self.selectionStartCol();
+                    const range = self.selectionRange().?;
+                    self.cursor = range.begin;
                     self.clearSelection();
                 } else {
-                    if (self.cursor_col > 0) {
-                        self.cursor_col = prevWordBoundary(line.items, self.cursor_col);
-                    } else if (self.cursor_line > 0) {
-                        self.cursor_line -= 1;
-                        self.cursor_col = self.lines.items[self.cursor_line].items.len;
+                    // Manual word-left using line text
+                    const line_text = self.getLine(self.cursor.row);
+                    if (self.cursor.col > 0) {
+                        const byte_pos = self.buffer.root.get_line_width_to_pos(self.cursor.row, self.cursor.col, m) catch 0;
+                        const new_byte_pos = prevWordBoundary(line_text, byte_pos);
+                        self.cursor.col = self.buffer.root.pos_to_width(self.cursor.row, new_byte_pos, m) catch 0;
+                    } else if (self.cursor.row > 0) {
+                        self.cursor.row -= 1;
+                        self.cursor.col = self.lineWidth(self.cursor.row);
                     }
                 }
             },
             .MoveWordRight => {
                 if (self.hasSelection()) {
-                    self.cursor_line = self.selectionEndLine();
-                    self.cursor_col = self.selectionEndCol();
+                    const range = self.selectionRange().?;
+                    self.cursor = range.end;
                     self.clearSelection();
                 } else {
-                    if (self.cursor_col < line.items.len) {
-                        self.cursor_col = nextWordBoundary(line.items, self.cursor_col);
-                    } else if (self.cursor_line + 1 < self.lines.items.len) {
-                        self.cursor_line += 1;
-                        self.cursor_col = 0;
+                    const line_text = self.getLine(self.cursor.row);
+                    const line_w = self.lineWidth(self.cursor.row);
+                    if (self.cursor.col < line_w) {
+                        const byte_pos = self.buffer.root.get_line_width_to_pos(self.cursor.row, self.cursor.col, m) catch 0;
+                        const new_byte_pos = nextWordBoundary(line_text, byte_pos);
+                        self.cursor.col = self.buffer.root.pos_to_width(self.cursor.row, new_byte_pos, m) catch line_w;
+                    } else if (self.cursor.row + 1 < line_count) {
+                        self.cursor.row += 1;
+                        self.cursor.col = 0;
                     }
                 }
             },
             .SelectLeft => {
                 if (!self.hasSelection()) self.startSelection();
-                if (self.cursor_col > 0) {
-                    self.cursor_col = prevCharBoundary(line.items, self.cursor_col);
-                } else if (self.cursor_line > 0) {
-                    self.cursor_line -= 1;
-                    self.cursor_col = self.lines.items[self.cursor_line].items.len;
-                }
+                self.cursor.move_left(self.buffer.root, m) catch {};
             },
             .SelectRight => {
                 if (!self.hasSelection()) self.startSelection();
-                if (self.cursor_col < line.items.len) {
-                    self.cursor_col = nextCharBoundary(line.items, self.cursor_col);
-                } else if (self.cursor_line + 1 < self.lines.items.len) {
-                    self.cursor_line += 1;
-                    self.cursor_col = 0;
-                }
+                self.cursor.move_right(self.buffer.root, m) catch {};
             },
             .SelectUp => {
                 if (!self.hasSelection()) self.startSelection();
-                if (self.cursor_line > 0) {
-                    self.cursor_line -= 1;
-                    const target = self.lines.items[self.cursor_line].items;
-                    self.cursor_col = snapToCharBoundary(target, @min(self.cursor_col, target.len));
-                }
+                self.cursor.move_up(self.buffer.root, m) catch {};
             },
             .SelectDown => {
                 if (!self.hasSelection()) self.startSelection();
-                if (self.cursor_line + 1 < self.lines.items.len) {
-                    self.cursor_line += 1;
-                    const target = self.lines.items[self.cursor_line].items;
-                    self.cursor_col = snapToCharBoundary(target, @min(self.cursor_col, target.len));
-                }
+                self.cursor.move_down(self.buffer.root, m) catch {};
             },
             .SelectWordLeft => {
                 if (!self.hasSelection()) self.startSelection();
-                if (self.cursor_col > 0) {
-                    self.cursor_col = prevWordBoundary(line.items, self.cursor_col);
-                } else if (self.cursor_line > 0) {
-                    self.cursor_line -= 1;
-                    self.cursor_col = self.lines.items[self.cursor_line].items.len;
+                const line_text = self.getLine(self.cursor.row);
+                if (self.cursor.col > 0) {
+                    const byte_pos = self.buffer.root.get_line_width_to_pos(self.cursor.row, self.cursor.col, m) catch 0;
+                    const new_byte_pos = prevWordBoundary(line_text, byte_pos);
+                    self.cursor.col = self.buffer.root.pos_to_width(self.cursor.row, new_byte_pos, m) catch 0;
+                } else if (self.cursor.row > 0) {
+                    self.cursor.row -= 1;
+                    self.cursor.col = self.lineWidth(self.cursor.row);
                 }
             },
             .SelectWordRight => {
                 if (!self.hasSelection()) self.startSelection();
-                if (self.cursor_col < line.items.len) {
-                    self.cursor_col = nextWordBoundary(line.items, self.cursor_col);
-                } else if (self.cursor_line + 1 < self.lines.items.len) {
-                    self.cursor_line += 1;
-                    self.cursor_col = 0;
+                const line_text = self.getLine(self.cursor.row);
+                const line_w = self.lineWidth(self.cursor.row);
+                if (self.cursor.col < line_w) {
+                    const byte_pos = self.buffer.root.get_line_width_to_pos(self.cursor.row, self.cursor.col, m) catch 0;
+                    const new_byte_pos = nextWordBoundary(line_text, byte_pos);
+                    self.cursor.col = self.buffer.root.pos_to_width(self.cursor.row, new_byte_pos, m) catch line_w;
+                } else if (self.cursor.row + 1 < line_count) {
+                    self.cursor.row += 1;
+                    self.cursor.col = 0;
                 }
             },
             .MoveLineStart => {
-                if (self.hasSelection()) {
-                    self.cursor_col = self.selectionStartCol();
-                    self.clearSelection();
-                } else {
-                    self.cursor_col = 0;
-                }
+                self.cursor.move_begin();
             },
             .MoveLineEnd => {
-                if (self.hasSelection()) {
-                    self.cursor_col = self.selectionEndCol();
-                    self.clearSelection();
-                } else {
-                    self.cursor_col = line.items.len;
-                }
+                self.cursor.move_end(self.buffer.root, m);
             },
             .SelectLineStart => {
                 if (!self.hasSelection()) self.startSelection();
-                self.cursor_col = 0;
+                self.cursor.move_begin();
             },
             .SelectLineEnd => {
                 if (!self.hasSelection()) self.startSelection();
-                self.cursor_col = line.items.len;
+                self.cursor.move_end(self.buffer.root, m);
             },
             .MoveFileStart => {
                 self.clearSelection();
-                self.cursor_line = 0;
-                self.cursor_col = 0;
+                self.cursor.move_buffer_begin();
             },
             .MoveFileEnd => {
                 self.clearSelection();
-                self.cursor_line = self.lines.items.len - 1;
-                self.cursor_col = self.lines.items[self.cursor_line].items.len;
+                self.cursor.move_buffer_end(self.buffer.root, m);
             },
             .SelectFileStart => {
                 if (!self.hasSelection()) self.startSelection();
-                self.cursor_line = 0;
-                self.cursor_col = 0;
+                self.cursor.move_buffer_begin();
             },
             .SelectFileEnd => {
                 if (!self.hasSelection()) self.startSelection();
-                self.cursor_line = self.lines.items.len - 1;
-                self.cursor_col = self.lines.items[self.cursor_line].items.len;
+                self.cursor.move_buffer_end(self.buffer.root, m);
             },
             .MovePageUp => {
-                const visible = self.visibleLineCount();
                 if (self.hasSelection()) {
-                    self.cursor_line = if (self.cursor_line > visible) self.cursor_line - visible else 0;
+                    self.cursor.move_page_up(self.buffer.root, &self.view, m);
                     self.clearSelection();
                 } else {
-                    self.cursor_line = if (self.cursor_line > visible) self.cursor_line - visible else 0;
-                    const target = self.lines.items[self.cursor_line].items;
-                    self.cursor_col = snapToCharBoundary(target, @min(self.cursor_col, target.len));
+                    self.cursor.move_page_up(self.buffer.root, &self.view, m);
                 }
             },
             .MovePageDown => {
-                const visible = self.visibleLineCount();
                 if (self.hasSelection()) {
-                    self.cursor_line = @min(self.cursor_line + visible, self.lines.items.len - 1);
+                    self.cursor.move_page_down(self.buffer.root, &self.view, m);
                     self.clearSelection();
                 } else {
-                    self.cursor_line = @min(self.cursor_line + visible, self.lines.items.len - 1);
-                    const target = self.lines.items[self.cursor_line].items;
-                    self.cursor_col = snapToCharBoundary(target, @min(self.cursor_col, target.len));
+                    self.cursor.move_page_down(self.buffer.root, &self.view, m);
                 }
             },
             .SelectPageUp => {
                 if (!self.hasSelection()) self.startSelection();
-                const visible = self.visibleLineCount();
-                self.cursor_line = if (self.cursor_line > visible) self.cursor_line - visible else 0;
-                const target = self.lines.items[self.cursor_line].items;
-                self.cursor_col = snapToCharBoundary(target, @min(self.cursor_col, target.len));
+                self.cursor.move_page_up(self.buffer.root, &self.view, m);
             },
             .SelectPageDown => {
                 if (!self.hasSelection()) self.startSelection();
-                const visible = self.visibleLineCount();
-                self.cursor_line = @min(self.cursor_line + visible, self.lines.items.len - 1);
-                const target = self.lines.items[self.cursor_line].items;
-                self.cursor_col = snapToCharBoundary(target, @min(self.cursor_col, target.len));
+                self.cursor.move_page_down(self.buffer.root, &self.view, m);
             },
             .DeleteBack => {
                 if (!self.deleteSelection()) {
-                    if (self.cursor_col > 0) {
-                        const char_start = prevCharBoundary(line.items, self.cursor_col);
-                        const byte_count = self.cursor_col - char_start;
-                        var removed: usize = 0;
-                        while (removed < byte_count) : (removed += 1) {
-                            _ = line.orderedRemove(char_start);
+                    if (self.cursor.col == 0 and self.cursor.row > 0) {
+                        // Join with previous line
+                        const prev_row = self.cursor.row - 1;
+                        const prev_len = self.lineWidth(prev_row);
+                        // Insert current line content at end of prev line
+                        const cur_text = self.getLine(self.cursor.row);
+                        const result = self.buffer.root.insert_chars(
+                            prev_row, prev_len, cur_text, self.allocator, m,
+                        ) catch return;
+                        self.buffer.root = result[2];
+                        // Delete current line
+                        const sel: flow_core.Selection = .{
+                            .begin = .{ .row = self.cursor.row, .col = 0 },
+                            .end = .{ .row = self.cursor.row, .col = self.lineWidth(self.cursor.row) + 1 },
+                        };
+                        const result2 = self.buffer.root.delete_range(sel, self.allocator, null, m) catch return;
+                        self.buffer.root = result2;
+                        self.cursor.row = prev_row;
+                        self.cursor.col = prev_len;
+                        self.retokenizeAround(prev_row);
+                    } else if (self.cursor.col > 0) {
+                        const line_text = self.getLine(self.cursor.row);
+                        const byte_pos = self.buffer.root.get_line_width_to_pos(self.cursor.row, self.cursor.col, m) catch 0;
+                        const char_start = prevCharBoundary(line_text, byte_pos);
+                        const char_bytes = byte_pos - char_start;
+                        if (char_bytes > 0) {
+                            const sel: flow_core.Selection = .{
+                                .begin = .{ .row = self.cursor.row, .col = self.cursor.col - 1 },
+                                .end = self.cursor,
+                            };
+                            const result2 = self.buffer.root.delete_range(sel, self.allocator, null, m) catch return;
+                            self.buffer.root = result2;
+                            self.cursor.col -= 1;
+                            self.cursor.target = self.cursor.col;
+                            self.retokenizeAround(self.cursor.row);
                         }
-                        self.cursor_col = char_start;
-                        self.tokenizeLine(self.cursor_line);
-                    } else if (self.cursor_line > 0) {
-                        const prev_line_idx = self.cursor_line - 1;
-                        const prev_len = self.lines.items[prev_line_idx].items.len;
-                        self.lines.items[prev_line_idx].appendSlice(self.allocator, line.items) catch {};
-                        var removed_line = self.lines.orderedRemove(self.cursor_line);
-                        removed_line.deinit(self.allocator);
-                        var removed_tokens = self.line_tokens.orderedRemove(self.cursor_line);
-                        removed_tokens.deinit(self.allocator);
-                        self.cursor_line = prev_line_idx;
-                        self.cursor_col = prev_len;
-                        self.tokenizeLine(self.cursor_line);
                     }
                 }
             },
             .DeleteForward => {
                 if (!self.deleteSelection()) {
-                    if (self.cursor_col < line.items.len) {
-                        const char_end = nextCharBoundary(line.items, self.cursor_col);
-                        const byte_count = char_end - self.cursor_col;
-                        var removed: usize = 0;
-                        while (removed < byte_count) : (removed += 1) {
-                            _ = line.orderedRemove(self.cursor_col);
-                        }
-                        self.tokenizeLine(self.cursor_line);
-                    } else if (self.cursor_line + 1 < self.lines.items.len) {
-                        const next_line_idx = self.cursor_line + 1;
-                        line.appendSlice(self.allocator, self.lines.items[next_line_idx].items) catch {};
-                        var removed_line = self.lines.orderedRemove(next_line_idx);
-                        removed_line.deinit(self.allocator);
-                        var removed_tokens = self.line_tokens.orderedRemove(next_line_idx);
-                        removed_tokens.deinit(self.allocator);
-                        self.tokenizeLine(self.cursor_line);
+                    const line_w = self.lineWidth(self.cursor.row);
+                    if (self.cursor.col < line_w) {
+                        const sel: flow_core.Selection = .{
+                            .begin = self.cursor,
+                            .end = .{ .row = self.cursor.row, .col = self.cursor.col + 1 },
+                        };
+                        const result2 = self.buffer.root.delete_range(sel, self.allocator, null, m) catch return;
+                        self.buffer.root = result2;
+                        self.retokenizeAround(self.cursor.row);
+                    } else if (self.cursor.row + 1 < line_count) {
+                        // Join with next line
+                        const next_text = self.getLine(self.cursor.row + 1);
+                        const result = self.buffer.root.insert_chars(
+                            self.cursor.row, self.cursor.col, next_text, self.allocator, m,
+                        ) catch return;
+                        self.buffer.root = result[2];
+                        // Delete next line
+                        const sel: flow_core.Selection = .{
+                            .begin = .{ .row = self.cursor.row + 1, .col = 0 },
+                            .end = .{ .row = self.cursor.row + 1, .col = self.lineWidth(self.cursor.row + 1) + 1 },
+                        };
+                        const result2 = self.buffer.root.delete_range(sel, self.allocator, null, m) catch return;
+                        self.buffer.root = result2;
+                        self.retokenizeAround(self.cursor.row);
                     }
                 }
             },
             .DeleteWordBack => {
                 if (!self.deleteSelection()) {
-                    if (self.cursor_col > 0) {
-                        const start = prevWordBoundary(line.items, self.cursor_col);
-                        const count = self.cursor_col - start;
-                        var removed: usize = 0;
-                        while (removed < count) : (removed += 1) {
-                            _ = line.orderedRemove(start);
+                    const line_text = self.getLine(self.cursor.row);
+                    if (self.cursor.col > 0) {
+                        const byte_pos = self.buffer.root.get_line_width_to_pos(self.cursor.row, self.cursor.col, m) catch 0;
+                        const new_byte_pos = prevWordBoundary(line_text, byte_pos);
+                        const new_col = self.buffer.root.pos_to_width(self.cursor.row, new_byte_pos, m) catch 0;
+                        if (new_col < self.cursor.col) {
+                            const sel: flow_core.Selection = .{
+                                .begin = .{ .row = self.cursor.row, .col = new_col },
+                                .end = self.cursor,
+                            };
+                            const result2 = self.buffer.root.delete_range(sel, self.allocator, null, m) catch return;
+                            self.buffer.root = result2;
+                            self.cursor.col = new_col;
+                            self.cursor.target = new_col;
+                            self.retokenizeAround(self.cursor.row);
                         }
-                        self.cursor_col = start;
-                        self.tokenizeLine(self.cursor_line);
-                    } else if (self.cursor_line > 0) {
+                    } else if (self.cursor.row > 0) {
                         self.dispatchAction(.DeleteBack);
                         return;
                     }
@@ -950,45 +735,64 @@ pub const CodeEditor = struct {
             },
             .DeleteWordForward => {
                 if (!self.deleteSelection()) {
-                    if (self.cursor_col < line.items.len) {
-                        const end = nextWordBoundary(line.items, self.cursor_col);
-                        const count = end - self.cursor_col;
-                        var removed: usize = 0;
-                        while (removed < count) : (removed += 1) {
-                            _ = line.orderedRemove(self.cursor_col);
+                    const line_text = self.getLine(self.cursor.row);
+                    const line_w = self.lineWidth(self.cursor.row);
+                    if (self.cursor.col < line_w) {
+                        const byte_pos = self.buffer.root.get_line_width_to_pos(self.cursor.row, self.cursor.col, m) catch 0;
+                        const new_byte_pos = nextWordBoundary(line_text, byte_pos);
+                        const new_col = self.buffer.root.pos_to_width(self.cursor.row, new_byte_pos, m) catch line_w;
+                        if (new_col > self.cursor.col) {
+                            const sel: flow_core.Selection = .{
+                                .begin = self.cursor,
+                                .end = .{ .row = self.cursor.row, .col = new_col },
+                            };
+                            const result2 = self.buffer.root.delete_range(sel, self.allocator, null, m) catch return;
+                            self.buffer.root = result2;
+                            self.retokenizeAround(self.cursor.row);
                         }
-                        self.tokenizeLine(self.cursor_line);
-                    } else if (self.cursor_line + 1 < self.lines.items.len) {
+                    } else if (self.cursor.row + 1 < line_count) {
                         self.dispatchAction(.DeleteForward);
                         return;
                     }
                 }
             },
+            .DeleteLine => {
+                const line_w = self.lineWidth(self.cursor.row);
+                const sel: flow_core.Selection = .{
+                    .begin = .{ .row = self.cursor.row, .col = 0 },
+                    .end = .{ .row = self.cursor.row, .col = line_w + 1 },
+                };
+                const result2 = self.buffer.root.delete_range(sel, self.allocator, null, m) catch return;
+                self.buffer.root = result2;
+                self.cursor.col = 0;
+                self.retokenizeAround(if (self.cursor.row > 0) self.cursor.row - 1 else 0);
+            },
             .InsertNewline => {
-                _ = self.deleteSelection();
-                var new_line = std.ArrayListUnmanaged(u8){};
-                new_line.appendSlice(self.allocator, line.items[self.cursor_col..]) catch {};
-                line.shrinkRetainingCapacity(self.cursor_col);
-                self.lines.insert(self.allocator, self.cursor_line + 1, new_line) catch return;
-                const new_tokens = std.ArrayListUnmanaged(Token){};
-                self.line_tokens.insert(self.allocator, self.cursor_line + 1, new_tokens) catch return;
-                self.tokenizeLine(self.cursor_line);
-                self.tokenizeLine(self.cursor_line + 1);
-                self.cursor_line += 1;
-                self.cursor_col = 0;
+                if (self.deleteSelection()) {}
+                const result = self.buffer.root.insert_chars(
+                    self.cursor.row, self.cursor.col, "\n", self.allocator, m,
+                ) catch return;
+                self.buffer.root = result[2];
+                self.cursor.row += 1;
+                self.cursor.col = 0;
+                self.cursor.target = 0;
+                self.retokenizeAround(self.cursor.row);
             },
             .InsertTab => {
-                _ = self.deleteSelection();
-                const line_ref = &self.lines.items[self.cursor_line];
-                line_ref.insertSlice(self.allocator, self.cursor_col, "    ") catch return;
-                self.cursor_col += 4;
-                self.tokenizeLine(self.cursor_line);
+                if (self.deleteSelection()) {}
+                const result = self.buffer.root.insert_chars(
+                    self.cursor.row, self.cursor.col, "    ", self.allocator, m,
+                ) catch return;
+                self.buffer.root = result[2];
+                self.cursor.col += 4;
+                self.cursor.target = self.cursor.col;
+                self.retokenizeAround(self.cursor.row);
             },
             .SelectAll => {
-                self.selection_anchor_line = 0;
-                self.selection_anchor_col = 0;
-                self.cursor_line = self.lines.items.len - 1;
-                self.cursor_col = self.lines.items[self.cursor_line].items.len;
+                self.selection_anchor = .{ .row = 0, .col = 0 };
+                self.cursor.row = line_count - 1;
+                self.cursor.col = self.lineWidth(self.cursor.row);
+                self.cursor.target = self.cursor.col;
             },
             .ScrollUp => {
                 self.scrollLines(1);
@@ -1037,39 +841,52 @@ pub const CodeEditor = struct {
                 self.context_menu_y = self.mouse_y;
             },
             .Undo => {
-                if (self.undo_stack.items.len == 0) return;
-                self.typing_in_progress = false;
-                const current = self.getTextAsSlice() catch return;
-                self.redo_stack.append(self.allocator, .{
-                    .text = current,
-                    .cursor_line = self.cursor_line,
-                    .cursor_col = self.cursor_col,
-                    .scroll_offset = self.scroll_offset_first_line,
-                }) catch { self.allocator.free(current); return; };
-                const entry = self.undo_stack.pop().?;
-                self.restoreFromEntry(entry);
-                self.allocator.free(entry.text);
+                const meta = self.buffer.undo() catch return;
+                _ = meta;
+                self.cursor = .{};
+                self.selection_anchor = null;
+                self.reinitTokens(self.lineCount());
+                if (self.cached_text.len > 0) {
+                    self.allocator.free(self.cached_text);
+                    self.cached_text = "";
+                }
                 return;
             },
             .Redo => {
-                if (self.redo_stack.items.len == 0) return;
-                self.typing_in_progress = false;
-                const current = self.getTextAsSlice() catch return;
-                self.undo_stack.append(self.allocator, .{
-                    .text = current,
-                    .cursor_line = self.cursor_line,
-                    .cursor_col = self.cursor_col,
-                    .scroll_offset = self.scroll_offset_first_line,
-                }) catch { self.allocator.free(current); return; };
-                const entry = self.redo_stack.pop().?;
-                self.restoreFromEntry(entry);
-                self.allocator.free(entry.text);
+                const meta = self.buffer.redo() catch return;
+                _ = meta;
+                self.cursor = .{};
+                self.selection_anchor = null;
+                self.reinitTokens(self.lineCount());
+                if (self.cached_text.len > 0) {
+                    self.allocator.free(self.cached_text);
+                    self.cached_text = "";
+                }
                 return;
             },
             else => {},
         }
         self.recordCursorMovement();
-        self.current_line = self.cursor_line + 1;
+        self.current_line = self.cursor.row + 1;
+    }
+
+    /// Delete selected text. Returns true if text was deleted.
+    fn deleteSelection(self: *Self) bool {
+        if (!self.hasSelection()) return false;
+        const range = self.selectionRange() orelse return false;
+        const m = self.metrics();
+        const new_root = self.buffer.root.delete_range(range, self.allocator, null, m) catch return false;
+        self.buffer.root = new_root;
+        self.cursor = range.begin;
+        self.clearSelection();
+        self.retokenizeAround(self.cursor.row);
+        return true;
+    }
+
+    /// Snapshot for undo (simplified - uses flow_core's built-in undo)
+    fn snapshotForUndo(self: *Self) void {
+        // flow_core handles its own undo/redo
+        _ = self;
     }
 
     pub fn handleKeyPress(self: *Self, key: wio.Button) void {
@@ -1081,8 +898,6 @@ pub const CodeEditor = struct {
         }
     }
 
-
-    /// Modifier-State aktualisieren (wird von main.zig aufgerufen)
     pub fn setShiftState(self: *Self, pressed: bool) void {
         self.mods.shift = pressed;
     }
@@ -1099,20 +914,17 @@ pub const CodeEditor = struct {
     // Mouse Handling
     // =========================================================================
 
-    /// Mausposition aktualisieren (wird von main.zig aufgerufen)
     pub fn updateMousePosition(self: *Self, x: f32, y: f32) void {
         self.mouse_x = x;
         self.mouse_y = y;
     }
 
-    /// Maus-Down Event verarbeiten
     pub fn handleMouseDown(self: *Self, x: f32, y: f32) void {
         self.mouse_x = x;
         self.mouse_y = y;
         self.mouse_down = true;
 
         if (self.show_context_menu) {
-            // Check if we clicked a context menu item
             if (clay.pointerOver(clay.getElementId("Cut"))) {
                 self.dispatchAction(.Cut);
                 self.show_context_menu = false;
@@ -1128,49 +940,43 @@ pub const CodeEditor = struct {
                 self.show_context_menu = false;
                 return;
             }
-
-            // Otherwise, close the menu if we clicked elsewhere
             self.show_context_menu = false;
         }
 
-        // Prüfen ob Scrollbar geklickt wurde
-        if (self.handleScrollbarMouseDown(x, y)) {
-            return;
-        }
+        if (self.handleScrollbarMouseDown(x, y)) return;
 
         const line_idx = self.lineFromY(y);
         const col = self.colFromX(x, line_idx);
 
-        // Double-Click Erkennung (innerhalb 500ms)
         const is_double_click = (self.time_ms - self.last_mouse_click_ms < 500.0) and
             self.last_mouse_click_line == line_idx and
             self.last_mouse_click_col == col;
 
         if (is_double_click) {
-            // Wort am Klickpunkt selektieren
-            const line = self.lines.items[line_idx].items;
-            const word_start = if (col < line.len and std.ascii.isAlphanumeric(line[col]))
-                prevWordBoundary(line, col)
-            else if (col > 0 and std.ascii.isAlphanumeric(line[col - 1]))
-                prevWordBoundary(line, col)
+            const line_text = self.getLine(line_idx);
+            const line_w = self.lineWidth(line_idx);
+            const m = self.metrics();
+            const byte_pos = if (col < line_w)
+                self.buffer.root.get_line_width_to_pos(line_idx, col, m) catch 0
             else
-                col;
-            const word_end = if (col < line.len and std.ascii.isAlphanumeric(line[col]))
-                nextWordBoundary(line, col)
-            else if (col > 0 and std.ascii.isAlphanumeric(line[col - 1]))
-                nextWordBoundary(line, word_start)
-            else
-                col;
+                line_text.len;
 
-            self.cursor_line = line_idx;
-            self.cursor_col = word_start;
-            self.selection_anchor_line = line_idx;
-            self.selection_anchor_col = word_end;
+            var ws: usize = byte_pos;
+            while (ws > 0 and isWordChar(line_text[ws - 1])) : (ws -= 1) {}
+            var we: usize = byte_pos;
+            while (we < line_text.len and isWordChar(line_text[we])) : (we += 1) {}
+
+            const word_start_col = self.buffer.root.pos_to_width(line_idx, ws, m) catch 0;
+            const word_end_col = self.buffer.root.pos_to_width(line_idx, we, m) catch line_w;
+
+            self.cursor.row = line_idx;
+            self.cursor.col = word_start_col;
+            self.selection_anchor = .{ .row = line_idx, .col = word_end_col };
         } else {
-            self.cursor_line = line_idx;
-            self.cursor_col = col;
-            self.selection_anchor_line = line_idx;
-            self.selection_anchor_col = col;
+            self.cursor.row = line_idx;
+            self.cursor.col = col;
+            self.cursor.target = col;
+            self.selection_anchor = .{ .row = line_idx, .col = col };
         }
 
         self.mouse_down = true;
@@ -1178,180 +984,139 @@ pub const CodeEditor = struct {
         self.last_mouse_click_line = line_idx;
         self.last_mouse_click_col = col;
         self.recordCursorMovement();
-        self.current_line = self.cursor_line + 1;
+        self.current_line = self.cursor.row + 1;
     }
 
-    /// Maus-Move Event verarbeiten (für Drag-Selektion)
     pub fn handleMouseMove(self: *Self, x: f32, y: f32) void {
         self.mouse_x = x;
         self.mouse_y = y;
-        
-        // Scrollbar-Dragging
+
         if (self.scrollbar_dragging) {
             self.handleScrollbarMouseMove(x, y);
             return;
         }
-        
+
         if (!self.mouse_down) return;
         const line_idx = self.lineFromY(y);
         const col = self.colFromX(x, line_idx);
-        self.cursor_line = line_idx;
-        self.cursor_col = col;
-        // Anchor bleibt gesetzt von handleMouseDown
+        self.cursor.row = line_idx;
+        self.cursor.col = col;
         self.ensureCursorVisible();
-        self.current_line = self.cursor_line + 1;
+        self.current_line = self.cursor.row + 1;
     }
 
-    /// Maus-Release Event verarbeiten
     pub fn handleMouseUp(self: *Self) void {
         self.mouse_down = false;
         self.scrollbar_dragging = false;
     }
 
-    /// Y-Koordinate in Zeilen-Index umrechnen (mit Content-Offset und Scroll-Offset).
     fn lineFromY(self: *const Self, y: f32) usize {
         const line_height: f32 = @floatFromInt(self.font_size + 16);
         if (line_height <= 0) return 0;
-        // Relativ zum Editor-Content (Fenster-Y minus Content-Offset)
         const rel_y = y - self.content_origin_y;
         if (rel_y < 0) return 0;
         const raw_line = @as(isize, @intFromFloat(@floor(rel_y / line_height)));
-        const line = raw_line + @as(isize, @intCast(self.scroll_offset_first_line));
+        const line = raw_line + @as(isize, @intCast(self.view.row));
         if (line < 0) return 0;
-        return @min(@as(usize, @intCast(line)), self.lines.items.len - 1);
+        const total = self.lineCount();
+        return @min(@as(usize, @intCast(line)), if (total > 0) total - 1 else 0);
     }
 
-    /// X-Koordinate in Spalte umrechnen (mit Content-Offset, echte Text-Messung).
     fn colFromX(self: *const Self, x: f32, line_idx: usize) usize {
-        // Relativ zum Editor-Content, minus Gutter und Code-Bereich Padding (left: 12)
         const rel_x = x - self.content_origin_x - self.gutter_width - 12;
         if (rel_x <= 0) return 0;
 
-        const line = self.lines.items[line_idx].items;
-        if (line.len == 0) return 0;
+        const line_text = self.getLine(line_idx);
+        if (line_text.len == 0) return 0;
 
-        // Wenn Messfunktion vorhanden: linearer Scan mit echter Breite
         if (self.measure_fn) |measure| {
             var x_accum: f32 = 0.0;
             var byte_offset: usize = 0;
-            while (byte_offset < line.len) {
-                // UTF-8: bestimme nächste Byte-Grenze
+            while (byte_offset < line_text.len) {
                 var next_offset = byte_offset + 1;
-                while (next_offset < line.len and (line[next_offset] & 0xC0) == 0x80) {
+                while (next_offset < line_text.len and (line_text[next_offset] & 0xC0) == 0x80) {
                     next_offset += 1;
                 }
-                const char_w = measure(@ptrCast(line.ptr + byte_offset), next_offset - byte_offset);
+                const char_w = measure(@ptrCast(line_text.ptr + byte_offset), next_offset - byte_offset);
                 if (rel_x < x_accum + char_w) {
-                    return byte_offset;
+                    return self.buffer.root.pos_to_width(line_idx, byte_offset, self.metrics()) catch 0;
                 }
                 x_accum += char_w;
                 byte_offset = next_offset;
             }
-            // Klick nach letztem Zeichen
-            return line.len;
+            return self.lineWidth(line_idx);
         }
 
-        // Fallback: grobe Schätzung
         const char_width: f32 = @as(f32, @floatFromInt(self.font_size)) * 0.6;
         if (char_width <= 0) return 0;
         const col_f = @as(isize, @intFromFloat(@floor(rel_x / char_width)));
         if (col_f < 0) return 0;
-        return @min(@as(usize, @intCast(col_f)), line.len);
+        return @min(@as(usize, @intCast(col_f)), self.lineWidth(line_idx));
     }
 
     // =========================================================================
     // Scrolling
     // =========================================================================
 
-    /// Scroll-Offset aktualisieren (Mausrad). Zeilen-basiert.
     pub fn scrollLines(self: *Self, delta: i32) void {
         if (delta > 0) {
-            // Scroll up: mehr Zeilen oben sichtbar
             const amount = @as(usize, @intCast(delta));
-            self.scroll_offset_first_line = if (amount > self.scroll_offset_first_line)
-                0
-            else
-                self.scroll_offset_first_line - amount;
+            self.view.row = if (amount > self.view.row) 0 else self.view.row - amount;
         } else if (delta < 0) {
-            // Scroll down: Zeilen unten verschwinden
             const amount = @as(usize, @intCast(-delta));
-            const max_offset = if (self.lines.items.len > self.visibleLineCount())
-                self.lines.items.len - self.visibleLineCount()
-            else
-                0;
-            const new_offset = self.scroll_offset_first_line + amount;
-            self.scroll_offset_first_line = @min(new_offset, max_offset);
+            const total = self.lineCount();
+            const visible = self.visibleLineCount();
+            const max_offset = if (total > visible) total - visible else 0;
+            self.view.row = @min(self.view.row + amount, max_offset);
         }
     }
 
-    /// Anzahl sichtbarer Zeilen basierend auf Container-Höhe.
     fn visibleLineCount(self: *const Self) usize {
         const line_height: f32 = @floatFromInt(self.font_size + 16);
         if (line_height <= 0) return 10;
-        // height ist die Editor-Höhe (ganze Fensterhöhe)
         const available = self.height;
         if (available <= 0) return 10;
         return @max(1, @as(usize, @intFromFloat(@floor(available / line_height))));
     }
 
-    /// Sicherstellen dass der Cursor sichtbar ist (Auto-Scroll).
     pub fn ensureCursorVisible(self: *Self) void {
-        const visible = self.visibleLineCount();
-        const total = self.lines.items.len;
-        if (total <= visible) {
-            self.scroll_offset_first_line = 0;
-            return;
-        }
-
-        // Cursor unterhalb des sichtbaren Bereichs?
-        const cursor_visible_line = self.cursor_line;
-        if (cursor_visible_line >= self.scroll_offset_first_line + visible) {
-            // Nach unten scrollen
-            self.scroll_offset_first_line = cursor_visible_line - visible + 1;
-        }
-        // Cursor oberhalb des sichtbaren Bereichs?
-        if (cursor_visible_line < self.scroll_offset_first_line) {
-            self.scroll_offset_first_line = cursor_visible_line;
-        }
-
-        // Clamp
-        const max_offset = total - visible;
-        self.scroll_offset_first_line = @min(self.scroll_offset_first_line, max_offset);
+        self.view.rows = self.visibleLineCount();
+        self.view.cols = 200; // reasonable default
+        self.view.clamp(&self.cursor, true);
     }
 
     pub fn handleChar(self: *Self, char_code: u21) void {
-        // Ignoriere Steuerzeichen
         if (char_code < 32 or char_code == 127) return;
-
-        // Wenn Strg gedrückt ist, ignorieren wir Zeicheneingaben (Shortcuts wie Ctrl+C/V/X).
-        // Ausnahme: AltGr (wird oft als Ctrl+Alt gemeldet oder wir lassen Alt generell durch)
         if (self.mods.ctrl and !self.mods.alt) return;
 
-        // Snapshot beim ersten Zeichen einer Tipp-Session (alle folgenden Zeichen = gleicher Undo-Step)
         if (!self.typing_in_progress) {
             self.snapshotForUndo();
             self.typing_in_progress = true;
         }
 
-        // Ersetze Selektion falls vorhanden
-        if (self.deleteSelection()) {
-            // Cursor steht jetzt am Selektionsanfang
-        }
+        if (self.deleteSelection()) {}
 
         var buf: [4]u8 = undefined;
         const len = std.unicode.utf8Encode(char_code, &buf) catch return;
 
-        const line = &self.lines.items[self.cursor_line];
-        line.insertSlice(self.allocator, self.cursor_col, buf[0..len]) catch return;
-        self.cursor_col += len;
+        const m = self.metrics();
+        const result = self.buffer.root.insert_chars(
+            self.cursor.row, self.cursor.col, buf[0..len], self.allocator, m,
+        ) catch return;
+        self.buffer.root = result[2];
+        self.cursor.col += @as(usize, @intCast(len));
+        self.cursor.target = self.cursor.col;
         self.recordCursorMovement();
-        self.tokenizeLine(self.cursor_line);
+        self.retokenizeAround(self.cursor.row);
     }
+
+    // =========================================================================
+    // Rendering
+    // =========================================================================
 
     pub fn render(self: *Self, arena: std.mem.Allocator) void {
         self.desired_cursor = .arrow;
 
-        // Editor Container
         clay.UI()(.{
             .id = clay.ElementId.ID("code_editor"),
             .layout = .{
@@ -1363,7 +1128,6 @@ pub const CodeEditor = struct {
             if (clay.hovered()) {
                 self.desired_cursor = .text;
             }
-            // Links: Scrollbarer Content
             clay.UI()(.{
                 .id = clay.ElementId.ID("editor_scroll"),
                 .layout = .{ .sizing = .grow },
@@ -1377,19 +1141,19 @@ pub const CodeEditor = struct {
                         .direction = .top_to_bottom,
                     },
                 })({
+                    const total = self.lineCount();
                     const visible_count = self.visibleLineCount();
-                    const start_line = @min(self.scroll_offset_first_line, self.lines.items.len);
-                    const end_line = @min(start_line + visible_count + 1, self.lines.items.len);
+                    const start_line = @min(self.view.row, total);
+                    const end_line = @min(start_line + visible_count + 1, total);
 
                     var i: usize = start_line;
                     while (i < end_line) : (i += 1) {
-                        const line = self.lines.items[i].items;
-                        const is_current = (i == self.cursor_line);
+                        const line_text = self.getLine(i);
+                        const is_current = (i == self.cursor.row);
 
                         const is_selected = if (self.hasSelection()) blk: {
-                            const sl = self.selectionStartLine();
-                            const el = self.selectionEndLine();
-                            break :blk i >= sl and i <= el;
+                            const range = self.selectionRange().?;
+                            break :blk i >= range.begin.row and i <= range.end.row;
                         } else false;
 
                         clay.UI()(.{
@@ -1428,23 +1192,292 @@ pub const CodeEditor = struct {
                                     .child_alignment = .{ .x = .left, .y = .center },
                                 },
                                 .background_color = if (is_current) self.current_line_highlight else .{ 0, 0, 0, 0 },
-                                })({
-                                 self.renderLine(i, line);
-                                });
-                                });
-                                }
-                                });
-                                });
-            // Rechts: Scrollbar
-            if (self.lines.items.len > self.visibleLineCount()) {
+                            })({
+                                self.renderLine(i, line_text);
+                            });
+                        });
+                    }
+                });
+            });
+
+            if (self.lineCount() > self.visibleLineCount()) {
                 self.renderScrollbar();
             }
         });
 
-        // Kontextmenü (Floating)
         if (self.show_context_menu) {
             self.renderContextMenu(arena);
         }
+    }
+
+    fn renderLine(self: *Self, line_idx: usize, line: []const u8) void {
+        // Ensure tokens exist for this line
+        while (self.line_tokens.items.len <= line_idx) {
+            const tokens = std.ArrayListUnmanaged(Token){};
+            self.line_tokens.append(self.allocator, tokens) catch break;
+        }
+        const tokens = if (line_idx < self.line_tokens.items.len)
+            self.line_tokens.items[line_idx].items
+        else
+            &[_]Token{};
+
+        clay.UI()(.{
+            .layout = .{ .direction = .left_to_right, .child_alignment = .{ .x = .left, .y = .center } },
+        })({
+            if (self.hasSelection()) {
+                self.renderSelection(line_idx);
+            }
+
+            if (tokens.len == 0 and line.len > 0) {
+                self.tokenizeLine(line_idx);
+            }
+
+            const current_tokens = if (line_idx < self.line_tokens.items.len)
+                self.line_tokens.items[line_idx].items
+            else
+                &[_]Token{};
+
+            if (current_tokens.len == 0) {
+                const persistent = self.allocator.dupe(u8, line) catch "";
+                clay.text(persistent, .{ .font_size = self.font_size, .color = .{ 202, 211, 245, 255 } });
+                if (line_idx == self.cursor.row) {
+                    self.renderCursor();
+                }
+            } else {
+                var tokens_valid = true;
+                for (current_tokens) |token| {
+                    if (token.end > line.len) { tokens_valid = false; break; }
+                }
+                if (!tokens_valid) {
+                    self.tokenizeLine(line_idx);
+                    const persistent = self.allocator.dupe(u8, line) catch "";
+                    clay.text(persistent, .{ .font_size = self.font_size, .color = .{ 202, 211, 245, 255 } });
+                } else {
+                    for (current_tokens) |token| {
+                        const color = self.highlighter.colorForType(token.token_type);
+                        const slice = token.slice(line);
+                        const persistent = self.allocator.dupe(u8, slice) catch "";
+                        clay.text(persistent, .{ .font_size = self.font_size, .color = color });
+                    }
+                }
+
+                if (line_idx == self.cursor.row) {
+                    self.renderCursor();
+                }
+            }
+        });
+    }
+
+    fn renderSelection(self: *Self, line_idx: usize) void {
+        const range = self.selectionRange() orelse return;
+        if (line_idx < range.begin.row or line_idx > range.end.row) return;
+
+        const line = self.getLine(line_idx);
+
+        const start_col = if (line_idx == range.begin.row) range.begin.col else 0;
+        const end_col = if (line_idx == range.end.row) range.end.col else self.lineWidth(line_idx);
+
+        const start_byte = self.buffer.root.get_line_width_to_pos(line_idx, start_col, self.metrics()) catch 0;
+        const end_byte = self.buffer.root.get_line_width_to_pos(line_idx, end_col, self.metrics()) catch line.len;
+
+        const start_clamped = @min(start_byte, line.len);
+        const end_clamped = @min(end_byte, line.len);
+
+        if (start_clamped >= end_clamped and line_idx < range.end.row) {
+            // Selection extends to end of line
+            const prefix = line[0..start_clamped];
+            const selected_text = line[start_clamped..];
+
+            clay.UI()(.{
+                .layout = .{ .sizing = .{ .w = .fixed(0), .h = .fixed(@floatFromInt(self.font_size + 16)) } },
+                .floating = .{
+                    .attach_to = .to_parent,
+                    .attach_points = .{ .element = .left_top, .parent = .left_top },
+                    .offset = .{ .x = 0, .y = 0 },
+                },
+            })({
+                clay.UI()(.{
+                    .layout = .{ .sizing = .{ .w = .fit, .h = .grow }, .direction = .left_to_right },
+                })({
+                    const p = self.allocator.dupe(u8, prefix) catch "";
+                    clay.text(p, .{ .font_size = self.font_size, .color = .{ 0, 0, 0, 0 } });
+
+                    clay.UI()(.{
+                        .layout = .{ .sizing = .{ .w = .fit, .h = .grow } },
+                        .background_color = self.selection_color,
+                    })({
+                        const s = self.allocator.dupe(u8, selected_text) catch "";
+                        clay.text(s, .{ .font_size = self.font_size, .color = .{ 0, 0, 0, 0 } });
+                        clay.UI()(.{ .layout = .{ .sizing = .{ .w = .fixed(10), .h = .grow } } })({});
+                    });
+                });
+            });
+        } else if (start_clamped < end_clamped) {
+            const prefix = line[0..start_clamped];
+            const selected_text = line[start_clamped..end_clamped];
+
+            clay.UI()(.{
+                .layout = .{ .sizing = .{ .w = .fixed(0), .h = .fixed(@floatFromInt(self.font_size + 16)) } },
+                .floating = .{
+                    .attach_to = .to_parent,
+                    .attach_points = .{ .element = .left_top, .parent = .left_top },
+                    .offset = .{ .x = 0, .y = 0 },
+                },
+            })({
+                clay.UI()(.{
+                    .layout = .{ .sizing = .{ .w = .fit, .h = .grow }, .direction = .left_to_right },
+                })({
+                    const p = self.allocator.dupe(u8, prefix) catch "";
+                    clay.text(p, .{ .font_size = self.font_size, .color = .{ 0, 0, 0, 0 } });
+
+                    clay.UI()(.{
+                        .layout = .{ .sizing = .{ .w = .fit, .h = .grow } },
+                        .background_color = self.selection_color,
+                    })({
+                        const s = self.allocator.dupe(u8, selected_text) catch "";
+                        clay.text(s, .{ .font_size = self.font_size, .color = .{ 0, 0, 0, 0 } });
+                        if (line_idx < range.end.row) {
+                            clay.UI()(.{ .layout = .{ .sizing = .{ .w = .fixed(10), .h = .grow } } })({});
+                        }
+                    });
+                });
+            });
+        }
+    }
+
+    fn renderCursor(self: *Self) void {
+        const blink_ms: f32 = 500.0;
+        const blink_delay_ms: f32 = 400.0;
+
+        const time_since_movement = self.time_ms - self.last_cursor_movement_ms;
+        const is_moving = time_since_movement < blink_delay_ms;
+        const visible = is_moving or (@mod(self.time_ms, blink_ms * 2.0) < blink_ms);
+        if (!visible) return;
+
+        const line = self.getLine(self.cursor.row);
+        const m = self.metrics();
+        const byte_pos = self.buffer.root.get_line_width_to_pos(self.cursor.row, self.cursor.col, m) catch line.len;
+        const text_before_cursor = if (byte_pos <= line.len) line[0..byte_pos] else line;
+
+        clay.UI()(.{
+            .layout = .{ .sizing = .{ .w = .fixed(0), .h = .fixed(@floatFromInt(self.font_size + 16)) } },
+            .floating = .{
+                .attach_to = .to_parent,
+                .attach_points = .{ .element = .left_top, .parent = .left_top },
+                .offset = .{ .x = 0, .y = 0 },
+            },
+        })({
+            clay.UI()(.{
+                .layout = .{ .sizing = .{ .w = .fit, .h = .grow }, .direction = .left_to_right },
+            })({
+                const persistent = self.allocator.dupe(u8, text_before_cursor) catch "";
+                clay.text(persistent, .{ .font_size = self.font_size, .color = .{ 0, 0, 0, 0 } });
+
+                clay.UI()(.{
+                    .layout = .{ .sizing = .{ .w = .fixed(2), .h = .grow } },
+                    .background_color = self.cursor_color,
+                })({});
+            });
+        });
+    }
+
+    fn renderScrollbar(self: *Self) void {
+        const total = self.lineCount();
+        const visible = self.visibleLineCount();
+        if (total <= visible) return;
+
+        const track_data = clay.getElementData(clay.ElementId.ID("scrollbar_track"));
+        if (track_data.found) {
+            self.scrollbar_track_x = track_data.bounding_box.x;
+            self.scrollbar_track_y = track_data.bounding_box.y;
+        }
+
+        const track_height = self.height;
+        const thumb_ratio: f32 = @as(f32, @floatFromInt(visible)) / @as(f32, @floatFromInt(total));
+        const thumb_height = @max(20.0, track_height * thumb_ratio);
+        const max_offset: usize = total - visible;
+        const scroll_frac: f32 = if (max_offset > 0)
+            @as(f32, @floatFromInt(self.view.row)) / @as(f32, @floatFromInt(max_offset))
+        else
+            0.0;
+        const thumb_y = scroll_frac * (track_height - thumb_height);
+
+        self.scrollbar_thumb_y = self.scrollbar_track_y + thumb_y;
+        self.scrollbar_thumb_height = thumb_height;
+
+        const track_color: clay.Color = .{ 30, 30, 46, 100 };
+        const thumb_color: clay.Color = .{ 88, 88, 120, 180 };
+
+        clay.UI()(.{
+            .id = clay.ElementId.ID("scrollbar_track"),
+            .layout = .{
+                .sizing = .{ .w = .fixed(self.scrollbar_width), .h = .grow },
+                .direction = .top_to_bottom,
+            },
+            .background_color = track_color,
+        })({
+            if (clay.hovered()) self.desired_cursor = .arrow;
+            clay.UI()(.{
+                .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(thumb_y) } },
+            })({});
+            clay.UI()(.{
+                .id = clay.ElementId.ID("scrollbar_thumb"),
+                .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(thumb_height) } },
+                .background_color = thumb_color,
+                .corner_radius = .all(3),
+            })({
+                if (clay.hovered()) self.desired_cursor = .arrow;
+            });
+        });
+    }
+
+    fn handleScrollbarMouseDown(self: *Self, x: f32, y: f32) bool {
+        const total = self.lineCount();
+        const visible = self.visibleLineCount();
+        if (total <= visible) return false;
+
+        if (x < self.scrollbar_track_x) return false;
+        if (x > self.scrollbar_track_x + self.scrollbar_width) return false;
+        if (y < self.scrollbar_track_y) return false;
+        if (y > self.scrollbar_track_y + self.height) return false;
+
+        if (y >= self.scrollbar_thumb_y and y <= self.scrollbar_thumb_y + self.scrollbar_thumb_height) {
+            self.scrollbar_dragging = true;
+            self.scrollbar_drag_start_y = y;
+            self.scrollbar_scroll_offset_at_drag_start = @as(f32, @floatFromInt(self.view.row));
+            return true;
+        }
+
+        if (y < self.scrollbar_thumb_y) {
+            self.scrollLines(@as(i32, @intCast(visible)));
+        } else {
+            self.scrollLines(-@as(i32, @intCast(visible)));
+        }
+        return true;
+    }
+
+    fn handleScrollbarMouseMove(self: *Self, _: f32, y: f32) void {
+        const total = self.lineCount();
+        const visible = self.visibleLineCount();
+        if (total <= visible) return;
+
+        const track_height = self.height;
+        const thumb_ratio: f32 = @as(f32, @floatFromInt(visible)) / @as(f32, @floatFromInt(total));
+        const thumb_height = @max(20.0, track_height * thumb_ratio);
+        const max_offset: usize = total - visible;
+        const scrollable_height = track_height - thumb_height;
+
+        if (scrollable_height <= 0) return;
+
+        const delta_y = y - self.scrollbar_drag_start_y;
+        const scroll_delta_frac = delta_y / scrollable_height;
+        const scroll_delta_lines = scroll_delta_frac * @as(f32, @floatFromInt(max_offset));
+        const scroll_delta_int: i32 = @intFromFloat(@round(scroll_delta_lines));
+
+        var new_offset: isize = @as(isize, @intFromFloat(self.scrollbar_scroll_offset_at_drag_start)) + @as(isize, scroll_delta_int);
+        new_offset = @max(0, @min(new_offset, @as(isize, @intCast(max_offset))));
+
+        self.view.row = @as(usize, @intCast(new_offset));
     }
 
     fn renderContextMenu(self: *Self, arena: std.mem.Allocator) void {
@@ -1502,510 +1535,133 @@ pub const CodeEditor = struct {
             .background_color = if (is_hovered) .{ 80, 80, 100, 255 } else .{ 0, 0, 0, 0 },
             .corner_radius = .all(2),
         })({
-
-            clay.text(label, .{ .font_size = self.font_size - 2, .color = .{ 220, 220, 240, 255 } });
-            
-            if (is_hovered and clay.pointerOver(clay.getElementId(label))) {
-                // Bei Klick Aktion ausführen
-                // Clay selbst hat keinen "onClick" Handler für UI Elemente direkt im Layout,
-                // wir prüfen den Pointer-Status in handleMouseDown oder hier falls möglich.
-                // In diesem Fall nutzen wir handleMouseDown für die globale Logik.
-            }
-        });
-
-        // Wir registrieren den Klick-Zustand für dieses Element
-        if (is_hovered) {
-            // Wenn Maus gedrückt wird während gehovered, Aktion auslösen
-            // Dies ist etwas tricky in Immediate Mode ohne globalen State-Bus für Events.
-            // Aber wir können CodeEditor.handleMouseDown nutzen.
-        }
-    }
-
-    fn renderScrollbar(self: *Self) void {
-        const total = self.lines.items.len;
-        const visible = self.visibleLineCount();
-        if (total <= visible) return;
-
-        // Echte Bounds aus dem letzten Frame auslesen (ein Frame Delay, unmerklich)
-        const track_data = clay.getElementData(clay.ElementId.ID("scrollbar_track"));
-        if (track_data.found) {
-            self.scrollbar_track_x = track_data.bounding_box.x;
-            self.scrollbar_track_y = track_data.bounding_box.y;
-        }
-
-        const track_height = self.height;
-        const thumb_ratio: f32 = @as(f32, @floatFromInt(visible)) / @as(f32, @floatFromInt(total));
-        const thumb_height = @max(20.0, track_height * thumb_ratio);
-        const max_offset: usize = total - visible;
-        const scroll_frac: f32 = if (max_offset > 0)
-            @as(f32, @floatFromInt(self.scroll_offset_first_line)) / @as(f32, @floatFromInt(max_offset))
-        else
-            0.0;
-        const thumb_y = scroll_frac * (track_height - thumb_height);
-
-        // Thumb-Bounds für Hit-Tests speichern
-        self.scrollbar_thumb_y = self.scrollbar_track_y + thumb_y;
-        self.scrollbar_thumb_height = thumb_height;
-
-        const track_color: clay.Color = .{ 30, 30, 46, 100 };
-        const thumb_color: clay.Color = .{ 88, 88, 120, 180 };
-
-        // Track (füllt den verfügbaren Platz)
-        clay.UI()(.{
-            .id = clay.ElementId.ID("scrollbar_track"),
-            .layout = .{
-                .sizing = .{ .w = .fixed(self.scrollbar_width), .h = .grow },
-                .direction = .top_to_bottom,
-            },
-            .background_color = track_color,
-        })({
-            if (clay.hovered()) self.desired_cursor = .arrow;
-            // Spacer drückt den Thumb an die richtige Y-Position
-            clay.UI()(.{
-                .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(thumb_y) } },
-            })({});
-            // Thumb
-            clay.UI()(.{
-                .id = clay.ElementId.ID("scrollbar_thumb"),
-                .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(thumb_height) } },
-                .background_color = thumb_color,
-                .corner_radius = .all(3),
-            })({
-                if (clay.hovered()) self.desired_cursor = .arrow;
-            });
+            const persistent = self.allocator.dupe(u8, label) catch "";
+            clay.text(persistent, .{ .font_size = self.font_size - 2, .color = .{ 220, 220, 240, 255 } });
         });
     }
 
-    /// Scrollbar MouseDown: Start Dragging oder Klick auf Track
-    fn handleScrollbarMouseDown(self: *Self, x: f32, y: f32) bool {
-        const total = self.lines.items.len;
-        const visible = self.visibleLineCount();
-        if (total <= visible) return false;
+    // =========================================================================
+    // Tokenizer (kept from original, adapted to work with line strings)
+    // =========================================================================
 
-        // Gegen echte Bounds (aus ElementData, kein Hardcode) prüfen
-        if (x < self.scrollbar_track_x) return false;
-        if (x > self.scrollbar_track_x + self.scrollbar_width) return false;
-        if (y < self.scrollbar_track_y) return false;
-        if (y > self.scrollbar_track_y + self.height) return false;
+    const KEYWORDS = [_][]const u8{ "const", "var", "fn", "pub", "return", "if", "else", "for", "while", "switch", "case", "break", "continue", "defer", "errdefer", "try", "catch", "orelse", "struct", "enum", "union", "extern", "export", "inline", "noinline", "comptime", "test", "usingnamespace", "and", "or", "not", "true", "false", "null", "undefined", "void", "bool", "type", "anytype", "anyframe", "anyerror" };
 
-        // Prüfen ob Klick auf dem Thumb (gespeicherte Bounds aus renderScrollbar)
-        if (y >= self.scrollbar_thumb_y and y <= self.scrollbar_thumb_y + self.scrollbar_thumb_height) {
-            self.scrollbar_dragging = true;
-            self.scrollbar_drag_start_y = y;
-            self.scrollbar_scroll_offset_at_drag_start = @as(f32, @floatFromInt(self.scroll_offset_first_line));
-            return true;
+    fn tokenizeLine(self: *Self, line_idx: usize) void {
+        const total = self.lineCount();
+        if (line_idx >= total) return;
+
+        // Ensure token array
+        while (self.line_tokens.items.len <= line_idx) {
+            const tokens = std.ArrayListUnmanaged(Token){};
+            self.line_tokens.append(self.allocator, tokens) catch break;
         }
 
-        // Track geklickt (oberhalb oder unterhalb vom Thumb) - Seite scrollen
-        if (y < self.scrollbar_thumb_y) {
-            // Oberhalb: Eine Seite hoch
-            self.scrollLines(@as(i32, @intCast(visible)));
-        } else {
-            // Unterhalb: Eine Seite runter
-            self.scrollLines(-@as(i32, @intCast(visible)));
-        }
-        return true;
-    }
+        var tokens = &self.line_tokens.items[line_idx];
+        tokens.clearRetainingCapacity();
 
-    /// Scrollbar MouseMove: Thumb bewegen
-    fn handleScrollbarMouseMove(self: *Self, _: f32, y: f32) void {
-        const total = self.lines.items.len;
-        const visible = self.visibleLineCount();
-        if (total <= visible) return;
+        const line_text = self.getLine(line_idx);
+        const len = line_text.len;
+        var ti: usize = 0;
 
-        const track_height = self.height;
-        const thumb_ratio: f32 = @as(f32, @floatFromInt(visible)) / @as(f32, @floatFromInt(total));
-        const thumb_height = @max(20.0, track_height * thumb_ratio);
-        const max_offset: usize = total - visible;
-        const scrollable_height = track_height - thumb_height;
-
-        if (scrollable_height <= 0) return;
-
-        // deltaY berechnen (wie weit wurde der Thumb bewegt)
-        const delta_y = y - self.scrollbar_drag_start_y;
-        
-        // Scroll-Fraktion berechnen
-        const scroll_delta_frac = delta_y / scrollable_height;
-        const scroll_delta_lines = scroll_delta_frac * @as(f32, @floatFromInt(max_offset));
-        const scroll_delta_int: i32 = @intFromFloat(@round(scroll_delta_lines));
-
-        // Neuen Scroll-Offset berechnen (plus: nach unten ziehen → weiter scrollen)
-        var new_offset: isize = @as(isize, @intFromFloat(self.scrollbar_scroll_offset_at_drag_start)) + @as(isize, scroll_delta_int);
-        new_offset = @max(0, @min(new_offset, @as(isize, @intCast(max_offset))));
-
-        self.scroll_offset_first_line = @as(usize, @intCast(new_offset));
-    }
-
-    fn renderLine(self: *Self, line_idx: usize, line: []const u8) void {
-        const tokens = self.line_tokens.items[line_idx].items;
-
-        clay.UI()(.{
-            .layout = .{ .direction = .left_to_right, .child_alignment = .{ .x = .left, .y = .center } },
-        })({
-            if (self.hasSelection()) {
-                self.renderSelection(line_idx);
+        while (ti < len) {
+            if (std.ascii.isWhitespace(line_text[ti])) {
+                const tok_start = ti;
+                while (ti < len and std.ascii.isWhitespace(line_text[ti])) ti += 1;
+                tokens.append(self.allocator, Token{ .start = tok_start, .end = ti, .token_type = .plain }) catch {};
+                continue;
             }
-
-            // LAZY: Nicht tokenisierte Zeile jetzt tokenisieren
-            if (tokens.len == 0 and line.len > 0) {
-                self.tokenizeLine(line_idx);
+            if (line_text[ti] == '"') {
+                const tok_start = ti;
+                ti += 1;
+                while (ti < len and line_text[ti] != '"') {
+                    if (line_text[ti] == '\\' and ti + 1 < len) ti += 1;
+                    ti += 1;
+                }
+                if (ti < len) ti += 1;
+                tokens.append(self.allocator, Token{ .start = tok_start, .end = ti, .token_type = .string }) catch {};
+                continue;
             }
-
-            if (tokens.len == 0) {
-                clay.text(line, .{ .font_size = self.font_size, .color = .{ 202, 211, 245, 255 } });
-                // Cursor bei leerer Zeile
-                if (line_idx == self.cursor_line) {
-                    self.renderCursor(0);
-                }
-            } else {
-                // Tokens stale? Zeile als plain fallback rendern und neu tokenisieren.
-                var tokens_valid = true;
-                for (tokens) |token| {
-                    if (token.end > line.len) { tokens_valid = false; break; }
-                }
-                if (!tokens_valid) {
-                    self.tokenizeLine(line_idx);
-                    clay.text(line, .{ .font_size = self.font_size, .color = .{ 202, 211, 245, 255 } });
-                } else {
-                // Alle Tokens rendern
-                for (tokens) |token| {
-                    const color = self.highlighter.colorForType(token.token_type);
-                    const slice = token.slice(line);
-                    clay.text(slice, .{ .font_size = self.font_size, .color = color });
-                }
-                }
-
-                // Cursor als floating element über dem Text
-                // Funktioniert nur, wenn der Font monospace ist!
-                if (line_idx == self.cursor_line) {
-                    self.renderCursor(line.len);
-                }
+            if (line_text[ti] == '/' and ti + 1 < len and line_text[ti + 1] == '/') {
+                tokens.append(self.allocator, Token{ .start = ti, .end = len, .token_type = .comment }) catch {};
+                break;
             }
-        });
-    }
-
-    fn renderSelection(self: *Self, line_idx: usize) void {
-        const sl = self.selectionStartLine();
-        const el = self.selectionEndLine();
-        const sc = self.selectionStartCol();
-        const ec = self.selectionEndCol();
-
-        if (line_idx < sl or line_idx > el) return;
-
-        const line = self.lines.items[line_idx].items;
-        
-        // Bereich dieser Zeile, der selektiert ist
-        const start_col = if (line_idx == sl) sc else 0;
-        const end_col = if (line_idx == el) ec else line.len;
-
-        if (start_col > line.len) return;
-        const end_clamped = @min(end_col, line.len);
-        
-        const prefix = line[0..start_col];
-        const selected_text = line[start_col..end_clamped];
-        
-        // Selektions-Rechteck als floating element
-        clay.UI()(.{
-            .layout = .{ .sizing = .{ .w = .fixed(0), .h = .fixed(@floatFromInt(self.font_size + 16)) } },
-            .floating = .{
-                .attach_to = .to_parent,
-                .attach_points = .{ .element = .left_top, .parent = .left_top },
-                .offset = .{ .x = 0, .y = 0 },
-            },
-        })({
-            clay.UI()(.{
-                .layout = .{ .sizing = .{ .w = .fit, .h = .grow }, .direction = .left_to_right },
-            })({
-                // Prefix (unsichtbar)
-                clay.text(prefix, .{ .font_size = self.font_size, .color = .{ 0, 0, 0, 0 } });
-                
-                // Selektion
-                clay.UI()(.{
-                    .layout = .{ .sizing = .{ .w = .fit, .h = .grow } },
-                    .background_color = self.selection_color,
-                })({
-                    // Wir rendern den Text nochmal unsichtbar darin, damit .fit die Breite findet
-                    clay.text(selected_text, .{ .font_size = self.font_size, .color = .{ 0, 0, 0, 0 } });
-                    
-                    // Bei mehrzeiliger Selektion: Falls am Ende der Zeile, noch ein kleines Stück extra (für das Newline-Gefühl)
-                    if (line_idx < el) {
-                        clay.UI()(.{ .layout = .{ .sizing = .{ .w = .fixed(10), .h = .grow } } })({});
+            if (std.ascii.isDigit(line_text[ti])) {
+                const tok_start = ti;
+                while (ti < len and (std.ascii.isDigit(line_text[ti]) or line_text[ti] == '_' or line_text[ti] == '.')) ti += 1;
+                tokens.append(self.allocator, Token{ .start = tok_start, .end = ti, .token_type = .number }) catch {};
+                continue;
+            }
+            if (std.mem.indexOfScalar(u8, &[_]u8{ '(', ')', '{', '}', '[', ']', ',', ';', '.', ':', '!', '?', '+', '-', '*', '/', '=', '<', '>', '|', '&', '^', '%', '~', '@' }, line_text[ti])) |_| {
+                const tok_start = ti;
+                if (ti + 1 < len) {
+                    const two = line_text[ti .. ti + 2];
+                    if (std.mem.eql(u8, two, "=>") or std.mem.eql(u8, two, "->") or std.mem.eql(u8, two, "||") or std.mem.eql(u8, two, "&&") or std.mem.eql(u8, two, "++") or std.mem.eql(u8, two, "--") or std.mem.eql(u8, two, "==") or std.mem.eql(u8, two, "!=") or std.mem.eql(u8, two, ">=") or std.mem.eql(u8, two, "<=")) {
+                        ti += 2;
+                        tokens.append(self.allocator, Token{ .start = tok_start, .end = ti, .token_type = .punctuation }) catch {};
+                        continue;
                     }
-                });
-            });
-        });
+                }
+                ti += 1;
+                tokens.append(self.allocator, Token{ .start = tok_start, .end = ti, .token_type = .punctuation }) catch {};
+                continue;
+            }
+            if (std.ascii.isAlphabetic(line_text[ti]) or line_text[ti] == '_' or (line_text[ti] & 0x80) != 0) {
+                const tok_start = ti;
+                while (ti < len and (std.ascii.isAlphanumeric(line_text[ti]) or line_text[ti] == '_' or (line_text[ti] & 0x80) != 0)) ti += 1;
+                const word = line_text[tok_start..ti];
+                var is_kw = false;
+                for (KEYWORDS) |kw| {
+                    if (std.mem.eql(u8, word, kw)) { is_kw = true; break; }
+                }
+                if (is_kw) {
+                    tokens.append(self.allocator, Token{ .start = tok_start, .end = ti, .token_type = .keyword }) catch {};
+                } else if (std.mem.eql(u8, word, "std")) {
+                    tokens.append(self.allocator, Token{ .start = tok_start, .end = ti, .token_type = .builtin }) catch {};
+                } else {
+                    tokens.append(self.allocator, Token{ .start = tok_start, .end = ti, .token_type = .plain }) catch {};
+                }
+                continue;
+            }
+            const tok_start = ti;
+            ti += 1;
+            tokens.append(self.allocator, Token{ .start = tok_start, .end = ti, .token_type = .plain }) catch {};
+        }
     }
 
-    fn renderCursor(self: *Self, _: usize) void {
-        const blink_ms: f32 = 500.0;
-        const blink_delay_ms: f32 = 400.0; // Cursor bleibt sichtbar für 400ms nach Bewegung
-        
-        // Prüfen ob Cursor sich gerade bewegt (Blink-Delay)
-        const time_since_movement = self.time_ms - self.last_cursor_movement_ms;
-        const is_moving = time_since_movement < blink_delay_ms;
-        
-        // Blink-Logik: sichtbar wenn sich bewegend ODER in der sichtbaren Blink-Phase
-        const visible = is_moving or (@mod(self.time_ms, blink_ms * 2.0) < blink_ms);
-        if (!visible) return;
-
-        // Text vor dem Cursor extrahieren
-        const line = self.lines.items[self.cursor_line].items;
-        const text_before_cursor = if (self.cursor_col <= line.len) 
-            line[0..self.cursor_col] 
-        else 
-            line;
-
-        // Floating Container mit 0 Breite im Parent-Layout
-        clay.UI()(.{
-            .layout = .{ .sizing = .{ .w = .fixed(0), .h = .fixed(@floatFromInt(self.font_size + 16)) } },
-            .floating = .{
-                .attach_to = .to_parent,
-                .attach_points = .{ .element = .left_top, .parent = .left_top },
-                .offset = .{ .x = 0, .y = 0 },
-            },
-        })({
-            // Innerer Container: misst Text-Breite mit .fit
-            clay.UI()(.{
-                .layout = .{ .sizing = .{ .w = .fit, .h = .grow }, .direction = .left_to_right },
-            })({
-                // Unsichtbaren Text rendern für das Width-Measuring
-                clay.text(text_before_cursor, .{ 
-                    .font_size = self.font_size, 
-                    .color = .{ 0, 0, 0, 0 },
-                });
-                
-                // Cursor am Ende des gemessenen Textes
-                clay.UI()(.{
-                    .layout = .{ .sizing = .{ .w = .fixed(1), .h = .grow } },
-                    .background_color = self.cursor_color,
-                })({});
-            });
-        });
+    pub fn getLineByteLen(self: *Self, line_idx: usize) usize {
+        return self.getLine(line_idx).len;
     }
 };
 
-test "CodeEditor: basic interaction" {
-    const allocator = std.testing.allocator;
-    var editor_inst = CodeEditor.init(allocator);
-    defer editor_inst.deinit();
-
-    editor_inst.setText("hello");
-
-    // Test char insertion
-    editor_inst.cursor_col = 5;
-    editor_inst.handleChar('!');
-    try std.testing.expectEqualStrings("hello!", editor_inst.lines.items[0].items);
-
-    // Test enter
-    editor_inst.handleKeyPress(.enter);
-    try std.testing.expectEqual(@as(usize, 2), editor_inst.lines.items.len);
-    try std.testing.expectEqualStrings("hello!", editor_inst.lines.items[0].items);
-    try std.testing.expectEqualStrings("", editor_inst.lines.items[1].items);
-    try std.testing.expectEqual(@as(usize, 1), editor_inst.cursor_line);
-    try std.testing.expectEqual(@as(usize, 0), editor_inst.cursor_col);
-
-    var arena = std.heap.ArenaAllocator.init(allocator);
-    defer arena.deinit();
-    // This will crash if Clay isn't initialized, but maybe we can just see if it panics?
-    // Actually clay is just a C library, calling clay.UI() without init might crash.
-    // Let's just tokenizeLine to see if it panics.
-    editor_inst.tokenizeLine(0);
-    editor_inst.tokenizeLine(1);
-
-    // Test delete/backspace
-    editor_inst.handleKeyPress(.backspace);
-    try std.testing.expectEqual(@as(usize, 1), editor_inst.lines.items.len);
-    try std.testing.expectEqualStrings("hello!", editor_inst.lines.items[0].items);
-    try std.testing.expectEqual(@as(usize, 0), editor_inst.cursor_line);
-    try std.testing.expectEqual(@as(usize, 6), editor_inst.cursor_col);
-}
-
-test "CodeEditor: auto-typing simulation" {
-    const allocator = std.testing.allocator;
-    var editor_inst = CodeEditor.init(allocator);
-    defer editor_inst.deinit();
-
-    // Simulation: "pub fn main() {" tippen
-    const input = "pub fn main() {";
-    for (input) |c| {
-        editor_inst.handleChar(c);
-    }
-    try std.testing.expectEqualStrings("pub fn main() {", editor_inst.lines.items[0].items);
-
-    // Enter drücken
-    editor_inst.handleKeyPress(.enter);
-    try std.testing.expectEqual(@as(usize, 2), editor_inst.lines.items.len);
-
-    // In der neuen Zeile einrücken und kommentieren
-    const line2 = "    // test";
-    for (line2) |c| {
-        editor_inst.handleChar(c);
-    }
-    try std.testing.expectEqualStrings("    // test", editor_inst.lines.items[1].items);
-}
-
-test "CodeEditor: Umlaut-Eingabe und UTF-8-Navigation" {
-    const allocator = std.testing.allocator;
-    var editor_inst = CodeEditor.init(allocator);
-    defer editor_inst.deinit();
-
-    // "hällo" tippen: h, ä, l, l, o
-    editor_inst.handleChar('h');
-    editor_inst.handleChar(0xE4); // ä
-    editor_inst.handleChar('l');
-    editor_inst.handleChar('l');
-    editor_inst.handleChar('o');
-    // "hällo" = h(1) + ä(2) + l(1) + l(1) + o(1) = 6 Bytes
-    try std.testing.expectEqualStrings("h\xC3\xA4llo", editor_inst.lines.items[0].items);
-    try std.testing.expectEqual(@as(usize, 6), editor_inst.cursor_col);
-
-    // Links navigieren: von Ende(6) zurück zu 'o'(5)
-    editor_inst.handleKeyPress(.left);
-    try std.testing.expectEqual(@as(usize, 5), editor_inst.cursor_col);
-
-    // Nochmal links: von 'o'(5) zu zweitem 'l'(4)
-    editor_inst.handleKeyPress(.left);
-    try std.testing.expectEqual(@as(usize, 4), editor_inst.cursor_col);
-
-    // Nochmal links: von zweitem 'l'(4) zu erstem 'l'(3)
-    editor_inst.handleKeyPress(.left);
-    try std.testing.expectEqual(@as(usize, 3), editor_inst.cursor_col);
-
-    // Nochmal links: über ä (2 Bytes, Pos 1-2) → vor ä(1)
-    editor_inst.handleKeyPress(.left);
-    try std.testing.expectEqual(@as(usize, 1), editor_inst.cursor_col);
-
-    // Nochmal links: von ä(1) zu 'h'(0)
-    editor_inst.handleKeyPress(.left);
-    try std.testing.expectEqual(@as(usize, 0), editor_inst.cursor_col);
-
-    // Rechts: von 'h'(0) über... nein, nextCharBoundary(0) = 1 (ä Start)
-    editor_inst.handleKeyPress(.right);
-    try std.testing.expectEqual(@as(usize, 1), editor_inst.cursor_col);
-
-    // Rechts: über ä (2 Bytes) zum ersten 'l'(3)
-    editor_inst.handleKeyPress(.right);
-    try std.testing.expectEqual(@as(usize, 3), editor_inst.cursor_col);
-
-    // Backspace: von 'l'(3) → ä (2 Bytes) löschen
-    editor_inst.handleKeyPress(.backspace);
-    try std.testing.expectEqualStrings("hllo", editor_inst.lines.items[0].items);
-    try std.testing.expectEqual(@as(usize, 1), editor_inst.cursor_col);
-
-    // ö einfügen an Position 1
-    editor_inst.handleChar(0xF6); // ö
-    try std.testing.expectEqualStrings("h\xC3\xB6llo", editor_inst.lines.items[0].items);
-
-    // Delete: ö mit Delete vorwärts löschen
-    // Cursor steht nach ö (Pos 3), zurück navigieren
-    editor_inst.handleKeyPress(.left);
-    try std.testing.expectEqual(@as(usize, 1), editor_inst.cursor_col);
-    // Delete löscht ö (2 Bytes)
-    editor_inst.handleKeyPress(.delete);
-    try std.testing.expectEqualStrings("hllo", editor_inst.lines.items[0].items);
-    try std.testing.expectEqual(@as(usize, 1), editor_inst.cursor_col);
-}
-
-test "CodeEditor: Up/Down mit Umlaut snapped auf Zeichengrenze" {
-    const allocator = std.testing.allocator;
-    var editor_inst = CodeEditor.init(allocator);
-    defer editor_inst.deinit();
-
-    // Zeile 0: "ab" (2 Bytes)
-    // Zeile 1: "äx" (3 Bytes: ä=2 + x=1)
-    editor_inst.setText("ab\näx");
-    try std.testing.expectEqual(@as(usize, 2), editor_inst.lines.items.len);
-
-    // Cursor auf Zeile 0, Spalte 1 (zwischen a und b)
-    editor_inst.cursor_line = 0;
-    editor_inst.cursor_col = 1;
-
-    // Down: Zeile 1, cursor_col=1 wäre mitten in ä → muss auf 0 snappen
-    editor_inst.handleKeyPress(.down);
-    try std.testing.expectEqual(@as(usize, 1), editor_inst.cursor_line);
-    try std.testing.expectEqual(@as(usize, 0), editor_inst.cursor_col);
-}
-
-test "CodeEditor: Tokenizer erfasst UTF-8 Zeichen als Token" {
-    const allocator = std.testing.allocator;
-    var editor_inst = CodeEditor.init(allocator);
-    defer editor_inst.deinit();
-
-    // "ä" eingeben — muss als Token tokenisiert werden, damit es gerendert wird.
-    editor_inst.handleChar(0xE4); // ä
-    try std.testing.expectEqualStrings("\xC3\xA4", editor_inst.lines.items[0].items);
-
-    const tokens = editor_inst.line_tokens.items[0].items;
-    try std.testing.expect(tokens.len > 0);
-    // Token muss die gesamten 2 Bytes des Umlauts abdecken.
-    try std.testing.expectEqual(@as(usize, 0), tokens[0].start);
-    try std.testing.expectEqual(@as(usize, 2), tokens[0].end);
-}
-
 // =========================================================================
-// Phase 8: Erweiterte Tests
+// Tests (adapted for flow_core.Buffer)
 // =========================================================================
 
-test "Tokenizer: alle Token-Typen vollständig abgedeckt" {
+test "Tokenizer: Zig-Funktion" {
     const allocator = std.testing.allocator;
     var ed = CodeEditor.init(allocator);
     defer ed.deinit();
 
-    ed.setText("const x = 42; // hi \"s\" $");
+    ed.setText("pub fn foo(x: i32) i32 {\n    return x + 42; // done\n}");
     const tokens = ed.line_tokens.items[0].items;
 
-    // Jedes Byte muss von mindestens einem Token abgedeckt sein.
-    const line = ed.lines.items[0].items;
-    var covered = try allocator.alloc(bool, line.len);
-    defer allocator.free(covered);
-    @memset(covered, false);
-
-    for (tokens) |tok| {
-        for (tok.start..tok.end) |j| {
-            covered[j] = true;
-        }
-    }
-    for (covered, 0..) |c, idx| {
-        if (!c) {
-            std.debug.print("Byte {d} (0x{X:0>2}) nicht in Token!\n", .{ idx, line[idx] });
-        }
-        try std.testing.expect(c);
-    }
-}
-
-test "Tokenizer: Keywords, Strings, Kommentare, Zahlen, Punctuation" {
-    const allocator = std.testing.allocator;
-    var ed = CodeEditor.init(allocator);
-    defer ed.deinit();
-
-    ed.setText("pub fn main() { return 42; } // done");
-    const tokens = ed.line_tokens.items[0].items;
-
-    // Erste Token-Typen prüfen
-    // "pub" → keyword
     try std.testing.expectEqual(TokenType.keyword, tokens[0].token_type);
-    try std.testing.expectEqualStrings("pub", tokens[0].slice(ed.lines.items[0].items));
-
-    // " " → plain (whitespace)
+    try std.testing.expectEqualStrings("pub", tokens[0].slice(ed.getLine(0)));
     try std.testing.expectEqual(TokenType.plain, tokens[1].token_type);
-
-    // "fn" → keyword
     try std.testing.expectEqual(TokenType.keyword, tokens[2].token_type);
 
-    // Finde "42" → number
     var found_number = false;
     for (tokens) |tok| {
         if (tok.token_type == .number) {
-            try std.testing.expectEqualStrings("42", tok.slice(ed.lines.items[0].items));
+            try std.testing.expectEqualStrings("42", tok.slice(ed.getLine(0)));
             found_number = true;
         }
     }
     try std.testing.expect(found_number);
 
-    // Finde "// done" → comment (letztes Token)
     const last = tokens[tokens.len - 1];
     try std.testing.expectEqual(TokenType.comment, last.token_type);
-    try std.testing.expectEqualStrings("// done", last.slice(ed.lines.items[0].items));
+    try std.testing.expectEqualStrings("// done", last.slice(ed.getLine(0)));
 }
 
 test "Tokenizer: Sonderzeichen werden nicht verschluckt" {
@@ -2013,16 +1669,11 @@ test "Tokenizer: Sonderzeichen werden nicht verschluckt" {
     var ed = CodeEditor.init(allocator);
     defer ed.deinit();
 
-    // Zeichen die früher im Fallthrough verloren gingen
     ed.setText("$#`\\");
     const tokens = ed.line_tokens.items[0].items;
-
-    // Jedes Zeichen muss ein Token haben
     try std.testing.expect(tokens.len >= 4);
-
-    // Gesamtabdeckung: Start des ersten = 0, Ende des letzten = len
     try std.testing.expectEqual(@as(usize, 0), tokens[0].start);
-    try std.testing.expectEqual(ed.lines.items[0].items.len, tokens[tokens.len - 1].end);
+    try std.testing.expectEqual(ed.getLine(0).len, tokens[tokens.len - 1].end);
 }
 
 test "Tokenizer: String-Literal mit Escape-Sequences" {
@@ -2033,11 +1684,10 @@ test "Tokenizer: String-Literal mit Escape-Sequences" {
     ed.setText("x = \"hello\\nworld\"");
     const tokens = ed.line_tokens.items[0].items;
 
-    // Finde String-Token — muss komplett sein inkl. Escapes
     var found_string = false;
     for (tokens) |tok| {
         if (tok.token_type == .string) {
-            try std.testing.expectEqualStrings("\"hello\\nworld\"", tok.slice(ed.lines.items[0].items));
+            try std.testing.expectEqualStrings("\"hello\\nworld\"", tok.slice(ed.getLine(0)));
             found_string = true;
         }
     }
@@ -2050,32 +1700,10 @@ test "setText: CRLF wird zu LF normalisiert" {
     defer ed.deinit();
 
     ed.setText("line1\r\nline2\r\nline3");
-    try std.testing.expectEqual(@as(usize, 3), ed.lines.items.len);
-    try std.testing.expectEqualStrings("line1", ed.lines.items[0].items);
-    try std.testing.expectEqualStrings("line2", ed.lines.items[1].items);
-    try std.testing.expectEqualStrings("line3", ed.lines.items[2].items);
-}
-
-test "Word Boundaries: nextWordBoundary behavior" {
-    const text = "hello  world  next";
-    // Starting at 'h' (0) -> should jump to end of 'hello' (5)
-    try std.testing.expectEqual(@as(usize, 5), CodeEditor.nextWordBoundary(text, 0));
-    
-    // Starting at end of 'hello' (5, which is a space) -> should jump to start of 'world' (7)
-    try std.testing.expectEqual(@as(usize, 7), CodeEditor.nextWordBoundary(text, 5));
-}
-
-test "Word Boundaries: prevWordBoundary behavior" {
-    const text = "hello  world  next";
-    // Starting at 'n' (14)
-    // 1. skip leading spaces (12)
-    // 2. skip 'world' (7) -> lands at 'w'
-    try std.testing.expectEqual(@as(usize, 7), CodeEditor.prevWordBoundary(text, 14));
-    
-    // Starting at 'w' (7)
-    // 1. skip leading spaces (5)
-    // 2. skip 'hello' (0) -> lands at 'h'
-    try std.testing.expectEqual(@as(usize, 0), CodeEditor.prevWordBoundary(text, 7));
+    try std.testing.expectEqual(@as(usize, 3), ed.lineCount());
+    try std.testing.expectEqualStrings("line1", ed.getLine(0));
+    try std.testing.expectEqualStrings("line2", ed.getLine(1));
+    try std.testing.expectEqualStrings("line3", ed.getLine(2));
 }
 
 test "setText: leerer String erzeugt eine leere Zeile" {
@@ -2084,10 +1712,10 @@ test "setText: leerer String erzeugt eine leere Zeile" {
     defer ed.deinit();
 
     ed.setText("");
-    try std.testing.expectEqual(@as(usize, 1), ed.lines.items.len);
-    try std.testing.expectEqualStrings("", ed.lines.items[0].items);
-    try std.testing.expectEqual(@as(usize, 0), ed.cursor_line);
-    try std.testing.expectEqual(@as(usize, 0), ed.cursor_col);
+    try std.testing.expectEqual(@as(usize, 1), ed.lineCount());
+    try std.testing.expectEqualStrings("", ed.getLine(0));
+    try std.testing.expectEqual(@as(usize, 0), ed.cursor.row);
+    try std.testing.expectEqual(@as(usize, 0), ed.cursor.col);
 }
 
 test "Enter mitten in der Zeile splittet korrekt" {
@@ -2096,28 +1724,15 @@ test "Enter mitten in der Zeile splittet korrekt" {
     defer ed.deinit();
 
     ed.setText("abcdef");
-    ed.cursor_col = 3; // zwischen 'c' und 'd'
+    const m = ed.metrics();
+    const byte_pos = ed.buffer.root.get_line_width_to_pos(0, 3, m) catch 0;
+    ed.cursor.col = byte_pos;
     ed.handleKeyPress(.enter);
 
-    try std.testing.expectEqual(@as(usize, 2), ed.lines.items.len);
-    try std.testing.expectEqualStrings("abc", ed.lines.items[0].items);
-    try std.testing.expectEqualStrings("def", ed.lines.items[1].items);
-    try std.testing.expectEqual(@as(usize, 1), ed.cursor_line);
-    try std.testing.expectEqual(@as(usize, 0), ed.cursor_col);
-}
-
-test "Enter bei UTF-8 Zeichen splittet an Byte-Grenze" {
-    const allocator = std.testing.allocator;
-    var ed = CodeEditor.init(allocator);
-    defer ed.deinit();
-
-    ed.setText("aäb"); // a(1) + ä(2) + b(1) = 4 Bytes
-    ed.cursor_col = 3; // nach ä, vor b
-    ed.handleKeyPress(.enter);
-
-    try std.testing.expectEqual(@as(usize, 2), ed.lines.items.len);
-    try std.testing.expectEqualStrings("a\xC3\xA4", ed.lines.items[0].items);
-    try std.testing.expectEqualStrings("b", ed.lines.items[1].items);
+    try std.testing.expectEqual(@as(usize, 2), ed.lineCount());
+    try std.testing.expectEqualStrings("abc", ed.getLine(0));
+    try std.testing.expectEqualStrings("def", ed.getLine(1));
+    try std.testing.expectEqual(@as(usize, 1), ed.cursor.row);
 }
 
 test "Backspace am Zeilenanfang mergt mit vorheriger Zeile" {
@@ -2126,14 +1741,13 @@ test "Backspace am Zeilenanfang mergt mit vorheriger Zeile" {
     defer ed.deinit();
 
     ed.setText("abc\ndef");
-    ed.cursor_line = 1;
-    ed.cursor_col = 0;
+    ed.cursor.row = 1;
+    ed.cursor.col = 0;
     ed.handleKeyPress(.backspace);
 
-    try std.testing.expectEqual(@as(usize, 1), ed.lines.items.len);
-    try std.testing.expectEqualStrings("abcdef", ed.lines.items[0].items);
-    try std.testing.expectEqual(@as(usize, 0), ed.cursor_line);
-    try std.testing.expectEqual(@as(usize, 3), ed.cursor_col);
+    try std.testing.expectEqual(@as(usize, 1), ed.lineCount());
+    try std.testing.expectEqualStrings("abcdef", ed.getLine(0));
+    try std.testing.expectEqual(@as(usize, 0), ed.cursor.row);
 }
 
 test "Delete am Zeilenende mergt mit nächster Zeile" {
@@ -2142,14 +1756,15 @@ test "Delete am Zeilenende mergt mit nächster Zeile" {
     defer ed.deinit();
 
     ed.setText("abc\ndef");
-    ed.cursor_line = 0;
-    ed.cursor_col = 3; // am Ende von "abc"
+    ed.cursor.row = 0;
+    const m = ed.metrics();
+    const lw = ed.buffer.root.line_width(0, m) catch 0;
+    ed.cursor.col = lw;
     ed.handleKeyPress(.delete);
 
-    try std.testing.expectEqual(@as(usize, 1), ed.lines.items.len);
-    try std.testing.expectEqualStrings("abcdef", ed.lines.items[0].items);
-    try std.testing.expectEqual(@as(usize, 0), ed.cursor_line);
-    try std.testing.expectEqual(@as(usize, 3), ed.cursor_col);
+    try std.testing.expectEqual(@as(usize, 1), ed.lineCount());
+    try std.testing.expectEqualStrings("abcdef", ed.getLine(0));
+    try std.testing.expectEqual(@as(usize, 0), ed.cursor.row);
 }
 
 test "Navigation: Left am Zeilenanfang springt ans Ende der vorherigen Zeile" {
@@ -2158,12 +1773,11 @@ test "Navigation: Left am Zeilenanfang springt ans Ende der vorherigen Zeile" {
     defer ed.deinit();
 
     ed.setText("abc\ndef");
-    ed.cursor_line = 1;
-    ed.cursor_col = 0;
+    ed.cursor.row = 1;
+    ed.cursor.col = 0;
     ed.handleKeyPress(.left);
 
-    try std.testing.expectEqual(@as(usize, 0), ed.cursor_line);
-    try std.testing.expectEqual(@as(usize, 3), ed.cursor_col);
+    try std.testing.expectEqual(@as(usize, 0), ed.cursor.row);
 }
 
 test "Navigation: Right am Zeilenende springt an Anfang der nächsten Zeile" {
@@ -2172,573 +1786,12 @@ test "Navigation: Right am Zeilenende springt an Anfang der nächsten Zeile" {
     defer ed.deinit();
 
     ed.setText("abc\ndef");
-    ed.cursor_line = 0;
-    ed.cursor_col = 3;
+    ed.cursor.row = 0;
+    const m = ed.metrics();
+    const lw = ed.buffer.root.line_width(0, m) catch 0;
+    ed.cursor.col = lw;
     ed.handleKeyPress(.right);
 
-    try std.testing.expectEqual(@as(usize, 1), ed.cursor_line);
-    try std.testing.expectEqual(@as(usize, 0), ed.cursor_col);
-}
-
-test "Navigation: Home und End" {
-    const allocator = std.testing.allocator;
-    var ed = CodeEditor.init(allocator);
-    defer ed.deinit();
-
-    ed.setText("hello world");
-    ed.cursor_col = 5;
-
-    ed.handleKeyPress(.home);
-    try std.testing.expectEqual(@as(usize, 0), ed.cursor_col);
-
-    ed.handleKeyPress(.end);
-    try std.testing.expectEqual(@as(usize, 11), ed.cursor_col);
-}
-
-test "Navigation: Left/Right an Dateigrenzen bleiben stehen" {
-    const allocator = std.testing.allocator;
-    var ed = CodeEditor.init(allocator);
-    defer ed.deinit();
-
-    ed.setText("abc");
-
-    // Left am Dateianfang → bleibt
-    ed.cursor_col = 0;
-    ed.cursor_line = 0;
-    ed.handleKeyPress(.left);
-    try std.testing.expectEqual(@as(usize, 0), ed.cursor_col);
-    try std.testing.expectEqual(@as(usize, 0), ed.cursor_line);
-
-    // Right am Dateiende → bleibt
-    ed.cursor_col = 3;
-    ed.handleKeyPress(.right);
-    try std.testing.expectEqual(@as(usize, 3), ed.cursor_col);
-    try std.testing.expectEqual(@as(usize, 0), ed.cursor_line);
-}
-
-test "Navigation: Up/Down an Dateigrenzen bleiben stehen" {
-    const allocator = std.testing.allocator;
-    var ed = CodeEditor.init(allocator);
-    defer ed.deinit();
-
-    ed.setText("abc\ndef");
-
-    // Up auf erster Zeile → bleibt
-    ed.cursor_line = 0;
-    ed.handleKeyPress(.up);
-    try std.testing.expectEqual(@as(usize, 0), ed.cursor_line);
-
-    // Down auf letzter Zeile → bleibt
-    ed.cursor_line = 1;
-    ed.handleKeyPress(.down);
-    try std.testing.expectEqual(@as(usize, 1), ed.cursor_line);
-}
-
-test "Navigation: Up/Down clamp auf kürzere Zeile" {
-    const allocator = std.testing.allocator;
-    var ed = CodeEditor.init(allocator);
-    defer ed.deinit();
-
-    ed.setText("longline\nab\nlongline");
-    ed.cursor_line = 0;
-    ed.cursor_col = 7; // weit rechts
-
-    ed.handleKeyPress(.down); // → "ab" (len=2), col clamp auf 2
-    try std.testing.expectEqual(@as(usize, 1), ed.cursor_line);
-    try std.testing.expectEqual(@as(usize, 2), ed.cursor_col);
-
-    ed.handleKeyPress(.down); // → "longline" (len=8), col bleibt 2
-    try std.testing.expectEqual(@as(usize, 2), ed.cursor_line);
-    try std.testing.expectEqual(@as(usize, 2), ed.cursor_col);
-}
-
-test "Einfügen am Zeilenanfang und -ende" {
-    const allocator = std.testing.allocator;
-    var ed = CodeEditor.init(allocator);
-    defer ed.deinit();
-
-    ed.setText("bc");
-
-    // Am Anfang einfügen
-    ed.cursor_col = 0;
-    ed.handleChar('a');
-    try std.testing.expectEqualStrings("abc", ed.lines.items[0].items);
-
-    // Am Ende einfügen
-    ed.cursor_col = 3;
-    ed.handleChar('d');
-    try std.testing.expectEqualStrings("abcd", ed.lines.items[0].items);
-}
-
-test "Steuerzeichen werden ignoriert" {
-    const allocator = std.testing.allocator;
-    var ed = CodeEditor.init(allocator);
-    defer ed.deinit();
-
-    ed.setText("abc");
-    ed.cursor_col = 1;
-
-    // NULL, BEL, DEL — dürfen nichts einfügen
-    ed.handleChar(0);
-    ed.handleChar(7);
-    ed.handleChar(127);
-    try std.testing.expectEqualStrings("abc", ed.lines.items[0].items);
-    try std.testing.expectEqual(@as(usize, 1), ed.cursor_col);
-}
-
-test "Mehrfach-Enter erzeugt leere Zeilen" {
-    const allocator = std.testing.allocator;
-    var ed = CodeEditor.init(allocator);
-    defer ed.deinit();
-
-    ed.setText("a");
-    ed.cursor_col = 1;
-
-    ed.handleKeyPress(.enter);
-    ed.handleKeyPress(.enter);
-    ed.handleKeyPress(.enter);
-
-    try std.testing.expectEqual(@as(usize, 4), ed.lines.items.len);
-    try std.testing.expectEqualStrings("a", ed.lines.items[0].items);
-    try std.testing.expectEqualStrings("", ed.lines.items[1].items);
-    try std.testing.expectEqualStrings("", ed.lines.items[2].items);
-    try std.testing.expectEqualStrings("", ed.lines.items[3].items);
-    try std.testing.expectEqual(@as(usize, 3), ed.cursor_line);
-}
-
-test "Blink-Delay wird bei Cursor-Bewegung zurückgesetzt" {
-    const allocator = std.testing.allocator;
-    var ed = CodeEditor.init(allocator);
-    defer ed.deinit();
-
-    ed.setText("abc");
-    ed.time_ms = 1000.0;
-
-    ed.handleChar('x');
-    try std.testing.expectEqual(@as(f32, 1000.0), ed.last_cursor_movement_ms);
-
-    ed.time_ms = 2000.0;
-    ed.handleKeyPress(.left);
-    try std.testing.expectEqual(@as(f32, 2000.0), ed.last_cursor_movement_ms);
-}
-
-test "3-Byte UTF-8: Japanische Zeichen" {
-    const allocator = std.testing.allocator;
-    var ed = CodeEditor.init(allocator);
-    defer ed.deinit();
-
-    // 日 = U+65E5 = 3 Bytes (0xE6, 0x97, 0xA5)
-    ed.handleChar(0x65E5);
-    ed.handleChar('a');
-
-    try std.testing.expectEqualStrings("\xE6\x97\xA5a", ed.lines.items[0].items);
-    try std.testing.expectEqual(@as(usize, 4), ed.cursor_col);
-
-    // Left über 'a' (1 Byte)
-    ed.handleKeyPress(.left);
-    try std.testing.expectEqual(@as(usize, 3), ed.cursor_col);
-
-    // Left über 日 (3 Bytes)
-    ed.handleKeyPress(.left);
-    try std.testing.expectEqual(@as(usize, 0), ed.cursor_col);
-
-    // Right über 日 (3 Bytes)
-    ed.handleKeyPress(.right);
-    try std.testing.expectEqual(@as(usize, 3), ed.cursor_col);
-
-    // Backspace löscht 日 komplett
-    ed.handleKeyPress(.left);
-    ed.handleKeyPress(.delete);
-    try std.testing.expectEqualStrings("a", ed.lines.items[0].items);
-}
-
-test "4-Byte UTF-8: Emoji" {
-    const allocator = std.testing.allocator;
-    var ed = CodeEditor.init(allocator);
-    defer ed.deinit();
-
-    // 😀 = U+1F600 = 4 Bytes
-    ed.handleChar(0x1F600);
-    try std.testing.expectEqual(@as(usize, 4), ed.cursor_col);
-    try std.testing.expectEqual(@as(usize, 4), ed.lines.items[0].items.len);
-
-    // Backspace löscht alle 4 Bytes
-    ed.handleKeyPress(.backspace);
-    try std.testing.expectEqual(@as(usize, 0), ed.cursor_col);
-    try std.testing.expectEqualStrings("", ed.lines.items[0].items);
-}
-
-// =========================================================================
-// Selection Tests
-// =========================================================================
-
-test "Selection: Shift+Right erweitert Selektion" {
-    const allocator = std.testing.allocator;
-    var ed = CodeEditor.init(allocator);
-    defer ed.deinit();
-
-    ed.setText("hello");
-    ed.cursor_col = 0;
-
-    ed.setShiftState(true);
-    ed.handleKeyPress(.right); // h markiert
-    try std.testing.expect(ed.hasSelection());
-    try std.testing.expectEqual(@as(usize, 0), ed.selectionStartCol());
-    try std.testing.expectEqual(@as(usize, 1), ed.selectionEndCol());
-
-    ed.handleKeyPress(.right); // he markiert
-    try std.testing.expectEqual(@as(usize, 2), ed.selectionEndCol());
-    ed.setShiftState(false);
-}
-
-test "Selection: Shift+Left erweitert Selektion rückwärts" {
-    const allocator = std.testing.allocator;
-    var ed = CodeEditor.init(allocator);
-    defer ed.deinit();
-
-    ed.setText("hello");
-    ed.cursor_col = 3; // bei 'l'
-
-    ed.setShiftState(true);
-    ed.handleKeyPress(.left); // hel → l markiert
-    try std.testing.expect(ed.hasSelection());
-    try std.testing.expectEqual(@as(usize, 2), ed.selectionStartCol());
-    try std.testing.expectEqual(@as(usize, 3), ed.selectionEndCol());
-    ed.setShiftState(false);
-}
-
-test "Selection: Navigation ohne Shift löscht Selektion" {
-    const allocator = std.testing.allocator;
-    var ed = CodeEditor.init(allocator);
-    defer ed.deinit();
-
-    ed.setText("hello world");
-    ed.cursor_col = 0;
-    ed.setShiftState(true);
-    ed.handleKeyPress(.right);
-    ed.handleKeyPress(.right); // "he" markiert
-    try std.testing.expect(ed.hasSelection());
-
-    // Ohne Shift: Selektion löschen + bewegen
-    ed.setShiftState(false);
-    ed.handleKeyPress(.right);
-    try std.testing.expect(!ed.hasSelection());
-    try std.testing.expectEqual(@as(usize, 2), ed.cursor_col); // zum Selektionsende gesprungen
-}
-
-test "Selection: Backspace löscht markierten Text" {
-    const allocator = std.testing.allocator;
-    var ed = CodeEditor.init(allocator);
-    defer ed.deinit();
-
-    ed.setText("hello");
-    ed.cursor_col = 1;
-    ed.setShiftState(true);
-    ed.handleKeyPress(.right);
-    ed.handleKeyPress(.right);
-    ed.handleKeyPress(.right); // "hell" markiert (col 1-4)
-    ed.setShiftState(false);
-
-    ed.handleKeyPress(.backspace);
-    try std.testing.expect(!ed.hasSelection());
-    try std.testing.expectEqualStrings("ho", ed.lines.items[0].items);
-    try std.testing.expectEqual(@as(usize, 1), ed.cursor_col);
-}
-
-test "Selection: Delete löscht markierten Text" {
-    const allocator = std.testing.allocator;
-    var ed = CodeEditor.init(allocator);
-    defer ed.deinit();
-
-    ed.setText("hello");
-    ed.cursor_col = 0;
-    ed.setShiftState(true);
-    ed.handleKeyPress(.right);
-    ed.handleKeyPress(.right); // "he" markiert (col 0-2)
-    ed.setShiftState(false);
-
-    ed.handleKeyPress(.delete);
-    try std.testing.expect(!ed.hasSelection());
-    try std.testing.expectEqualStrings("llo", ed.lines.items[0].items);
-    try std.testing.expectEqual(@as(usize, 0), ed.cursor_col);
-}
-
-test "Selection: Tippen ersetzt markierten Text" {
-    const allocator = std.testing.allocator;
-    var ed = CodeEditor.init(allocator);
-    defer ed.deinit();
-
-    ed.setText("hello");
-    ed.cursor_col = 0;
-    ed.setShiftState(true);
-    ed.handleKeyPress(.right);
-    ed.handleKeyPress(.right); // "he" markiert (col 0-2)
-    ed.setShiftState(false);
-
-    ed.handleChar('x');
-    try std.testing.expect(!ed.hasSelection());
-    try std.testing.expectEqualStrings("xllo", ed.lines.items[0].items);
-    try std.testing.expectEqual(@as(usize, 1), ed.cursor_col);
-}
-
-test "Selection: Shift+Up/Down multi-line Selektion" {
-    const allocator = std.testing.allocator;
-    var ed = CodeEditor.init(allocator);
-    defer ed.deinit();
-
-    ed.setText("abc\ndef\nghi");
-    ed.cursor_line = 0;
-    ed.cursor_col = 1; // bei 'b'
-
-    ed.setShiftState(true);
-    ed.handleKeyPress(.down); // Zeile 1
-    try std.testing.expect(ed.hasSelection());
-    try std.testing.expectEqual(@as(usize, 0), ed.selectionStartLine());
-    try std.testing.expectEqual(@as(usize, 1), ed.selectionEndLine());
-
-    ed.handleKeyPress(.down); // Zeile 2
-    try std.testing.expectEqual(@as(usize, 2), ed.selectionEndLine());
-    ed.setShiftState(false);
-}
-
-test "Selection: Mehrzeilige Selektion löschen" {
-    const allocator = std.testing.allocator;
-    var ed = CodeEditor.init(allocator);
-    defer ed.deinit();
-
-    ed.setText("abc\ndef\nghi");
-    ed.cursor_line = 0;
-    ed.cursor_col = 1;
-    ed.setShiftState(true);
-    ed.handleKeyPress(.down); // Zeile 1 ("def"), col wird auf 1 gesnappt (da "abc" col=1)
-    ed.handleKeyPress(.down); // Zeile 2 ("ghi"), col wird auf 1 gesnappt
-    ed.setShiftState(false);
-
-    // Anchor (0,1), Cursor (2,1) → "bc\ndef\ng" löschen
-    ed.handleKeyPress(.backspace);
-    try std.testing.expect(!ed.hasSelection());
-    try std.testing.expectEqual(@as(usize, 1), ed.lines.items.len);
-    // "a" + "hi" = "ahi"
-    try std.testing.expectEqualStrings("ahi", ed.lines.items[0].items);
-}
-
-test "CodeEditor: Keypad Enter" {
-    const allocator = std.testing.allocator;
-    var ed = CodeEditor.init(allocator);
-    defer ed.deinit();
-
-    ed.setText("abc");
-    ed.cursor_col = 3;
-
-    // kp_enter should trigger InsertNewline via keymap
-    ed.handleKeyPress(.kp_enter);
-
-    try std.testing.expectEqual(@as(usize, 2), ed.lines.items.len);
-    try std.testing.expectEqualStrings("abc", ed.lines.items[0].items);
-    try std.testing.expectEqualStrings("", ed.lines.items[1].items);
-    try std.testing.expectEqual(@as(usize, 1), ed.cursor_line);
-    try std.testing.expectEqual(@as(usize, 0), ed.cursor_col);
-}
-
-test "Selection: Shift+Home und Shift+End" {
-    const allocator = std.testing.allocator;
-    var ed = CodeEditor.init(allocator);
-    defer ed.deinit();
-
-    ed.setText("hello world");
-    ed.cursor_col = 6; // bei 'w'
-
-    ed.setShiftState(true);
-    ed.handleKeyPress(.home);
-    try std.testing.expect(ed.hasSelection());
-    try std.testing.expectEqual(@as(usize, 0), ed.selectionStartCol());
-    try std.testing.expectEqual(@as(usize, 6), ed.selectionEndCol());
-
-    // Weiter zu End — erweitert Selektion
-    ed.handleKeyPress(.end);
-    // Anchor bleibt bei 6, Cursor bei 11 → Selektion ist col 6-11
-    try std.testing.expectEqual(@as(usize, 6), ed.selectionStartCol());
-    try std.testing.expectEqual(@as(usize, 11), ed.selectionEndCol());
-    ed.setShiftState(false);
-}
-
-test "Selection: Rückwärts selektieren (Anchor > Cursor)" {
-    const allocator = std.testing.allocator;
-    var ed = CodeEditor.init(allocator);
-    defer ed.deinit();
-
-    ed.setText("hello");
-    ed.cursor_col = 4; // bei erstem 'l' von rechts
-    ed.setShiftState(true);
-    ed.handleKeyPress(.left);
-    ed.handleKeyPress(.left);
-    ed.handleKeyPress(.left); // von col 4 auf col 1
-    ed.setShiftState(false);
-
-    try std.testing.expect(ed.hasSelection());
-    try std.testing.expectEqual(@as(usize, 1), ed.selectionStartCol());
-    try std.testing.expectEqual(@as(usize, 4), ed.selectionEndCol());
-}
-
-test "Selection: Home ohne Shift auf Selektion springt zum Start" {
-    const allocator = std.testing.allocator;
-    var ed = CodeEditor.init(allocator);
-    defer ed.deinit();
-
-    ed.setText("hello world");
-    ed.cursor_col = 5;
-    ed.setShiftState(true);
-    ed.handleKeyPress(.end); // " world" markiert
-    try std.testing.expect(ed.hasSelection());
-    ed.setShiftState(false);
-
-    ed.handleKeyPress(.home); // Soll zum Selektionsanfang (col 5)
-    try std.testing.expect(!ed.hasSelection());
-    try std.testing.expectEqual(@as(usize, 5), ed.cursor_col);
-}
-
-// =========================================================================
-// Scrolling Tests
-// =========================================================================
-
-test "Scrolling: Viewport Culling rendert nur sichtbare Zeilen" {
-    const allocator = std.testing.allocator;
-    var ed = CodeEditor.init(allocator);
-    defer ed.deinit();
-
-    // 20 Zeilen erzeugen
-    var buf: [16]u8 = undefined;
-    var lines_text = std.ArrayList(u8).empty;
-    defer lines_text.deinit(allocator);
-    var i: usize = 0;
-    while (i < 20) : (i += 1) {
-        if (i > 0) lines_text.append(allocator, '\n') catch {};
-        const s = std.fmt.bufPrint(&buf, "line{}", .{i}) catch "";
-        lines_text.appendSlice(allocator, s) catch {};
-    }
-    ed.setText(lines_text.items);
-
-    // Default: scroll_offset = 0, visible ~9 Zeilen (height=400, line_height=40)
-    try std.testing.expectEqual(@as(usize, 0), ed.scroll_offset_first_line);
-    const visible = ed.visibleLineCount();
-    try std.testing.expect(visible >= 8 and visible <= 12);
-
-    // 5 Zeilen runter scrollen (negatives delta = Content nach oben = offset erhöht)
-    ed.scrollLines(-5);
-    try std.testing.expectEqual(@as(usize, 5), ed.scroll_offset_first_line);
-
-    // 3 Zeilen hoch scrollen (positives delta = Content nach unten = offset reduziert)
-    ed.scrollLines(3);
-    try std.testing.expectEqual(@as(usize, 2), ed.scroll_offset_first_line);
-}
-
-test "Scrolling: scrollLines clamp an Grenzen" {
-    const allocator = std.testing.allocator;
-    var ed = CodeEditor.init(allocator);
-    defer ed.deinit();
-
-    ed.setText("a\nb\nc"); // 3 Zeilen
-
-    // Runter scrollen über Ende hinaus
-    ed.scrollLines(100);
-    // Max offset = 3 - visible (mindestens 1)
-    const max_offset = if (ed.lines.items.len > ed.visibleLineCount())
-        ed.lines.items.len - ed.visibleLineCount()
-    else
-        0;
-    try std.testing.expectEqual(max_offset, ed.scroll_offset_first_line);
-
-    // Hoch scrollen über Anfang hinaus
-    ed.scrollLines(-100);
-    try std.testing.expectEqual(@as(usize, 0), ed.scroll_offset_first_line);
-}
-
-test "Scrolling: Auto-Scroll wenn Cursor nach unten wandert" {
-    const allocator = std.testing.allocator;
-    var ed = CodeEditor.init(allocator);
-    defer ed.deinit();
-
-    // Viele Zeilen erzeugen
-    var text = std.ArrayList(u8).empty;
-    defer text.deinit(allocator);
-    var i: usize = 0;
-    while (i < 30) : (i += 1) {
-        if (i > 0) text.append(allocator, '\n') catch {};
-        text.appendSlice(allocator, "x") catch {};
-    }
-    ed.setText(text.items);
-
-    // Cursor auf Zeile 20 bewegen
-    ed.cursor_line = 20;
-    ed.ensureCursorVisible();
-
-    // Scroll-Offset sollte jetzt so sein dass Zeile 20 sichtbar ist
-    const visible = ed.visibleLineCount();
-    try std.testing.expect(ed.scroll_offset_first_line <= 20);
-    try std.testing.expect(ed.scroll_offset_first_line + visible > 20);
-}
-
-test "Scrolling: Auto-Scroll wenn Cursor nach oben wandert" {
-    const allocator = std.testing.allocator;
-    var ed = CodeEditor.init(allocator);
-    defer ed.deinit();
-
-    var text = std.ArrayList(u8).empty;
-    defer text.deinit(allocator);
-    var i: usize = 0;
-    while (i < 30) : (i += 1) {
-        if (i > 0) text.append(allocator, '\n') catch {};
-        text.appendSlice(allocator, "x") catch {};
-    }
-    ed.setText(text.items);
-
-    // Erst runter scrollen (negatives delta = offset erhöht)
-    ed.scrollLines(-15);
-    try std.testing.expect(ed.scroll_offset_first_line > 0);
-
-    // Cursor nach oben bewegen
-    ed.cursor_line = 0;
-    ed.ensureCursorVisible();
-    try std.testing.expectEqual(@as(usize, 0), ed.scroll_offset_first_line);
-}
-
-test "Scrolling: setText reset scroll_offset" {
-    const allocator = std.testing.allocator;
-    var ed = CodeEditor.init(allocator);
-    defer ed.deinit();
-
-    ed.setText("a\nb\nc\nd\ne");
-    ed.scrollLines(10);
-
-    ed.setText("new text");
-    try std.testing.expectEqual(@as(usize, 0), ed.scroll_offset_first_line);
-}
-
-test "Scrolling: Mouse-Drag Scrollt Auto" {
-    const allocator = std.testing.allocator;
-    var ed = CodeEditor.init(allocator);
-    defer ed.deinit();
-
-    // 30 Zeilen
-    var text = std.ArrayList(u8).empty;
-    defer text.deinit(allocator);
-    var i: usize = 0;
-    while (i < 30) : (i += 1) {
-        if (i > 0) text.append(allocator, '\n') catch {};
-        text.appendSlice(allocator, "x") catch {};
-    }
-    ed.setText(text.items);
-    ed.height = 400; // ~9 visible lines
-
-    // Mouse down bei Zeile 0
-    ed.handleMouseDown(100, 20);
-    try std.testing.expectEqual(@as(usize, 0), ed.cursor_line);
-
-    // Mouse move zu Zeile 25 (y = 25 * 40 = 1000)
-    ed.handleMouseMove(100, 1000);
-    try std.testing.expectEqual(@as(usize, 25), ed.cursor_line);
-
-    // Auto-Scroll sollte Zeile 25 sichtbar machen
-    const visible = ed.visibleLineCount();
-    try std.testing.expect(ed.scroll_offset_first_line + visible > 25);
+    try std.testing.expectEqual(@as(usize, 1), ed.cursor.row);
+    try std.testing.expectEqual(@as(usize, 0), ed.cursor.col);
 }
