@@ -1,0 +1,19 @@
+.{
+    .name = .flow_core,
+    .version = "0.1.0",
+    .minimum_zig_version = "0.15.2",
+    .fingerprint = 0xd5675a4826f25bf8,
+
+    .dependencies = .{
+        .cbor = .{
+            .url = "git+https://github.com/neurocyte/cbor?ref=master#b6fc137250b7d3f70459652ee78c7b6cd9ad2826",
+            .hash = "cbor-1.0.0-RcQE_HwwAQAiNkKC9ezLxHUMkWgHeVa3QyTfv4hi3VZR",
+        },
+    },
+
+    .paths = .{
+        "src",
+        "build.zig",
+        "build.zig.zon",
+    },
+}
