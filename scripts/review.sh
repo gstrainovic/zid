@@ -36,7 +36,13 @@ EOF
 fi
 
 # ---- Vor-Check 2: Byte-identische Phasen-Screenshots (spart Claude-Tokens) ----
-PREV_PHASE=$((PHASE - 1))
+# Handle Subphasen (12A, 12B, ...) — extract base phase number
+BASE_PHASE=$(echo "$PHASE" | grep -oP '^\d+')
+if [[ -n "$BASE_PHASE" ]]; then
+    PREV_PHASE=$((BASE_PHASE - 1))
+else
+    PREV_PHASE=""
+fi
 PREV_SHOTS=("$REPO_ROOT/screenshots/phase${PREV_PHASE}_"*.png)
 if [[ ${#PREV_SHOTS[@]} -gt 0 ]]; then
     # Newest current phase shot
