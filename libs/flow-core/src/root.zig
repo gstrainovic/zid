@@ -6,3 +6,5 @@ pub const Manager = Buffer.Manager;
 pub const diff = @import("diff.zig");
 pub const snippet = @import("snippet.zig");
 pub const keybind = @import("keybind/mod.zig");
+pub const highlight = @import("highlight/mod.zig");
+pub const file_type_config = @import("file_type_config.zig");
