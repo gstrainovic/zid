@@ -358,16 +358,16 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
 - [x] **Verifikation 12.A:** `zig build` in flow-core funktioniert (0 Warnings)
 
 ### Phase 12.B: Buffer-Layer kopieren
-- [ ] `libs/flow/src/buffer/` → `libs/flow-core/src/buffer/` kopieren (ohne Thespian)
-  - [ ] `Buffer.zig` (Rope Buffer, Kern — keine externen Deps außer cbor/file_type_config)
-  - [ ] `Cursor.zig` (Position + Navigation)
-  - [ ] `Selection.zig` (Start/End Marks)
-  - [ ] `View.zig` (Viewport Culling für Rendering)
-  - [ ] `reflow.zig` (Line-Breaking, Unicode Width)
-  - [ ] `unicode.zig` (UTF-8 utilities)
-- [ ] Alle Thespian-Imports entfernen
-- [ ] Unit-Tests für Buffer mitnehmen
-- **Verifikation 12.B:** `zig build test` in flow-core, alle Buffer-Tests grün
+- [x] `libs/flow/src/buffer/` → `libs/flow-core/src/buffer/` kopiert (ohne Thespian)
+  - [x] `Buffer.zig` (Rope Buffer, Kern — keine externen Deps außer cbor/file_type_config)
+  - [x] `Cursor.zig` (Position + Navigation)
+  - [x] `Selection.zig` (Start/End Marks)
+  - [x] `View.zig` (Viewport Culling für Rendering)
+  - [x] `reflow.zig` (Line-Breaking, Unicode Width)
+  - [x] `unicode.zig` (UTF-8 utilities)
+- [x] Alle Thespian-Imports entfernt
+- [x] Unit-Tests für Buffer mitgenommen
+- [x] **Verifikation 12.B:** `zig build test` in flow-core, alle Buffer-Tests grün
 
 ### Phase 12.C: Diff + Snippet + Keybind-Parser
 - [x] `libs/flow/src/diff.zig` → `libs/flow-core/src/diff.zig` (Rope-Diffs)
