@@ -134,23 +134,4 @@ pub fn build(b: *std.Build) void {
     }
     run_editor_tests.has_side_effects = true;
     test_step.dependOn(&run_editor_tests.step);
-
-    // Test window for Phase 11 screenshots (minimal wio window, no vulkan-ed app logic)
-    const tw_mod = b.createModule(.{
-        .root_source_file = b.path("scripts/test-vulkan-ed-window.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    tw_mod.addImport("wio", wio_dep.module("wio"));
-    const tw_exe = b.addExecutable(.{
-        .name = "test-window",
-        .root_module = tw_mod,
-    });
-    if (target.result.os.tag == .windows) {
-        tw_exe.root_module.linkSystemLibrary("user32", .{});
-    }
-    b.installArtifact(tw_exe);
-    const tw_run = b.addRunArtifact(tw_exe);
-    const tw_step = b.step("test-window", "Run minimal test window for screenshots");
-    tw_step.dependOn(&tw_run.step);
 }
