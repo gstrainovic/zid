@@ -6,9 +6,8 @@
 const std = @import("std");
 const clay = @import("clay");
 const flow_core = @import("flow_core");
-const Highlighter = @import("highlighter.zig").Highlighter;
-const Token = @import("highlighter.zig").Token;
-const TokenType = @import("highlighter.zig").TokenType;
+const SyntaxHighlighter = flow_core.highlight.SyntaxHighlighter;
+const ColorTag = flow_core.highlight.ColorTag;
 const wio = @import("wio");
 
 const actions = @import("actions.zig");
@@ -47,11 +46,8 @@ pub const CodeEditor = struct {
     /// flow-core Buffer for text storage
     buffer: *flow_core.Buffer,
 
-    /// Tokenized lines for syntax highlighting (lazy, per-line)
-    line_tokens: std.ArrayListUnmanaged(std.ArrayListUnmanaged(Token)),
-
-    /// Highlighter
-    highlighter: Highlighter,
+    /// Syntax-Highlighter (flow-syntax/tree-sitter). null = kein Highlighting.
+    highlighter: ?*SyntaxHighlighter = null,
 
     /// Aktuelle Zeile (1-based, für Highlight)
     current_line: usize = 1,
@@ -186,38 +182,34 @@ pub const CodeEditor = struct {
             .target = 0,
         };
 
-        var self = Self{
+        const hl = flow_core.highlight.SyntaxHighlighter.create(allocator, "zig") catch null;
+
+        return Self{
             .allocator = allocator,
             .buffer = buf,
-            .line_tokens = .{},
-            .highlighter = Highlighter.init(
-                .{ 199, 146, 234, 255 },
-                .{ 166, 209, 137, 255 },
-                .{ 108, 112, 134, 255 },
-                .{ 250, 179, 135, 255 },
-                .{ 138, 173, 244, 255 },
-                .{ 138, 173, 244, 255 },
-                .{ 202, 211, 245, 255 },
-            ),
             .cursor = cursor,
             .view = view,
             .keymap = keymap.Keymap.initDefault(allocator) catch null,
             .desired_cursor = .arrow,
+            .highlighter = hl,
         };
-        const first_tokens = std.ArrayListUnmanaged(Token){};
-        self.line_tokens.append(allocator, first_tokens) catch {};
-        return self;
     }
 
     pub fn deinit(self: *Self) void {
+        if (self.highlighter) |hl| hl.destroy();
         self.buffer.deinit();
-        for (self.line_tokens.items) |*tokens| tokens.deinit(self.allocator);
-        self.line_tokens.deinit(self.allocator);
         if (self.keymap) |*km| km.deinit();
         if (self.cached_text.len > 0) {
             self.allocator.free(self.cached_text);
             self.cached_text = "";
         }
+    }
+
+    /// Re-parse highlighter nach Buffer-Änderung.
+    fn refreshHighlighter(self: *Self) void {
+        const hl = self.highlighter orelse return;
+        const text = self.buffer.store_to_string_cached(self.buffer.root, self.buffer.file_eol_mode);
+        hl.updateFromString(text) catch {};
     }
 
     /// Get entire buffer as string for rendering
@@ -250,10 +242,6 @@ pub const CodeEditor = struct {
     }
 
     pub fn setText(self: *Self, text: []const u8) void {
-        // Free cached tokens
-        for (self.line_tokens.items) |*tokens| tokens.deinit(self.allocator);
-        self.line_tokens.clearRetainingCapacity();
-
         var eol_mode: flow_core.Buffer.EolMode = .lf;
         var utf8_sanitized: bool = false;
         const new_root = self.buffer.load_from_string(text, &eol_mode, &utf8_sanitized) catch {
@@ -261,35 +249,21 @@ pub const CodeEditor = struct {
             self.buffer.root = self.buffer.load_from_string("", &self.buffer.file_eol_mode, &self.buffer.file_utf8_sanitized) catch @panic("OOM");
             self.cursor = .{};
             self.selection_anchor = null;
-            self.reinitTokens(1);
+            self.refreshHighlighter();
             return;
         };
         self.buffer.root = new_root;
         self.buffer.file_eol_mode = eol_mode;
         self.buffer.file_utf8_sanitized = utf8_sanitized;
 
-        // Reset cursor
         self.cursor = .{};
         self.selection_anchor = null;
 
-        // Reinit tokens
-        self.reinitTokens(self.lineCount());
+        self.refreshHighlighter();
 
-        // Free old cached text
         if (self.cached_text.len > 0) {
             self.allocator.free(self.cached_text);
             self.cached_text = "";
-        }
-    }
-
-    fn reinitTokens(self: *Self, count: usize) void {
-        for (self.line_tokens.items) |*tokens| tokens.deinit(self.allocator);
-        self.line_tokens.clearRetainingCapacity();
-        var i: usize = 0;
-        while (i < count) : (i += 1) {
-            const tokens = std.ArrayListUnmanaged(Token){};
-            self.line_tokens.append(self.allocator, tokens) catch {};
-            if (i < 200) self.tokenizeLine(i);
         }
     }
 
@@ -443,25 +417,8 @@ pub const CodeEditor = struct {
     }
 
     fn retokenizeAround(self: *Self, up_to_line: usize) void {
-        const total = self.lineCount();
-        // Ensure token array size
-        while (self.line_tokens.items.len < total) {
-            const tokens = std.ArrayListUnmanaged(Token){};
-            self.line_tokens.append(self.allocator, tokens) catch break;
-        }
-        // Tokenize up to first 200 lines
-        const limit = @min(total, 200);
-        var i: usize = 0;
-        while (i < limit) : (i += 1) {
-            self.tokenizeLine(i);
-        }
-        // Also tokenize lines near the cursor
-        if (up_to_line > 0 and up_to_line <= limit) {
-            self.tokenizeLine(up_to_line - 1);
-        }
-        if (up_to_line < limit) {
-            self.tokenizeLine(up_to_line);
-        }
+        _ = up_to_line;
+        self.refreshHighlighter();
     }
 
     pub fn dispatchAction(self: *Self, action: actions.Action) void {
@@ -852,7 +809,7 @@ pub const CodeEditor = struct {
                 _ = meta;
                 self.cursor = .{};
                 self.selection_anchor = null;
-                self.reinitTokens(self.lineCount());
+                self.refreshHighlighter();
                 if (self.cached_text.len > 0) {
                     self.allocator.free(self.cached_text);
                     self.cached_text = "";
@@ -864,7 +821,7 @@ pub const CodeEditor = struct {
                 _ = meta;
                 self.cursor = .{};
                 self.selection_anchor = null;
-                self.reinitTokens(self.lineCount());
+                self.refreshHighlighter();
                 if (self.cached_text.len > 0) {
                     self.allocator.free(self.cached_text);
                     self.cached_text = "";
@@ -1200,7 +1157,7 @@ pub const CodeEditor = struct {
                                 },
                                 .background_color = if (is_current) self.current_line_highlight else .{ 0, 0, 0, 0 },
                             })({
-                                self.renderLine(i, line_text);
+                                self.renderLine(arena, i, line_text);
                             });
                         });
                     }
@@ -1217,65 +1174,68 @@ pub const CodeEditor = struct {
         }
     }
 
-    fn renderLine(self: *Self, line_idx: usize, line: []const u8) void {
-        // Ensure tokens exist for this line
-        while (self.line_tokens.items.len <= line_idx) {
-            const tokens = std.ArrayListUnmanaged(Token){};
-            self.line_tokens.append(self.allocator, tokens) catch break;
-        }
-        const tokens = if (line_idx < self.line_tokens.items.len)
-            self.line_tokens.items[line_idx].items
-        else
-            &[_]Token{};
-
+    fn renderLine(self: *Self, arena: std.mem.Allocator, line_idx: usize, line: []const u8) void {
         clay.UI()(.{
             .layout = .{ .direction = .left_to_right, .child_alignment = .{ .x = .left, .y = .center } },
         })({
             if (self.hasSelection()) {
-                self.renderSelection(line_idx);
+                self.renderSelection(arena, line_idx);
             }
 
-            if (tokens.len == 0 and line.len > 0) {
-                self.tokenizeLine(line_idx);
-            }
-
-            const current_tokens = if (line_idx < self.line_tokens.items.len)
-                self.line_tokens.items[line_idx].items
+            const plain_color: clay.Color = .{ 202, 211, 245, 255 };
+            const hl_opt = if (self.highlighter) |hl|
+                hl.tagsForLine(line_idx, line.len, self.allocator) catch null
             else
-                &[_]Token{};
+                null;
 
-            if (current_tokens.len == 0) {
-                const persistent = self.allocator.dupe(u8, line) catch "";
-                clay.text(persistent, .{ .font_size = self.font_size, .color = .{ 202, 211, 245, 255 } });
-                if (line_idx == self.cursor.row) {
-                    self.renderCursor();
-                }
-            } else {
-                var tokens_valid = true;
-                for (current_tokens) |token| {
-                    if (token.end > line.len) { tokens_valid = false; break; }
-                }
-                if (!tokens_valid) {
-                    self.tokenizeLine(line_idx);
-                    const persistent = self.allocator.dupe(u8, line) catch "";
-                    clay.text(persistent, .{ .font_size = self.font_size, .color = .{ 202, 211, 245, 255 } });
-                } else {
-                    for (current_tokens) |token| {
-                        const color = self.highlighter.colorForType(token.token_type);
-                        const slice = token.slice(line);
-                        const persistent = self.allocator.dupe(u8, slice) catch "";
-                        clay.text(persistent, .{ .font_size = self.font_size, .color = color });
+            if (hl_opt) |tags| {
+                defer self.allocator.free(tags);
+
+                var current_byte: usize = 0;
+                for (tags) |tag| {
+                    if (tag.start > current_byte) {
+                        const start = @min(current_byte, line.len);
+                        const end = @min(tag.start, line.len);
+                        if (start < end) {
+                            const prefix = line[start..end];
+                            const p_str = arena.dupe(u8, prefix) catch "";
+                            clay.text(p_str, .{ .font_size = self.font_size, .color = plain_color });
+                        }
+                    }
+
+                    const start = @min(tag.start, line.len);
+                    const end = @min(tag.end, line.len);
+                    if (start < end and start >= current_byte) {
+                        const token_text = line[start..end];
+                        const t_str = arena.dupe(u8, token_text) catch "";
+
+                        const r: u8 = @intCast((tag.fg >> 16) & 0xFF);
+                        const g: u8 = @intCast((tag.fg >> 8) & 0xFF);
+                        const b: u8 = @intCast(tag.fg & 0xFF);
+                        const color = clay.Color{ @floatFromInt(r), @floatFromInt(g), @floatFromInt(b), 255 };
+
+                        clay.text(t_str, .{ .font_size = self.font_size, .color = color });
+                        current_byte = end;
                     }
                 }
 
-                if (line_idx == self.cursor.row) {
-                    self.renderCursor();
+                if (current_byte < line.len) {
+                    const suffix = line[current_byte..];
+                    const s_str = arena.dupe(u8, suffix) catch "";
+                    clay.text(s_str, .{ .font_size = self.font_size, .color = plain_color });
                 }
+            } else {
+                const persistent = arena.dupe(u8, line) catch "";
+                clay.text(persistent, .{ .font_size = self.font_size, .color = plain_color });
+            }
+
+            if (line_idx == self.cursor.row) {
+                self.renderCursor(arena);
             }
         });
     }
 
-    fn renderSelection(self: *Self, line_idx: usize) void {
+    fn renderSelection(self: *Self, arena: std.mem.Allocator, line_idx: usize) void {
         const range = self.selectionRange() orelse return;
         if (line_idx < range.begin.row or line_idx > range.end.row) return;
 
@@ -1306,14 +1266,14 @@ pub const CodeEditor = struct {
                 clay.UI()(.{
                     .layout = .{ .sizing = .{ .w = .fit, .h = .grow }, .direction = .left_to_right },
                 })({
-                    const p = self.allocator.dupe(u8, prefix) catch "";
+                    const p = arena.dupe(u8, prefix) catch "";
                     clay.text(p, .{ .font_size = self.font_size, .color = .{ 0, 0, 0, 0 } });
 
                     clay.UI()(.{
                         .layout = .{ .sizing = .{ .w = .fit, .h = .grow } },
                         .background_color = self.selection_color,
                     })({
-                        const s = self.allocator.dupe(u8, selected_text) catch "";
+                        const s = arena.dupe(u8, selected_text) catch "";
                         clay.text(s, .{ .font_size = self.font_size, .color = .{ 0, 0, 0, 0 } });
                         clay.UI()(.{ .layout = .{ .sizing = .{ .w = .fixed(10), .h = .grow } } })({});
                     });
@@ -1334,14 +1294,14 @@ pub const CodeEditor = struct {
                 clay.UI()(.{
                     .layout = .{ .sizing = .{ .w = .fit, .h = .grow }, .direction = .left_to_right },
                 })({
-                    const p = self.allocator.dupe(u8, prefix) catch "";
+                    const p = arena.dupe(u8, prefix) catch "";
                     clay.text(p, .{ .font_size = self.font_size, .color = .{ 0, 0, 0, 0 } });
 
                     clay.UI()(.{
                         .layout = .{ .sizing = .{ .w = .fit, .h = .grow } },
                         .background_color = self.selection_color,
                     })({
-                        const s = self.allocator.dupe(u8, selected_text) catch "";
+                        const s = arena.dupe(u8, selected_text) catch "";
                         clay.text(s, .{ .font_size = self.font_size, .color = .{ 0, 0, 0, 0 } });
                         if (line_idx < range.end.row) {
                             clay.UI()(.{ .layout = .{ .sizing = .{ .w = .fixed(10), .h = .grow } } })({});
@@ -1352,7 +1312,7 @@ pub const CodeEditor = struct {
         }
     }
 
-    fn renderCursor(self: *Self) void {
+    fn renderCursor(self: *Self, arena: std.mem.Allocator) void {
         const blink_ms: f32 = 500.0;
         const blink_delay_ms: f32 = 400.0;
 
@@ -1377,7 +1337,7 @@ pub const CodeEditor = struct {
             clay.UI()(.{
                 .layout = .{ .sizing = .{ .w = .fit, .h = .grow }, .direction = .left_to_right },
             })({
-                const persistent = self.allocator.dupe(u8, text_before_cursor) catch "";
+                const persistent = arena.dupe(u8, text_before_cursor) catch "";
                 clay.text(persistent, .{ .font_size = self.font_size, .color = .{ 0, 0, 0, 0 } });
 
                 clay.UI()(.{
@@ -1525,7 +1485,6 @@ pub const CodeEditor = struct {
 
     fn renderContextMenuItem(self: *Self, label: []const u8, _action: actions.Action, arena: std.mem.Allocator) void {
         _ = _action;
-        _ = arena;
         const item_id = clay.getElementId(label);
         const is_hovered = clay.pointerOver(item_id);
         if (is_hovered) {
@@ -1542,97 +1501,9 @@ pub const CodeEditor = struct {
             .background_color = if (is_hovered) .{ 80, 80, 100, 255 } else .{ 0, 0, 0, 0 },
             .corner_radius = .all(2),
         })({
-            const persistent = self.allocator.dupe(u8, label) catch "";
+            const persistent = arena.dupe(u8, label) catch "";
             clay.text(persistent, .{ .font_size = self.font_size - 2, .color = .{ 220, 220, 240, 255 } });
         });
-    }
-
-    // =========================================================================
-    // Tokenizer (kept from original, adapted to work with line strings)
-    // =========================================================================
-
-    const KEYWORDS = [_][]const u8{ "const", "var", "fn", "pub", "return", "if", "else", "for", "while", "switch", "case", "break", "continue", "defer", "errdefer", "try", "catch", "orelse", "struct", "enum", "union", "extern", "export", "inline", "noinline", "comptime", "test", "usingnamespace", "and", "or", "not", "true", "false", "null", "undefined", "void", "bool", "type", "anytype", "anyframe", "anyerror" };
-
-    fn tokenizeLine(self: *Self, line_idx: usize) void {
-        const total = self.lineCount();
-        if (line_idx >= total) return;
-
-        // Ensure token array
-        while (self.line_tokens.items.len <= line_idx) {
-            const tokens = std.ArrayListUnmanaged(Token){};
-            self.line_tokens.append(self.allocator, tokens) catch break;
-        }
-
-        var tokens = &self.line_tokens.items[line_idx];
-        tokens.clearRetainingCapacity();
-
-        const line_text = self.getLine(line_idx);
-        const len = line_text.len;
-        var ti: usize = 0;
-
-        while (ti < len) {
-            if (std.ascii.isWhitespace(line_text[ti])) {
-                const tok_start = ti;
-                while (ti < len and std.ascii.isWhitespace(line_text[ti])) ti += 1;
-                tokens.append(self.allocator, Token{ .start = tok_start, .end = ti, .token_type = .plain }) catch {};
-                continue;
-            }
-            if (line_text[ti] == '"') {
-                const tok_start = ti;
-                ti += 1;
-                while (ti < len and line_text[ti] != '"') {
-                    if (line_text[ti] == '\\' and ti + 1 < len) ti += 1;
-                    ti += 1;
-                }
-                if (ti < len) ti += 1;
-                tokens.append(self.allocator, Token{ .start = tok_start, .end = ti, .token_type = .string }) catch {};
-                continue;
-            }
-            if (line_text[ti] == '/' and ti + 1 < len and line_text[ti + 1] == '/') {
-                tokens.append(self.allocator, Token{ .start = ti, .end = len, .token_type = .comment }) catch {};
-                break;
-            }
-            if (std.ascii.isDigit(line_text[ti])) {
-                const tok_start = ti;
-                while (ti < len and (std.ascii.isDigit(line_text[ti]) or line_text[ti] == '_' or line_text[ti] == '.')) ti += 1;
-                tokens.append(self.allocator, Token{ .start = tok_start, .end = ti, .token_type = .number }) catch {};
-                continue;
-            }
-            if (std.mem.indexOfScalar(u8, &[_]u8{ '(', ')', '{', '}', '[', ']', ',', ';', '.', ':', '!', '?', '+', '-', '*', '/', '=', '<', '>', '|', '&', '^', '%', '~', '@' }, line_text[ti])) |_| {
-                const tok_start = ti;
-                if (ti + 1 < len) {
-                    const two = line_text[ti .. ti + 2];
-                    if (std.mem.eql(u8, two, "=>") or std.mem.eql(u8, two, "->") or std.mem.eql(u8, two, "||") or std.mem.eql(u8, two, "&&") or std.mem.eql(u8, two, "++") or std.mem.eql(u8, two, "--") or std.mem.eql(u8, two, "==") or std.mem.eql(u8, two, "!=") or std.mem.eql(u8, two, ">=") or std.mem.eql(u8, two, "<=")) {
-                        ti += 2;
-                        tokens.append(self.allocator, Token{ .start = tok_start, .end = ti, .token_type = .punctuation }) catch {};
-                        continue;
-                    }
-                }
-                ti += 1;
-                tokens.append(self.allocator, Token{ .start = tok_start, .end = ti, .token_type = .punctuation }) catch {};
-                continue;
-            }
-            if (std.ascii.isAlphabetic(line_text[ti]) or line_text[ti] == '_' or (line_text[ti] & 0x80) != 0) {
-                const tok_start = ti;
-                while (ti < len and (std.ascii.isAlphanumeric(line_text[ti]) or line_text[ti] == '_' or (line_text[ti] & 0x80) != 0)) ti += 1;
-                const word = line_text[tok_start..ti];
-                var is_kw = false;
-                for (KEYWORDS) |kw| {
-                    if (std.mem.eql(u8, word, kw)) { is_kw = true; break; }
-                }
-                if (is_kw) {
-                    tokens.append(self.allocator, Token{ .start = tok_start, .end = ti, .token_type = .keyword }) catch {};
-                } else if (std.mem.eql(u8, word, "std")) {
-                    tokens.append(self.allocator, Token{ .start = tok_start, .end = ti, .token_type = .builtin }) catch {};
-                } else {
-                    tokens.append(self.allocator, Token{ .start = tok_start, .end = ti, .token_type = .plain }) catch {};
-                }
-                continue;
-            }
-            const tok_start = ti;
-            ti += 1;
-            tokens.append(self.allocator, Token{ .start = tok_start, .end = ti, .token_type = .plain }) catch {};
-        }
     }
 
     pub fn getLineByteLen(self: *Self, line_idx: usize) usize {
@@ -1643,63 +1514,6 @@ pub const CodeEditor = struct {
 // =========================================================================
 // Tests (adapted for flow_core.Buffer)
 // =========================================================================
-
-test "Tokenizer: Zig-Funktion" {
-    const allocator = std.testing.allocator;
-    var ed = CodeEditor.init(allocator);
-    defer ed.deinit();
-
-    ed.setText("pub fn foo(x: i32) i32 {\n    return x + 42; // done\n}");
-    const tokens = ed.line_tokens.items[0].items;
-
-    try std.testing.expectEqual(TokenType.keyword, tokens[0].token_type);
-    try std.testing.expectEqualStrings("pub", tokens[0].slice(ed.getLine(0)));
-    try std.testing.expectEqual(TokenType.plain, tokens[1].token_type);
-    try std.testing.expectEqual(TokenType.keyword, tokens[2].token_type);
-
-    var found_number = false;
-    for (tokens) |tok| {
-        if (tok.token_type == .number) {
-            try std.testing.expectEqualStrings("42", tok.slice(ed.getLine(0)));
-            found_number = true;
-        }
-    }
-    try std.testing.expect(found_number);
-
-    const last = tokens[tokens.len - 1];
-    try std.testing.expectEqual(TokenType.comment, last.token_type);
-    try std.testing.expectEqualStrings("// done", last.slice(ed.getLine(0)));
-}
-
-test "Tokenizer: Sonderzeichen werden nicht verschluckt" {
-    const allocator = std.testing.allocator;
-    var ed = CodeEditor.init(allocator);
-    defer ed.deinit();
-
-    ed.setText("$#`\\");
-    const tokens = ed.line_tokens.items[0].items;
-    try std.testing.expect(tokens.len >= 4);
-    try std.testing.expectEqual(@as(usize, 0), tokens[0].start);
-    try std.testing.expectEqual(ed.getLine(0).len, tokens[tokens.len - 1].end);
-}
-
-test "Tokenizer: String-Literal mit Escape-Sequences" {
-    const allocator = std.testing.allocator;
-    var ed = CodeEditor.init(allocator);
-    defer ed.deinit();
-
-    ed.setText("x = \"hello\\nworld\"");
-    const tokens = ed.line_tokens.items[0].items;
-
-    var found_string = false;
-    for (tokens) |tok| {
-        if (tok.token_type == .string) {
-            try std.testing.expectEqualStrings("\"hello\\nworld\"", tok.slice(ed.getLine(0)));
-            found_string = true;
-        }
-    }
-    try std.testing.expect(found_string);
-}
 
 test "setText: CRLF wird zu LF normalisiert" {
     const allocator = std.testing.allocator;
