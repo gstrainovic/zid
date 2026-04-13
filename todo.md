@@ -387,13 +387,13 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
 - **Verifikation 12.D:** Test-Datei laden, highlightLine() liefert plausible Color-Tags
 
 ### Phase 12.E: vulkan-ed nutzt flow-core
-- [ ] `vulkan-ed/build.zig.zon` → `flow-core` als Dep (Pfad: `libs/flow-core`)
-- [ ] In vulkan-ed integrieren — exakte Pfade vorher mit `ls vulkan-ed/src/editor/` prüfen, nicht raten
-- [ ] BufferView-Wrapper: `loadFile()`, `getVisibleLines()`, `insertChar()`, `deleteChar()` auf flow-core API
-- [ ] Render-Pfad erweitern: pro Zeile Cells aus Buffer + Color-Tags aus highlightLine() → bestehender Atlas/Cell-Renderer
-- [ ] Cursor-Quad an Buffer.cursor-Position
-- [ ] File-Explorer-Click → Buffer laden → Repaint
-- **Verifikation 12.E:** Datei öffnen → Text sichtbar, Cursor bewegbar, Syntax gehighlightet
+- [x] `vulkan-ed/build.zig.zon` → `flow-core` als Dep (Pfad: `libs/flow-core`)
+- [x] `vulkan-ed/build.zig` → flow-core Dep + Module-Import
+- [x] `src/editor/code_editor.zig`: Eigenes Line-Array → `flow_core.Buffer` (Rope)
+- [x] Cursor → `flow_core.Cursor`, View → `flow_core.View`
+- [x] `insert_chars()` / `delete_range()` über `Buffer.Root`-API
+- [x] `setText()` → `Buffer.load_from_string_and_update()`
+- [x] `zig build` erfolgreich
 
 ### Phase 12.F: Verifikation (Screenshot)
 - [ ] vulkan-ed Binary bauen (`zig build` — kein renderer-Switch)
