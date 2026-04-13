@@ -359,22 +359,33 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
 - [x] Neues Build-Modul `vulkan_ed_gui_mod` in `libs/flow/build.zig` parallel zu `gui_mod`. Imports: `wio`, `cbor`, `thespian`, `input`, `vaxis`
 - [x] **Verifikation B:** Build durch mit `-Drenderer=vulkan_ed`
 
-### Phase 11.C — wgpu-Surface auf wio-Window
-- [ ] `wgpu_native_zig` Dependency in `libs/flow/build.zig.zon` (analog vulkan-ed)
-- [ ] In `gui.zig`/`entry()`: nach `createWindow` → wgpu Instance/Adapter/Device/Surface aufbauen (Code aus `vulkan-ed/src/main.zig` Phase 3 kopieren — funktioniert dort bereits)
-- [ ] Render-Loop: `clear` Surface mit Hintergrundfarbe, hardgecodet zur Verifikation
-- [ ] Resize-Event behandelt Surface-Reconfigure
-- **Verifikation C:** Fenster zeigt einfarbig blaues Bild, Resize funktioniert
+### Phase 11.C — Vendoring (verschoben aus 11.H, war falsch sortiert)
 
-### Phase 11.D — vaxis.Screen → wgpu Cell-Rendering (KERN)
-- [ ] Glyph-Atlas-Modul aus vulkan-ed übernehmen: `vulkan-ed/src/text/` komplett nach `libs/flow/src/renderer/vulkan_ed/text/`
-- [ ] JetBrainsMono.ttf via `@embedFile` mitnehmen
-- [ ] Cell-Renderer schreiben:
-  - Pro Cell: Background-Quad an `(col*cw, row*ch)` mit Cell.bg-Farbe
-  - Glyph aus Atlas an gleicher Position mit Cell.fg-Farbe
-- [ ] `process_renderer_event()` in `renderer.zig`: empfängt von Flow's TUI per Thespian-Message ein gepacktes Screen-Diff (Format aus `src/renderer/win32/renderer.zig:195-280` übernehmen) → decode → an `gui.zig` weitergeben → in shared Buffer schreiben → `requestRender()` triggert Repaint
-- [ ] Cursor: separater Quad-Pass am Cursor-Pos in Cursor-Farbe (block/beam/underline)
-- **Verifikation D:** Flow zeigt Editor-Inhalt korrekt, Tipp-Test, Syntax-Highlighting, Selektion sichtbar
+**Begründung Reorder (2026-04-13):** Ursprünglicher Plan wollte erst wgpu-Surface neu schreiben (11.C), dann später vendoren (11.H). Falsch — vulkan-ed hat funktionierenden wio+wgpu+Atlas+Cell-Render-Stack. Erst vendoren, dann adaptieren. Spart ~2 Tage Doppelarbeit + verhindert Bug-Drift zwischen beiden Implementierungen.
+
+- [ ] `vulkan-ed/src/text/` → `libs/flow/src/renderer/vulkan_ed/text/`
+- [ ] `vulkan-ed/src/clay_renderer/` → `libs/flow/src/renderer/vulkan_ed/clay_renderer/`
+- [ ] `vulkan-ed/src/rendering/` → `libs/flow/src/renderer/vulkan_ed/rendering/`
+- [ ] `vulkan-ed/src/svg/` → `libs/flow/src/renderer/vulkan_ed/svg/` (nur falls von text/ benötigt)
+- [ ] `vulkan-ed/src/platform/` → `libs/flow/src/renderer/vulkan_ed/platform/` (wgpu-Surface Helpers)
+- [ ] Shaders (`*.wgsl`) + `JetBrainsMono.ttf` mitnehmen
+- [ ] Imports anpassen (relative Pfade)
+- [ ] `wgpu_native_zig` + `clay-zig` Deps in `libs/flow/build.zig.zon`
+- [ ] Build-Modul `vulkan_ed_gui_mod` um neue Imports erweitern
+- **Verifikation C:** `zig build -Drenderer=vulkan_ed` baut ohne Fehler
+
+### Phase 11.D — Render-Loop adaptieren (vendored Stack → Flow)
+- [ ] `gui.zig`/`entry()` ersetzt `vulkan-ed/src/main.zig` Worker-Loop. Anpassungen:
+  - `main()` → `entry(pid: thespian.pid)`
+  - Standalone GPA → `std.heap.page_allocator` (Worker-Thread-tauglich)
+  - Editor-State raus, stattdessen `vaxis.Screen` Cell-Buffer als Render-Quelle
+- [ ] Cell-Renderer schreiben (auf vendored Atlas + GPU-Pipeline):
+  - Pro Cell: Background-Quad mit Cell.bg
+  - Glyph aus Atlas mit Cell.fg
+  - Cursor: separater Quad-Pass
+- [ ] `process_renderer_event()` empfängt Screen-Diff (Wire-Format aus `src/renderer/win32/renderer.zig:195-280`) → in Shared-Cell-Buffer schreiben
+- [ ] Resize-Event: Surface reconfigure + Cell-Counts neu berechnen
+- **Verifikation D:** Screenshot zeigt Flow-Editor mit Text + Syntax + Cursor
 
 ### Phase 11.E — Input: wio → Thespian → Flow-TUI
 - [ ] wio-Event-Mapping nach Pattern aus `src/renderer/vaxis/input.zig` — Tasten in Flow's `input` Modul-Codes übersetzen
@@ -402,11 +413,7 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
   - `zig build check` → vaxis (TUI) ✅
   - `zig build check -Drenderer=vulkan_ed` → vulkan_ed baut erfolgreich ✅
 
-### Phase 11.H — vulkan-ed-Code vendoren
-- [ ] **Entscheidung:** Code von `vulkan-ed/src/text/`, `vulkan-ed/src/clay_renderer/`, `vulkan-ed/src/rendering/` nach `libs/flow/src/renderer/vulkan_ed/` **kopieren** (Vendoring), nicht als Submodule. Begründung: Flow bleibt standalone, vulkan-ed-Repo bleibt für eigenständige Experimente erhalten
-- [ ] Verzeichnisse spiegeln, Imports anpassen
-- [ ] Shader-Dateien (`*.wgsl`) nach `libs/flow/src/renderer/vulkan_ed/shaders/`. In `build.zig` als install-step ergänzen analog `vulkan-ed/build.zig`
-- [ ] `JetBrainsMono.ttf` → `libs/flow/src/renderer/vulkan_ed/fonts/`
+### Phase 11.H — ENTFERNT (in 11.C aufgegangen)
 
 ### Phase 11.I — Verifikation & Aufräumen
 - [ ] Alle 3 Renderer testen:
@@ -421,17 +428,19 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
 
 | Phase | Aufwand | Risiko | Blocker für |
 |-------|---------|--------|-------------|
-| 11.A | 1 Tag   | niedrig | alle |
-| 11.B | 1 Tag   | niedrig | C–F |
-| 11.C | 0.5 Tag | mittel (wgpu-Surface auf wio-HWND) | D |
-| 11.D | 2–3 Tage | hoch (Atlas + Cell-Render-Pipeline) | I |
-| 11.E | 1 Tag   | mittel (Key-Mapping vollständig) | I |
-| 11.F | 0.5 Tag | niedrig | I |
-| 11.G | 0.5 Tag | niedrig | — |
-| 11.H | 1 Tag   | niedrig (mechanisches Vendoring) | D |
-| 11.I | 0.5 Tag | — | — |
+| 11.A | 1 Tag   | niedrig | alle | ✅ |
+| 11.B | 1 Tag   | niedrig | C–F | ✅ |
+| 11.C | 1 Tag   | niedrig (mechanisches Vendoring) | D | offen |
+| 11.D | 2–3 Tage | hoch (Cell-Pipeline auf vaxis.Screen) | I | offen |
+| 11.E | 1 Tag   | mittel (Key-Mapping vollständig) | I | offen |
+| 11.F | 0.5 Tag | niedrig | I | offen |
+| 11.G | 0.5 Tag | niedrig | — | ✅ |
+| 11.H | — | — | — | entfernt |
+| 11.I | 0.5 Tag | — | — | offen |
 
-**Gesamt:** ~8–10 Arbeitstage. **Kritischer Pfad:** A → B → C → D. Phasen E/F/G können parallel zu D laufen.
+**Gesamt:** ~6–8 Arbeitstage. **Kritischer Pfad:** A → B → C → D. Phasen E/F können parallel zu D laufen.
+
+**Verworfen:** wgpu/wio in `gui.zig` neu schreiben. Stash in `libs/flow`: `Phase 11.C wgpu re-init (verkehrt rum, sollte vendored werden)` — bei Bedarf via `git stash list` einsehbar, sonst droppen.
 
 ## 🛠️ Windows-Build ohne Admin
 
