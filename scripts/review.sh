@@ -65,7 +65,7 @@ if command -v gemini &>/dev/null; then
 fi
 
 if [[ "$CLAUDE_AVAIL" == "false" && "$GEMINI_AVAIL" == "false" ]]; then
-    echo "ERROR: Weder claude noch gemini CLI im PATH" >&2
+    echo "ERROR: Weder gemini noch claude CLI im PATH" >&2
     exit 2
 fi
 
@@ -98,32 +98,8 @@ trap 'rm -f "$RESPONSE_FILE" "$RESPONSE_FILE.err"' EXIT
 
 SUCCESS=false
 
-if [[ "$CLAUDE_AVAIL" == "true" ]]; then
-    # --dangerously-skip-permissions: Reviewer ist read-only, braucht keine Bestaetigungen.
-    # Verhindert auch Haenger wenn das Script aus einer anderen Claude-Instanz (Qwen) aufgerufen wird.
-    set +e
-    claude -p "$USER_PROMPT" \
-        --model sonnet \
-        --effort medium \
-        --output-format json \
-        --json-schema "$SCHEMA" \
-        --dangerously-skip-permissions \
-        --append-system-prompt "$SYSTEM_PROMPT" \
-        --add-dir "$REPO_ROOT" \
-        --allowedTools "Read" "Glob" "Grep" "Bash(git log:*)" "Bash(git diff:*)" "Bash(git show:*)" "Bash(git tag:*)" "Bash(ls:*)" "Bash(sha256sum:*)" \
-        >"$RESPONSE_FILE" 2>"$RESPONSE_FILE.err"
-    CLAUDE_EXIT=$?
-    set -e
-    
-    if [[ $CLAUDE_EXIT -eq 0 ]]; then
-        SUCCESS=true
-    else
-        echo "Claude failed (exit $CLAUDE_EXIT), trying fallback..." >&2
-    fi
-fi
-
-if [[ "$SUCCESS" == "false" && "$GEMINI_AVAIL" == "true" ]]; then
-    # Construct combined prompt for Gemini
+# ---- PRIMAER: Gemini ----
+if [[ "$GEMINI_AVAIL" == "true" ]]; then
     GEMINI_PROMPT="SYSTEM_PROMPT:
 $SYSTEM_PROMPT
 
@@ -139,14 +115,37 @@ $USER_PROMPT"
         >"$RESPONSE_FILE" 2>"$RESPONSE_FILE.err"
     GEMINI_EXIT=$?
     set -e
-    
+
     if [[ $GEMINI_EXIT -eq 0 ]]; then
         SUCCESS=true
     else
-        echo "ERROR: gemini CLI exit=$GEMINI_EXIT" >&2
+        echo "Gemini failed (exit $GEMINI_EXIT), trying Claude fallback..." >&2
+    fi
+fi
+
+# ---- FALLBACK: Claude ----
+if [[ "$SUCCESS" == "false" && "$CLAUDE_AVAIL" == "true" ]]; then
+    set +e
+    claude -p "$USER_PROMPT" \
+        --model sonnet \
+        --effort medium \
+        --output-format json \
+        --json-schema "$SCHEMA" \
+        --dangerously-skip-permissions \
+        --append-system-prompt "$SYSTEM_PROMPT" \
+        --add-dir "$REPO_ROOT" \
+        --allowedTools "Read" "Glob" "Grep" "Bash(git log:*)" "Bash(git diff:*)" "Bash(git show:*)" "Bash(git tag:*)" "Bash(ls:*)" "Bash(sha256sum:*)" \
+        >"$RESPONSE_FILE" 2>"$RESPONSE_FILE.err"
+    CLAUDE_EXIT=$?
+    set -e
+
+    if [[ $CLAUDE_EXIT -eq 0 ]]; then
+        SUCCESS=true
+    else
+        echo "ERROR: claude CLI exit=$CLAUDE_EXIT" >&2
         cat "$RESPONSE_FILE.err" >&2
         cat <<EOF
-{"verdict":"REJECT","reasons":["gemini CLI Fehler exit=$GEMINI_EXIT — siehe stderr"],"required_fixes":["Infrastruktur pruefen: gemini --version, gemini auth status"]}
+{"verdict":"REJECT","reasons":["claude CLI Fehler exit=$CLAUDE_EXIT — siehe stderr"],"required_fixes":["Infrastruktur pruefen: claude --version, claude auth status"]}
 EOF
         exit 2
     fi

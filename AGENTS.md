@@ -58,9 +58,9 @@
 ./gui-screenshot.sh screenshots/phase4_text.png 5
 ```
 
-## Supervisor Gates (Claude als Reviewer)
+## Supervisor Gates (Gemini primär, Claude Fallback als Reviewer)
 
-Zwischen jeder Phase ist ein **Review-Gate durch Claude** Pflicht. Qwen darf nicht
+Zwischen jeder Phase ist ein **Review-Gate** Pflicht. Qwen darf nicht
 eigenmaechtig mit Phase N+1 beginnen, solange Phase N nicht ACK ist.
 
 ### Workflow pro Phase
@@ -128,13 +128,14 @@ länger braucht, brich den Vorgang ab und prüfe die Ursache.
 
 ### Token-Budget
 
-Der Reviewer laeuft mit **Sonnet 4.6**, **Effort: medium**, unter
+Der Reviewer laeuft primär mit **Gemini** (via `gemini --yolo`), Fallback **Claude Sonnet 4.6**, **Effort: medium**, unter
 `--max-budget-usd 0.60`. Qwen darf review.sh beliebig oft aufrufen —
 billiger ist es trotzdem, den Screenshot **selbst visuell zu pruefen**
 (Schritt 5 im 8-Schritte-Workflow) bevor review.sh aufgerufen wird.
 
 Warum diese Wahl:
-- **Sonnet statt Opus:** Reviewer-Aufgabe ist strukturiert (Claim-vs-Evidenz,
+- **Gemini primär:** Schneller, günstiger, reicht für strukturierte Reviews.
+- **Sonnet statt Opus als Fallback:** Reviewer-Aufgabe ist strukturiert (Claim-vs-Evidenz,
   JSON-Output), Opus waere Overkill und ~5x teurer.
 - **Effort medium statt high:** Reviews sind kein Research, keine Algorithmen.
   Medium reicht fuer Bildvergleich + Diff-Check und spart Thinking-Tokens.
