@@ -19,3 +19,6 @@
 [submodule "libs/zigjr"]
 	path = libs/zigjr
 	url = https://github.com/williamw520/zigjr
+[submodule "libs/flow"]
+	path = libs/flow
+	url = https://github.com/neurocyte/flow.git

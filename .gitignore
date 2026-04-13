@@ -22,3 +22,8 @@ libs/wio_test_vulkan/
 temp_*.png
 
 *.log
+
+# Local files
+nul
+unicode.lib
+.git.lock
