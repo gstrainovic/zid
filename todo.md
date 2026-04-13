@@ -334,6 +334,117 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
 - [ ] Tabs → pro Tab ein Flow Buffer
 - **Verifikation:** Screenshot → Explorer + Flow-Editor + Tabs
 
+## 🎯 Phase 11: vulkan-ed als 3. Renderer in Flow
+
+**Architektur-Entscheidung (final):** vulkan-ed wird **nicht** als externes Repo neben Flow betrieben, sondern als **dritte Renderer-Variante** innerhalb von Flow integriert — analog zu `src/renderer/vaxis/` (Terminal) und `src/renderer/win32/` (D3D11+DirectWrite).
+
+**Threading-Modell:** Weg 1 — Thespian bleibt auf Main-Thread (`ctx.run()`), wio+wgpu+Clay laufen auf Worker-Thread, gestartet via `std.Thread.spawn` aus dem TUI-Actor heraus. Exakt das Muster von `libs/flow/src/win32/gui.zig:304-310`. Begründung: auch Flows experimentelle `wio-sokol-gui`-Branch geht diesen Weg — Thespian's `ctx.run()` will den Main-Thread (Signal-Handler, Entry-Actor, Teardown). macOS bleibt damit faktisch ausgeschlossen, ist laut Projekt-Scope aber sowieso kein Ziel.
+
+**Build-Switch:** `-Drenderer={vaxis|win32|vulkan_ed|auto}` ersetzt das binäre `-Dgui`-Flag. Default `auto` wählt plattformabhängig.
+
+### Phase 11.A — Renderer-Skeleton (baut, schwarzes Fenster)
+- [x] Ordner `libs/flow/src/renderer/vulkan_ed/` mit `renderer.zig`, `gui.zig`, `Plane.zig`, `Cell.zig`, `style.zig`, `input.zig`
+- [x] `Cell.zig`/`Plane.zig`/`style.zig` 1:1 von `src/renderer/vaxis/` kopieren (reines Daten-Layout, keine Backend-Logik)
+- [x] `renderer.zig` als Stub mit voller API-Oberfläche von `src/renderer/win32/renderer.zig` (510 Zeilen): `init`, `deinit`, `run`, `render`, `stop`, `stdplane`, `process_renderer_event`, `set_fontsize`, `adjust_fontsize`, `reset_fontsize`, `set_fontface`, `reset_fontface`, `get_fontfaces`, `set_terminal_title`, `set_terminal_style`, `set_sgr_pixel_mode_support`, `set_mouse_cursor`. Bodies: `_ = self; return;` oder `return error.NotImplemented`
+- [x] `init()` ruft `gui.init()`, `run()` ruft `try gui.start()` (gibt Worker-Thread zurück, blockiert nicht)
+- [x] **Verifikation A:** `zig build check` + `zig build check -Drenderer=vulkan_ed` bauen erfolgreich
+
+### Phase 11.B — wio-Window auf Worker-Thread
+- [x] `gui.zig` Skeleton aus `src/win32/gui.zig:300-380` ableiten:
+  - [x] `global` Struct mit `init_called`, `start_called`, `window`, `tui_pid`
+  - [x] `pub fn init() void` — wio einmalig initialisieren
+  - [x] `pub fn start() !std.Thread` — `tui_pid = thespian.self_pid().clone()`, dann `std.Thread.spawn(.{}, entry, .{})`
+  - [x] `fn entry() !void` — wio.createWindow + Event-Loop `while (wio.run()) |event| handleEvent(event)`
+- [x] `wio` Dependency in `libs/flow/build.zig.zon` ergänzen (Pfad zu lokalem Submodule)
+- [x] Neues Build-Modul `vulkan_ed_gui_mod` in `libs/flow/build.zig` parallel zu `gui_mod`. Imports: `wio`, `cbor`, `thespian`, `input`, `vaxis`
+- [x] **Verifikation B:** Build durch mit `-Drenderer=vulkan_ed`
+
+### Phase 11.C — wgpu-Surface auf wio-Window
+- [ ] `wgpu_native_zig` Dependency in `libs/flow/build.zig.zon` (analog vulkan-ed)
+- [ ] In `gui.zig`/`entry()`: nach `createWindow` → wgpu Instance/Adapter/Device/Surface aufbauen (Code aus `vulkan-ed/src/main.zig` Phase 3 kopieren — funktioniert dort bereits)
+- [ ] Render-Loop: `clear` Surface mit Hintergrundfarbe, hardgecodet zur Verifikation
+- [ ] Resize-Event behandelt Surface-Reconfigure
+- **Verifikation C:** Fenster zeigt einfarbig blaues Bild, Resize funktioniert
+
+### Phase 11.D — vaxis.Screen → wgpu Cell-Rendering (KERN)
+- [ ] Glyph-Atlas-Modul aus vulkan-ed übernehmen: `vulkan-ed/src/text/` komplett nach `libs/flow/src/renderer/vulkan_ed/text/`
+- [ ] JetBrainsMono.ttf via `@embedFile` mitnehmen
+- [ ] Cell-Renderer schreiben:
+  - Pro Cell: Background-Quad an `(col*cw, row*ch)` mit Cell.bg-Farbe
+  - Glyph aus Atlas an gleicher Position mit Cell.fg-Farbe
+- [ ] `process_renderer_event()` in `renderer.zig`: empfängt von Flow's TUI per Thespian-Message ein gepacktes Screen-Diff (Format aus `src/renderer/win32/renderer.zig:195-280` übernehmen) → decode → an `gui.zig` weitergeben → in shared Buffer schreiben → `requestRender()` triggert Repaint
+- [ ] Cursor: separater Quad-Pass am Cursor-Pos in Cursor-Farbe (block/beam/underline)
+- **Verifikation D:** Flow zeigt Editor-Inhalt korrekt, Tipp-Test, Syntax-Highlighting, Selektion sichtbar
+
+### Phase 11.E — Input: wio → Thespian → Flow-TUI
+- [ ] wio-Event-Mapping nach Pattern aus `src/renderer/vaxis/input.zig` — Tasten in Flow's `input` Modul-Codes übersetzen
+- [ ] Pro Event: `gui.tui_pid.send(.{"i", scancode, codepoint, modifiers, key_string})` (exakt das Wire-Format aus `src/win32/gui.zig` — dann braucht TUI-Layer keine Anpassung)
+- [ ] Resize-Event: Fenstergröße in Cell-Counts umrechnen, `tui_pid.send(.{"RDR", "Resize", cols, rows, cell_w, cell_h})`
+- **Verifikation E:** Tippen, Pfeiltasten, Enter, Backspace funktionieren. Resize ändert Editor-Layout
+
+### Phase 11.F — Font/Theme/Window-Title
+- [ ] `set_fontsize`, `adjust_fontsize`, `reset_fontsize` → Atlas regenerieren mit neuer Größe
+- [ ] `set_terminal_title` → `wio.setWindowTitle()`
+- [ ] `set_terminal_style` → speichern, beim nächsten Render verwenden
+- [ ] `set_mouse_cursor` → `wio.setCursor()`
+- **Verifikation F:** Ctrl++/Ctrl+- ändert Fontgröße live, Fenstertitel zeigt Dateiname
+
+### Phase 11.G — build.zig Switch: `-Drenderer=`
+- [x] `libs/flow/build.zig` Zeile 13 erweitern:
+  ```zig
+  const RendererKind = enum { auto, vaxis, win32, vulkan_ed };
+  const renderer_kind = b.option(RendererKind, "renderer", "Renderer backend") orelse .auto;
+  const gui = b.option(bool, "gui", "Standalone GUI mode") orelse (renderer_kind != .auto and renderer_kind != .vaxis);
+  ```
+- [x] Im `renderer_mod`-blk Verzweigung auf `renderer_kind` einbauen
+- [x] Default-Logik: `auto` + `gui=true` → Plattform-Default (Windows: `win32`, sonst `vulkan_ed`)
+- [x] **Verifikation G:**
+  - `zig build check` → vaxis (TUI) ✅
+  - `zig build check -Drenderer=vulkan_ed` → vulkan_ed baut erfolgreich ✅
+
+### Phase 11.H — vulkan-ed-Code vendoren
+- [ ] **Entscheidung:** Code von `vulkan-ed/src/text/`, `vulkan-ed/src/clay_renderer/`, `vulkan-ed/src/rendering/` nach `libs/flow/src/renderer/vulkan_ed/` **kopieren** (Vendoring), nicht als Submodule. Begründung: Flow bleibt standalone, vulkan-ed-Repo bleibt für eigenständige Experimente erhalten
+- [ ] Verzeichnisse spiegeln, Imports anpassen
+- [ ] Shader-Dateien (`*.wgsl`) nach `libs/flow/src/renderer/vulkan_ed/shaders/`. In `build.zig` als install-step ergänzen analog `vulkan-ed/build.zig`
+- [ ] `JetBrainsMono.ttf` → `libs/flow/src/renderer/vulkan_ed/fonts/`
+
+### Phase 11.I — Verifikation & Aufräumen
+- [ ] Alle 3 Renderer testen:
+  - `zig build run` (vaxis, Terminal)
+  - `zig build -Dgui run` (win32, D3D11)
+  - `zig build -Drenderer=vulkan_ed run` (wgpu+wio)
+- [ ] Großdatei-Test: `libs/gooey/src/layout/engine.zig` (3363 Zeilen) öffnen, scrollen, Performance vergleichen mit win32-Renderer
+- [ ] Linux-Build prüfen (Cross-compile oder WSL): `zig build -Drenderer=vulkan_ed -Dtarget=x86_64-linux`
+- [ ] Phase 10.3 anhängen: Explorer/Tabs aus vulkan-ed → Flow-Buffer-Kommandos
+
+### Reihenfolge & Aufwand
+
+| Phase | Aufwand | Risiko | Blocker für |
+|-------|---------|--------|-------------|
+| 11.A | 1 Tag   | niedrig | alle |
+| 11.B | 1 Tag   | niedrig | C–F |
+| 11.C | 0.5 Tag | mittel (wgpu-Surface auf wio-HWND) | D |
+| 11.D | 2–3 Tage | hoch (Atlas + Cell-Render-Pipeline) | I |
+| 11.E | 1 Tag   | mittel (Key-Mapping vollständig) | I |
+| 11.F | 0.5 Tag | niedrig | I |
+| 11.G | 0.5 Tag | niedrig | — |
+| 11.H | 1 Tag   | niedrig (mechanisches Vendoring) | D |
+| 11.I | 0.5 Tag | — | — |
+
+**Gesamt:** ~8–10 Arbeitstage. **Kritischer Pfad:** A → B → C → D. Phasen E/F/G können parallel zu D laufen.
+
+## 🛠️ Windows-Build ohne Admin
+
+**Problem:** Flow's tree-sitter-Tarballs enthalten Unix-Symlinks (Grammars teilen Query-Dateien). Auf Windows ohne `SeCreateSymbolicLinkPrivilege` (Admin oder Developer Mode) bricht der Zig-Package-Manager beim Unpack mit `AccessDenied` ab.
+
+**Lösung:** `scripts/fix_zig_cache.py` befüllt `%LOCALAPPDATA%\zig\p\<name>-<version>-<hash>\` manuell — Tarball wird heruntergeladen und mit Symlinks-als-Kopien ausgepackt. Nutzt `\\?\`-Pfad-Präfix für Windows Long-Path-Workaround.
+
+**Nutzung bei Symlink-Fehler:**
+```bash
+python scripts/fix_zig_cache.py add "<name>-<version>-<hash>" "<tarball-url>"
+```
+Hash und URL kommen direkt aus der Zig-Fehlermeldung. Erfolgreich getestet mit `tree_sitter-0.26.7-z0LhyJOPZzF4S6ZW6MrFTfJgiM9Fp81hqKrXUKSBaUAc`.
+
 ## 📚 Verfügbare Libraries
 
 | Library | Zweck | Status |
