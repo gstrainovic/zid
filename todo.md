@@ -334,125 +334,73 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
 - [ ] Tabs → pro Tab ein Flow Buffer
 - **Verifikation:** Screenshot → Explorer + Flow-Editor + Tabs
 
-## 🎯 Phase 11: vulkan-ed als 3. Renderer in Flow
+## 🎯 Phase 12: flow-core Library extrahieren
 
-**Architektur-Entscheidung (final):** vulkan-ed wird **nicht** als externes Repo neben Flow betrieben, sondern als **dritte Renderer-Variante** innerhalb von Flow integriert — analog zu `src/renderer/vaxis/` (Terminal) und `src/renderer/win32/` (D3D11+DirectWrite).
+**Begründung:** Phase 11 (vulkan-ed als 3. Renderer in Flow) war falsche Richtung — Flow's Thespian-Architektur ist zu stark gekoppelt. Stattdessen: Flow's Editor-Kern (Buffer, Cursor, Selection, Syntax, Keybindings) als **flow-core**-Library extrahieren. vulkan-ed nutzt diese Library direkt mit eigener Architektur (wgpu+Clay+wio). Ermöglicht Wiederverwendbarkeit (jeder kann flow-core nutzen), trennt UI-Concerns von Editor-Kern, und vulkan-ed hat volle Kontrolle über Rendering.
 
-**Threading-Modell:** Weg 1 — Thespian bleibt auf Main-Thread (`ctx.run()`), wio+wgpu+Clay laufen auf Worker-Thread, gestartet via `std.Thread.spawn` aus dem TUI-Actor heraus. Exakt das Muster von `libs/flow/src/win32/gui.zig:304-310`. Begründung: auch Flows experimentelle `wio-sokol-gui`-Branch geht diesen Weg — Thespian's `ctx.run()` will den Main-Thread (Signal-Handler, Entry-Actor, Teardown). macOS bleibt damit faktisch ausgeschlossen, ist laut Projekt-Scope aber sowieso kein Ziel.
+| Phase | Titel | Aufwand | Risiko | Abhängig |
+|-------|-------|---------|--------|----------|
+| 12.A | flow-core Skeleton (Repo + build.zig) | 0.5 Tag | niedrig | — |
+| 12.B | Buffer-Layer kopieren + entkoppeln | 1 Tag | mittel (transitive Deps) | 12.A |
+| 12.C | Diff + Snippet + Keybind-Parser | 0.5 Tag | niedrig | 12.B |
+| 12.D | flow-syntax integrieren + ColorTag-Output | 1 Tag | mittel (Tokenizer-API) | 12.C |
+| 12.E | vulkan-ed nutzt flow-core (BufferView + Render) | 2 Tage | hoch (Editor-State Sync) | 12.D |
+| 12.F | Verifikation (Screenshot + Tests) | 0.5 Tag | — | 12.E |
+| **Gesamt** | | **~5.5 Tage** | | |
 
-**Build-Switch:** `-Drenderer={vaxis|win32|vulkan_ed|auto}` ersetzt das binäre `-Dgui`-Flag. Default `auto` wählt plattformabhängig.
+### Phase 12.A: flow-core Skeleton
+- [ ] Neues Verzeichnis `libs/flow-core/` anlegen
+- [ ] `build.zig` schreiben (Expose `flow-core` Package)
+  - [ ] Zielplattformen: Linux, Windows
+  - [ ] Abhängigkeiten: flow-syntax (später)
+- [ ] `build.zig.zon` erstellen (Versionierung)
+- [ ] `src/root.zig` (Public API Placeholder)
+- **Verifikation 12.A:** `zig build` in flow-core funktioniert (0 Warnings)
 
-### Phase 11.A — Renderer-Skeleton (baut, schwarzes Fenster)
-- [x] Ordner `libs/flow/src/renderer/vulkan_ed/` mit `renderer.zig`, `gui.zig`, `Plane.zig`, `Cell.zig`, `style.zig`, `input.zig`
-- [x] `Cell.zig`/`Plane.zig`/`style.zig` 1:1 von `src/renderer/vaxis/` kopieren (reines Daten-Layout, keine Backend-Logik)
-- [x] `renderer.zig` als Stub mit voller API-Oberfläche von `src/renderer/win32/renderer.zig` (510 Zeilen): `init`, `deinit`, `run`, `render`, `stop`, `stdplane`, `process_renderer_event`, `set_fontsize`, `adjust_fontsize`, `reset_fontsize`, `set_fontface`, `reset_fontface`, `get_fontfaces`, `set_terminal_title`, `set_terminal_style`, `set_sgr_pixel_mode_support`, `set_mouse_cursor`. Bodies: `_ = self; return;` oder `return error.NotImplemented`
-- [x] `init()` ruft `gui.init()`, `run()` ruft `try gui.start()` (gibt Worker-Thread zurück, blockiert nicht)
-- [x] **Verifikation A:** `zig build check` + `zig build check -Drenderer=vulkan_ed` bauen erfolgreich
+### Phase 12.B: Buffer-Layer kopieren
+- [ ] `libs/flow/src/buffer/` → `libs/flow-core/src/buffer/` kopieren (ohne Thespian)
+  - [ ] `Buffer.zig` (Rope Buffer, Kern — keine externen Deps außer cbor/file_type_config)
+  - [ ] `Cursor.zig` (Position + Navigation)
+  - [ ] `Selection.zig` (Start/End Marks)
+  - [ ] `View.zig` (Viewport Culling für Rendering)
+  - [ ] `reflow.zig` (Line-Breaking, Unicode Width)
+  - [ ] `unicode.zig` (UTF-8 utilities)
+- [ ] Alle Thespian-Imports entfernen
+- [ ] Unit-Tests für Buffer mitnehmen
+- **Verifikation 12.B:** `zig build test` in flow-core, alle Buffer-Tests grün
 
-### Phase 11.B — wio-Window auf Worker-Thread
-- [x] `gui.zig` Skeleton aus `src/win32/gui.zig:300-380` ableiten:
-  - [x] `global` Struct mit `init_called`, `start_called`, `window`, `tui_pid`
-  - [x] `pub fn init() void` — wio einmalig initialisieren
-  - [x] `pub fn start() !std.Thread` — `tui_pid = thespian.self_pid().clone()`, dann `std.Thread.spawn(.{}, entry, .{})`
-  - [x] `fn entry() !void` — wio.createWindow + Event-Loop `while (wio.run()) |event| handleEvent(event)`
-- [x] `wio` Dependency in `libs/flow/build.zig.zon` ergänzen (Pfad zu lokalem Submodule)
-- [x] Neues Build-Modul `vulkan_ed_gui_mod` in `libs/flow/build.zig` parallel zu `gui_mod`. Imports: `wio`, `cbor`, `thespian`, `input`, `vaxis`
-- [x] **Verifikation B:** Build durch mit `-Drenderer=vulkan_ed`
+### Phase 12.C: Diff + Snippet + Keybind-Parser
+- [ ] `libs/flow/src/diff.zig` → `libs/flow-core/src/diff.zig` (Rope-Diffs)
+- [ ] `libs/flow/src/snippet.zig` → `libs/flow-core/src/snippet.zig` (Snippet Expansion)
+- [ ] `libs/flow/src/keybind/parse_flow.zig` → `libs/flow-core/src/keybind/parse_flow.zig` (Flow Keybind Syntax)
+- [ ] `libs/flow/src/keybind/parse_vim.zig` → `libs/flow-core/src/keybind/parse_vim.zig` (Vim Keybind Syntax)
+- [ ] Alle Thespian-Imports entfernen
+- [ ] Public API in `src/root.zig` aktualisieren
+- **Verifikation 12.C:** `zig build` + Tests grün, kein Thespian-Code übrig
 
-### Phase 11.C — Vendoring (verschoben aus 11.H, war falsch sortiert)
+### Phase 12.D: flow-syntax integrieren + ColorTag-Output
+- [ ] `flow-syntax` Dep in `libs/flow-core/build.zig.zon` (gleicher Hash wie Flow nutzt)
+- [ ] Wrapper-Modul `src/highlight.zig` neu schreiben:
+  - [ ] API: `highlightLine(buffer: Buffer, line: usize, allocator) ![]ColorTag`
+  - [ ] `ColorTag` struct: `{ start: usize, end: usize, fg: u32, bg: ?u32 }` — UI-agnostisch
+  - [ ] Nutzt flow-syntax Tokenizer + Themes-Mapping
+- **Verifikation 12.D:** Test-Datei laden, highlightLine() liefert plausible Color-Tags
 
-**Begründung Reorder (2026-04-13):** Ursprünglicher Plan wollte erst wgpu-Surface neu schreiben (11.C), dann später vendoren (11.H). Falsch — vulkan-ed hat funktionierenden wio+wgpu+Atlas+Cell-Render-Stack. Erst vendoren, dann adaptieren. Spart ~2 Tage Doppelarbeit + verhindert Bug-Drift zwischen beiden Implementierungen.
+### Phase 12.E: vulkan-ed nutzt flow-core
+- [ ] `vulkan-ed/build.zig.zon` → `flow-core` als Dep (Pfad: `libs/flow-core`)
+- [ ] In vulkan-ed integrieren — exakte Pfade vorher mit `ls vulkan-ed/src/editor/` prüfen, nicht raten
+- [ ] BufferView-Wrapper: `loadFile()`, `getVisibleLines()`, `insertChar()`, `deleteChar()` auf flow-core API
+- [ ] Render-Pfad erweitern: pro Zeile Cells aus Buffer + Color-Tags aus highlightLine() → bestehender Atlas/Cell-Renderer
+- [ ] Cursor-Quad an Buffer.cursor-Position
+- [ ] File-Explorer-Click → Buffer laden → Repaint
+- **Verifikation 12.E:** Datei öffnen → Text sichtbar, Cursor bewegbar, Syntax gehighlightet
 
-- [ ] `vulkan-ed/src/text/` → `libs/flow/src/renderer/vulkan_ed/text/`
-- [ ] `vulkan-ed/src/clay_renderer/` → `libs/flow/src/renderer/vulkan_ed/clay_renderer/`
-- [ ] `vulkan-ed/src/rendering/` → `libs/flow/src/renderer/vulkan_ed/rendering/`
-- [ ] `vulkan-ed/src/svg/` → `libs/flow/src/renderer/vulkan_ed/svg/` (nur falls von text/ benötigt)
-- [ ] `vulkan-ed/src/platform/` → `libs/flow/src/renderer/vulkan_ed/platform/` (wgpu-Surface Helpers)
-- [ ] Shaders (`*.wgsl`) + `JetBrainsMono.ttf` mitnehmen
-- [ ] Imports anpassen (relative Pfade)
-- [ ] `wgpu_native_zig` + `clay-zig` Deps in `libs/flow/build.zig.zon`
-- [ ] Build-Modul `vulkan_ed_gui_mod` um neue Imports erweitern
-- **Verifikation C:** `zig build -Drenderer=vulkan_ed` baut ohne Fehler
-
-### Phase 11.D — Render-Loop adaptieren (vendored Stack → Flow)
-- [ ] `gui.zig`/`entry()` ersetzt `vulkan-ed/src/main.zig` Worker-Loop. Anpassungen:
-  - `main()` → `entry(pid: thespian.pid)`
-  - Standalone GPA → `std.heap.page_allocator` (Worker-Thread-tauglich)
-  - Editor-State raus, stattdessen `vaxis.Screen` Cell-Buffer als Render-Quelle
-- [ ] Cell-Renderer schreiben (auf vendored Atlas + GPU-Pipeline):
-  - Pro Cell: Background-Quad mit Cell.bg
-  - Glyph aus Atlas mit Cell.fg
-  - Cursor: separater Quad-Pass
-- [ ] `process_renderer_event()` empfängt Screen-Diff (Wire-Format aus `src/renderer/win32/renderer.zig:195-280`) → in Shared-Cell-Buffer schreiben
-- [ ] Resize-Event: Surface reconfigure + Cell-Counts neu berechnen
-- **Verifikation D:** Screenshot zeigt Flow-Editor mit Text + Syntax + Cursor
-
-### Phase 11.E — Input: wio → Thespian → Flow-TUI
-- [ ] wio-Event-Mapping nach Pattern aus `src/renderer/vaxis/input.zig` — Tasten in Flow's `input` Modul-Codes übersetzen
-- [ ] Pro Event: `gui.tui_pid.send(.{"i", scancode, codepoint, modifiers, key_string})` (exakt das Wire-Format aus `src/win32/gui.zig` — dann braucht TUI-Layer keine Anpassung)
-- [ ] Resize-Event: Fenstergröße in Cell-Counts umrechnen, `tui_pid.send(.{"RDR", "Resize", cols, rows, cell_w, cell_h})`
-- **Verifikation E:** Tippen, Pfeiltasten, Enter, Backspace funktionieren. Resize ändert Editor-Layout
-
-### Phase 11.F — Font/Theme/Window-Title
-- [ ] `set_fontsize`, `adjust_fontsize`, `reset_fontsize` → Atlas regenerieren mit neuer Größe
-- [ ] `set_terminal_title` → `wio.setWindowTitle()`
-- [ ] `set_terminal_style` → speichern, beim nächsten Render verwenden
-- [ ] `set_mouse_cursor` → `wio.setCursor()`
-- **Verifikation F:** Ctrl++/Ctrl+- ändert Fontgröße live, Fenstertitel zeigt Dateiname
-
-### Phase 11.G — build.zig Switch: `-Drenderer=`
-- [x] `libs/flow/build.zig` Zeile 13 erweitern:
-  ```zig
-  const RendererKind = enum { auto, vaxis, win32, vulkan_ed };
-  const renderer_kind = b.option(RendererKind, "renderer", "Renderer backend") orelse .auto;
-  const gui = b.option(bool, "gui", "Standalone GUI mode") orelse (renderer_kind != .auto and renderer_kind != .vaxis);
-  ```
-- [x] Im `renderer_mod`-blk Verzweigung auf `renderer_kind` einbauen
-- [x] Default-Logik: `auto` + `gui=true` → Plattform-Default (Windows: `win32`, sonst `vulkan_ed`)
-- [x] **Verifikation G:**
-  - `zig build check` → vaxis (TUI) ✅
-  - `zig build check -Drenderer=vulkan_ed` → vulkan_ed baut erfolgreich ✅
-
-### Phase 11.H — ENTFERNT (in 11.C aufgegangen)
-
-### Phase 11.I — Verifikation & Aufräumen
-- [ ] Alle 3 Renderer testen:
-  - `zig build run` (vaxis, Terminal)
-  - `zig build -Dgui run` (win32, D3D11)
-  - `zig build -Drenderer=vulkan_ed run` (wgpu+wio)
-- [ ] Großdatei-Test: `libs/gooey/src/layout/engine.zig` (3363 Zeilen) öffnen, scrollen, Performance vergleichen mit win32-Renderer
-- [ ] Linux-Build prüfen (Cross-compile oder WSL): `zig build -Drenderer=vulkan_ed -Dtarget=x86_64-linux`
-- [ ] Phase 10.3 anhängen: Explorer/Tabs aus vulkan-ed → Flow-Buffer-Kommandos
-
-### Reihenfolge & Aufwand
-
-| Phase | Aufwand | Risiko | Blocker für |
-|-------|---------|--------|-------------|
-| 11.A | 1 Tag   | niedrig | alle | ✅ |
-| 11.B | 1 Tag   | niedrig | C–F | ✅ |
-| 11.C | 1 Tag   | niedrig (mechanisches Vendoring) | D | offen |
-| 11.D | 2–3 Tage | hoch (Cell-Pipeline auf vaxis.Screen) | I | offen |
-| 11.E | 1 Tag   | mittel (Key-Mapping vollständig) | I | offen |
-| 11.F | 0.5 Tag | niedrig | I | offen |
-| 11.G | 0.5 Tag | niedrig | — | ✅ |
-| 11.H | — | — | — | entfernt |
-| 11.I | 0.5 Tag | — | — | offen |
-
-**Gesamt:** ~6–8 Arbeitstage. **Kritischer Pfad:** A → B → C → D. Phasen E/F können parallel zu D laufen.
-
-**Verworfen:** wgpu/wio in `gui.zig` neu schreiben. Stash in `libs/flow`: `Phase 11.C wgpu re-init (verkehrt rum, sollte vendored werden)` — bei Bedarf via `git stash list` einsehbar, sonst droppen.
-
-## 🛠️ Windows-Build ohne Admin
-
-**Problem:** Flow's tree-sitter-Tarballs enthalten Unix-Symlinks (Grammars teilen Query-Dateien). Auf Windows ohne `SeCreateSymbolicLinkPrivilege` (Admin oder Developer Mode) bricht der Zig-Package-Manager beim Unpack mit `AccessDenied` ab.
-
-**Lösung:** `scripts/fix_zig_cache.py` befüllt `%LOCALAPPDATA%\zig\p\<name>-<version>-<hash>\` manuell — Tarball wird heruntergeladen und mit Symlinks-als-Kopien ausgepackt. Nutzt `\\?\`-Pfad-Präfix für Windows Long-Path-Workaround.
-
-**Nutzung bei Symlink-Fehler:**
-```bash
-python scripts/fix_zig_cache.py add "<name>-<version>-<hash>" "<tarball-url>"
-```
-Hash und URL kommen direkt aus der Zig-Fehlermeldung. Erfolgreich getestet mit `tree_sitter-0.26.7-z0LhyJOPZzF4S6ZW6MrFTfJgiM9Fp81hqKrXUKSBaUAc`.
+### Phase 12.F: Verifikation (Screenshot)
+- [ ] vulkan-ed Binary bauen (`zig build` — kein renderer-Switch)
+- [ ] vulkan-ed starten, Datei öffnen (z.B. `libs/flow-core/src/buffer/Buffer.zig`)
+- [ ] Screenshot via `scripts/screenshot.ps1` analog Phase 11
+- [ ] Screenshot speichern: `screenshots/phase12_flow_core.png`
+- **Verifikation 12.F:** Screenshot zeigt Datei-Inhalt mit Syntax-Highlighting + Cursor
 
 ## 📚 Verfügbare Libraries
 
