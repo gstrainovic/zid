@@ -1299,6 +1299,9 @@ pub fn load(self: *const Self, reader: *std.Io.Reader, eol_mode: *EolMode, utf8_
         buf = converted;
         utf8_sanitized.* = true;
     }
+    // Free any prior load's buffers before overwriting — otherwise repeated
+    // load_from_string / load_from_file calls leak every previous buffer.
+    if (self_.file_buf) |old| self.external_allocator.free(old);
     self_.file_buf = buf;
 
     eol_mode.* = .lf;
@@ -1312,6 +1315,7 @@ pub fn load(self: *const Self, reader: *std.Io.Reader, eol_mode: *EolMode, utf8_
     }
 
     var leaves = try self.external_allocator.alloc(Node, leaf_count);
+    if (self_.leaves_buf) |old| self.external_allocator.free(old);
     self_.leaves_buf = leaves;
     var cur_leaf: usize = 0;
     var b: usize = 0;

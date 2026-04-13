@@ -123,6 +123,7 @@ pub fn build(b: *std.Build) void {
     });
     editor_tests.root_module.addImport("clay", clay_dep.module("zclay"));
     editor_tests.root_module.addImport("wio", wio_dep.module("wio"));
+    editor_tests.root_module.addImport("flow_core", flow_core_dep.module("flow-core"));
 
     const test_step = b.step("test", "Run tests");
 

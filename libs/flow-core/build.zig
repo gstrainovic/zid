@@ -4,6 +4,12 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const syntax_dep = b.dependency("syntax", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    const syntax_mod = syntax_dep.module("syntax");
+
     const cbor_dep = b.dependency("cbor", .{
         .target = target,
         .optimize = optimize,
@@ -12,6 +18,9 @@ pub fn build(b: *std.Build) void {
 
     const file_type_config_mod = b.createModule(.{
         .root_source_file = b.path("src/file_type_config.zig"),
+        .imports = &.{
+            .{ .name = "syntax", .module = syntax_mod },
+        },
     });
 
     const typed_int_mod = b.createModule(.{
@@ -59,6 +68,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "diff", .module = diff_mod },
             .{ .name = "snippet", .module = snippet_mod },
             .{ .name = "keybind", .module = keybind_mod },
+            .{ .name = "syntax", .module = syntax_mod },
         },
     });
 
@@ -93,6 +103,7 @@ pub fn build(b: *std.Build) void {
                 .{ .name = "buffer", .module = buffer_mod },
                 .{ .name = "diff", .module = diff_mod },
                 .{ .name = "snippet", .module = snippet_mod },
+                .{ .name = "syntax", .module = syntax_mod },
             },
         }),
     });

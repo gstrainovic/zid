@@ -379,12 +379,15 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
 - [x] **Verifikation 12.C:** `zig build test` ✅ grün, kein Thespian-Code übrig
 
 ### Phase 12.D: flow-syntax integrieren + ColorTag-Output
-- [ ] `flow-syntax` Dep in `libs/flow-core/build.zig.zon` (gleicher Hash wie Flow nutzt)
-- [ ] Wrapper-Modul `src/highlight.zig` neu schreiben:
-  - [ ] API: `highlightLine(buffer: Buffer, line: usize, allocator) ![]ColorTag`
-  - [ ] `ColorTag` struct: `{ start: usize, end: usize, fg: u32, bg: ?u32 }` — UI-agnostisch
-  - [ ] Nutzt flow-syntax Tokenizer + Themes-Mapping
-- **Verifikation 12.D:** Test-Datei laden, highlightLine() liefert plausible Color-Tags
+- [x] `flow-syntax` Dep in `libs/flow-core/build.zig.zon` (neurocyte/flow-syntax@zig-0.15)
+- [x] Wrapper-Modul `libs/flow-core/src/highlight/mod.zig`:
+  - [x] API: `SyntaxHighlighter.create(lang)` / `createByPath(path, content)` — Filetype-Erkennung via Extension + First-Line
+  - [x] `updateFromString(content)` — Re-Parse
+  - [x] `tagsForLine(line_idx, line_len, alloc) ![]ColorTag` — Byte-Offsets relativ zur Zeile
+  - [x] `ColorTag` struct: `{ start: usize, end: usize, fg: u32 }` — UI-agnostisch (Catppuccin Macchiato)
+  - [x] Scope → RGB Mapping (keyword/string/type/function/…)
+- [x] CodeEditor nutzt Highlighter: `setLanguageFromPath` + `ensureHighlightFresh` (Rope-Root-Identity), renderLine splittet Zeile in farbige Segmente
+- **Verifikation 12.D:** `zig build` grün, `flow-core/zig build test` grün
 
 ### Phase 12.E: vulkan-ed nutzt flow-core
 - [x] `vulkan-ed/build.zig.zon` → `flow-core` als Dep (Pfad: `libs/flow-core`)

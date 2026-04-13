@@ -6,8 +6,6 @@
 const std = @import("std");
 const clay = @import("clay");
 const flow_core = @import("flow_core");
-const SyntaxHighlighter = flow_core.highlight.SyntaxHighlighter;
-const ColorTag = flow_core.highlight.ColorTag;
 const wio = @import("wio");
 
 const actions = @import("actions.zig");
@@ -40,14 +38,59 @@ pub fn ArrayListWriter(comptime WriterError: type) type {
     };
 }
 
+fn colorFromTag(fg: u32) clay.Color {
+    return .{
+        @floatFromInt((fg >> 16) & 0xff),
+        @floatFromInt((fg >> 8) & 0xff),
+        @floatFromInt(fg & 0xff),
+        255,
+    };
+}
+
+fn lessThanTag(_: void, a: flow_core.highlight.ColorTag, b: flow_core.highlight.ColorTag) bool {
+    if (a.start != b.start) return a.start < b.start;
+    return a.end > b.end; // längere zuerst bei gleichem Start
+}
+
+fn renderHighlightedLine(
+    arena: std.mem.Allocator,
+    hl: *flow_core.highlight.SyntaxHighlighter,
+    line_idx: usize,
+    line: []const u8,
+    font_size: u16,
+    plain_color: clay.Color,
+) void {
+    const tags = hl.tagsForLine(line_idx, line.len, arena) catch {
+        const persistent = arena.dupe(u8, line) catch "";
+        clay.text(persistent, .{ .font_size = font_size, .color = plain_color });
+        return;
+    };
+    std.sort.insertion(flow_core.highlight.ColorTag, tags, {}, lessThanTag);
+
+    var pos: usize = 0;
+    for (tags) |tag| {
+        if (tag.end > line.len) continue;
+        if (tag.start >= tag.end) continue;
+        if (tag.start < pos) continue; // überlappender Sub-Capture — überspringen
+        if (tag.start > pos) {
+            const seg = arena.dupe(u8, line[pos..tag.start]) catch "";
+            clay.text(seg, .{ .font_size = font_size, .color = plain_color });
+        }
+        const seg = arena.dupe(u8, line[tag.start..tag.end]) catch "";
+        clay.text(seg, .{ .font_size = font_size, .color = colorFromTag(tag.fg) });
+        pos = tag.end;
+    }
+    if (pos < line.len) {
+        const seg = arena.dupe(u8, line[pos..]) catch "";
+        clay.text(seg, .{ .font_size = font_size, .color = plain_color });
+    }
+}
+
 pub const CodeEditor = struct {
     allocator: std.mem.Allocator,
 
     /// flow-core Buffer for text storage
     buffer: *flow_core.Buffer,
-
-    /// Syntax-Highlighter (flow-syntax/tree-sitter). null = kein Highlighting.
-    highlighter: ?*SyntaxHighlighter = null,
 
     /// Aktuelle Zeile (1-based, für Highlight)
     current_line: usize = 1,
@@ -132,6 +175,14 @@ pub const CodeEditor = struct {
     /// Cached text for rendering
     cached_text: [:0]const u8 = "",
 
+    /// Syntax-Highlighter (flow-syntax / tree-sitter). null = kein Highlighting
+    /// (z.B. unbekannte Dateiendung oder leerer Editor).
+    highlighter: ?*flow_core.highlight.SyntaxHighlighter = null,
+
+    /// Rope-Root der letzten Parser-Run — wird pro Render verglichen,
+    /// um nur bei Buffer-Änderungen neu zu parsen.
+    last_parsed_root: ?flow_core.Buffer.Root = null,
+
     const Self = @This();
 
     /// Metrics for flow_core - uses monospace assumption
@@ -163,7 +214,8 @@ pub const CodeEditor = struct {
         };
     }
 
-    pub fn init(allocator: std.mem.Allocator) Self {
+    pub fn init(allocator: std.mem.Allocator, file_path: ?[]const u8) Self {
+        _ = file_path;
         const buf = flow_core.Buffer.create(allocator) catch @panic("OOM Buffer.create");
         // Start with empty buffer
         const empty_text: [0]u8 = .{};
@@ -182,8 +234,6 @@ pub const CodeEditor = struct {
             .target = 0,
         };
 
-        const hl = flow_core.highlight.SyntaxHighlighter.create(allocator, "zig") catch null;
-
         return Self{
             .allocator = allocator,
             .buffer = buf,
@@ -191,12 +241,14 @@ pub const CodeEditor = struct {
             .view = view,
             .keymap = keymap.Keymap.initDefault(allocator) catch null,
             .desired_cursor = .arrow,
-            .highlighter = hl,
         };
     }
 
     pub fn deinit(self: *Self) void {
-        if (self.highlighter) |hl| hl.destroy();
+        if (self.highlighter) |hl| {
+            hl.destroy();
+            self.highlighter = null;
+        }
         self.buffer.deinit();
         if (self.keymap) |*km| km.deinit();
         if (self.cached_text.len > 0) {
@@ -205,11 +257,48 @@ pub const CodeEditor = struct {
         }
     }
 
-    /// Re-parse highlighter nach Buffer-Änderung.
-    fn refreshHighlighter(self: *Self) void {
+    fn destroyHighlighter(self: *Self) void {
+        if (self.highlighter) |hl| {
+            hl.destroy();
+            self.highlighter = null;
+        }
+        self.last_parsed_root = null;
+    }
+
+    /// Sprache anhand Dateipfad (Extension / Shebang) wählen.
+    /// Erkennt nichts → Highlighter bleibt null, Fallback = Plain-Color.
+    pub fn setLanguageFromPath(self: *Self, file_path: []const u8) void {
+        const log = std.log.scoped(.highlight);
+        self.destroyHighlighter();
+        const content = self.buffer.store_to_string_cached(self.buffer.root, self.buffer.file_eol_mode);
+        const hl = flow_core.highlight.SyntaxHighlighter.createByPath(
+            self.allocator,
+            file_path,
+            content,
+        ) catch |err| {
+            log.warn("no highlighter for '{s}': {s}", .{ file_path, @errorName(err) });
+            return;
+        };
+        self.highlighter = hl;
+        // last_parsed_root = null erzwingt ersten Parse in ensureHighlightFresh.
+        self.last_parsed_root = null;
+        log.info("highlighter active for '{s}'", .{file_path});
+    }
+
+    /// Re-parse Highlighter, wenn der Rope-Root seit letztem Parse getauscht
+    /// wurde. Pro Render-Frame am Anfang aufrufen. Nutzt inkrementelle
+    /// tree-sitter Reparse (wie Flow/Zed) — O(edit-size) statt O(datei).
+    pub fn ensureHighlightFresh(self: *Self) void {
         const hl = self.highlighter orelse return;
-        const text = self.buffer.store_to_string_cached(self.buffer.root, self.buffer.file_eol_mode);
-        hl.updateFromString(text) catch {};
+        if (self.last_parsed_root) |lpr| {
+            if (lpr == self.buffer.root) return;
+        }
+        const content = self.buffer.store_to_string_cached(self.buffer.root, self.buffer.file_eol_mode);
+        hl.reparseIncremental(content) catch |err| {
+            std.log.scoped(.highlight).err("reparse failed: {s}", .{@errorName(err)});
+            return;
+        };
+        self.last_parsed_root = self.buffer.root;
     }
 
     /// Get entire buffer as string for rendering
@@ -242,6 +331,8 @@ pub const CodeEditor = struct {
     }
 
     pub fn setText(self: *Self, text: []const u8) void {
+        // Alten Highlighter wegwerfen — setLanguageFromPath setzt danach neu.
+        self.destroyHighlighter();
         var eol_mode: flow_core.Buffer.EolMode = .lf;
         var utf8_sanitized: bool = false;
         const new_root = self.buffer.load_from_string(text, &eol_mode, &utf8_sanitized) catch {
@@ -249,7 +340,6 @@ pub const CodeEditor = struct {
             self.buffer.root = self.buffer.load_from_string("", &self.buffer.file_eol_mode, &self.buffer.file_utf8_sanitized) catch @panic("OOM");
             self.cursor = .{};
             self.selection_anchor = null;
-            self.refreshHighlighter();
             return;
         };
         self.buffer.root = new_root;
@@ -258,8 +348,6 @@ pub const CodeEditor = struct {
 
         self.cursor = .{};
         self.selection_anchor = null;
-
-        self.refreshHighlighter();
 
         if (self.cached_text.len > 0) {
             self.allocator.free(self.cached_text);
@@ -411,14 +499,9 @@ pub const CodeEditor = struct {
         self.cursor.target = result[1];
 
         // Re-tokenize affected lines
-        self.retokenizeAround(self.cursor.row);
+        // self.retokenizeAround(self.cursor.row);
 
         self.last_cursor_movement_ms = self.time_ms;
-    }
-
-    fn retokenizeAround(self: *Self, up_to_line: usize) void {
-        _ = up_to_line;
-        self.refreshHighlighter();
     }
 
     pub fn dispatchAction(self: *Self, action: actions.Action) void {
@@ -624,7 +707,6 @@ pub const CodeEditor = struct {
                         self.buffer.root = result2;
                         self.cursor.row = prev_row;
                         self.cursor.col = prev_len;
-                        self.retokenizeAround(prev_row);
                     } else if (self.cursor.col > 0) {
                         const line_text = self.getLine(self.cursor.row);
                         const byte_pos = self.buffer.root.get_line_width_to_pos(self.cursor.row, self.cursor.col, m) catch 0;
@@ -639,7 +721,6 @@ pub const CodeEditor = struct {
                             self.buffer.root = result2;
                             self.cursor.col -= 1;
                             self.cursor.target = self.cursor.col;
-                            self.retokenizeAround(self.cursor.row);
                         }
                     }
                 }
@@ -654,7 +735,6 @@ pub const CodeEditor = struct {
                         };
                         const result2 = self.buffer.root.delete_range(sel, self.allocator, null, m) catch return;
                         self.buffer.root = result2;
-                        self.retokenizeAround(self.cursor.row);
                     } else if (self.cursor.row + 1 < line_count) {
                         // Join with next line
                         const next_text = self.getLine(self.cursor.row + 1);
@@ -669,7 +749,6 @@ pub const CodeEditor = struct {
                         };
                         const result2 = self.buffer.root.delete_range(sel, self.allocator, null, m) catch return;
                         self.buffer.root = result2;
-                        self.retokenizeAround(self.cursor.row);
                     }
                 }
             },
@@ -689,7 +768,6 @@ pub const CodeEditor = struct {
                             self.buffer.root = result2;
                             self.cursor.col = new_col;
                             self.cursor.target = new_col;
-                            self.retokenizeAround(self.cursor.row);
                         }
                     } else if (self.cursor.row > 0) {
                         self.dispatchAction(.DeleteBack);
@@ -712,7 +790,6 @@ pub const CodeEditor = struct {
                             };
                             const result2 = self.buffer.root.delete_range(sel, self.allocator, null, m) catch return;
                             self.buffer.root = result2;
-                            self.retokenizeAround(self.cursor.row);
                         }
                     } else if (self.cursor.row + 1 < line_count) {
                         self.dispatchAction(.DeleteForward);
@@ -729,7 +806,6 @@ pub const CodeEditor = struct {
                 const result2 = self.buffer.root.delete_range(sel, self.allocator, null, m) catch return;
                 self.buffer.root = result2;
                 self.cursor.col = 0;
-                self.retokenizeAround(if (self.cursor.row > 0) self.cursor.row - 1 else 0);
             },
             .InsertNewline => {
                 if (self.deleteSelection()) {}
@@ -740,7 +816,6 @@ pub const CodeEditor = struct {
                 self.cursor.row += 1;
                 self.cursor.col = 0;
                 self.cursor.target = 0;
-                self.retokenizeAround(self.cursor.row);
             },
             .InsertTab => {
                 if (self.deleteSelection()) {}
@@ -750,7 +825,6 @@ pub const CodeEditor = struct {
                 self.buffer.root = result[2];
                 self.cursor.col += 4;
                 self.cursor.target = self.cursor.col;
-                self.retokenizeAround(self.cursor.row);
             },
             .SelectAll => {
                 self.selection_anchor = .{ .row = 0, .col = 0 };
@@ -809,7 +883,6 @@ pub const CodeEditor = struct {
                 _ = meta;
                 self.cursor = .{};
                 self.selection_anchor = null;
-                self.refreshHighlighter();
                 if (self.cached_text.len > 0) {
                     self.allocator.free(self.cached_text);
                     self.cached_text = "";
@@ -821,7 +894,6 @@ pub const CodeEditor = struct {
                 _ = meta;
                 self.cursor = .{};
                 self.selection_anchor = null;
-                self.refreshHighlighter();
                 if (self.cached_text.len > 0) {
                     self.allocator.free(self.cached_text);
                     self.cached_text = "";
@@ -843,7 +915,6 @@ pub const CodeEditor = struct {
         self.buffer.root = new_root;
         self.cursor = range.begin;
         self.clearSelection();
-        self.retokenizeAround(self.cursor.row);
         return true;
     }
 
@@ -1071,7 +1142,6 @@ pub const CodeEditor = struct {
         self.cursor.col += @as(usize, @intCast(len));
         self.cursor.target = self.cursor.col;
         self.recordCursorMovement();
-        self.retokenizeAround(self.cursor.row);
     }
 
     // =========================================================================
@@ -1080,6 +1150,7 @@ pub const CodeEditor = struct {
 
     pub fn render(self: *Self, arena: std.mem.Allocator) void {
         self.desired_cursor = .arrow;
+        self.ensureHighlightFresh();
 
         clay.UI()(.{
             .id = clay.ElementId.ID("code_editor"),
@@ -1183,47 +1254,9 @@ pub const CodeEditor = struct {
             }
 
             const plain_color: clay.Color = .{ 202, 211, 245, 255 };
-            const hl_opt = if (self.highlighter) |hl|
-                hl.tagsForLine(line_idx, line.len, self.allocator) catch null
-            else
-                null;
 
-            if (hl_opt) |tags| {
-                defer self.allocator.free(tags);
-
-                var current_byte: usize = 0;
-                for (tags) |tag| {
-                    if (tag.start > current_byte) {
-                        const start = @min(current_byte, line.len);
-                        const end = @min(tag.start, line.len);
-                        if (start < end) {
-                            const prefix = line[start..end];
-                            const p_str = arena.dupe(u8, prefix) catch "";
-                            clay.text(p_str, .{ .font_size = self.font_size, .color = plain_color });
-                        }
-                    }
-
-                    const start = @min(tag.start, line.len);
-                    const end = @min(tag.end, line.len);
-                    if (start < end and start >= current_byte) {
-                        const token_text = line[start..end];
-                        const t_str = arena.dupe(u8, token_text) catch "";
-
-                        const r: u8 = @intCast((tag.fg >> 16) & 0xFF);
-                        const g: u8 = @intCast((tag.fg >> 8) & 0xFF);
-                        const b: u8 = @intCast(tag.fg & 0xFF);
-                        const color = clay.Color{ @floatFromInt(r), @floatFromInt(g), @floatFromInt(b), 255 };
-
-                        clay.text(t_str, .{ .font_size = self.font_size, .color = color });
-                        current_byte = end;
-                    }
-                }
-
-                if (current_byte < line.len) {
-                    const suffix = line[current_byte..];
-                    const s_str = arena.dupe(u8, suffix) catch "";
-                    clay.text(s_str, .{ .font_size = self.font_size, .color = plain_color });
-                }
+            if (self.highlighter) |hl| {
+                renderHighlightedLine(arena, hl, line_idx, line, self.font_size, plain_color);
             } else {
                 const persistent = arena.dupe(u8, line) catch "";
                 clay.text(persistent, .{ .font_size = self.font_size, .color = plain_color });
