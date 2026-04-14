@@ -478,7 +478,7 @@ pub const CodeEditor = struct {
         if (self.hasSelection()) {
             const range = self.selectionRange().?;
             const m = self.metrics();
-            const new_root = self.buffer.root.delete_range(range, self.allocator, null, m) catch return error.Stop;
+            const new_root = self.buffer.root.delete_range(range, self.buffer.allocator, null, m) catch return error.Stop;
             self.buffer.root = new_root;
             self.cursor = range.begin;
             self.clearSelection();
@@ -490,7 +490,7 @@ pub const CodeEditor = struct {
             self.cursor.row,
             self.cursor.col,
             text,
-            self.allocator,
+            self.buffer.allocator,
             m,
         ) catch return error.Stop;
         self.buffer.root = result[2];
@@ -695,7 +695,7 @@ pub const CodeEditor = struct {
                         // Insert current line content at end of prev line
                         const cur_text = self.getLine(self.cursor.row);
                         const result = self.buffer.root.insert_chars(
-                            prev_row, prev_len, cur_text, self.allocator, m,
+                            prev_row, prev_len, cur_text, self.buffer.allocator, m,
                         ) catch return;
                         self.buffer.root = result[2];
                         // Delete current line
@@ -703,7 +703,7 @@ pub const CodeEditor = struct {
                             .begin = .{ .row = self.cursor.row, .col = 0 },
                             .end = .{ .row = self.cursor.row, .col = self.lineWidth(self.cursor.row) + 1 },
                         };
-                        const result2 = self.buffer.root.delete_range(sel, self.allocator, null, m) catch return;
+                        const result2 = self.buffer.root.delete_range(sel, self.buffer.allocator, null, m) catch return;
                         self.buffer.root = result2;
                         self.cursor.row = prev_row;
                         self.cursor.col = prev_len;
@@ -717,7 +717,7 @@ pub const CodeEditor = struct {
                                 .begin = .{ .row = self.cursor.row, .col = self.cursor.col - 1 },
                                 .end = self.cursor,
                             };
-                            const result2 = self.buffer.root.delete_range(sel, self.allocator, null, m) catch return;
+                            const result2 = self.buffer.root.delete_range(sel, self.buffer.allocator, null, m) catch return;
                             self.buffer.root = result2;
                             self.cursor.col -= 1;
                             self.cursor.target = self.cursor.col;
@@ -733,13 +733,13 @@ pub const CodeEditor = struct {
                             .begin = self.cursor,
                             .end = .{ .row = self.cursor.row, .col = self.cursor.col + 1 },
                         };
-                        const result2 = self.buffer.root.delete_range(sel, self.allocator, null, m) catch return;
+                        const result2 = self.buffer.root.delete_range(sel, self.buffer.allocator, null, m) catch return;
                         self.buffer.root = result2;
                     } else if (self.cursor.row + 1 < line_count) {
                         // Join with next line
                         const next_text = self.getLine(self.cursor.row + 1);
                         const result = self.buffer.root.insert_chars(
-                            self.cursor.row, self.cursor.col, next_text, self.allocator, m,
+                            self.cursor.row, self.cursor.col, next_text, self.buffer.allocator, m,
                         ) catch return;
                         self.buffer.root = result[2];
                         // Delete next line
@@ -747,7 +747,7 @@ pub const CodeEditor = struct {
                             .begin = .{ .row = self.cursor.row + 1, .col = 0 },
                             .end = .{ .row = self.cursor.row + 1, .col = self.lineWidth(self.cursor.row + 1) + 1 },
                         };
-                        const result2 = self.buffer.root.delete_range(sel, self.allocator, null, m) catch return;
+                        const result2 = self.buffer.root.delete_range(sel, self.buffer.allocator, null, m) catch return;
                         self.buffer.root = result2;
                     }
                 }
@@ -764,7 +764,7 @@ pub const CodeEditor = struct {
                                 .begin = .{ .row = self.cursor.row, .col = new_col },
                                 .end = self.cursor,
                             };
-                            const result2 = self.buffer.root.delete_range(sel, self.allocator, null, m) catch return;
+                            const result2 = self.buffer.root.delete_range(sel, self.buffer.allocator, null, m) catch return;
                             self.buffer.root = result2;
                             self.cursor.col = new_col;
                             self.cursor.target = new_col;
@@ -788,7 +788,7 @@ pub const CodeEditor = struct {
                                 .begin = self.cursor,
                                 .end = .{ .row = self.cursor.row, .col = new_col },
                             };
-                            const result2 = self.buffer.root.delete_range(sel, self.allocator, null, m) catch return;
+                            const result2 = self.buffer.root.delete_range(sel, self.buffer.allocator, null, m) catch return;
                             self.buffer.root = result2;
                         }
                     } else if (self.cursor.row + 1 < line_count) {
@@ -803,14 +803,14 @@ pub const CodeEditor = struct {
                     .begin = .{ .row = self.cursor.row, .col = 0 },
                     .end = .{ .row = self.cursor.row, .col = line_w + 1 },
                 };
-                const result2 = self.buffer.root.delete_range(sel, self.allocator, null, m) catch return;
+                const result2 = self.buffer.root.delete_range(sel, self.buffer.allocator, null, m) catch return;
                 self.buffer.root = result2;
                 self.cursor.col = 0;
             },
             .InsertNewline => {
                 if (self.deleteSelection()) {}
                 const result = self.buffer.root.insert_chars(
-                    self.cursor.row, self.cursor.col, "\n", self.allocator, m,
+                    self.cursor.row, self.cursor.col, "\n", self.buffer.allocator, m,
                 ) catch return;
                 self.buffer.root = result[2];
                 self.cursor.row += 1;
@@ -820,7 +820,7 @@ pub const CodeEditor = struct {
             .InsertTab => {
                 if (self.deleteSelection()) {}
                 const result = self.buffer.root.insert_chars(
-                    self.cursor.row, self.cursor.col, "    ", self.allocator, m,
+                    self.cursor.row, self.cursor.col, "    ", self.buffer.allocator, m,
                 ) catch return;
                 self.buffer.root = result[2];
                 self.cursor.col += 4;
@@ -911,7 +911,7 @@ pub const CodeEditor = struct {
         if (!self.hasSelection()) return false;
         const range = self.selectionRange() orelse return false;
         const m = self.metrics();
-        const new_root = self.buffer.root.delete_range(range, self.allocator, null, m) catch return false;
+        const new_root = self.buffer.root.delete_range(range, self.buffer.allocator, null, m) catch return false;
         self.buffer.root = new_root;
         self.cursor = range.begin;
         self.clearSelection();
@@ -1136,7 +1136,7 @@ pub const CodeEditor = struct {
 
         const m = self.metrics();
         const result = self.buffer.root.insert_chars(
-            self.cursor.row, self.cursor.col, buf[0..len], self.allocator, m,
+            self.cursor.row, self.cursor.col, buf[0..len], self.buffer.allocator, m,
         ) catch return;
         self.buffer.root = result[2];
         self.cursor.col += @as(usize, @intCast(len));
