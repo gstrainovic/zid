@@ -402,6 +402,9 @@ pub fn main() !void {
             &svg_atlas,
         );
 
+        // Highlighting chunked aktualisieren (nicht-blockierend)
+        _ = ui_system.code_editor.highlightChunked(8);
+
         frame_count += 1;
 
         // Event-basiert: blockiert bis Wayland-Events kommen (wie Gooey's dispatch).
