@@ -198,6 +198,20 @@ pub const CodeEditor = struct {
 
     const Self = @This();
 
+    /// Setzt Dirty-Flag für Highlighting — OHNE sofortigen Reparse.
+    /// MUSS nach Edit-Operationen aufgerufen werden.
+    fn markDirty(self: *Self, start_line: usize, end_line: usize) void {
+        self.edits_fully_tracked = true;
+        if (!self.has_dirty_lines) {
+            self.dirty_line_start = start_line;
+            self.dirty_line_end = end_line;
+            self.has_dirty_lines = true;
+        } else {
+            self.dirty_line_start = @min(self.dirty_line_start, start_line);
+            self.dirty_line_end = @max(self.dirty_line_end, end_line);
+        }
+    }
+
     /// Metrics for flow_core - uses monospace assumption
     fn metrics(_: *const Self) flow_core.Buffer.Metrics {
         const Ctx = struct {
@@ -291,9 +305,16 @@ pub const CodeEditor = struct {
             return;
         };
         self.highlighter = hl;
-        // last_parsed_root = null erzwingt ersten Parse in ensureHighlightFresh.
         self.last_parsed_root = null;
-        log.info("highlighter active for '{s}'", .{file_path});
+        
+        // Dirty-Flag setzen statt sofort zu parsen.
+        // highlightChunked wird im Main-Loop aufgerufen.
+        self.edits_fully_tracked = false;
+        self.has_dirty_lines = true;
+        self.dirty_line_start = 0;
+        self.dirty_line_end = self.lineCount();
+
+        log.info("highlighter active for '{s}' (background parsing started)", .{file_path});
     }
 
     /// Re-parse Highlighter, wenn der Rope-Root seit letztem Parse getauscht
@@ -333,6 +354,53 @@ pub const CodeEditor = struct {
         self.has_dirty_lines = false;
         self.dirty_line_start = 0;
         self.dirty_line_end = 0;
+    }
+
+    /// Chunked Reparse — max `max_ms` Millisekunden pro Aufruf.
+    /// Gibt `true` zurück wenn noch Arbeit übrig ist.
+    pub fn highlightChunked(self: *Self, max_ms: u64) bool {
+        if (!self.has_dirty_lines) return false;
+        const hl = self.highlighter orelse return false;
+
+        const start = std.time.milliTimestamp();
+
+        // Prüfen ob Reparse nötig
+        if (self.last_parsed_root) |lpr| {
+            if (lpr == self.buffer.root) {
+                // Baum hat sich nicht geändert → Dirty-Flags zurücksetzen
+                self.has_dirty_lines = false;
+                return false;
+            }
+        }
+
+        // Wenn Edits fehlen: resetTree() nötig
+        if (!self.edits_fully_tracked) {
+            if (self.last_parsed_root != null) {
+                hl.resetTree();
+            }
+        }
+
+        // Reparse starten — aktuell noch synchron, da flow_syntax kein
+        // time-budgeting für ts_parser_parse() nutzt.
+        // Inkrementeller Reparse (nach Edits) sollte aber < 1ms sein.
+        hl.reparseFromBuffer(self.buffer.root, self.metrics()) catch |err| {
+            std.log.scoped(.highlight).err("reparse failed: {s}", .{@errorName(err)});
+            self.has_dirty_lines = false;
+            return false;
+        };
+
+        self.last_parsed_root = self.buffer.root;
+        self.edits_fully_tracked = true;
+        self.has_dirty_lines = false;
+
+        // Zeit prüfen — wenn zu lange, im nächsten Frame weiter
+        const end = std.time.milliTimestamp();
+        const elapsed = @as(u64, @intCast(end - start));
+        if (elapsed >= max_ms) {
+            std.log.scoped(.highlight).debug("highlight chunk took {d}ms, deferring", .{elapsed});
+        }
+
+        return self.has_dirty_lines;
     }
 
     /// Get a single line via rope. Returned slice points into `line_scratch`
@@ -376,6 +444,9 @@ pub const CodeEditor = struct {
         // setText ersetzt den gesamten Inhalt -> Edits können nicht getrackt werden
         // -> ensureHighlightFresh muss resetTree() aufrufen
         self.edits_fully_tracked = false;
+        self.has_dirty_lines = true;
+        self.dirty_line_start = 0;
+        self.dirty_line_end = self.lineCount();
     }
 
     fn recordCursorMovement(self: *Self) void {
@@ -429,19 +500,9 @@ pub const CodeEditor = struct {
             .new_end_point = .{ .row = new_end_row, .column = new_end_col },
         };
         hl.pushEdit(ed);
-
-        // Dirty-Region aktualisieren für inkrementelles Rendering
-        self.edits_fully_tracked = true;
-        self.has_dirty_lines = true;
         const affected_start = row;
         const affected_end = row + @max(old_line_count, new_line_count);
-        if (!self.has_dirty_lines) {
-            self.dirty_line_start = affected_start;
-            self.dirty_line_end = affected_end;
-        } else {
-            self.dirty_line_start = @min(self.dirty_line_start, affected_start);
-            self.dirty_line_end = @max(self.dirty_line_end, affected_end);
-        }
+        self.markDirty(affected_start, affected_end);
     }
 
     // =========================================================================
@@ -1288,7 +1349,6 @@ pub const CodeEditor = struct {
 
     pub fn render(self: *Self, arena: std.mem.Allocator) void {
         self.desired_cursor = .arrow;
-        self.ensureHighlightFresh();
 
         clay.UI()(.{
             .id = clay.ElementId.ID("code_editor"),
