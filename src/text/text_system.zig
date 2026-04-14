@@ -142,22 +142,22 @@ pub const ShapedRunCache = struct {
     const Self = @This();
 
     // Compile-time capacity limits
-    pub const MAX_ENTRIES: usize = 128;
-    pub const MAX_GLYPHS_PER_ENTRY: usize = 512; // ~512 chars per cached string
+    pub const MAX_ENTRIES: usize = 2048;
+    pub const MAX_GLYPHS_PER_ENTRY: usize = 256; // ~256 chars per cached string
     pub const MAX_TEXT_LEN: usize = 2048; // Max cacheable text length
 
     // Hash table configuration
     // Size is 2x entries for low collision rate with open addressing
-    const HASH_TABLE_SIZE: usize = 512;
+    const HASH_TABLE_SIZE: usize = 4096;
     const MAX_PROBE_LENGTH: usize = HASH_TABLE_SIZE; // Must be able to probe entire table
     const EMPTY_SLOT: u16 = 0xFFFF; // Sentinel for empty hash slots
 
     // Compile-time size verification
     comptime {
-        // Ensure reasonable memory footprint (~4MB for cache)
+        // Ensure reasonable memory footprint (~32MB for cache)
         const entry_size = @sizeOf(CacheEntry);
         const total_size = entry_size * MAX_ENTRIES;
-        std.debug.assert(total_size < 4 * 1024 * 1024); // Under 4MB
+        std.debug.assert(total_size < 32 * 1024 * 1024); // Under 32MB
         std.debug.assert(@sizeOf(ShapedGlyph) <= 48); // Glyph struct size check
     }
 

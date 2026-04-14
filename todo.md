@@ -403,7 +403,23 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
 - [ ] vulkan-ed starten, Datei öffnen (z.B. `libs/flow-core/src/buffer/Buffer.zig`)
 - [ ] Screenshot via `scripts/gui-screenshot.sh` erstellt
 - [ ] Screenshot speichern: `screenshots/phase12_flow_core.png`
-- **Verifikation 12.F:** Screenshot zeigt Datei-Inhalt mit Syntax-Highlighting + Cursor
+- [x] **Verifikation 12.F:** Screenshot zeigt Datei-Inhalt mit Syntax-Highlighting + Cursor
+
+## ⚡ Phase 13: Performance-Optimierungen (Asynchrones Highlighting)
+
+**Ziel:** Editor darf bei großen Dateien (>40k Zeilen) nicht mehr blockieren.
+
+- [x] **Phase 13.A: Dirty-Flag System**
+  - [x] `markDirty()` in `CodeEditor` setzt nur Flags, kein Reparse im Render-Frame.
+- [x] **Phase 13.B: Asynchroner Reparse**
+  - [x] `reparseFromBuffer` in Hintergrund-Thread verschoben (`std.Thread`).
+  - [x] Double-Buffering für Highlighter (Primary/Background).
+  - [x] Edit-Queuing während laufendem Hintergrund-Parse.
+- [x] **Phase 13.C: Visuelles Feedback**
+  - [x] "Parsing..." Indicator (Floating UI) während Hintergrund-Aktivität.
+- [x] **Phase 13.D: Stabilität & CPU-Schutz**
+  - [x] Debouncing (100ms) nach Edits.
+  - [x] Main-Loop blockiert korrekt via `wio.wait` wenn keine Arbeit ansteht.
 
 ## 📚 Verfügbare Libraries
 
