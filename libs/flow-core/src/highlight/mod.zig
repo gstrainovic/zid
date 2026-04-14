@@ -73,6 +73,25 @@ pub const SyntaxHighlighter = struct {
         self.syn.edit(ed);
     }
 
+    /// Invalidiere Cache-Eintraege fuer einen Zeilen-Bereich [start, end).
+    /// Aufrufen nach inkrementellem Reparse mit bekanntem Dirty-Range.
+    pub fn invalidateLineRange(self: *SyntaxHighlighter, start: usize, end: usize) void {
+        var i = start;
+        while (i < end) : (i += 1) {
+            if (self.tag_cache.fetchRemove(i)) |kv| {
+                self.allocator.free(kv.value);
+            }
+        }
+    }
+
+    /// Invalidiere den gesamten Tag-Cache. Aufrufen nach `resetTree` oder
+    /// Highlighter-Swap (Background-Thread) — alter Tree = alte Offsets.
+    pub fn invalidateAllLines(self: *SyntaxHighlighter) void {
+        var it = self.tag_cache.valueIterator();
+        while (it.next()) |tags| self.allocator.free(tags.*);
+        self.tag_cache.clearRetainingCapacity();
+    }
+
     /// Verwirft den bestehenden Parsebaum — nächster `reparseFromBuffer`
     /// macht einen vollen Parse. Nötig, wenn zwischendurch Edits passiert
     /// sind, für die kein `pushEdit` ausgelöst wurde (sonst würde tree-sitter
@@ -95,10 +114,11 @@ pub const SyntaxHighlighter = struct {
         line_byte_len: usize,
         allocator: std.mem.Allocator,
     ) ![]ColorTag {
+        _ = allocator; // kept for API compatibility; storage is persistent in self.allocator
         if (self.tag_cache.get(line_idx)) |tags| return tags;
 
         var tags: std.ArrayListUnmanaged(ColorTag) = .{};
-        errdefer tags.deinit(allocator);
+        errdefer tags.deinit(self.allocator);
 
         const Ctx = struct {
             tags: *std.ArrayListUnmanaged(ColorTag),
@@ -139,7 +159,7 @@ pub const SyntaxHighlighter = struct {
 
         var ctx: Ctx = .{
             .tags = &tags,
-            .alloc = allocator,
+            .alloc = self.allocator,
             .line = @intCast(line_idx),
             .line_len = line_byte_len,
         };
@@ -156,9 +176,7 @@ pub const SyntaxHighlighter = struct {
             else => return err,
         };
 
-        const slice = try tags.toOwnedSlice(allocator);
-        // Persistente Kopie für Cache erstellen
-        const persistent_tags = try self.allocator.dupe(ColorTag, slice);
+        const persistent_tags = try tags.toOwnedSlice(self.allocator);
         try self.tag_cache.put(self.allocator, line_idx, persistent_tags);
         return persistent_tags;
     }
