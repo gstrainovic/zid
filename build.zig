@@ -132,6 +132,25 @@ pub fn build(b: *std.Build) void {
     editor_tests.root_module.addImport("clay", clay_dep.module("zclay"));
     editor_tests.root_module.addImport("wio", wio_dep.module("wio"));
     editor_tests.root_module.addImport("flow_core", flow_core_dep.module("flow-core"));
+    editor_tests.root_module.addImport("syntax", syntax_mod);
+
+    const perf_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/editor/highlight_perf_tests.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    perf_test_mod.addImport("flow_core", flow_core_dep.module("flow-core"));
+    perf_test_mod.addImport("syntax", syntax_mod);
+    perf_test_mod.addImport("highlight_perf_test.zig", b.createModule(.{
+        .root_source_file = b.path("src/editor/highlight_perf_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    }));
+
+    const run_perf_tests = b.addRunArtifact(b.addTest(.{
+        .root_module = perf_test_mod,
+    }));
+    run_perf_tests.has_side_effects = true;
 
     const test_step = b.step("test", "Run tests");
 
@@ -150,4 +169,27 @@ pub fn build(b: *std.Build) void {
     }
     run_editor_tests.has_side_effects = true;
     test_step.dependOn(&run_editor_tests.step);
+    test_step.dependOn(&run_perf_tests.step);
+
+    // Performance Benchmark für Highlighting
+    const benchmark_mod = b.createModule(.{
+        .root_source_file = b.path("src/editor/highlight_benchmark.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    benchmark_mod.addImport("flow_core", flow_core_dep.module("flow-core"));
+    benchmark_mod.addImport("syntax", syntax_mod);
+
+    const benchmark_exe = b.addExecutable(.{
+        .name = "highlight-benchmark",
+        .root_module = benchmark_mod,
+    });
+
+    const run_benchmark = b.addRunArtifact(benchmark_exe);
+    if (b.args) |args| {
+        run_benchmark.addArgs(args);
+    }
+
+    const benchmark_step = b.step("benchmark", "Run highlight performance benchmark");
+    benchmark_step.dependOn(&run_benchmark.step);
 }
