@@ -86,11 +86,6 @@ fn renderHighlightedLine(
         const seg = arena.dupe(u8, line[pos..]) catch "";
         clay.text(seg, .{ .font_size = font_size, .color = plain_color });
     }
-    const end = std.time.nanoTimestamp();
-    const elapsed_ms = @as(f64, @floatFromInt(end - start)) / 1000000.0;
-    if (elapsed_ms > 1.0) {
-        std.log.scoped(.editor).debug("Line {d} highlight took {d:.2}ms", .{line_idx, elapsed_ms});
-    }
 }
 
 pub const CodeEditor = struct {
@@ -428,10 +423,10 @@ pub const CodeEditor = struct {
                 self.highlighter = self.bg_highlighter.?;
                 self.bg_highlighter = old_hl;
                 
-                // Queued Edits auf BEIDE anwenden
+                // Queued Edits auf den NEUEN Background-Highlighter anwenden 
+                // (der primäre hat sie bereits in pushEditForChange erhalten)
                 self.bg_mutex.lock();
                 for (self.bg_queued_edits.items) |ed| {
-                    self.highlighter.?.pushEdit(ed);
                     self.bg_highlighter.?.pushEdit(ed);
                 }
                 self.bg_queued_edits.clearRetainingCapacity();
@@ -1573,11 +1568,6 @@ pub const CodeEditor = struct {
         if (self.show_context_menu) {
             self.renderContextMenu(arena);
         }
-        const render_end = std.time.nanoTimestamp();
-        const render_ms = @as(f64, @floatFromInt(render_end - render_start)) / 1000000.0;
-        if (render_ms > 4.0) {
-            std.log.scoped(.editor).debug("Editor render took {d:.2}ms (visible={d})", .{render_ms, self.visibleLineCount()});
-        }
     }
 
     fn renderLine(self: *Self, arena: std.mem.Allocator, line_idx: usize, line: []const u8) void {
@@ -1589,7 +1579,7 @@ pub const CodeEditor = struct {
             }
 
             const plain_color: clay.Color = .{ 202, 211, 245, 255 };
-            if (self.highlighter != null and !self.has_dirty_lines) {
+            if (self.highlighter != null) {
                 renderHighlightedLine(arena, self.highlighter.?, line_idx, line, self.font_size, plain_color);
             } else {
                 const persistent = arena.dupe(u8, line) catch "";

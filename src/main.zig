@@ -12,9 +12,9 @@ const svg_gpu_mod = @import("svg/gpu_renderer.zig");
 const editor = @import("editor/mod.zig");
 const e2e_server = @import("e2e_server.zig");
 
-// Log-Level: debug
+// Log-Level: Nur info und höher anzeigen (debug unterdrücken)
 pub const std_options: std.Options = .{
-    .log_level = .debug,
+    .log_level = .info,
 };
 
 const log = std.log.scoped(.main);
@@ -346,7 +346,6 @@ pub fn main() !void {
         ui_system.updateScroll(0, scroll_delta_y * 10.0, delta_time_ms);
 
         const render_commands = ui_system.renderExample(&logo_texture);
-        const t4 = std.time.nanoTimestamp();
 
         plat.setCursor(ui_system.code_editor.desired_cursor);
 
@@ -363,27 +362,10 @@ pub fn main() !void {
             &svg_gpu,
             &svg_atlas,
         );
-        const t5 = std.time.nanoTimestamp();
 
-        const hl_start = std.time.nanoTimestamp();
         const has_more_work = ui_system.code_editor.highlightChunked(2, ui_system.code_editor.time_ms);
-        const hl_end = std.time.nanoTimestamp();
 
         frame_count += 1;
-        const frame_end = std.time.nanoTimestamp();
-        
-        const wio_ms = @as(f64, @floatFromInt(t1 - frame_start)) / 1000000.0;
-        const ui_ms = @as(f64, @floatFromInt(t2 - t1)) / 1000000.0;
-        const ev_ms = @as(f64, @floatFromInt(t3 - t2)) / 1000000.0;
-        const layout_ms = @as(f64, @floatFromInt(t4 - t3)) / 1000000.0;
-        const gpu_ms = @as(f64, @floatFromInt(t5 - t4)) / 1000000.0;
-        const total_ms = @as(f64, @floatFromInt(frame_end - frame_start)) / 1000000.0;
-        const hl_ms = @as(f64, @floatFromInt(hl_end - hl_start)) / 1000000.0;
-
-        if (total_ms > 16.6 or frame_count % 60 == 0) {
-            log.debug("Frame {d}: total={d:.1}ms [wio={d:.1}, ui={d:.1}, evt={d:.1}, lay={d:.1}, gpu={d:.1}, hl={d:.1}]", 
-                .{frame_count, total_ms, wio_ms, ui_ms, ev_ms, layout_ms, gpu_ms, hl_ms});
-        }
 
         if (has_more_work or e2e_ctx != null) {
             wio.wait(.{ .timeout_ns = 16 * 1000 * 1000 });
