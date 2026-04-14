@@ -7,7 +7,8 @@ zig-out/
 test_data/
 
 # Screenshots (local only)
-# screenshots/
+screenshots/
+*.png
 
 # OS files
 .DS_Store
@@ -21,6 +22,9 @@ archives/
 libs/wgpu-native/
 libs/wio_test_vulkan/
 temp_*.png
+
+# Referenz-Repos (Inspiration, kein Build-Input) — via scripts/sync.sh geklont
+reference/
 
 *.log
 
