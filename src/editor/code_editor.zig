@@ -172,8 +172,8 @@ pub const CodeEditor = struct {
     /// Aktueller Mauszeiger-Typ
     desired_cursor: wio.Cursor = .arrow,
 
-    /// Cached text for rendering
-    cached_text: [:0]const u8 = "",
+    /// Reusable line buffer for getLine — contents valid only until next getLine call.
+    line_scratch: std.Io.Writer.Allocating,
 
     /// Syntax-Highlighter (flow-syntax / tree-sitter). null = kein Highlighting
     /// (z.B. unbekannte Dateiendung oder leerer Editor).
@@ -241,6 +241,7 @@ pub const CodeEditor = struct {
             .view = view,
             .keymap = keymap.Keymap.initDefault(allocator) catch null,
             .desired_cursor = .arrow,
+            .line_scratch = .init(allocator),
         };
     }
 
@@ -251,10 +252,7 @@ pub const CodeEditor = struct {
         }
         self.buffer.deinit();
         if (self.keymap) |*km| km.deinit();
-        if (self.cached_text.len > 0) {
-            self.allocator.free(self.cached_text);
-            self.cached_text = "";
-        }
+        self.line_scratch.deinit();
     }
 
     fn destroyHighlighter(self: *Self) void {
@@ -301,23 +299,12 @@ pub const CodeEditor = struct {
         self.last_parsed_root = self.buffer.root;
     }
 
-    /// Get entire buffer as string for rendering
-    fn getFullText(self: *const Self) []const u8 {
-        const text = self.buffer.store_to_string_cached(self.buffer.root, self.buffer.file_eol_mode);
-        // Update cached text - skip caching for const version, just return the slice
-        _ = self.cached_text;
-        return text;
-    }
-
-    /// Get a single line as string
-    fn getLine(self: *const Self, line_idx: usize) []const u8 {
-        const full = self.getFullText();
-        var iter = std.mem.splitSequence(u8, full, "\n");
-        var idx: usize = 0;
-        while (iter.next()) |line| : (idx += 1) {
-            if (idx == line_idx) return line;
-        }
-        return "";
+    /// Get a single line via rope. Returned slice points into `line_scratch`
+    /// and is invalidated by the next getLine call. Dupe into arena if needed.
+    fn getLine(self: *Self, line_idx: usize) []const u8 {
+        self.line_scratch.clearRetainingCapacity();
+        self.buffer.root.get_line(line_idx, &self.line_scratch.writer, self.metrics()) catch {};
+        return self.line_scratch.written();
     }
 
     /// Total number of lines
@@ -348,11 +335,6 @@ pub const CodeEditor = struct {
 
         self.cursor = .{};
         self.selection_anchor = null;
-
-        if (self.cached_text.len > 0) {
-            self.allocator.free(self.cached_text);
-            self.cached_text = "";
-        }
     }
 
     fn recordCursorMovement(self: *Self) void {
@@ -692,8 +674,10 @@ pub const CodeEditor = struct {
                         // Join with previous line
                         const prev_row = self.cursor.row - 1;
                         const prev_len = self.lineWidth(prev_row);
-                        // Insert current line content at end of prev line
-                        const cur_text = self.getLine(self.cursor.row);
+                        // Insert current line content at end of prev line — dupe
+                        // into buffer arena because insert_chars stores the slice
+                        // directly in a Leaf (no copy).
+                        const cur_text = self.buffer.allocator.dupe(u8, self.getLine(self.cursor.row)) catch return;
                         const result = self.buffer.root.insert_chars(
                             prev_row, prev_len, cur_text, self.buffer.allocator, m,
                         ) catch return;
@@ -736,8 +720,9 @@ pub const CodeEditor = struct {
                         const result2 = self.buffer.root.delete_range(sel, self.buffer.allocator, null, m) catch return;
                         self.buffer.root = result2;
                     } else if (self.cursor.row + 1 < line_count) {
-                        // Join with next line
-                        const next_text = self.getLine(self.cursor.row + 1);
+                        // Join with next line — dupe into buffer arena (Leaf.new
+                        // stores the slice without copying).
+                        const next_text = self.buffer.allocator.dupe(u8, self.getLine(self.cursor.row + 1)) catch return;
                         const result = self.buffer.root.insert_chars(
                             self.cursor.row, self.cursor.col, next_text, self.buffer.allocator, m,
                         ) catch return;
@@ -883,10 +868,6 @@ pub const CodeEditor = struct {
                 _ = meta;
                 self.cursor = .{};
                 self.selection_anchor = null;
-                if (self.cached_text.len > 0) {
-                    self.allocator.free(self.cached_text);
-                    self.cached_text = "";
-                }
                 return;
             },
             .Redo => {
@@ -894,10 +875,6 @@ pub const CodeEditor = struct {
                 _ = meta;
                 self.cursor = .{};
                 self.selection_anchor = null;
-                if (self.cached_text.len > 0) {
-                    self.allocator.free(self.cached_text);
-                    self.cached_text = "";
-                }
                 return;
             },
             else => {},
@@ -1057,7 +1034,7 @@ pub const CodeEditor = struct {
         return @min(@as(usize, @intCast(line)), if (total > 0) total - 1 else 0);
     }
 
-    fn colFromX(self: *const Self, x: f32, line_idx: usize) usize {
+    fn colFromX(self: *Self, x: f32, line_idx: usize) usize {
         const rel_x = x - self.content_origin_x - self.gutter_width - 12;
         if (rel_x <= 0) return 0;
 
@@ -1183,7 +1160,7 @@ pub const CodeEditor = struct {
 
                     var i: usize = start_line;
                     while (i < end_line) : (i += 1) {
-                        const line_text = self.getLine(i);
+                        const line_text = arena.dupe(u8, self.getLine(i)) catch "";
                         const is_current = (i == self.cursor.row);
 
                         const is_selected = if (self.hasSelection()) blk: {
