@@ -1,6 +1,6 @@
-// Force wio wayland backend symbol emission by referencing init
+// Force wio backend symbol emission by referencing init
 comptime {
-    _ = &@import("wio").backend.wayland.init;
+    _ = @import("wio").backend.init;
 }
 
 // Re-export all tests from code_editor

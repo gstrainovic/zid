@@ -193,7 +193,7 @@ pub const CodeEditor = struct {
                 if (egcs[0] == '\n') { colcount.* = 1; return 1; }
                 if (egcs[0] == '\t') { colcount.* = 4; return 1; }
                 colcount.* = 1;
-                return egcs.len;
+                return 1;  // ASCII: jedes Zeichen ist 1 Byte und Breite 1
             }
             fn egc_chunk_width(_: flow_core.Buffer.Metrics, chunk_: []const u8, _: usize) usize {
                 if (chunk_.len == 0) return 0;
@@ -1550,7 +1550,7 @@ pub const CodeEditor = struct {
 
 test "setText: CRLF wird zu LF normalisiert" {
     const allocator = std.testing.allocator;
-    var ed = CodeEditor.init(allocator);
+    var ed = CodeEditor.init(allocator, null);
     defer ed.deinit();
 
     ed.setText("line1\r\nline2\r\nline3");
@@ -1562,7 +1562,7 @@ test "setText: CRLF wird zu LF normalisiert" {
 
 test "setText: leerer String erzeugt eine leere Zeile" {
     const allocator = std.testing.allocator;
-    var ed = CodeEditor.init(allocator);
+    var ed = CodeEditor.init(allocator, null);
     defer ed.deinit();
 
     ed.setText("");
@@ -1574,7 +1574,7 @@ test "setText: leerer String erzeugt eine leere Zeile" {
 
 test "Enter mitten in der Zeile splittet korrekt" {
     const allocator = std.testing.allocator;
-    var ed = CodeEditor.init(allocator);
+    var ed = CodeEditor.init(allocator, null);
     defer ed.deinit();
 
     ed.setText("abcdef");
@@ -1591,7 +1591,7 @@ test "Enter mitten in der Zeile splittet korrekt" {
 
 test "Backspace am Zeilenanfang mergt mit vorheriger Zeile" {
     const allocator = std.testing.allocator;
-    var ed = CodeEditor.init(allocator);
+    var ed = CodeEditor.init(allocator, null);
     defer ed.deinit();
 
     ed.setText("abc\ndef");
@@ -1606,7 +1606,7 @@ test "Backspace am Zeilenanfang mergt mit vorheriger Zeile" {
 
 test "Delete am Zeilenende mergt mit nächster Zeile" {
     const allocator = std.testing.allocator;
-    var ed = CodeEditor.init(allocator);
+    var ed = CodeEditor.init(allocator, null);
     defer ed.deinit();
 
     ed.setText("abc\ndef");
@@ -1623,7 +1623,7 @@ test "Delete am Zeilenende mergt mit nächster Zeile" {
 
 test "Navigation: Left am Zeilenanfang springt ans Ende der vorherigen Zeile" {
     const allocator = std.testing.allocator;
-    var ed = CodeEditor.init(allocator);
+    var ed = CodeEditor.init(allocator, null);
     defer ed.deinit();
 
     ed.setText("abc\ndef");
@@ -1634,9 +1634,42 @@ test "Navigation: Left am Zeilenanfang springt ans Ende der vorherigen Zeile" {
     try std.testing.expectEqual(@as(usize, 0), ed.cursor.row);
 }
 
+test "Navigation: Right bewegt Cursor um EINE Position weiter" {
+    const allocator = std.testing.allocator;
+    var ed = CodeEditor.init(allocator, null);
+    defer ed.deinit();
+
+    ed.setText("abcdef");
+    ed.cursor.row = 0;
+    ed.cursor.col = 0;
+    const m = ed.metrics();
+    
+    // Erster Right: col=0 → col=1
+    ed.cursor.move_right(ed.buffer.root, m) catch {};
+    try std.testing.expectEqual(@as(usize, 1), ed.cursor.col);
+    
+    // Zweiter Right: col=1 → col=2
+    ed.cursor.move_right(ed.buffer.root, m) catch {};
+    try std.testing.expectEqual(@as(usize, 2), ed.cursor.col);
+    
+    // Dritter Right: col=2 → col=3
+    ed.cursor.move_right(ed.buffer.root, m) catch {};
+    try std.testing.expectEqual(@as(usize, 3), ed.cursor.col);
+    
+    // Am Zeilenende (col=6): Right springt zur nächsten Zeile
+    ed.cursor.col = 6;
+    ed.cursor.row = 0;
+    ed.setText("abcdef\nxyz");
+    ed.cursor.col = 6;
+    ed.cursor.row = 0;
+    ed.cursor.move_right(ed.buffer.root, m) catch {};
+    try std.testing.expectEqual(@as(usize, 1), ed.cursor.row);
+    try std.testing.expectEqual(@as(usize, 0), ed.cursor.col);
+}
+
 test "Navigation: Right am Zeilenende springt an Anfang der nächsten Zeile" {
     const allocator = std.testing.allocator;
-    var ed = CodeEditor.init(allocator);
+    var ed = CodeEditor.init(allocator, null);
     defer ed.deinit();
 
     ed.setText("abc\ndef");
