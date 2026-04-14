@@ -463,10 +463,13 @@ pub const CodeEditor = struct {
         if (self.bg_parsing) return true;
         if (!self.has_dirty_lines) return false;
 
-        // 2. Debounce: Nur parsen wenn seit 100ms keine Edits mehr kamen
+        // 2. Debounce: Nur parsen wenn seit 100ms keine Edits mehr kamen.
+        // Wichtig: `true` zurueckgeben damit main-loop in 16ms-Poll bleibt,
+        // sonst schlaeft `wio.wait(.{})` bis zum naechsten Input-Event und
+        // der Parse startet erst beim naechsten Tastendruck (→ 600ms Delay).
         const idle_ms = time_ms - self.last_cursor_movement_ms;
         if (idle_ms < 100 and !self.edits_fully_tracked) {
-            return false; 
+            return true;
         }
 
         // 3. Prüfen ob Reparse nötig
