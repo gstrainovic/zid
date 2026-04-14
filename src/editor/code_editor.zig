@@ -61,7 +61,6 @@ fn renderHighlightedLine(
     font_size: u16,
     plain_color: clay.Color,
 ) void {
-    const start = std.time.nanoTimestamp();
     const tags = hl.tagsForLine(line_idx, line.len, arena) catch {
         const persistent = arena.dupe(u8, line) catch "";
         clay.text(persistent, .{ .font_size = font_size, .color = plain_color });
@@ -1200,10 +1199,10 @@ pub const CodeEditor = struct {
     fn deleteSelection(self: *Self) bool {
         if (!self.hasSelection()) return false;
         const range = self.selectionRange() orelse return false;
-        const del_text = self.getTextInRange(range) catch "";
-        const del_owned = if (del_text.len > 0) self.allocator.dupe(u8, del_text) catch "" else "";
-        defer if (del_owned.len > 0) self.allocator.free(del_owned);
-        self.pushEditForChange(range.begin.row, range.begin.col, del_owned, "");
+        const del_text = self.getTextInRange(range) catch return false;
+        defer self.allocator.free(del_text);
+        
+        self.pushEditForChange(range.begin.row, range.begin.col, del_text, "");
         const m = self.metrics();
         const new_root = self.buffer.root.delete_range(range, self.buffer.allocator, null, m) catch return false;
         self.buffer.root = new_root;
@@ -1448,7 +1447,6 @@ pub const CodeEditor = struct {
     // =========================================================================
 
     pub fn render(self: *Self, arena: std.mem.Allocator) void {
-        const render_start = std.time.nanoTimestamp();
         self.desired_cursor = .arrow;
 
         clay.UI()(.{
