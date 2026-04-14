@@ -13,9 +13,6 @@
 [submodule "libs/wio"]
 	path = libs/wio
 	url = https://github.com/gstrainovic/wio.git
-[submodule "libs/sev"]
-	path = libs/sev
-	url = https://github.com/dylancobb/sev
 [submodule "libs/zigjr"]
 	path = libs/zigjr
 	url = https://github.com/williamw520/zigjr
