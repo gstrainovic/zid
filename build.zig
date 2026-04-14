@@ -141,16 +141,20 @@ pub fn build(b: *std.Build) void {
     });
     perf_test_mod.addImport("flow_core", flow_core_dep.module("flow-core"));
     perf_test_mod.addImport("syntax", syntax_mod);
-    perf_test_mod.addImport("highlight_perf_test.zig", b.createModule(.{
+    const perf_test_helper_mod = b.createModule(.{
         .root_source_file = b.path("src/editor/highlight_perf_test.zig"),
         .target = target,
         .optimize = optimize,
-    }));
+    });
+    perf_test_helper_mod.addImport("flow_core", flow_core_dep.module("flow-core"));
+    perf_test_helper_mod.addImport("syntax", syntax_mod);
 
-    const run_perf_tests = b.addRunArtifact(b.addTest(.{
+    const perf_test_exe = b.addTest(.{
         .root_module = perf_test_mod,
-    }));
+    });
+    const run_perf_tests = b.addRunArtifact(perf_test_exe);
     run_perf_tests.has_side_effects = true;
+    perf_test_exe.root_module.addImport("highlight_perf_test.zig", perf_test_helper_mod);
 
     const test_step = b.step("test", "Run tests");
 

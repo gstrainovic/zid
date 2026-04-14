@@ -37,7 +37,7 @@ test "incremental edit is faster than full reparse" {
     std.debug.print("\n=== Performance Test: Incremental vs Full ===\n", .{});
     std.debug.print("Full reparse average: {d:.3} ms\n", .{ @as(f64, @floatFromInt(avg_full)) / 1_000_000.0 });
     std.debug.print("Incremental edit average: {d:.3} ms\n", .{ @as(f64, @floatFromInt(avg_incr)) / 1_000_000.0 });
-    std.debug.print("Speedup: {d:.1f}x\n", .{ @as(f64, @floatFromInt(avg_full)) / @as(f64, @floatFromInt(avg_incr)) });
+    std.debug.print("Speedup: {d:.1}x\n", .{ @as(f64, @floatFromInt(avg_full)) / @as(f64, @floatFromInt(avg_incr)) });
 
     // Incremental sollte mindestens 2x schneller sein
     try testing.expect(avg_incr < avg_full / 2);
@@ -96,11 +96,11 @@ test "pushEdit correctly tracks changes" {
     try highlighter.reparseFromBuffer(root, metrics);
 
     // Tags für Zeile 1 (mit "const x")
-    var line_buf = std.ArrayListUnmanaged(u8){};
-    defer line_buf.deinit(allocator);
-    try buffer.root.get_line(1, &line_buf.writer(allocator), metrics);
+    var line_buf: std.Io.Writer.Allocating = .init(allocator);
+    defer line_buf.deinit();
+    try buffer.root.get_line(1, &line_buf.writer, metrics);
 
-    const tags_before = try highlighter.tagsForLine(1, line_buf.items.len, allocator);
+    const tags_before = try highlighter.tagsForLine(1, line_buf.written().len, allocator);
     defer allocator.free(tags_before);
 
     // Edit: "x" durch "y" ersetzen
@@ -117,7 +117,7 @@ test "pushEdit correctly tracks changes" {
     try highlighter.reparseFromBuffer(root, metrics);
 
     // Tags sollten sich geändert haben (anderer Scope für "y")
-    const tags_after = try highlighter.tagsForLine(1, line_buf.items.len, allocator);
+    const tags_after = try highlighter.tagsForLine(1, line_buf.written().len, allocator);
     defer allocator.free(tags_after);
 
     // Test dass Tags generiert wurden
