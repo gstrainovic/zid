@@ -3,15 +3,23 @@
 # Aufruf bei jedem PC-Wechsel oder vor/nach groesseren Arbeitsabschnitten.
 #
 # Usage:
-#   ./scripts/sync.sh          # Pull: alles auf aktuellen Stand bringen
-#   ./scripts/sync.sh --push   # Push: lokale Aenderungen hochladen
-#   ./scripts/sync.sh --status # Status: nur pruefen, nichts aendern
+#   ./scripts/sync.sh              # Pull: alles auf aktuellen Stand bringen
+#   ./scripts/sync.sh --push       # Push: lokale Aenderungen hochladen
+#   ./scripts/sync.sh --status     # Status: nur pruefen, nichts aendern
+#   ./scripts/sync.sh --references # Nur Referenz-Repos klonen/aktualisieren
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
 REPO_ROOT="$(pwd)"
 
 OWN_SUBMODULES=("libs/gooey" "libs/wgpu_native_zig" "libs/wio")
+
+# Referenz-Repos: Inspiration/Lesequelle, kein Build-Input.
+# Format: "<relativer Pfad>|<git-URL>"
+REFERENCES=(
+    "reference/ghostty|https://github.com/ghostty-org/ghostty.git"
+    "reference/lite-xl|https://github.com/lite-xl/lite-xl.git"
+)
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -109,7 +117,34 @@ cmd_pull() {
     ok "All submodules updated"
 
     echo ""
+    echo "=== Pull: Referenzen ==="
+    cmd_references
+
+    echo ""
     cmd_status || true
+}
+
+cmd_references() {
+    for ENTRY in "${REFERENCES[@]}"; do
+        local REF_PATH="${ENTRY%%|*}"
+        local REF_URL="${ENTRY##*|}"
+        local ABS_PATH="$REPO_ROOT/$REF_PATH"
+
+        if [[ -d "$ABS_PATH/.git" ]]; then
+            if git -C "$ABS_PATH" diff-index --quiet HEAD -- 2>/dev/null; then
+                git -C "$ABS_PATH" fetch --quiet origin 2>/dev/null || { warn "$REF_PATH: fetch failed"; continue; }
+                local DEF
+                DEF=$(get_default_branch "$ABS_PATH")
+                git -C "$ABS_PATH" reset --quiet --hard "origin/$DEF" 2>/dev/null || true
+                ok "$REF_PATH (updated)"
+            else
+                warn "$REF_PATH: local changes — skipping update"
+            fi
+        else
+            echo "  clone $REF_URL -> $REF_PATH"
+            git clone --depth 1 "$REF_URL" "$ABS_PATH" && ok "$REF_PATH (cloned)"
+        fi
+    done
 }
 
 cmd_push() {
@@ -144,7 +179,8 @@ cmd_push() {
 }
 
 case "${1:---pull}" in
-    --status|-s) cmd_status ;;
-    --push|-p)   cmd_push ;;
-    --pull|*)    cmd_pull ;;
+    --status|-s)     cmd_status ;;
+    --push|-p)       cmd_push ;;
+    --references|-r) cmd_references ;;
+    --pull|*)        cmd_pull ;;
 esac
