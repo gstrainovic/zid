@@ -9,6 +9,34 @@ const std = @import("std");
 const flow_core = @import("flow_core");
 const syntax = @import("syntax");
 
+fn asciiMetrics() flow_core.Buffer.Metrics {
+    const Ctx = struct {
+        fn egc_length(_: flow_core.Buffer.Metrics, egcs: []const u8, colcount: *usize, _: usize) usize {
+            if (egcs.len == 0) return 0;
+            if (egcs[0] == '\n') { colcount.* = 1; return 1; }
+            if (egcs[0] == '\t') { colcount.* = 4; return 1; }
+            colcount.* = 1;
+            return 1;
+        }
+        fn egc_chunk_width(_: flow_core.Buffer.Metrics, chunk_: []const u8, _: usize) usize {
+            if (chunk_.len == 0) return 0;
+            if (chunk_[0] == '\n') return 1;
+            if (chunk_[0] == '\t') return 4;
+            return 1;
+        }
+        fn egc_last(_: flow_core.Buffer.Metrics, egcs: []const u8) []const u8 {
+            return egcs;
+        }
+    };
+    return .{
+        .ctx = undefined,
+        .egc_length = Ctx.egc_length,
+        .egc_chunk_width = Ctx.egc_chunk_width,
+        .egc_last = Ctx.egc_last,
+        .tab_width = 4,
+    };
+}
+
 /// Generiere eine große Testdatei mit wiederholtem Zig-Code
 fn generateLargeZigFile(allocator: std.mem.Allocator, target_lines: usize) ![]u8 {
     var buffer = std.ArrayListUnmanaged(u8){};
@@ -51,10 +79,7 @@ fn benchmarkFullReparse(allocator: std.mem.Allocator, large_file: []const u8, nu
         var utf8_sanitized: bool = false;
         const root = try buffer.load_from_string(large_file, &eol_mode, &utf8_sanitized);
 
-        const metrics: flow_core.Buffer.Metrics = .{
-            .tab_width = 4,
-            .font_size = 14,
-        };
+        const metrics = asciiMetrics();
 
         var highlighter = try flow_core.highlight.SyntaxHighlighter.create(allocator, "zig");
         defer highlighter.destroy();
@@ -63,7 +88,7 @@ fn benchmarkFullReparse(allocator: std.mem.Allocator, large_file: []const u8, nu
         try highlighter.reparseFromBuffer(root, metrics);
         const end = std.time.nanoTimestamp();
 
-        const elapsed = end - start;
+        const elapsed: u64 = @intCast(end - start);
         total_time_ns += elapsed;
 
         std.debug.print("  Iteration {d}: {d:.3} ms\n", .{ i + 1, @as(f64, @floatFromInt(elapsed)) / 1_000_000.0 });
@@ -87,14 +112,12 @@ fn benchmarkIncrementalEdit(allocator: std.mem.Allocator, large_file: []const u8
     var utf8_sanitized: bool = false;
     const root = try buffer.load_from_string(large_file, &eol_mode, &utf8_sanitized);
 
-    const metrics: flow_core.Buffer.Metrics = .{
-        .tab_width = 4,
-        .font_size = 14,
-    };
+    const metrics = asciiMetrics();
 
     var highlighter = try flow_core.highlight.SyntaxHighlighter.create(allocator, "zig");
     defer highlighter.destroy();
 
+    buffer.root = root;
     // Initial parse
     try highlighter.reparseFromBuffer(root, metrics);
     std.debug.print("  Initial parse complete\n", .{});
@@ -110,11 +133,11 @@ fn benchmarkIncrementalEdit(allocator: std.mem.Allocator, large_file: []const u8
         const mid_line = buffer.root.lines() / 2 + e;
         if (mid_line >= buffer.root.lines()) break;
 
-        var line_buf = std.ArrayListUnmanaged(u8){};
-        defer line_buf.deinit(allocator);
+        var line_buf: std.Io.Writer.Allocating = .init(allocator);
+        defer line_buf.deinit();
 
-        try buffer.root.get_line(mid_line, &line_buf.writer(allocator), metrics);
-        const line_text = line_buf.items;
+        try buffer.root.get_line(mid_line, &line_buf.writer, metrics);
+        const line_text = line_buf.written();
 
         if (line_text.len == 0) continue;
 
@@ -145,7 +168,7 @@ fn benchmarkIncrementalEdit(allocator: std.mem.Allocator, large_file: []const u8
         try highlighter.reparseFromBuffer(buffer.root, metrics);
         const end = std.time.nanoTimestamp();
 
-        const elapsed = end - start;
+        const elapsed: u64 = @intCast(end - start);
         total_time_ns += elapsed;
         try edit_times.append(allocator, elapsed);
 
@@ -177,14 +200,12 @@ fn benchmarkTagsForLine(allocator: std.mem.Allocator, large_file: []const u8, nu
     var utf8_sanitized: bool = false;
     const root = try buffer.load_from_string(large_file, &eol_mode, &utf8_sanitized);
 
-    const metrics: flow_core.Buffer.Metrics = .{
-        .tab_width = 4,
-        .font_size = 14,
-    };
+    const metrics = asciiMetrics();
 
     var highlighter = try flow_core.highlight.SyntaxHighlighter.create(allocator, "zig");
     defer highlighter.destroy();
 
+    buffer.root = root;
     try highlighter.reparseFromBuffer(root, metrics);
     std.debug.print("  Parse complete\n", .{});
 
@@ -193,18 +214,17 @@ fn benchmarkTagsForLine(allocator: std.mem.Allocator, large_file: []const u8, nu
 
     var i: usize = 0;
     while (i < lines_to_test) : (i += 1) {
-        var line_buf = std.ArrayListUnmanaged(u8){};
-        defer line_buf.deinit(allocator);
+        var line_buf: std.Io.Writer.Allocating = .init(allocator);
+        defer line_buf.deinit();
 
-        try buffer.root.get_line(i, &line_buf.writer(allocator), metrics);
-        const line_len = line_buf.items.len;
+        try buffer.root.get_line(i, &line_buf.writer, metrics);
+        const line_len = line_buf.written().len;
 
         const start = std.time.nanoTimestamp();
         const tags = try highlighter.tagsForLine(i, line_len, allocator);
-        defer allocator.free(tags);
         const end = std.time.nanoTimestamp();
 
-        const elapsed = end - start;
+        const elapsed: u64 = @intCast(end - start);
         total_time_ns += elapsed;
 
         if (i % 100 == 0) {
