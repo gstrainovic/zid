@@ -355,29 +355,75 @@ pub fn main() !void {
         if (ui_system.file_explorer.file_to_open) |path| {
             ui_system.tab_bar.openFile(path) catch {};
 
-            // Datei lesen und in Editor laden
-            const content = std.fs.cwd().readFileAlloc(allocator, path, 64 * 1024 * 1024) catch |err| blk: {
-                log.err("Failed to open {s}: {}", .{ path, err });
-                break :blk allocator.dupe(u8, "Fehler beim Öffnen der Datei.") catch unreachable;
-            };
-            ui_system.code_editor.setText(content);
-            ui_system.code_editor.setLanguageFromPath(path);
-            allocator.free(content);
+            // Dateityp prüfen
+            const file_types = @import("ui/file_types.zig");
+            const kind = file_types.getFileKind(path);
+            
+            if (kind == .text) {
+                // Text-Dateien in den Editor laden
+                const content = std.fs.cwd().readFileAlloc(allocator, path, 64 * 1024 * 1024) catch |err| blk: {
+                    log.err("Failed to open {s}: {}", .{ path, err });
+                    break :blk allocator.dupe(u8, "Fehler beim Öffnen der Datei.") catch unreachable;
+                };
+                ui_system.code_editor.setText(content);
+                ui_system.code_editor.setLanguageFromPath(path);
+                allocator.free(content);
+            } else if (kind == .image) {
+                // Bild-Dateien in den Textur-Cache laden
+                if (!ui_system.open_images.contains(path)) {
+                    log.info("Loading image texture for: {s}", .{path});
+                    const tex = image_rdr.createTextureFromPath(allocator, path) catch |err| blk: {
+                        log.err("Failed to load image texture for '{s}': {}", .{path, err});
+                        // Fallback auf Logo oder Test-Pattern
+                        break :blk image_rdr.createTestPattern(64, 64) catch unreachable;
+                    };
+                    
+                    // Wir speichern einen Heap-allozierte Kopie der ImageTexture
+                    const tex_ptr = allocator.create(@import("clay_renderer/image_renderer.zig").ImageTexture) catch unreachable;
+                    tex_ptr.* = tex;
+                    const path_copy = allocator.dupe(u8, path) catch unreachable;
+                    ui_system.open_images.put(path_copy, tex_ptr) catch {};
+                    
+                    // Force another frame to render the newly loaded texture!
+                    wio.cancelWait();
+                }
+            }
 
             ui_system.file_explorer.file_to_open = null;
         }
 
         // Phase 9: Tab-Wechsel verarbeiten
         if (ui_system.tab_bar.pending_switch_path) |path| {
-            // Datei lesen und in Editor laden
-            const content = std.fs.cwd().readFileAlloc(allocator, path, 64 * 1024 * 1024) catch |err| blk: {
-                log.err("Failed to load tab content for '{s}': {}", .{ path, err });
-                const msg = try allocator.dupe(u8, "Fehler beim Laden der Datei.");
-                break :blk msg;
-            };
-            ui_system.code_editor.setText(content);
-            ui_system.code_editor.setLanguageFromPath(path);
-            allocator.free(content);
+            const file_types = @import("ui/file_types.zig");
+            const kind = file_types.getFileKind(path);
+            
+            if (kind == .text) {
+                // Nur Text-Dateien in den Editor laden
+                const content = std.fs.cwd().readFileAlloc(allocator, path, 64 * 1024 * 1024) catch |err| blk: {
+                    log.err("Failed to load tab content for '{s}': {}", .{ path, err });
+                    const msg = try allocator.dupe(u8, "Fehler beim Laden der Datei.");
+                    break :blk msg;
+                };
+                ui_system.code_editor.setText(content);
+                ui_system.code_editor.setLanguageFromPath(path);
+                allocator.free(content);
+            } else if (kind == .image) {
+                // Bild beim Tab-Wechsel sicherstellen dass es geladen ist
+                if (!ui_system.open_images.contains(path)) {
+                    log.info("Loading image texture for (tab switch): {s}", .{path});
+                    const tex = image_rdr.createTextureFromPath(allocator, path) catch |err| blk: {
+                        log.err("Failed to load image texture for '{s}': {}", .{path, err});
+                        break :blk image_rdr.createTestPattern(64, 64) catch unreachable;
+                    };
+                    const tex_ptr = allocator.create(@import("clay_renderer/image_renderer.zig").ImageTexture) catch unreachable;
+                    tex_ptr.* = tex;
+                    const path_copy = allocator.dupe(u8, path) catch unreachable;
+                    ui_system.open_images.put(path_copy, tex_ptr) catch {};
+                    
+                    // Force another frame to render the newly loaded texture!
+                    wio.cancelWait();
+                }
+            }
 
             // pending_switch_path freigeben und nullen
             ui_system.allocator.free(path);
