@@ -1,224 +1,208 @@
-# Plan: Asynchrones Chunked Highlighting
+# Plan: Inkrementelles + asynchrones Highlighting
 
-**Ziel:** Edit-Operationen bei 40k+ Lines dürfen den Render-Frame nicht blockieren.
-**Referenz:** lite-xl's `Highlighter:start()` mit Coroutine + Time-Budgeting.
-**Datum:** 14. April 2026
+**Ziel:** Highlighting bei 40k+ Zeilen blockiert weder Edits noch erstes Rendern.
+**Referenzen:**
+- `reference/lite-xl/data/core/doc/highlighter.lua` — chunked coroutine, per-line cache, dirty-range tracking
+- Zed-Muster — persistent tree, `ts_tree_edit` + `parser.parse(old_tree, …)` für inkrementellen Reparse, background thread
+- `libs/gooey/docs/Tree Sitter Integration.md` — saubere API (StyledRun, Highlighter-VTable, SyntaxTheme)
+**Datum:** 2026-04-14
 
 ---
 
 ## Problem-Analyse
 
-### Aktueller Pfad (blockierend):
+### Warum ist der aktuelle Stand langsam?
+
+Tree-sitter selbst ist inkrementell und schnell. Das **Wie** unserer Nutzung ist der Bottleneck:
+
+1. **Kein `old_tree` beim Reparse.** `reparseFromBuffer` parst komplett neu statt `parser.parse(old_tree, …)`. → O(Dateigröße) pro Edit statt O(Edit-Größe).
+2. **Synchron im Render-Pfad.** `render()` ruft `ensureHighlightFresh()` → parse blockiert den Frame.
+3. **Query pro Zeile, kein Cache-Invalidieren.** `colorTagsForLine` führt Query jedes Render durch; neuer WIP-Cache invalidiert nicht bei Edits → stale Tags möglich (bereits im Commit dokumentiert).
+4. **Kompletter File-Parse beim `setText()`**, auch wenn nur erste 40 Zeilen sichtbar.
+
+**Lite-XL-Vergleich:** Lite-XL nutzt Regex-Tokenizer (kein TS), aber das Muster ist übertragbar:
+- Per-line Cache `{text, init_state, tokens, resume}`
+- Dirty-Range: `first_invalid_line`, `max_wanted_line`
+- Coroutine, 40 Zeilen pro Tick, `yield`
+- State-Chain: Zeile N-1 state → init für N; gleich + text gleich = skip
+
+**Zed-Vergleich:** Tree-sitter tree lebt im Highlighter, bei jedem Edit wird `ts_tree_edit` gerufen, der eigentliche `parse(old_tree)` läuft in einem Background-Thread. UI liest den letzten fertigen Tree.
+
+**Gooey-Doc:** API-Blueprint (StyledRun, VTable, SyntaxTheme). Enthält keine Performance-Strategie — ergänzen wir hier.
+
+---
+
+## Zielarchitektur
+
 ```
-Tastendruck → insertString()
-  → pushEditForChange()    ← Edit an tree-sitter melden (schnell ✓)
-  → buffer.insert_chars()  ← Rope ändern (schnell ✓)
-  → render()
-    → ensureHighlightFresh()
-      → reparseFromBuffer() ← ❌ BLOCKIERT — tree-sitter parst synchron
+Edit → pushEditForChange (ts_tree_edit)   ← O(1)
+     → buffer.insert_chars                ← Rope O(log n)
+     → invalidate(line_start, line_end)   ← dirty-range update O(1)
+     → render                              ← liest Cache, nichts parsen
+
+main-loop (nach render):
+     → highlightTick(budget_ms = 8)
+        wenn dirty:
+          parser.parse(old_tree, new_text) ← inkrementell, wenige ms
+          tree.get_changed_ranges(old, new) → betroffene Zeilen
+          requery nur diese Zeilen in ColorTag-Cache
+          bei Zeitüberschreitung: yield, Rest nächster Frame
 ```
 
-### Zielpfad (nicht-blockierend):
-```
-Tastendruck → insertString()
-  → pushEditForChange()    ← Edit an tree-sitter melden (schnell ✓)
-  → buffer.insert_chars()  ← Rope ändern (schnell ✓)
-  → markDirty()            ← ❗NUR Dirty-Flag setzen (O(1))
-  → render()               ← ❗KEIN Reparse hier — alten Cache nutzen
+Zwei Stellschrauben:
+1. **Inkrementeller Reparse** (persistent tree + `ts_tree_edit` + `parse(old_tree)`) — macht den Einzelparse schnell.
+2. **Chunked Query-Update** (lite-xl-Muster) — verteilt Kosten über mehrere Frames wenn initialer Parse oder massive Änderung.
 
-Main-Loop (nach render):
-  → highlightChunked()     ← chunked parsen, max 8ms pro Frame
-  → Rest im nächsten Frame
-```
+Background-Thread (Zed) bleibt Option für Phase 5, nicht Phase 1.
 
 ---
 
 ## Phasen
 
-### Phase 1: Dirty-Flag System einbauen
+### Phase 0 — Tree-sitter inkrementell nutzen
+
+**Zweck:** Allein diese Änderung bringt den Löwenanteil der Performance. Vor allem anderen.
+
+**Datei:** `libs/flow-core/src/highlight/mod.zig` (oder wherever `reparseFromBuffer` lebt)
+
+- Beim ersten Parse: Tree speichern in `SyntaxHighlighter.tree: ?*ts.Tree`.
+- Bei Edits: `ts_tree_edit(tree, &edit)` im `pushEditForChange`-Pfad aufrufen **bevor** der Buffer geändert wird (tree-sitter braucht alte Offsets).
+- `reparseFromBuffer`: statt `parser.parse(null, text)` → `parser.parse(self.tree, text)`. Alten Tree erst nach Übergabe freigeben.
+- `tree.get_changed_ranges(old, new)` liefert die betroffenen Byte-Ranges → exakt die Zeilen, die re-highlighted werden müssen.
+
+**Verifikation:** Benchmark: Einzel-Tastendruck in 40k-Zeilen-Zig-Datei. Vorher: volle Parse-Zeit. Nachher: ≤1 ms.
+
+---
+
+### Phase 1 — Dirty-Line-Tracking
 
 **Datei:** `src/editor/code_editor.zig`
 
-Bestehende Felder prüfen (`has_dirty_lines`, `dirty_line_start`, `dirty_line_end`):
+Felder bereits vorhanden (`has_dirty_lines`, `dirty_line_start`, `dirty_line_end`) — aber falsch genutzt. Semantik festschreiben nach lite-xl:
+
 ```zig
-// Zeilen ~240-260 — bereits vorhanden aber nicht korrekt genutzt:
-has_dirty_lines: bool = false,
-dirty_line_start: usize = 0,
-dirty_line_end: usize = 0,
+first_invalid_line: usize = 0,      // kleinste Zeile die Re-Query braucht
+max_wanted_line: usize = 0,         // größte je gerenderte Zeile (lazy horizon)
 ```
 
-Neu: `markDirty()` die NUR das Flag setzt, OHNE Reparse:
-```zig
-fn markDirty(self: *Self, start_line: usize, end_line: usize) void {
-    self.edits_fully_tracked = true;
-    self.has_dirty_lines = true;
-    if (!self.has_dirty_lines) {
-        self.dirty_line_start = start_line;
-        self.dirty_line_end = end_line;
-    } else {
-        self.dirty_line_start = @min(self.dirty_line_start, start_line);
-        self.dirty_line_end = @max(self.dirty_line_end, end_line);
-    }
-}
-```
+- `invalidate(line)` — `first_invalid_line = min(first_invalid_line, line)`.
+- `insertNotify(line, n)` + `removeNotify(line, n)` — verschiebt Cache-Einträge, setzt `invalidate(line)`.
+- `getLine(idx)` (Render-Pfad) — liest aus Cache; bei Miss oder Text-Mismatch: on-demand query, `max_wanted_line = max(max_wanted_line, idx)`.
 
-`pushEditForChange()` aufräumen — ruft bereits markDirty-Logik auf, muss
-sicherstellen dass es KEINEN Reparse triggert.
+`first_invalid_line <= max_wanted_line` → Arbeit offen. Sonst idle.
 
 ---
 
-### Phase 2: render() darf NICHT blockieren
+### Phase 2 — `render()` darf nicht parsen
 
-**Datei:** `src/editor/code_editor.zig` — `render()` Methode (Zeile ~1289)
+**Datei:** `src/editor/code_editor.zig`
 
-**Änderung:** `self.ensureHighlightFresh()` aus render() entfernen:
-```zig
-pub fn render(self: *Self, arena: std.mem.Allocator) void {
-    self.desired_cursor = .arrow;
-    // ❌ ENTFERNEN: self.ensureHighlightFresh();
-    // ✅ NEU: Nichts — Highlighting kommt asynchron
-    ...
-}
-```
+`render()`:
+- `ensureHighlightFresh()` entfernen.
+- Für jede sichtbare Zeile `getLine(idx)` aufrufen — liest Cache, füllt On-Demand-Query nur bei Miss.
+- Bei komplett ungehighlighteten Zeilen (initialer Load): Plain-Color-Fallback. Kein Block.
 
-**Konsequenz:** Beim ersten Laden einer Datei oder nach vielen Edits kann
-es sein dass Zeilen noch nicht gehighlighted sind. Das ist OK — sie werden
-mit Plain-Color gerendert bis der Chunk sie erreicht hat.
+Konsequenz: beim Dateiöffnen sind Zeilen kurz plain, werden innerhalb weniger Frames nachgezeichnet. Akzeptabel.
 
 ---
 
-### Phase 3: Chunked Reparse im Main-Loop
+### Phase 3 — `highlightTick` mit Zeitbudget
 
-**Dateien:**
-- `src/editor/code_editor.zig` — neue Methode `highlightChunked()`
-- `src/main.zig` — Aufruf NACH renderFrameWithText
+**Datei:** `src/editor/code_editor.zig` — neue Methode. **Aufrufer:** `src/main.zig` nach Render.
 
-**Neue Methode in code_editor.zig:**
 ```zig
-/// Chunked Reparse — max `max_ms` Millisekunden pro Aufruf.
-/// Gibt `true` zurück wenn noch Arbeit übrig ist.
-pub fn highlightChunked(self: *Self, max_ms: u64) bool {
-    if (!self.has_dirty_lines) return false;
+pub fn highlightTick(self: *Self, budget_ms: u64) bool {
     const hl = self.highlighter orelse return false;
+    if (self.first_invalid_line > self.max_wanted_line) return false;
 
-    const start = std.time.milliTimestamp();
+    const deadline_ns = std.time.nanoTimestamp() + budget_ms * std.time.ns_per_ms;
 
-    // Prüfen ob Reparse nötig
-    if (self.last_parsed_root) |lpr| {
-        if (lpr == self.buffer.root) {
-            // Baum hat sich nicht geändert → Dirty-Flags zurücksetzen
-            self.has_dirty_lines = false;
-            return false;
-        }
+    // 1. Falls buffer-root veraendert: parser.parse(old_tree, ...) inkrementell
+    if (self.last_parsed_root != self.buffer.root) {
+        try hl.reparseIncremental(self.buffer.root, self.metrics());
+        self.last_parsed_root = self.buffer.root;
     }
 
-    // Wenn Edits fehlen: resetTree() nötig
-    if (!self.edits_fully_tracked) {
-        if (self.last_parsed_root != null) {
-            hl.resetTree();
-        }
+    // 2. Query nur changed lines, chunked
+    const chunk_size: usize = 40;
+    while (self.first_invalid_line <= self.max_wanted_line) {
+        const end = @min(self.first_invalid_line + chunk_size, self.max_wanted_line + 1);
+        for (self.first_invalid_line..end) |i| hl.requery(i);
+        self.first_invalid_line = end;
+        if (std.time.nanoTimestamp() >= deadline_ns) break;
     }
 
-    // Reparse starten — aber mit Zeitlimit
-    hl.reparseFromBuffer(self.buffer.root, self.metrics()) catch |err| {
-        std.log.scoped(.highlight).err("reparse failed: {s}", .{@errorName(err)});
-        self.has_dirty_lines = false;
-        return false;
-    };
-
-    self.last_parsed_root = self.buffer.root;
-    self.edits_fully_tracked = true;
-    self.has_dirty_lines = false;
-
-    // Zeit prüfen — wenn zu lange, im nächsten Frame weiter
-    const elapsed = @as(u64, @intCast(std.time.milliTimestamp() - start));
-    if (elapsed >= max_ms) {
-        std.log.scoped(.highlight).debug("highlight chunk took {d}ms, deferring", .{elapsed});
-    }
-
-    return self.has_dirty_lines;
+    return self.first_invalid_line <= self.max_wanted_line;
 }
 ```
 
-**Problem:** `reparseFromBuffer` ist aktuell ein einzelner synchroner Aufruf.
-tree-sitter's `refresh_from_buffer` kennt kein Time-Budgeting von Haus aus.
-
-**Lösung:** Der Aufruf muss so gestückelt werden dass tree-sitter nur einen
-Teil der Änderungen pro Chunk verarbeitet. Dafür gibt es zwei Ansätze:
-
-**Ansatz A:** tree-sitter's `edit()` Aufruf puffern und nur einen Teil
-der Edits pro Chunk anwenden, dann `refresh_from_buffer` aufrufen.
-
-**Ansatz B:** tree-sitter's `refresh_from_buffer` als Ganzes aufrufen — es
-ist inkrementell und sollte bei lokalen Edits schnell sein. Das Problem
-tritt hauptsächlich beim **initialen Parse** auf (setText). Für Edits
-sollte es OK sein. Der echte Bottleneck ist der **erste Parse**.
-
-→ **Entscheidung:** Ansatz B zuerst versuchen. Falls inkrementeller
-Reparse bei Edits trotzdem zu langsam ist, auf Ansatz A wechseln.
-
-**Aufruf in main.zig** — NACH renderFrameWithText (Zeile ~340):
+**`main.zig`** (nach `renderFrameWithText`):
 ```zig
-// Highlighting chunked aktualisieren (nicht-blockierend)
-const _ = ui_system.code_editor.highlightChunked(8); // max 8ms
+_ = ui_system.code_editor.highlightTick(8);
 ```
 
 ---
 
-### Phase 4: Initialer Parse beim Datei-Laden
+### Phase 4 — Visible-Range-Priorität
 
-Beim `setText()` (Datei öffnen) wird der HIGHLIGHTER KOMPLETT NEU erstellt
-und muss die GANZE Datei parsen. Das ist der Haupt-Bottleneck.
+Beim `setText()` großer Datei: sichtbarer Bereich zuerst, Rest lazy.
 
-**Aktuell:**
-```zig
-setText() → setLanguageFromPath() → neuer Highlighter
-→ ensureHighlightFresh() → voller Reparse (❌ blockiert Frame)
-```
+- `setLanguageFromPath`: Highlighter neu, `last_parsed_root = null`, `first_invalid_line = 0`, `max_wanted_line = 0`.
+- Erster Render erhöht `max_wanted_line` auf unterstes sichtbares Zeilenende.
+- `highlightTick` arbeitet genau diesen Bereich ab — keine 40k Zeilen beim Laden.
+- Scroll nach unten: `max_wanted_line` wächst dynamisch → neue Zeilen werden in folgenden Ticks nachgehighlighted.
 
-**Neu:**
-```zig
-setText() → setLanguageFromPath() → neuer Highlighter + has_dirty_lines = true
-→ render() → noch kein Highlighting (Plain-Color)
-→ highlightChunked() → parst chunked im Hintergrund
-→ nach ~N Frames: alles gehighlighted
-```
-
-**Änderung in `setLanguageFromPath`:**
-```zig
-pub fn setLanguageFromPath(self: *Self, file_path: []const u8) void {
-    self.destroyHighlighter();
-    const content = self.buffer.store_to_string_cached(...);
-    const hl = flow_core.highlight.SyntaxHighlighter.createByPath(...) catch return;
-    self.highlighter = hl;
-    self.last_parsed_root = null;
-    // ❗Dirty-Flag setzen statt sofort zu parsen:
-    self.edits_fully_tracked = false;
-    self.has_dirty_lines = true;
-    self.dirty_line_start = 0;
-    self.dirty_line_end = self.lineCount();
-}
-```
+Effekt: Datei sofort sichtbar, Highlighting folgt in wenigen Frames für sichtbaren Bereich.
 
 ---
 
-### Phase 5: Visuelles Feedback während Highlighting läuft
+### Phase 5 — (Optional) Background-Thread
 
-Optional: Status-Bar oder Indicator zeigen dass noch Highlighting läuft.
+Falls Phase 0–4 nicht reicht (sehr große Dateien, schwerer Grammar):
+
+- `hl.reparseIncremental` läuft in `std.Thread.Pool` Worker.
+- Tree wird atomic geswappt wenn fertig (`std.atomic.Value(*Tree)`).
+- Main-Thread liest letzten fertigen Tree; wenn Worker noch läuft → alter Tree = leicht veraltete Farben, kein Block.
+
+Nicht vor Phase 4 anfassen — 8-ms-Budget reicht für die meisten Fälle.
 
 ---
 
-## Zusammenfassung der Änderungen
+### Phase 6 — (Später) API-Refactor zu `gooey-syntax`
 
-| Datei | Änderung |
-|---|---|
-| `src/editor/code_editor.zig` | `ensureHighlightFresh()` aus render() entfernen, `highlightChunked()` neu |
-| `src/main.zig` | `highlightChunked(8)` NACH renderFrameWithText aufrufen |
-| `libs/flow-core/src/highlight/mod.zig` | Evtl. anpassen für chunked Reparse (falls nötig) |
+Sobald Performance sitzt: Interface sauber schneiden nach `libs/gooey/docs/Tree Sitter Integration.md`:
+
+- `StyledRun` statt `ColorTag` (einheitliche Primitive).
+- `Highlighter`-VTable → tree-sitter + WASM-Backend tauschbar.
+- `SyntaxTheme` mit `colorForCapture(name)` statt hart codierter Mappings.
+- Paket `libs/gooey-syntax/` mit `createHighlighter(lang)` Factory.
+
+Reiner Refactor, keine Perf-Änderung. Kann parallel zum Zed-Background-Thread.
+
+---
+
+## Reihenfolge + Zeit-Schätzung
+
+| Phase | Beschreibung | Erwarteter Effekt | Aufwand |
+|---|---|---|---|
+| 0 | `ts_tree_edit` + `parse(old_tree)` | ~100× schneller pro Edit | 0.5 Tag |
+| 1 | Dirty-Line-Tracking (first_invalid/max_wanted) | Vorbedingung für Chunking | 0.5 Tag |
+| 2 | `render()` parst nicht | Frame sofort frei | 0.5 Tag |
+| 3 | `highlightTick(8)` im Main-Loop | Chunks über Frames verteilt | 1 Tag |
+| 4 | Visible-Range-Priorität | Große Dateien sofort sichtbar | 0.5 Tag |
+| 5 | Background-Thread (opt.) | Nur falls 8-ms-Budget überzogen | 2 Tage |
+| 6 | `gooey-syntax` API-Refactor | Sauberkeit, keine Perf | 2–3 Tage |
+
+**Start:** Phase 0 → allein das beseitigt vermutlich den spürbaren Lag. Messen, dann weiter.
+
+---
 
 ## Test-Plan
 
-1. Große Datei öffnen (40k+ Lines) — sollte sofort rendern, Highlighting kommt nach
-2. Tippen in großer Datei — kein Frame-Drop spürbar
-3. Highlighting-Verifizierung: nach kurzer Zeit alles korrekt gehighlighted
-4. Mit `--profile` oder Logging messen: highlightChunked soll ≤ 8ms brauchen
+1. **Einzel-Edit, 40k Zeilen Zig-Datei** — Frame-Drop < 1 ms. Log `reparse took Xms`.
+2. **Datei öffnen, 40k Zeilen** — erster Render < 16 ms; sichtbarer Bereich highlighted innerhalb 3 Frames.
+3. **Massiver Paste** (2k Zeilen) — UI bleibt responsiv, Highlighting zieht chunked nach.
+4. **Cache-Konsistenz** — nach Edit in Zeile N: exakt die betroffenen Zeilen (aus `get_changed_ranges`) neu gequeryed, keine stale Tags.
+5. **Scroll durch 40k Zeilen** — nach jedem Scroll-Schritt werden neue Zeilen innerhalb ≤ 2 Frames gehighlighted.
+
+Messung via `std.log.scoped(.highlight).debug`; später Perf-HUD (Frame-Zeit + `highlightTick`-Zeit).
