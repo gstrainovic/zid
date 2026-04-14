@@ -20,8 +20,6 @@ pub const SyntaxHighlighter = struct {
     allocator: std.mem.Allocator,
     query_cache: *syntax.QueryCache,
     syn: *syntax,
-    /// Zero-terminated Content-Kopie (treez braucht [:0]const u8).
-    content_z: ?[:0]u8 = null,
 
     pub fn create(allocator: std.mem.Allocator, lang_name: []const u8) !*SyntaxHighlighter {
         const qc = try syntax.QueryCache.create(allocator, .{});
@@ -60,68 +58,29 @@ pub const SyntaxHighlighter = struct {
     }
 
     pub fn destroy(self: *SyntaxHighlighter) void {
-        if (self.content_z) |c| self.allocator.free(c);
         self.syn.destroy();
         self.query_cache.deinit();
         self.allocator.destroy(self);
     }
 
-    /// Re-parse full content. Kopiert content mit Null-Terminator.
-    /// Erst-Parse ODER voller Reparse (z.B. bei Sprachwechsel).
-    pub fn updateFromString(self: *SyntaxHighlighter, content: []const u8) !void {
-        if (self.content_z) |c| self.allocator.free(c);
-        self.content_z = null;
-
-        const buf = try self.allocator.allocSentinel(u8, content.len, 0);
-        @memcpy(buf, content);
-        self.content_z = buf;
-
-        try self.syn.refresh_from_string(buf);
+    /// Melde einen Edit an tree-sitter. Muss VOR dem nächsten
+    /// `reparseFromBuffer` passieren, damit inkrementeller Reparse funktioniert.
+    pub fn pushEdit(self: *SyntaxHighlighter, ed: syntax.Edit) void {
+        self.syn.edit(ed);
     }
 
-    /// Inkrementeller Reparse: berechnet Single-Edit-Diff zwischen letzter
-    /// Content-Kopie und `new_content`, meldet `syn.edit(…)` an tree-sitter
-    /// (markiert Subtree als dirty), und re-parst. Tree-sitter reused
-    /// unveränderte Subtrees → O(edit-size) statt O(datei-size).
-    ///
-    /// Falls noch kein Baum existiert (erster Call), fällt auf
-    /// `updateFromString` zurück (voller Parse).
-    pub fn reparseIncremental(self: *SyntaxHighlighter, new_content: []const u8) !void {
-        const old = self.content_z orelse {
-            return self.updateFromString(new_content);
-        };
+    /// Verwirft den bestehenden Parsebaum — nächster `reparseFromBuffer`
+    /// macht einen vollen Parse. Nötig, wenn zwischendurch Edits passiert
+    /// sind, für die kein `pushEdit` ausgelöst wurde (sonst würde tree-sitter
+    /// den stale Baum wiederverwenden).
+    pub fn resetTree(self: *SyntaxHighlighter) void {
+        self.syn.reset();
+    }
 
-        // Single-Edit Diff: common prefix + common suffix, Rest = Edit-Range.
-        var prefix: usize = 0;
-        const min_len = @min(old.len, new_content.len);
-        while (prefix < min_len and old[prefix] == new_content[prefix]) : (prefix += 1) {}
-
-        var old_end = old.len;
-        var new_end = new_content.len;
-        while (old_end > prefix and new_end > prefix and old[old_end - 1] == new_content[new_end - 1]) {
-            old_end -= 1;
-            new_end -= 1;
-        }
-
-        // Wenn identisch: nichts tun.
-        if (prefix == old.len and prefix == new_content.len) return;
-
-        const ed: syntax.Edit = .{
-            .start_byte = @intCast(prefix),
-            .old_end_byte = @intCast(old_end),
-            .new_end_byte = @intCast(new_end),
-            .start_point = pointAtByte(old, prefix),
-            .old_end_point = pointAtByte(old, old_end),
-            .new_end_point = pointAtByte(new_content, new_end),
-        };
-        self.syn.edit(ed);
-
-        // Neue Content-Kopie und reparse (nutzt old_tree = inkrementell).
-        const buf = try self.allocator.allocSentinel(u8, new_content.len, 0);
-        @memcpy(buf, new_content);
-        self.allocator.free(old);
-        self.content_z = buf;
-        try self.syn.refresh_from_string(buf);
+    /// Reparse über Rope-Callback — tree-sitter ruft `buffer.get_from_pos`
+    /// chunk-weise auf. Keine Volltext-Materialisierung.
+    pub fn reparseFromBuffer(self: *SyntaxHighlighter, buffer: anytype, metrics: anytype) !void {
+        try self.syn.refresh_from_buffer(buffer, metrics);
     }
 
     /// ColorTags für eine Zeile. Byte-Offsets relativ zum Zeilenanfang.
@@ -195,22 +154,6 @@ pub const SyntaxHighlighter = struct {
         return tags.toOwnedSlice(allocator);
     }
 };
-
-/// Byte-Offset → tree-sitter Point (row, column). Zählt '\n' in Text bis zum
-/// Offset. O(byte) — akzeptabel da nur einmal pro Reparse.
-fn pointAtByte(text: []const u8, byte: usize) syntax.Point {
-    var row: u32 = 0;
-    var last_nl: usize = 0;
-    const limit = @min(byte, text.len);
-    var i: usize = 0;
-    while (i < limit) : (i += 1) {
-        if (text[i] == '\n') {
-            row += 1;
-            last_nl = i + 1;
-        }
-    }
-    return .{ .row = row, .column = @intCast(limit - last_nl) };
-}
 
 /// Mappe tree-sitter Scope-Namen zu Catppuccin-Macchiato RGB.
 /// Scope kann hierarchisch sein (z.B. "keyword.control.return") —
