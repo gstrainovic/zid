@@ -20,6 +20,7 @@ pub const SyntaxHighlighter = struct {
     allocator: std.mem.Allocator,
     query_cache: *syntax.QueryCache,
     syn: *syntax,
+    tag_cache: std.AutoHashMapUnmanaged(usize, []ColorTag) = .empty,
 
     pub fn create(allocator: std.mem.Allocator, lang_name: []const u8) !*SyntaxHighlighter {
         const qc = try syntax.QueryCache.create(allocator, .{});
@@ -32,12 +33,11 @@ pub const SyntaxHighlighter = struct {
             .allocator = allocator,
             .query_cache = qc,
             .syn = syn,
+            .tag_cache = .empty,
         };
         return self;
     }
 
-    /// Erkenne Sprache via Dateipfad (Extension) + Inhalt (Shebang/First-Line).
-    /// Gibt `error.NotFound` zurück, wenn keine Sprache passt.
     pub fn createByPath(
         allocator: std.mem.Allocator,
         file_path: ?[]const u8,
@@ -53,11 +53,15 @@ pub const SyntaxHighlighter = struct {
             .allocator = allocator,
             .query_cache = qc,
             .syn = syn,
+            .tag_cache = .empty,
         };
         return self;
     }
 
     pub fn destroy(self: *SyntaxHighlighter) void {
+        var it = self.tag_cache.valueIterator();
+        while (it.next()) |tags| self.allocator.free(tags.*);
+        self.tag_cache.deinit(self.allocator);
         self.syn.destroy();
         self.query_cache.deinit();
         self.allocator.destroy(self);
@@ -91,6 +95,8 @@ pub const SyntaxHighlighter = struct {
         line_byte_len: usize,
         allocator: std.mem.Allocator,
     ) ![]ColorTag {
+        if (self.tag_cache.get(line_idx)) |tags| return tags;
+
         var tags: std.ArrayListUnmanaged(ColorTag) = .{};
         errdefer tags.deinit(allocator);
 
@@ -108,7 +114,6 @@ pub const SyntaxHighlighter = struct {
                 _: usize,
                 _: *const syntax.Node,
             ) error{Stop}!void {
-                // Skip captures nicht auf dieser Zeile.
                 if (sel.end_point.row < ctx.line) return;
                 if (sel.start_point.row > ctx.line) return;
 
@@ -151,7 +156,11 @@ pub const SyntaxHighlighter = struct {
             else => return err,
         };
 
-        return tags.toOwnedSlice(allocator);
+        const slice = try tags.toOwnedSlice(allocator);
+        // Persistente Kopie für Cache erstellen
+        const persistent_tags = try self.allocator.dupe(ColorTag, slice);
+        try self.tag_cache.put(self.allocator, line_idx, persistent_tags);
+        return persistent_tags;
     }
 };
 
