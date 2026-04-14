@@ -162,6 +162,11 @@ fn benchmarkIncrementalEdit(allocator: std.mem.Allocator, large_file: []const u8
             .new_end_point = .{ .row = @intCast(mid_line), .column = @intCast(col_byte + insert_text.len) },
         };
 
+        // Buffer tatsaechlich mutieren, sonst parst tree-sitter den alten
+        // Content und ignoriert die Edits faktisch.
+        const ins_res = try buffer.root.insert_chars(mid_line, insert_pos, insert_text, buffer.allocator, metrics);
+        buffer.root = ins_res[2];
+
         // Inkrementelles Edit
         const start = std.time.nanoTimestamp();
         highlighter.pushEdit(edit);
