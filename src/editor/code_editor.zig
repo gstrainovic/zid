@@ -184,6 +184,18 @@ pub const CodeEditor = struct {
     /// um nur bei Buffer-Änderungen neu zu parsen.
     last_parsed_root: ?flow_core.Buffer.Root = null,
 
+    /// Trackt ob seit dem letzten Reparse Edits korrekt via pushEdit gemeldet wurden.
+    /// true = alle Edits wurden gemeldet, inkrementeller Parse ist sicher.
+    /// false = Edits fehlen, resetTree() muß vor dem nächsten Reparse aufgerufen werden.
+    edits_fully_tracked: bool = true,
+
+    /// Zeilen-Bereich der seit dem letzten Reparse geändert wurde (inclusive).
+    /// Wird für Dirty-Region-Tracking beim Rendering verwendet.
+    /// Nur relevant wenn edits_fully_tracked == true.
+    dirty_line_start: usize = 0,
+    dirty_line_end: usize = 0,
+    has_dirty_lines: bool = false,
+
     const Self = @This();
 
     /// Metrics for flow_core - uses monospace assumption
@@ -287,21 +299,40 @@ pub const CodeEditor = struct {
     /// Re-parse Highlighter, wenn der Rope-Root seit letztem Parse getauscht
     /// wurde. Pro Render-Frame am Anfang aufrufen. tree-sitter liest über
     /// Rope-Callback (`refresh_from_buffer`) — keine Volltext-Kopie.
-    /// Für inkrementelles Reparse müssen Edit-Actions vorher `pushEdit(...)`
-    /// aufrufen, sonst re-parst tree-sitter den ganzen Baum.
+    ///
+    /// Inkrementeller Pfad:
+    /// - Wenn alle Edits via `pushEditForChange` gemeldet wurden, wird der
+    ///   bestehende Tree inkrementell aktualisiert (schnell).
+    /// - Wenn Edits fehlen (z.B. setText, Undo/Redo), wird der Tree verworfen
+    ///   und vollständig neu geparst (langsam, aber korrekt).
     pub fn ensureHighlightFresh(self: *Self) void {
         const hl = self.highlighter orelse return;
         if (self.last_parsed_root) |lpr| {
             if (lpr == self.buffer.root) return;
         }
-        // Edits werden (noch) nicht pro Action per `pushEdit` gemeldet →
-        // alten Baum verwerfen, damit tree-sitter voll neu parst.
-        if (self.last_parsed_root != null) hl.resetTree();
+
+        // Wenn Edits nicht vollständig getrackt wurden, muss der Tree verworfen
+        // werden (z.B. nach setText oder Undo/Redo ohne korrekte Edit-Events).
+        if (!self.edits_fully_tracked) {
+            if (self.last_parsed_root != null) {
+                std.log.scoped(.highlight).debug("resetTree: edits not fully tracked", .{});
+                hl.resetTree();
+            }
+        } else {
+            std.log.scoped(.highlight).debug("incremental reparse: edits tracked", .{});
+        }
+
         hl.reparseFromBuffer(self.buffer.root, self.metrics()) catch |err| {
             std.log.scoped(.highlight).err("reparse failed: {s}", .{@errorName(err)});
             return;
         };
         self.last_parsed_root = self.buffer.root;
+
+        // Nach erfolgreichem Reparse: Dirty-Flags zurücksetzen
+        self.edits_fully_tracked = true;
+        self.has_dirty_lines = false;
+        self.dirty_line_start = 0;
+        self.dirty_line_end = 0;
     }
 
     /// Get a single line via rope. Returned slice points into `line_scratch`
@@ -332,6 +363,7 @@ pub const CodeEditor = struct {
             self.buffer.root = self.buffer.load_from_string("", &self.buffer.file_eol_mode, &self.buffer.file_utf8_sanitized) catch @panic("OOM");
             self.cursor = .{};
             self.selection_anchor = null;
+            self.edits_fully_tracked = false;
             return;
         };
         self.buffer.root = new_root;
@@ -340,6 +372,10 @@ pub const CodeEditor = struct {
 
         self.cursor = .{};
         self.selection_anchor = null;
+
+        // setText ersetzt den gesamten Inhalt -> Edits können nicht getrackt werden
+        // -> ensureHighlightFresh muss resetTree() aufrufen
+        self.edits_fully_tracked = false;
     }
 
     fn recordCursorMovement(self: *Self) void {
@@ -393,6 +429,19 @@ pub const CodeEditor = struct {
             .new_end_point = .{ .row = new_end_row, .column = new_end_col },
         };
         hl.pushEdit(ed);
+
+        // Dirty-Region aktualisieren für inkrementelles Rendering
+        self.edits_fully_tracked = true;
+        self.has_dirty_lines = true;
+        const affected_start = row;
+        const affected_end = row + @max(old_line_count, new_line_count);
+        if (!self.has_dirty_lines) {
+            self.dirty_line_start = affected_start;
+            self.dirty_line_end = affected_end;
+        } else {
+            self.dirty_line_start = @min(self.dirty_line_start, affected_start);
+            self.dirty_line_end = @max(self.dirty_line_end, affected_end);
+        }
     }
 
     // =========================================================================
