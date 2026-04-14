@@ -359,9 +359,13 @@ pub const CodeEditor = struct {
             if (lpr == self.buffer.root) return;
         }
 
+        const was_tracked = self.edits_fully_tracked;
+        const dirty_start = self.dirty_line_start;
+        const dirty_end = self.dirty_line_end;
+
         // Wenn Edits nicht vollständig getrackt wurden, muss der Tree verworfen
         // werden (z.B. nach setText oder Undo/Redo ohne korrekte Edit-Events).
-        if (!self.edits_fully_tracked) {
+        if (!was_tracked) {
             if (self.last_parsed_root != null) {
                 std.log.scoped(.highlight).debug("resetTree: edits not fully tracked", .{});
                 hl.resetTree();
@@ -375,6 +379,13 @@ pub const CodeEditor = struct {
             return;
         };
         self.last_parsed_root = self.buffer.root;
+
+        // Cache invalidieren: komplett bei Full-Reparse, sonst nur Dirty-Range.
+        if (!was_tracked) {
+            hl.invalidateAllLines();
+        } else if (self.has_dirty_lines) {
+            hl.invalidateLineRange(dirty_start, dirty_end + 1);
+        }
 
         // Nach erfolgreichem Reparse: Dirty-Flags zurücksetzen
         self.edits_fully_tracked = true;
@@ -421,15 +432,19 @@ pub const CodeEditor = struct {
                 const old_hl = self.highlighter.?;
                 self.highlighter = self.bg_highlighter.?;
                 self.bg_highlighter = old_hl;
-                
-                // Queued Edits auf den NEUEN Background-Highlighter anwenden 
+
+                // Neuer primary hat frischen Tree, aber sein tag_cache gehoert
+                // noch zu einem alten Snapshot (falls vorher mal aktiv) -> wipen.
+                self.highlighter.?.invalidateAllLines();
+
+                // Queued Edits auf den NEUEN Background-Highlighter anwenden
                 // (der primäre hat sie bereits in pushEditForChange erhalten)
                 self.bg_mutex.lock();
                 for (self.bg_queued_edits.items) |ed| {
                     self.bg_highlighter.?.pushEdit(ed);
                 }
                 self.bg_queued_edits.clearRetainingCapacity();
-                
+
                 self.last_parsed_root = self.bg_snapshot_root;
                 self.has_dirty_lines = (self.last_parsed_root != self.buffer.root);
                 self.bg_mutex.unlock();
