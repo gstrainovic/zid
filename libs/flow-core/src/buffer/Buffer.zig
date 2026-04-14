@@ -811,6 +811,51 @@ const Node = union(enum) {
         return if (found) ctx.result else error.NotFound;
     }
 
+    /// Berechnet den globalen Byte-Offset des Beginns einer Zeile.
+    /// Summiert die Bytes aller vorherigen Zeilen + EOL-Zeichen.
+    pub fn line_start_byte(self: *const Node, target_line: usize, metrics: Metrics) usize {
+        if (target_line == 0) return 0;
+        const Ctx = struct {
+            current_line: usize = 0,
+            target: usize,
+            total_bytes: usize = 0,
+            done: bool = false,
+            fn walker(ctx_: *anyopaque, leaf: *const Leaf, _: Metrics) Walker {
+                const ctx = @as(*@This(), @ptrCast(@alignCast(ctx_)));
+                if (ctx.done) return Walker.stop;
+                if (ctx.current_line >= ctx.target) {
+                    ctx.done = true;
+                    return Walker.stop;
+                }
+                ctx.total_bytes += leaf.buf.len;
+                if (leaf.eol) ctx.total_bytes += 1;
+                // Zeilenwechsel: leaf.eol markiert Ende der aktuellen Zeile.
+                // Da jede Zeile im Rope als eigene Leaf-Kette gespeichert ist,
+                // zäählen wir Zeilen anhand von EOL-Markern.
+                if (leaf.eol) ctx.current_line += 1;
+                return Walker.keep_walking;
+            }
+        };
+        var ctx: Ctx = .{ .target = target_line };
+        _ = self.walk_from_line_begin_const(0, struct {
+            fn w(ctx_: *anyopaque, leaf: *const Leaf, _: Metrics) Walker {
+                const ctx2 = @as(*Ctx, @ptrCast(@alignCast(ctx_)));
+                if (ctx2.done) return Walker.stop;
+                ctx2.total_bytes += leaf.buf.len;
+                if (leaf.eol) {
+                    ctx2.total_bytes += 1;
+                    ctx2.current_line += 1;
+                    if (ctx2.current_line >= ctx2.target) {
+                        ctx2.done = true;
+                        return Walker.stop;
+                    }
+                }
+                return Walker.keep_walking;
+            }
+        }.w, &ctx, metrics) catch {};
+        return ctx.total_bytes;
+    }
+
     pub fn pos_to_width(self: *const Node, line: usize, pos: usize, metrics_: Metrics) error{NotFound}!usize {
         const do = struct {
             result: usize = 0,

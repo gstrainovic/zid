@@ -22,6 +22,10 @@
         .flow_core = .{
             .path = "libs/flow-core",
         },
+        .syntax = .{
+            .url = "git+https://github.com/neurocyte/flow-syntax?ref=zig-0.15#5bc4bcba1552a597d1a6a1f3bf8433ba710b6a90",
+            .hash = "flow_syntax-0.7.2-X8jOoaFbAQBEZWaLbtlj9C8N4zRkNSG2Nq_T40pXRypr",
+        },
     },
     .paths = .{
         "build.zig",
