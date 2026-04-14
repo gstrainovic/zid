@@ -12,9 +12,9 @@ const svg_gpu_mod = @import("svg/gpu_renderer.zig");
 const editor = @import("editor/mod.zig");
 const e2e_server = @import("e2e_server.zig");
 
-// Log-Level: Nur info und höher anzeigen (debug unterdrücken)
+// Log-Level: debug
 pub const std_options: std.Options = .{
-    .log_level = .info,
+    .log_level = .debug,
 };
 
 const log = std.log.scoped(.main);
@@ -247,15 +247,12 @@ pub fn main() !void {
     var alt_held: bool = false;
 
     while (plat.isRunning() and (e2e_ctx == null or !e2e_ctx.?.shutdown_flag.load(.seq_cst))) {
-        const frame_start = std.time.nanoTimestamp();
         const delta_time_ms: f32 = 16.0;
 
         wio.update();
-        const t1 = std.time.nanoTimestamp();
 
         // UI updaten (Animationen)
         ui_system.update(delta_time_ms);
-        const t2 = std.time.nanoTimestamp();
 
         // Theme-Wechsel für Verifizierung entfernt — Standard: Dark
         if (theme_override) |t| {
@@ -340,7 +337,6 @@ pub fn main() !void {
                 plat.handleEventExternal(event);
             }
         }
-        const t3 = std.time.nanoTimestamp();
 
         ui_system.setPointerState(mouse_x, mouse_y, mouse_down);
         ui_system.updateScroll(0, scroll_delta_y * 10.0, delta_time_ms);
