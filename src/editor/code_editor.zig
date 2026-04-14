@@ -284,15 +284,19 @@ pub const CodeEditor = struct {
     }
 
     /// Re-parse Highlighter, wenn der Rope-Root seit letztem Parse getauscht
-    /// wurde. Pro Render-Frame am Anfang aufrufen. Nutzt inkrementelle
-    /// tree-sitter Reparse (wie Flow/Zed) — O(edit-size) statt O(datei).
+    /// wurde. Pro Render-Frame am Anfang aufrufen. tree-sitter liest über
+    /// Rope-Callback (`refresh_from_buffer`) — keine Volltext-Kopie.
+    /// Für inkrementelles Reparse müssen Edit-Actions vorher `pushEdit(...)`
+    /// aufrufen, sonst re-parst tree-sitter den ganzen Baum.
     pub fn ensureHighlightFresh(self: *Self) void {
         const hl = self.highlighter orelse return;
         if (self.last_parsed_root) |lpr| {
             if (lpr == self.buffer.root) return;
         }
-        const content = self.buffer.store_to_string_cached(self.buffer.root, self.buffer.file_eol_mode);
-        hl.reparseIncremental(content) catch |err| {
+        // Edits werden (noch) nicht pro Action per `pushEdit` gemeldet →
+        // alten Baum verwerfen, damit tree-sitter voll neu parst.
+        if (self.last_parsed_root != null) hl.resetTree();
+        hl.reparseFromBuffer(self.buffer.root, self.metrics()) catch |err| {
             std.log.scoped(.highlight).err("reparse failed: {s}", .{@errorName(err)});
             return;
         };
