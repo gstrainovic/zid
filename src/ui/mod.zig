@@ -93,7 +93,7 @@ pub const UI = struct {
 
         const clay_memory = try allocator.alloc(u8, generous_memory);
 
-        const code_editor = editor_mod.CodeEditor.init(allocator, default_file_path);
+        var code_editor = editor_mod.CodeEditor.init(allocator, default_file_path);
 
         // Phase 9: Tab-Bar und File Explorer initialisieren
         const tab_bar = tab_bar_mod.TabBarState.init(allocator);
