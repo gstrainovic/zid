@@ -80,7 +80,11 @@ pub const SyntaxHighlighter = struct {
     /// Reparse über Rope-Callback — tree-sitter ruft `buffer.get_from_pos`
     /// chunk-weise auf. Keine Volltext-Materialisierung.
     pub fn reparseFromBuffer(self: *SyntaxHighlighter, buffer: anytype, metrics: anytype) !void {
+        const start = std.time.nanoTimestamp();
         try self.syn.refresh_from_buffer(buffer, metrics);
+        const end = std.time.nanoTimestamp();
+        const ms = @as(f64, @floatFromInt(end - start)) / 1000000.0;
+        std.log.scoped(.highlight).debug("reparseFromBuffer took {d:.2}ms", .{ms});
     }
 
     /// ColorTags für eine Zeile. Byte-Offsets relativ zum Zeilenanfang.
