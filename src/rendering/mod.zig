@@ -465,6 +465,7 @@ pub const Renderer = struct {
                 1.0,
                 .{ 1.0, 1.0, 1.0, 1.0 },
             ) catch {};
+            text_gpu.flush(render_pass) catch {};
         }
 
         render_pass.end();

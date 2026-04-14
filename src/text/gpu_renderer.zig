@@ -33,6 +33,8 @@ pub const TextRendererGPU = struct {
     cached_glyphs: std.AutoHashMap(u21, GlyphQuad),
     last_atlas_generation: u32 = 0, // Trackt ob Atlas sich geändert hat
 
+    batch_vertices: std.ArrayListUnmanaged(f32) = .empty,
+
     const Self = @This();
 
     pub const GlyphQuad = struct {
@@ -179,11 +181,13 @@ const vertex_buffers = [_]wgpu.VertexBufferLayout{
             .viewport_width = @floatFromInt(viewport_width),
             .viewport_height = @floatFromInt(viewport_height),
             .cached_glyphs = std.AutoHashMap(u21, GlyphQuad).init(allocator),
+            .batch_vertices = .empty,
         };
     }
 
     pub fn deinit(self: *Self) void {
         log.debug("GPU text renderer shutdown", .{});
+        self.batch_vertices.deinit(self.allocator);
         if (self.text_vertex_buffer) |b| b.release();
         if (self.vertex_buffer) |b| b.release();
         if (self.atlas_texture_view) |v| v.release();
@@ -318,14 +322,14 @@ const vertex_buffers = [_]wgpu.VertexBufferLayout{
         // Wenn sich der Atlas geändert hat (neue Glyphen gerastert), auf GPU hochladen
         // Auch beim ersten Mal hochladen (atlas_texture_view == null)
         if (self.atlas_texture_view == null or text_renderer.atlasGeneration() != self.last_atlas_generation) {
+            if (self.batch_vertices.items.len > 0) {
+                try self.flush(render_pass);
+            }
             try self.updateAtlas(text_renderer.getAtlasData(), text_renderer.getAtlasSize());
             self.last_atlas_generation = text_renderer.atlasGeneration();
         }
 
         // === Phase 4: GPU Vertices aus echten Glyph-Metriken bauen ===
-        var vertices = std.ArrayList(f32){};
-        defer vertices.deinit(self.allocator);
-
         for (
             cached_results[0 .. shaped.glyphs.len],
             device_x[0 .. shaped.glyphs.len],
@@ -350,7 +354,7 @@ const vertex_buffers = [_]wgpu.VertexBufferLayout{
             const ndc_y1 = -(((glyph_y + glyph_h) / self.viewport_height) * 2.0 - 1.0);
 
             // 2 Dreiecke = 6 Vertices (pos: 2f32 + uv: 2f32 + color: 4f32)
-            try vertices.appendSlice(self.allocator, &.{
+            try self.batch_vertices.appendSlice(self.allocator, &.{
                 ndc_x0, ndc_y0, uv.u0, uv.v0, r, g, b, a,
                 ndc_x1, ndc_y0, uv.u1, uv.v0, r, g, b, a,
                 ndc_x0, ndc_y1, uv.u0, uv.v1, r, g, b, a,
@@ -359,8 +363,14 @@ const vertex_buffers = [_]wgpu.VertexBufferLayout{
                 ndc_x0, ndc_y1, uv.u0, uv.v1, r, g, b, a,
             });
         }
+    }
 
-        if (vertices.items.len == 0) return;
+    pub fn hasBufferedText(self: *Self) bool {
+        return self.batch_vertices.items.len > 0;
+    }
+
+    pub fn flush(self: *Self, render_pass: *wgpu.RenderPassEncoder) !void {
+        if (self.batch_vertices.items.len == 0) return;
 
         // Atlas Bind Group
         const bind_group = self.device.createBindGroup(&wgpu.BindGroupDescriptor{
@@ -379,43 +389,40 @@ const vertex_buffers = [_]wgpu.VertexBufferLayout{
                     .sampler = self.sampler.?,
                 },
             },
-        }) orelse return;
+        }) orelse return error.BindGroupCreateFailed;
         defer bind_group.release();
 
-        // Bind Group nur erstellen wenn nötig oder persistent halten
-        // Für jetzt: Bind Group pro Frame ist okay, aber Buffer muss persistent sein
-        
-        // Vertex Buffer vergrößern oder erstellen
-        const needed_size = vertices.items.len * @sizeOf(f32);
+        const needed_size = self.batch_vertices.items.len * @sizeOf(f32);
         const total_needed = self.text_vertex_buffer_cursor + needed_size;
         
         if (self.text_vertex_buffer == null or self.text_vertex_buffer_size < total_needed) {
             if (self.text_vertex_buffer) |buf| buf.release();
-            self.text_vertex_buffer_size = @max(total_needed * 2, 65536); // Gross genug für viele Texte
+            self.text_vertex_buffer_size = @max(total_needed * 2, 65536);
             self.text_vertex_buffer = self.device.createBuffer(&wgpu.BufferDescriptor{
                 .label = wgpu.StringView.fromSlice("text_vertex_buffer"),
                 .size = self.text_vertex_buffer_size,
                 .usage = wgpu.BufferUsages.vertex | wgpu.BufferUsages.copy_dst,
                 .mapped_at_creation = 0,
-            }) orelse return;
-            self.text_vertex_buffer_cursor = 0; // Reset nach Resize um Komplexität zu sparen
+            }) orelse return error.BufferCreateFailed;
+            self.text_vertex_buffer_cursor = 0;
         }
 
         const offset = self.text_vertex_buffer_cursor;
         self.queue.writeBuffer(
             self.text_vertex_buffer.?,
             offset,
-            @as(*const anyopaque, @ptrCast(vertices.items.ptr)),
+            @as(*const anyopaque, @ptrCast(self.batch_vertices.items.ptr)),
             needed_size,
         );
         self.text_vertex_buffer_cursor += needed_size;
 
-        // Mit Atlas-Pipeline rendern (echte Glyphen aus Textur)
         render_pass.setPipeline(self.pipeline.?);
         render_pass.setVertexBuffer(0, self.text_vertex_buffer.?, offset, needed_size);
         render_pass.setBindGroup(0, bind_group, 0, null);
-        const vertex_count = vertices.items.len / 8; // 8 floats pro Vertex (pos:2, uv:2, col:4)
+        const vertex_count = self.batch_vertices.items.len / 8;
         render_pass.draw(@intCast(vertex_count), 1, 0, 0);
+
+        self.batch_vertices.clearRetainingCapacity();
     }
 
     /// Phase 1: Device-Pixel-Positionen und Subpixel-Offsets berechnen.

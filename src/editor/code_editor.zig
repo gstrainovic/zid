@@ -61,6 +61,7 @@ fn renderHighlightedLine(
     font_size: u16,
     plain_color: clay.Color,
 ) void {
+    const start = std.time.nanoTimestamp();
     const tags = hl.tagsForLine(line_idx, line.len, arena) catch {
         const persistent = arena.dupe(u8, line) catch "";
         clay.text(persistent, .{ .font_size = font_size, .color = plain_color });
@@ -84,6 +85,11 @@ fn renderHighlightedLine(
     if (pos < line.len) {
         const seg = arena.dupe(u8, line[pos..]) catch "";
         clay.text(seg, .{ .font_size = font_size, .color = plain_color });
+    }
+    const end = std.time.nanoTimestamp();
+    const elapsed_ms = @as(f64, @floatFromInt(end - start)) / 1000000.0;
+    if (elapsed_ms > 1.0) {
+        std.log.scoped(.editor).debug("Line {d} highlight took {d:.2}ms", .{line_idx, elapsed_ms});
     }
 }
 
@@ -180,6 +186,15 @@ pub const CodeEditor = struct {
     /// (z.B. unbekannte Dateiendung oder leerer Editor).
     highlighter: ?*flow_core.highlight.SyntaxHighlighter = null,
 
+    /// Background parsing state
+    bg_parse_thread: ?std.Thread = null,
+    bg_mutex: std.Thread.Mutex = .{},
+    bg_highlighter: ?*flow_core.highlight.SyntaxHighlighter = null,
+    bg_queued_edits: std.ArrayListUnmanaged(syntax.Edit) = .empty,
+    bg_parsing: bool = false,
+    bg_snapshot_root: ?flow_core.Buffer.Root = null,
+    bg_parse_error: ?anyerror = null,
+
     /// Rope-Root der letzten Parser-Run — wird pro Render verglichen,
     /// um nur bei Buffer-Änderungen neu zu parsen.
     last_parsed_root: ?flow_core.Buffer.Root = null,
@@ -273,20 +288,29 @@ pub const CodeEditor = struct {
     }
 
     pub fn deinit(self: *Self) void {
-        if (self.highlighter) |hl| {
-            hl.destroy();
-            self.highlighter = null;
-        }
+        if (self.bg_parse_thread) |thread| thread.join();
+        if (self.highlighter) |hl| hl.destroy();
+        if (self.bg_highlighter) |hl| hl.destroy();
+        self.bg_queued_edits.deinit(self.allocator);
         self.buffer.deinit();
         if (self.keymap) |*km| km.deinit();
         self.line_scratch.deinit();
     }
 
     fn destroyHighlighter(self: *Self) void {
+        if (self.bg_parse_thread) |thread| {
+            thread.join();
+            self.bg_parse_thread = null;
+        }
         if (self.highlighter) |hl| {
             hl.destroy();
             self.highlighter = null;
         }
+        if (self.bg_highlighter) |hl| {
+            hl.destroy();
+            self.bg_highlighter = null;
+        }
+        self.bg_queued_edits.clearRetainingCapacity();
         self.last_parsed_root = null;
     }
 
@@ -296,7 +320,9 @@ pub const CodeEditor = struct {
         const log = std.log.scoped(.highlight);
         self.destroyHighlighter();
         const content = self.buffer.store_to_string_cached(self.buffer.root, self.buffer.file_eol_mode);
-        const hl = flow_core.highlight.SyntaxHighlighter.createByPath(
+        
+        // Create primary highlighter
+        self.highlighter = flow_core.highlight.SyntaxHighlighter.createByPath(
             self.allocator,
             file_path,
             content,
@@ -304,7 +330,14 @@ pub const CodeEditor = struct {
             log.warn("no highlighter for '{s}': {s}", .{ file_path, @errorName(err) });
             return;
         };
-        self.highlighter = hl;
+
+        // Create secondary highlighter for background parsing
+        self.bg_highlighter = flow_core.highlight.SyntaxHighlighter.createByPath(
+            self.allocator,
+            file_path,
+            content,
+        ) catch null; // If first succeeded, this usually succeeds too
+
         self.last_parsed_root = null;
         
         // Dirty-Flag setzen statt sofort zu parsen.
@@ -356,51 +389,110 @@ pub const CodeEditor = struct {
         self.dirty_line_end = 0;
     }
 
-    /// Chunked Reparse — max `max_ms` Millisekunden pro Aufruf.
-    /// Gibt `true` zurück wenn noch Arbeit übrig ist.
-    pub fn highlightChunked(self: *Self, max_ms: u64) bool {
+    fn runBackgroundParse(self: *Self, root: flow_core.Buffer.Root, metrics_val: flow_core.Buffer.Metrics) void {
+        const bg_hl = self.bg_highlighter orelse return;
+        bg_hl.reparseFromBuffer(root, metrics_val) catch |err| {
+            self.bg_mutex.lock();
+            self.bg_parse_error = err;
+            self.bg_mutex.unlock();
+        };
+
+        self.bg_mutex.lock();
+        self.bg_parsing = false;
+        self.bg_mutex.unlock();
+    }
+
+    /// Chunked Reparse — jetzt asynchron via Background-Thread.
+    /// Gibt `true` zurück wenn noch Arbeit (Parsing) läuft.
+    pub fn highlightChunked(self: *Self, max_ms: u64, time_ms: f32) bool {
+        _ = max_ms; // Budget wird im Background-Thread ignoriert (da kein UI-Block)
+        
+        // 1. Prüfen ob Background-Parse fertig ist
+        self.bg_mutex.lock();
+        if (self.bg_parse_thread != null and !self.bg_parsing) {
+            self.bg_mutex.unlock();
+            
+            if (self.bg_parse_thread) |thread| {
+                thread.join();
+                self.bg_parse_thread = null;
+            }
+
+            // Swap highlighters
+            if (self.highlighter != null and self.bg_highlighter != null) {
+                if (self.bg_parse_error) |err| {
+                    std.log.scoped(.highlight).err("background reparse failed: {s}", .{@errorName(err)});
+                    self.bg_parse_error = null;
+                }
+
+                const old_hl = self.highlighter.?;
+                self.highlighter = self.bg_highlighter.?;
+                self.bg_highlighter = old_hl;
+                
+                // Queued Edits auf BEIDE anwenden
+                self.bg_mutex.lock();
+                for (self.bg_queued_edits.items) |ed| {
+                    self.highlighter.?.pushEdit(ed);
+                    self.bg_highlighter.?.pushEdit(ed);
+                }
+                self.bg_queued_edits.clearRetainingCapacity();
+                
+                self.last_parsed_root = self.bg_snapshot_root;
+                self.has_dirty_lines = (self.last_parsed_root != self.buffer.root);
+                self.bg_mutex.unlock();
+
+                std.log.scoped(.highlight).debug("background reparse swapped, fresh AST active", .{});
+            } else {
+                self.bg_mutex.lock();
+                self.bg_queued_edits.clearRetainingCapacity();
+                self.bg_mutex.unlock();
+            }
+            return self.has_dirty_lines;
+        }
+        self.bg_mutex.unlock();
+
+        // Wenn gerade ein Parse läuft: Main-Loop informieren (für wio.wait Timeout)
+        if (self.bg_parsing) return true;
         if (!self.has_dirty_lines) return false;
-        const hl = self.highlighter orelse return false;
 
-        const start = std.time.milliTimestamp();
+        // 2. Debounce: Nur parsen wenn seit 100ms keine Edits mehr kamen
+        const idle_ms = time_ms - self.last_cursor_movement_ms;
+        if (idle_ms < 100 and !self.edits_fully_tracked) {
+            return false; 
+        }
 
-        // Prüfen ob Reparse nötig
+        // 3. Prüfen ob Reparse nötig
         if (self.last_parsed_root) |lpr| {
             if (lpr == self.buffer.root) {
-                // Baum hat sich nicht geändert → Dirty-Flags zurücksetzen
                 self.has_dirty_lines = false;
                 return false;
             }
         }
 
+        // 4. Background-Parse starten
+        const hl = self.highlighter orelse return false;
+        
         // Wenn Edits fehlen: resetTree() nötig
         if (!self.edits_fully_tracked) {
-            if (self.last_parsed_root != null) {
-                hl.resetTree();
-            }
+            hl.resetTree();
+            if (self.bg_highlighter) |bg| bg.resetTree();
+            self.edits_fully_tracked = true;
         }
 
-        // Reparse starten — aktuell noch synchron, da flow_syntax kein
-        // time-budgeting für ts_parser_parse() nutzt.
-        // Inkrementeller Reparse (nach Edits) sollte aber < 1ms sein.
-        hl.reparseFromBuffer(self.buffer.root, self.metrics()) catch |err| {
-            std.log.scoped(.highlight).err("reparse failed: {s}", .{@errorName(err)});
-            self.has_dirty_lines = false;
+        self.bg_mutex.lock();
+        self.bg_parsing = true;
+        self.bg_snapshot_root = self.buffer.root;
+        self.bg_parse_error = null;
+        self.bg_mutex.unlock();
+
+        self.bg_parse_thread = std.Thread.spawn(.{}, runBackgroundParse, .{ self, self.bg_snapshot_root.?, self.metrics() }) catch |err| {
+            std.log.scoped(.highlight).err("failed to spawn bg parse thread: {s}", .{@errorName(err)});
+            self.bg_mutex.lock();
+            self.bg_parsing = false;
+            self.bg_mutex.unlock();
             return false;
         };
 
-        self.last_parsed_root = self.buffer.root;
-        self.edits_fully_tracked = true;
-        self.has_dirty_lines = false;
-
-        // Zeit prüfen — wenn zu lange, im nächsten Frame weiter
-        const end = std.time.milliTimestamp();
-        const elapsed = @as(u64, @intCast(end - start));
-        if (elapsed >= max_ms) {
-            std.log.scoped(.highlight).debug("highlight chunk took {d}ms, deferring", .{elapsed});
-        }
-
-        return self.has_dirty_lines;
+        return true;
     }
 
     /// Get a single line via rope. Returned slice points into `line_scratch`
@@ -499,7 +591,20 @@ pub const CodeEditor = struct {
             .old_end_point = .{ .row = old_end_row, .column = old_end_col },
             .new_end_point = .{ .row = new_end_row, .column = new_end_col },
         };
+
+        // Always apply to primary highlighter
         hl.pushEdit(ed);
+
+        // Apply to background highlighter or queue if busy
+        self.bg_mutex.lock();
+        defer self.bg_mutex.unlock();
+
+        if (self.bg_parsing) {
+            self.bg_queued_edits.append(self.allocator, ed) catch {};
+        } else if (self.bg_highlighter) |bg_hl| {
+            bg_hl.pushEdit(ed);
+        }
+
         const affected_start = row;
         const affected_end = row + @max(old_line_count, new_line_count);
         self.markDirty(affected_start, affected_end);
@@ -1348,6 +1453,7 @@ pub const CodeEditor = struct {
     // =========================================================================
 
     pub fn render(self: *Self, arena: std.mem.Allocator) void {
+        const render_start = std.time.nanoTimestamp();
         self.desired_cursor = .arrow;
 
         clay.UI()(.{
@@ -1361,6 +1467,32 @@ pub const CodeEditor = struct {
             if (clay.hovered()) {
                 self.desired_cursor = .text;
             }
+
+            // Phase 5: Progress Indicator
+            if (self.bg_parsing) {
+                clay.UI()(.{
+                    .id = clay.ElementId.ID("parsing_indicator"),
+                    .layout = .{
+                        .sizing = .fit,
+                        .padding = .axes(6, 12),
+                        .child_alignment = .center,
+                    },
+                    .background_color = .{ 45, 45, 70, 220 },
+                    .corner_radius = .all(6),
+                    .floating = .{
+                        .attach_to = .to_parent,
+                        .attach_points = .{
+                            .element = .right_top,
+                            .parent = .right_top,
+                        },
+                        .offset = .{ .x = -40, .y = 20 },
+                        .z_index = 100,
+                    },
+                })({
+                    clay.text("Parsing...", .{ .font_size = 16, .color = .{ 200, 200, 255, 255 } });
+                });
+            }
+
             clay.UI()(.{
                 .id = clay.ElementId.ID("editor_scroll"),
                 .layout = .{ .sizing = .grow },
@@ -1441,6 +1573,11 @@ pub const CodeEditor = struct {
         if (self.show_context_menu) {
             self.renderContextMenu(arena);
         }
+        const render_end = std.time.nanoTimestamp();
+        const render_ms = @as(f64, @floatFromInt(render_end - render_start)) / 1000000.0;
+        if (render_ms > 4.0) {
+            std.log.scoped(.editor).debug("Editor render took {d:.2}ms (visible={d})", .{render_ms, self.visibleLineCount()});
+        }
     }
 
     fn renderLine(self: *Self, arena: std.mem.Allocator, line_idx: usize, line: []const u8) void {
@@ -1452,9 +1589,8 @@ pub const CodeEditor = struct {
             }
 
             const plain_color: clay.Color = .{ 202, 211, 245, 255 };
-
-            if (self.highlighter) |hl| {
-                renderHighlightedLine(arena, hl, line_idx, line, self.font_size, plain_color);
+            if (self.highlighter != null and !self.has_dirty_lines) {
+                renderHighlightedLine(arena, self.highlighter.?, line_idx, line, self.font_size, plain_color);
             } else {
                 const persistent = arena.dupe(u8, line) catch "";
                 clay.text(persistent, .{ .font_size = self.font_size, .color = plain_color });

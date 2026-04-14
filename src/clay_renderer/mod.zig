@@ -199,6 +199,9 @@ pub const ClayRenderer = struct {
         for (render_commands) |cmd| {
             switch (cmd.command_type) {
                 .rectangle => {
+                    if (text_gpu.hasBufferedText()) {
+                        try text_gpu.flush(render_pass);
+                    }
                     const bbox = cmd.bounding_box;
                     const color = cmd.render_data.rectangle.background_color;
 
@@ -210,6 +213,9 @@ pub const ClayRenderer = struct {
                     try self.appendRect(&rect_vertices, bbox.x, bbox.y, bbox.width, bbox.height, r, g, b, a);
                 },
                 .border => {
+                    if (text_gpu.hasBufferedText()) {
+                        try text_gpu.flush(render_pass);
+                    }
                     const bbox = cmd.bounding_box;
                     const border = cmd.render_data.border;
                     const color = border.color;
@@ -346,10 +352,13 @@ pub const ClayRenderer = struct {
                     }
                 },
                 .scissor_start => {
-                    // Flush existing rects before changing scissor
+                    // Flush existing rects and text before changing scissor
                     if (rect_vertices.items.len > 0) {
                         try self.flushRects(render_pass, rect_vertices.items);
                         rect_vertices.clearRetainingCapacity();
+                    }
+                    if (text_gpu.hasBufferedText()) {
+                        try text_gpu.flush(render_pass);
                     }
                     
                     const bbox = cmd.bounding_box;
@@ -364,10 +373,13 @@ pub const ClayRenderer = struct {
                     }
                 },
                 .scissor_end => {
-                    // Flush rects before resetting scissor
+                    // Flush rects and text before resetting scissor
                     if (rect_vertices.items.len > 0) {
                         try self.flushRects(render_pass, rect_vertices.items);
                         rect_vertices.clearRetainingCapacity();
+                    }
+                    if (text_gpu.hasBufferedText()) {
+                        try text_gpu.flush(render_pass);
                     }
                     
                     render_pass.setScissorRect(0, 0, @intFromFloat(self.viewport_width), @intFromFloat(self.viewport_height));
@@ -379,6 +391,10 @@ pub const ClayRenderer = struct {
         // Restliche Rechtecke flashen
         if (rect_vertices.items.len > 0) {
             try self.flushRects(render_pass, rect_vertices.items);
+        }
+        // Restlichen Text flashen
+        if (text_gpu.hasBufferedText()) {
+            try text_gpu.flush(render_pass);
         }
     }
 

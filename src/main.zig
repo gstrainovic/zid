@@ -12,9 +12,9 @@ const svg_gpu_mod = @import("svg/gpu_renderer.zig");
 const editor = @import("editor/mod.zig");
 const e2e_server = @import("e2e_server.zig");
 
-// Log-Level: Nur info und höher anzeigen (debug unterdrücken)
+// Log-Level: debug
 pub const std_options: std.Options = .{
-    .log_level = .info,
+    .log_level = .debug,
 };
 
 const log = std.log.scoped(.main);
@@ -247,12 +247,15 @@ pub fn main() !void {
     var alt_held: bool = false;
 
     while (plat.isRunning() and (e2e_ctx == null or !e2e_ctx.?.shutdown_flag.load(.seq_cst))) {
+        const frame_start = std.time.nanoTimestamp();
         const delta_time_ms: f32 = 16.0;
 
         wio.update();
+        const t1 = std.time.nanoTimestamp();
 
         // UI updaten (Animationen)
         ui_system.update(delta_time_ms);
+        const t2 = std.time.nanoTimestamp();
 
         // Theme-Wechsel für Verifizierung entfernt — Standard: Dark
         if (theme_override) |t| {
@@ -296,11 +299,11 @@ pub fn main() !void {
                         } else {
                            ui_system.handleKeyPress(btn);
                         }
-                        },
-                        .button_repeat => |btn| {
+                    },
+                    .button_repeat => |btn| {
                         ui_system.handleKeyPress(btn);
-                        },
-                        .button_release => |btn| {
+                    },
+                    .button_release => |btn| {
                         if (btn == .mouse_left) {
                            mouse_down = false;
                            ui_system.handleMouseUp();
@@ -317,18 +320,15 @@ pub fn main() !void {
                            alt_held = false;
                            ui_system.setAltState(false);
                         }
-                        },                    .char => |char_code| {
+                    },
+                    .char => |char_code| {
                         ui_system.handleChar(char_code);
                     },
                     .focused => {
-                        // Text-Input nach Fokus-Erhalt re-aktivieren (wichtig für Wayland)
                         plat.setTextInput(true);
                     },
                     .scroll_vertical => |delta| {
                         scroll_delta_y = @floatCast(delta);
-                        // Mausrad-Events an Editor weiterleiten
-                        // delta ist typisch ~1.0 pro Klick → direkt als Zeilen-Offset
-                        // Auf Windows ist das Vorzeichen invertiert (natural scrolling Unterschied)
                         var lines_delta: i32 = @intFromFloat(@round(scroll_delta_y));
                         if (builtin.os.tag == .windows) {
                             lines_delta = -lines_delta;
@@ -340,76 +340,56 @@ pub fn main() !void {
                 plat.handleEventExternal(event);
             }
         }
+        const t3 = std.time.nanoTimestamp();
 
-        // Pointer-Status an Clay (immer pro Frame vor updateScroll)
         ui_system.setPointerState(mouse_x, mouse_y, mouse_down);
-        
-        // Scroll-Events an Clay (Scroll-Multiplikator 10.0 für bessere Geschwindigkeit)
-        // Muss jeden Frame aufgerufen werden, auch wenn delta == 0, da sonst Drag-Scrolling nicht geht!
         ui_system.updateScroll(0, scroll_delta_y * 10.0, delta_time_ms);
 
-        // Clay Layout berechnen
         const render_commands = ui_system.renderExample(&logo_texture);
+        const t4 = std.time.nanoTimestamp();
 
-        // Phase 9: Datei öffnen verarbeiten
-        if (ui_system.file_explorer.file_to_open) |path| {
-            ui_system.tab_bar.openFile(path) catch {};
-
-            // Datei lesen und in Editor laden
-            const content = std.fs.cwd().readFileAlloc(allocator, path, 64 * 1024 * 1024) catch |err| blk: {
-                log.err("Failed to open {s}: {}", .{ path, err });
-                break :blk allocator.dupe(u8, "Fehler beim Öffnen der Datei.") catch unreachable;
-            };
-            ui_system.code_editor.setText(content);
-            ui_system.code_editor.setLanguageFromPath(path);
-            allocator.free(content);
-
-            ui_system.file_explorer.file_to_open = null;
-        }
-
-        // Phase 9: Tab-Wechsel verarbeiten
-        if (ui_system.tab_bar.pending_switch_path) |path| {
-            // Datei lesen und in Editor laden
-            const content = std.fs.cwd().readFileAlloc(allocator, path, 64 * 1024 * 1024) catch |err| blk: {
-                log.err("Failed to load tab content for '{s}': {}", .{ path, err });
-                const msg = try allocator.dupe(u8, "Fehler beim Laden der Datei.");
-                break :blk msg;
-            };
-            ui_system.code_editor.setText(content);
-            ui_system.code_editor.setLanguageFromPath(path);
-            allocator.free(content);
-
-            // pending_switch_path freigeben und nullen
-            ui_system.allocator.free(path);
-            ui_system.tab_bar.pending_switch_path = null;
-        }
-
-        // Cursor-Form anpassen basierend auf Layout-Ergebnis
         plat.setCursor(ui_system.code_editor.desired_cursor);
 
-        // Rendern: Clear → Clay UI → Present
         renderer.renderFrameWithText(
             &clay_rdr,
             &text_gpu,
             &text_renderer,
             render_commands,
-            "", // Kein zusätzlicher Text
+            "", 
             0,
             0,
             &image_rdr,
-            &[_]rendering.ImageToRender{}, // Keine Legacy-Bilder
+            &[_]rendering.ImageToRender{},
             &svg_gpu,
             &svg_atlas,
         );
+        const t5 = std.time.nanoTimestamp();
 
-        // Highlighting chunked aktualisieren (nicht-blockierend)
-        _ = ui_system.code_editor.highlightChunked(8);
+        const hl_start = std.time.nanoTimestamp();
+        const has_more_work = ui_system.code_editor.highlightChunked(2, ui_system.code_editor.time_ms);
+        const hl_end = std.time.nanoTimestamp();
 
         frame_count += 1;
+        const frame_end = std.time.nanoTimestamp();
+        
+        const wio_ms = @as(f64, @floatFromInt(t1 - frame_start)) / 1000000.0;
+        const ui_ms = @as(f64, @floatFromInt(t2 - t1)) / 1000000.0;
+        const ev_ms = @as(f64, @floatFromInt(t3 - t2)) / 1000000.0;
+        const layout_ms = @as(f64, @floatFromInt(t4 - t3)) / 1000000.0;
+        const gpu_ms = @as(f64, @floatFromInt(t5 - t4)) / 1000000.0;
+        const total_ms = @as(f64, @floatFromInt(frame_end - frame_start)) / 1000000.0;
+        const hl_ms = @as(f64, @floatFromInt(hl_end - hl_start)) / 1000000.0;
 
-        // Event-basiert: blockiert bis Wayland-Events kommen (wie Gooey's dispatch).
-        // Muss NACH dem Rendern stehen, damit der erste Frame gezeichnet wird.
-        wio.wait(.{});
+        if (total_ms > 16.6 or frame_count % 60 == 0) {
+            log.debug("Frame {d}: total={d:.1}ms [wio={d:.1}, ui={d:.1}, evt={d:.1}, lay={d:.1}, gpu={d:.1}, hl={d:.1}]", 
+                .{frame_count, total_ms, wio_ms, ui_ms, ev_ms, layout_ms, gpu_ms, hl_ms});
+        }
+
+        if (has_more_work or e2e_ctx != null) {
+            wio.wait(.{ .timeout_ns = 16 * 1000 * 1000 });
+        } else {
+            wio.wait(.{});
+        }
     }
 
     log.info("=== vulkan-ed exiting ===", .{});

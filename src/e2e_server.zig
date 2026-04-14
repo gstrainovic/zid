@@ -45,6 +45,7 @@ pub fn createDispatcher(alloc: std.mem.Allocator, ctx: *E2EContext) !*zigjr.RpcD
     try rpc_dispatcher.addWithCtx("close_tab", ctx, closeTab);
     try rpc_dispatcher.addWithCtx("set_active_tab", ctx, setActiveTab);
     try rpc_dispatcher.addWithCtx("click", ctx, click);
+    try rpc_dispatcher.addWithCtx("type_text", ctx, typeText);
     try rpc_dispatcher.addWithCtx("get_state", ctx, getState);
     try rpc_dispatcher.addWithCtx("benchmark_open_file", ctx, benchmarkOpenFile);
     try rpc_dispatcher.addWithCtx("benchmark_load_file", ctx, benchmarkLoadFile);
@@ -164,6 +165,22 @@ fn click(ctx: *E2EContext, dc: *zigjr.DispatchCtx, x: f64, y: f64) ![]const u8 {
     ctx.ui_system.handleMouseMove(@floatCast(x), @floatCast(y));
     ctx.ui_system.handleMouseDown(@floatCast(x), @floatCast(y));
     ctx.ui_system.handleMouseUp();
+
+    return dc.arena().dupe(u8, "ok") catch "error: out of memory";
+}
+
+/// Text eintippen (simuliert)
+fn typeText(ctx: *E2EContext, dc: *zigjr.DispatchCtx, text: []const u8) ![]const u8 {
+    log.info("RPC: type_text('{s}')", .{text});
+
+    // Wir iterieren über UTF-8 Zeichen
+    var view = std.unicode.Utf8View.init(text) catch return "error: invalid utf8";
+    var iter = view.iterator();
+    while (iter.nextCodepoint()) |cp| {
+        ctx.ui_system.handleChar(cp);
+        // Kurze Pause simulieren (optional, aber realistischer)
+        std.Thread.sleep(10 * std.time.ns_per_ms);
+    }
 
     return dc.arena().dupe(u8, "ok") catch "error: out of memory";
 }
