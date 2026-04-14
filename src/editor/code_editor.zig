@@ -50,7 +50,7 @@ fn colorFromTag(fg: u32) clay.Color {
 
 fn lessThanTag(_: void, a: flow_core.highlight.ColorTag, b: flow_core.highlight.ColorTag) bool {
     if (a.start != b.start) return a.start < b.start;
-    return a.end > b.end; // längere zuerst bei gleichem Start
+    return a.end > b.end; // längere zuerst bei gleichem Start (Container-Prinzip)
 }
 
 fn renderHighlightedLine(
@@ -72,12 +72,16 @@ fn renderHighlightedLine(
     for (tags) |tag| {
         if (tag.end > line.len) continue;
         if (tag.start >= tag.end) continue;
-        if (tag.start < pos) continue; // überlappender Sub-Capture — überspringen
-        if (tag.start > pos) {
-            const seg = arena.dupe(u8, line[pos..tag.start]) catch "";
+        
+        // Robust gegen Überlappungen: nur den Teil rendern, der noch nicht gezeichnet wurde
+        const actual_start = @max(tag.start, pos);
+        if (actual_start >= tag.end) continue;
+
+        if (actual_start > pos) {
+            const seg = arena.dupe(u8, line[pos..actual_start]) catch "";
             clay.text(seg, .{ .font_size = font_size, .color = plain_color });
         }
-        const seg = arena.dupe(u8, line[tag.start..tag.end]) catch "";
+        const seg = arena.dupe(u8, line[actual_start..tag.end]) catch "";
         clay.text(seg, .{ .font_size = font_size, .color = colorFromTag(tag.fg) });
         pos = tag.end;
     }
@@ -210,6 +214,7 @@ pub const CodeEditor = struct {
     /// Setzt Dirty-Flag für Highlighting — OHNE sofortigen Reparse.
     /// MUSS nach Edit-Operationen aufgerufen werden.
     fn markDirty(self: *Self, start_line: usize, end_line: usize) void {
+        std.log.scoped(.highlight).info("markDirty lines {d}..{d}", .{ start_line, end_line });
         self.edits_fully_tracked = true;
         if (!self.has_dirty_lines) {
             self.dirty_line_start = start_line;
@@ -340,6 +345,8 @@ pub const CodeEditor = struct {
         self.has_dirty_lines = true;
         self.dirty_line_start = 0;
         self.dirty_line_end = self.lineCount();
+        // Damit der Background-Parse sofort startet und nicht erst nach 100ms Debounce
+        self.last_cursor_movement_ms = -1000.0;
 
         log.info("highlighter active for '{s}' (background parsing started)", .{file_path});
     }
@@ -374,10 +381,13 @@ pub const CodeEditor = struct {
             std.log.scoped(.highlight).debug("incremental reparse: edits tracked", .{});
         }
 
+        const start = std.time.nanoTimestamp();
         hl.reparseFromBuffer(self.buffer.root, self.metrics()) catch |err| {
             std.log.scoped(.highlight).err("reparse failed: {s}", .{@errorName(err)});
             return;
         };
+        const end = std.time.nanoTimestamp();
+        std.log.scoped(.highlight).info("synchronous reparse took {d:.3} ms", .{ @as(f64, @floatFromInt(end - start)) / 1_000_000.0 });
         self.last_parsed_root = self.buffer.root;
 
         // Cache invalidieren: komplett bei Full-Reparse, sonst nur Dirty-Range.
@@ -396,11 +406,14 @@ pub const CodeEditor = struct {
 
     fn runBackgroundParse(self: *Self, root: flow_core.Buffer.Root, metrics_val: flow_core.Buffer.Metrics) void {
         const bg_hl = self.bg_highlighter orelse return;
+        const start = std.time.nanoTimestamp();
         bg_hl.reparseFromBuffer(root, metrics_val) catch |err| {
             self.bg_mutex.lock();
             self.bg_parse_error = err;
             self.bg_mutex.unlock();
         };
+        const end = std.time.nanoTimestamp();
+        std.log.scoped(.highlight).info("background reparse took {d:.3} ms", .{ @as(f64, @floatFromInt(end - start)) / 1_000_000.0 });
 
         self.bg_mutex.lock();
         self.bg_parsing = false;
@@ -417,6 +430,7 @@ pub const CodeEditor = struct {
         if (self.bg_parse_thread != null and !self.bg_parsing) {
             self.bg_mutex.unlock();
             
+            const swap_start = std.time.nanoTimestamp();
             if (self.bg_parse_thread) |thread| {
                 thread.join();
                 self.bg_parse_thread = null;
@@ -424,32 +438,32 @@ pub const CodeEditor = struct {
 
             // Swap highlighters
             if (self.highlighter != null and self.bg_highlighter != null) {
-                if (self.bg_parse_error) |err| {
-                    std.log.scoped(.highlight).err("background reparse failed: {s}", .{@errorName(err)});
-                    self.bg_parse_error = null;
-                }
-
+                // ... (rest of swap logic)
                 const old_hl = self.highlighter.?;
                 self.highlighter = self.bg_highlighter.?;
                 self.bg_highlighter = old_hl;
 
-                // Neuer primary hat frischen Tree, aber sein tag_cache gehoert
-                // noch zu einem alten Snapshot (falls vorher mal aktiv) -> wipen.
-                self.highlighter.?.invalidateAllLines();
-
-                // Queued Edits auf den NEUEN Background-Highlighter anwenden
-                // (der primäre hat sie bereits in pushEditForChange erhalten)
+                // Neuer primary hat frischen Tree vom Snapshot-Zeitpunkt, 
+                // aber ihm fehlen die Edits, die WÄHREND des Parsens passiert sind.
+                // -> Catch up!
                 self.bg_mutex.lock();
                 for (self.bg_queued_edits.items) |ed| {
-                    self.bg_highlighter.?.pushEdit(ed);
+                    self.highlighter.?.pushEdit(ed);
                 }
                 self.bg_queued_edits.clearRetainingCapacity();
 
+                // Cache für alle Zeilen invalidieren, da der Tree nun ein anderer ist
+                self.highlighter.?.invalidateAllLines();
+
                 self.last_parsed_root = self.bg_snapshot_root;
                 self.has_dirty_lines = (self.last_parsed_root != self.buffer.root);
+                if (self.has_dirty_lines) {
+                    std.log.scoped(.highlight).info("STILL DIRTY after swap (more edits arrived): last={*} current={*}", .{ self.last_parsed_root, self.buffer.root });
+                }
                 self.bg_mutex.unlock();
 
-                std.log.scoped(.highlight).debug("background reparse swapped, fresh AST active", .{});
+                const swap_end = std.time.nanoTimestamp();
+                std.log.scoped(.highlight).info("background reparse swapped in {d:.3} ms", .{ @as(f64, @floatFromInt(swap_end - swap_start)) / 1_000_000.0 });
             } else {
                 self.bg_mutex.lock();
                 self.bg_queued_edits.clearRetainingCapacity();
@@ -482,6 +496,7 @@ pub const CodeEditor = struct {
 
         // 4. Background-Parse starten
         const hl = self.highlighter orelse return false;
+        std.log.scoped(.highlight).info("starting background parse: has_dirty={any} tracked={any} root={*} last={*}", .{ self.has_dirty_lines, self.edits_fully_tracked, self.buffer.root, self.last_parsed_root });
         
         // Wenn Edits fehlen: resetTree() nötig
         if (!self.edits_fully_tracked) {
@@ -526,6 +541,7 @@ pub const CodeEditor = struct {
     }
 
     pub fn setText(self: *Self, text: []const u8) void {
+        std.log.scoped(.editor).info("setText called (len={d})", .{text.len});
         // Alten Highlighter wegwerfen — setLanguageFromPath setzt danach neu.
         self.destroyHighlighter();
         var eol_mode: flow_core.Buffer.EolMode = .lf;
@@ -1236,6 +1252,7 @@ pub const CodeEditor = struct {
     }
 
     pub fn handleKeyPress(self: *Self, key: wio.Button) void {
+        std.log.scoped(.editor).info("handleKeyPress: {any}", .{key});
         if (self.keymap) |km| {
             if (km.lookup(key, self.mods)) |action| {
                 self.dispatchAction(action);
@@ -1432,6 +1449,11 @@ pub const CodeEditor = struct {
     }
 
     pub fn handleChar(self: *Self, char_code: u21) void {
+        if (char_code < 128) {
+            std.log.scoped(.editor).info("handleChar: '{c}'", .{@as(u8, @intCast(char_code))});
+        } else {
+            std.log.scoped(.editor).info("handleChar: U+{X}", .{char_code});
+        }
         if (char_code < 32 or char_code == 127) return;
         if (self.mods.ctrl and !self.mods.alt) return;
 

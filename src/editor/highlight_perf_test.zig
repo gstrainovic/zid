@@ -95,11 +95,11 @@ pub fn measureTagsForLine(
 
     try highlighter.reparseFromBuffer(root, metrics);
 
-    var line_buf = std.ArrayListUnmanaged(u8){};
-    defer line_buf.deinit(allocator);
+    var line_buf: std.Io.Writer.Allocating = .init(allocator);
+    defer line_buf.deinit();
 
-    try buffer.root.get_line(line_idx, &line_buf.writer(allocator), metrics);
-    const line_len = line_buf.items.len;
+    try buffer.root.get_line(line_idx, &line_buf.writer, metrics);
+    const line_len = line_buf.written().len;
 
     const start = std.time.nanoTimestamp();
     const tags = try highlighter.tagsForLine(line_idx, line_len, allocator);
