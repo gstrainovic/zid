@@ -6,6 +6,7 @@
 const std = @import("std");
 const clay = @import("clay");
 const flow_core = @import("flow_core");
+const syntax = @import("syntax");
 const wio = @import("wio");
 
 const actions = @import("actions.zig");
@@ -347,6 +348,54 @@ pub const CodeEditor = struct {
     }
 
     // =========================================================================
+    // tree-sitter inkrementelles Edit-Tracking
+    // =========================================================================
+
+    /// Melde eine Änderung an den Syntax-Highlighter für inkrementelles Reparse.
+    /// MUSS vor der eigentlichen Buffer-Änderung aufgerufen werden.
+    ///
+    /// `row`, `col` = Position VOR der Änderung (Beginn der Änderung).
+    /// `old_text` = Text der gelöscht wird ("" bei reinem Insert).
+    /// `new_text` = Text der eingefügt wird ("" bei reinem Delete).
+    fn pushEditForChange(self: *Self, row: usize, col: usize, old_text: []const u8, new_text: []const u8) void {
+        const hl = self.highlighter orelse return;
+        const m = self.metrics();
+        const line_start = self.buffer.root.line_start_byte(row, m);
+        const col_byte: usize = self.buffer.root.get_line_width_to_pos(row, col, m) catch return;
+
+        const start_byte = line_start + col_byte;
+        const old_end_byte = start_byte + old_text.len;
+        const new_end_byte = start_byte + new_text.len;
+
+        // Zeilen/Spalten-Punkte berechnen
+        const old_line_count = std.mem.count(u8, old_text, "\n");
+        const new_line_count = std.mem.count(u8, new_text, "\n");
+
+        const old_end_row: u32 = @intCast(row + old_line_count);
+        const new_end_row: u32 = @intCast(row + new_line_count);
+
+        const old_end_col: u32 = if (old_line_count == 0)
+            @intCast(col + old_text.len)
+        else
+            @intCast(old_text.len - std.mem.lastIndexOf(u8, old_text, "\n").? - 1);
+
+        const new_end_col: u32 = if (new_line_count == 0)
+            @intCast(col + new_text.len)
+        else
+            @intCast(new_text.len - std.mem.lastIndexOf(u8, new_text, "\n").? - 1);
+
+        const ed: syntax.Edit = .{
+            .start_byte = @intCast(start_byte),
+            .old_end_byte = @intCast(old_end_byte),
+            .new_end_byte = @intCast(new_end_byte),
+            .start_point = .{ .row = @intCast(row), .column = @intCast(col_byte) },
+            .old_end_point = .{ .row = old_end_row, .column = old_end_col },
+            .new_end_point = .{ .row = new_end_row, .column = new_end_col },
+        };
+        hl.pushEdit(ed);
+    }
+
+    // =========================================================================
     // UTF-8 Navigation Helpers (adapted for buffer text)
     // =========================================================================
 
@@ -440,19 +489,28 @@ pub const CodeEditor = struct {
     }
 
     pub fn getSelectedText(self: *const Self, alloc: std.mem.Allocator) !?[]u8 {
+        _ = alloc;
         const range = self.selectionRange() orelse return null;
+        const text = try self.getTextInRange(range);
+        if (text.len == 0) {
+            self.allocator.free(text);
+            return null;
+        }
+        return text;
+    }
 
+    pub fn getTextInRange(self: *const Self, range: flow_core.Selection) ![]u8 {
         var sel_list = std.ArrayListUnmanaged(u8){};
-        errdefer sel_list.deinit(alloc);
+        errdefer sel_list.deinit(self.allocator);
 
-        var writer = ArrayListWriter(std.mem.Allocator.Error).init(alloc, &sel_list);
+        var writer = ArrayListWriter(std.mem.Allocator.Error).init(self.allocator, &sel_list);
         self.buffer.root.write_range(range, &writer, null, self.metrics()) catch return error.WriteFailed;
 
         if (sel_list.items.len == 0) {
-            sel_list.deinit(alloc);
-            return null;
+            sel_list.deinit(self.allocator);
+            return "";
         }
-        const owned = try sel_list.toOwnedSlice(alloc);
+        const owned = try sel_list.toOwnedSlice(self.allocator);
         return owned;
     }
 
@@ -464,11 +522,21 @@ pub const CodeEditor = struct {
         if (self.hasSelection()) {
             const range = self.selectionRange().?;
             const m = self.metrics();
+            // pushEdit für Delete der Selection
+            const sel_text = self.getTextInRange(range) catch "";
+            const sel_owned = if (sel_text.len > 0) self.allocator.dupe(u8, sel_text) catch "" else "";
+            defer if (sel_owned.len > 0) self.allocator.free(sel_owned);
+            self.pushEditForChange(range.begin.row, range.begin.col, sel_owned, "");
             const new_root = self.buffer.root.delete_range(range, self.buffer.allocator, null, m) catch return error.Stop;
             self.buffer.root = new_root;
             self.cursor = range.begin;
             self.clearSelection();
         }
+
+        // pushEdit für Insert
+        const insert_row = self.cursor.row;
+        const insert_col = self.cursor.col;
+        self.pushEditForChange(insert_row, insert_col, "", text);
 
         // Insert chars at cursor
         const m = self.metrics();
@@ -682,6 +750,8 @@ pub const CodeEditor = struct {
                         // into buffer arena because insert_chars stores the slice
                         // directly in a Leaf (no copy).
                         const cur_text = self.buffer.allocator.dupe(u8, self.getLine(self.cursor.row)) catch return;
+                        // pushEdit: Delete EOL am Ende von prev_row (old_text="\n", new_text="")
+                        self.pushEditForChange(prev_row, prev_len, "\n", "");
                         const result = self.buffer.root.insert_chars(
                             prev_row, prev_len, cur_text, self.buffer.allocator, m,
                         ) catch return;
@@ -701,6 +771,11 @@ pub const CodeEditor = struct {
                         const char_start = prevCharBoundary(line_text, byte_pos);
                         const char_bytes = byte_pos - char_start;
                         if (char_bytes > 0) {
+                            const del_text = self.allocator.dupe(u8, line_text[char_start..byte_pos]) catch return;
+                            defer self.allocator.free(del_text);
+                            const del_row = self.cursor.row;
+                            const del_col = self.cursor.col - 1;
+                            self.pushEditForChange(del_row, del_col, del_text, "");
                             const sel: flow_core.Selection = .{
                                 .begin = .{ .row = self.cursor.row, .col = self.cursor.col - 1 },
                                 .end = self.cursor,
@@ -721,12 +796,18 @@ pub const CodeEditor = struct {
                             .begin = self.cursor,
                             .end = .{ .row = self.cursor.row, .col = self.cursor.col + 1 },
                         };
+                        const del_text = self.getTextInRange(sel) catch "";
+                        const del_owned = if (del_text.len > 0) self.allocator.dupe(u8, del_text) catch "" else "";
+                        defer if (del_owned.len > 0) self.allocator.free(del_owned);
+                        self.pushEditForChange(self.cursor.row, self.cursor.col, del_owned, "");
                         const result2 = self.buffer.root.delete_range(sel, self.buffer.allocator, null, m) catch return;
                         self.buffer.root = result2;
                     } else if (self.cursor.row + 1 < line_count) {
                         // Join with next line — dupe into buffer arena (Leaf.new
                         // stores the slice without copying).
                         const next_text = self.buffer.allocator.dupe(u8, self.getLine(self.cursor.row + 1)) catch return;
+                        // pushEdit: Delete EOL am Ende von cursor.row (old_text="\n", new_text="")
+                        self.pushEditForChange(self.cursor.row, self.cursor.col, "\n", "");
                         const result = self.buffer.root.insert_chars(
                             self.cursor.row, self.cursor.col, next_text, self.buffer.allocator, m,
                         ) catch return;
@@ -753,6 +834,10 @@ pub const CodeEditor = struct {
                                 .begin = .{ .row = self.cursor.row, .col = new_col },
                                 .end = self.cursor,
                             };
+                            const del_text = self.getTextInRange(sel) catch "";
+                            const del_owned = if (del_text.len > 0) self.allocator.dupe(u8, del_text) catch "" else "";
+                            defer if (del_owned.len > 0) self.allocator.free(del_owned);
+                            self.pushEditForChange(self.cursor.row, new_col, del_owned, "");
                             const result2 = self.buffer.root.delete_range(sel, self.buffer.allocator, null, m) catch return;
                             self.buffer.root = result2;
                             self.cursor.col = new_col;
@@ -777,6 +862,10 @@ pub const CodeEditor = struct {
                                 .begin = self.cursor,
                                 .end = .{ .row = self.cursor.row, .col = new_col },
                             };
+                            const del_text = self.getTextInRange(sel) catch "";
+                            const del_owned = if (del_text.len > 0) self.allocator.dupe(u8, del_text) catch "" else "";
+                            defer if (del_owned.len > 0) self.allocator.free(del_owned);
+                            self.pushEditForChange(self.cursor.row, self.cursor.col, del_owned, "");
                             const result2 = self.buffer.root.delete_range(sel, self.buffer.allocator, null, m) catch return;
                             self.buffer.root = result2;
                         }
@@ -792,12 +881,19 @@ pub const CodeEditor = struct {
                     .begin = .{ .row = self.cursor.row, .col = 0 },
                     .end = .{ .row = self.cursor.row, .col = line_w + 1 },
                 };
+                const del_text = self.getTextInRange(sel) catch "";
+                const del_owned = if (del_text.len > 0) self.allocator.dupe(u8, del_text) catch "" else "";
+                defer if (del_owned.len > 0) self.allocator.free(del_owned);
+                self.pushEditForChange(self.cursor.row, 0, del_owned, "");
                 const result2 = self.buffer.root.delete_range(sel, self.buffer.allocator, null, m) catch return;
                 self.buffer.root = result2;
                 self.cursor.col = 0;
             },
             .InsertNewline => {
                 if (self.deleteSelection()) {}
+                const ins_row = self.cursor.row;
+                const ins_col = self.cursor.col;
+                self.pushEditForChange(ins_row, ins_col, "", "\n");
                 const result = self.buffer.root.insert_chars(
                     self.cursor.row, self.cursor.col, "\n", self.buffer.allocator, m,
                 ) catch return;
@@ -808,6 +904,9 @@ pub const CodeEditor = struct {
             },
             .InsertTab => {
                 if (self.deleteSelection()) {}
+                const ins_row = self.cursor.row;
+                const ins_col = self.cursor.col;
+                self.pushEditForChange(ins_row, ins_col, "", "    ");
                 const result = self.buffer.root.insert_chars(
                     self.cursor.row, self.cursor.col, "    ", self.buffer.allocator, m,
                 ) catch return;
@@ -891,6 +990,10 @@ pub const CodeEditor = struct {
     fn deleteSelection(self: *Self) bool {
         if (!self.hasSelection()) return false;
         const range = self.selectionRange() orelse return false;
+        const del_text = self.getTextInRange(range) catch "";
+        const del_owned = if (del_text.len > 0) self.allocator.dupe(u8, del_text) catch "" else "";
+        defer if (del_owned.len > 0) self.allocator.free(del_owned);
+        self.pushEditForChange(range.begin.row, range.begin.col, del_owned, "");
         const m = self.metrics();
         const new_root = self.buffer.root.delete_range(range, self.buffer.allocator, null, m) catch return false;
         self.buffer.root = new_root;
@@ -1114,6 +1217,11 @@ pub const CodeEditor = struct {
 
         var buf: [4]u8 = undefined;
         const len = std.unicode.utf8Encode(char_code, &buf) catch return;
+
+        // pushEdit für Insert des Zeichens
+        const ins_row = self.cursor.row;
+        const ins_col = self.cursor.col;
+        self.pushEditForChange(ins_row, ins_col, "", buf[0..len]);
 
         const m = self.metrics();
         const result = self.buffer.root.insert_chars(
