@@ -1540,6 +1540,17 @@ pub const CodeEditor = struct {
                     },
                 })({
                     const total = self.lineCount();
+                    
+                    // Dynamische Gutter-Breite basierend auf maximaler Zeilennummer
+                    if (self.measure_fn) |measure| {
+                        var buf: [16]u8 = undefined;
+                        const sample = std.fmt.bufPrint(&buf, "{d}", .{total}) catch "000";
+                        // Padding: 8 (links) + 16 (rechts) = 24
+                        const needed = measure(sample.ptr, sample.len) + 24;
+                        // Nur vergrößern (oder sanft schrumpfen), um Flackern zu vermeiden
+                        self.gutter_width = @max(50, needed);
+                    }
+
                     const visible_count = self.visibleLineCount();
                     const start_line = @min(self.view.row, total);
                     const end_line = @min(start_line + visible_count + 1, total);
