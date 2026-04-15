@@ -292,6 +292,8 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
   - [x] SVG-Dateien im Editor-Tab als Bild anzeigen (wie VSCode)
   - [x] nanosvg rasterisiert SVG (Full Color) → wgpu Texture → Textured Quad im Tab
 - [x] **Bild-Datei Preview**
+- [x] **PDF-Datei Preview** (nutze fancy-cat / mupdf)
+
   - [x] PNG/JPG im Editor-Tab anzeigen
 
 ## 🔮 Phase 10: Flow-Editor Integration (GPU-beschleunigt, Cross-Platform)

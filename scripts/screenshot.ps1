@@ -32,7 +32,7 @@ if (-Not (Test-Path $exePath)) {
 }
 
 Write-Host "Launching with: $File"
-$proc = Start-Process -FilePath (Resolve-Path $exePath).Path -ArgumentList $File -PassThru -WindowStyle Normal
+$proc = Start-Process -FilePath (Resolve-Path $exePath).Path -ArgumentList "`"$File`"" -PassThru -WindowStyle Normal
 Write-Host "Started PID $($proc.Id), waiting..."
 
 Start-Sleep -Milliseconds $WaitMs

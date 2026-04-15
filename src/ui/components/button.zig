@@ -2,7 +2,7 @@ const std = @import("std");
 const clay = @import("clay");
 const Theme = @import("../theme.zig").Theme;
 
-pub fn Button(id: []const u8, text: []const u8, theme: Theme) void {
+pub fn Button(id: []const u8, text: []const u8, theme: Theme, mouse_pressed: bool) bool {
     const element_id = clay.ElementId.ID(id);
     const is_hovered = clay.pointerOver(element_id);
     
@@ -24,8 +24,8 @@ pub fn Button(id: []const u8, text: []const u8, theme: Theme) void {
         .background_color = bg_color,
         .corner_radius = .all(4),
         .border = .{
-            .width = .{ .left = 2, .right = 2, .top = 2, .bottom = 2 },
-            .color = theme.accent, // Accent border for better shape definition
+            .width = .all(2),
+            .color = theme.accent,
         },
     })({
         clay.text(text, .{ 
@@ -33,4 +33,6 @@ pub fn Button(id: []const u8, text: []const u8, theme: Theme) void {
             .color = theme.text_on_primary,
         });
     });
+
+    return is_hovered and mouse_pressed;
 }
