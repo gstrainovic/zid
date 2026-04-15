@@ -586,12 +586,14 @@ pub const UI = struct {
         const term_instance = self.tab_bar.terminal_instances.get(path) orelse return;
         _ = t;
 
-        // Get screen text from ghostty-vt terminal
-        const screen_text = term_instance.getScreenText() catch |err| {
+        // Use frame_arena so the text survives until endLayout() processes it.
+        // frame_arena is reset at the start of each frame in beginLayout().
+        const arena_alloc = self.frame_arena.allocator();
+        const screen_text = term_instance.getScreenText(arena_alloc) catch |err| {
             log.err("Failed to get terminal screen text: {}", .{err});
             return;
         };
-        defer self.allocator.free(screen_text);
+        // No defer free — frame_arena handles cleanup
 
         // Convert to Clay string
         const text_slice: []const u8 = if (screen_text.len > 0) screen_text else " ";
