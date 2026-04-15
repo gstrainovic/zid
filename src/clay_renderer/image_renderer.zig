@@ -287,13 +287,18 @@ pub const ImageRenderer = struct {
         };
     }
 
-    /// Lade eine Textur aus einer Datei (PNG via zigimg)
+    /// Lade eine Textur aus einer Datei (PNG via zigimg, SVG via cairo-rasterizer)
     pub fn createTextureFromPath(
         self: *Self,
         allocator: std.mem.Allocator,
         path: []const u8,
     ) !ImageTexture {
         log.debug("Loading image from path: {s}", .{path});
+
+        if (std.ascii.endsWithIgnoreCase(path, ".svg")) {
+            return self.createTextureFromSvg(allocator, path);
+        }
+
         const zigimg = @import("zigimg");
 
         const file_data = try std.fs.cwd().readFileAlloc(allocator, path, 64 * 1024 * 1024);
@@ -311,6 +316,85 @@ pub const ImageRenderer = struct {
         const pixels = std.mem.sliceAsBytes(src_pixels);
 
         return self.createTextureFromPixels(pixels, @intCast(img.width), @intCast(img.height));
+    }
+
+    const ViewBox = struct { w: f32, h: f32 };
+
+    /// Parse viewBox width + height aus SVG-Datei.
+    /// Fallback: 24×24 (Lucide-Default).
+    fn parseSvgViewBox(src: []const u8) ViewBox {
+        const fallback = ViewBox{ .w = 24.0, .h = 24.0 };
+        const needle = "viewBox";
+        const vb_pos = std.mem.indexOf(u8, src, needle) orelse return fallback;
+        var i = vb_pos + needle.len;
+        while (i < src.len and src[i] != '"' and src[i] != '\'') : (i += 1) {}
+        if (i >= src.len) return fallback;
+        i += 1;
+        const start = i;
+        while (i < src.len and src[i] != '"' and src[i] != '\'') : (i += 1) {}
+        const content = src[start..i];
+
+        var it = std.mem.tokenizeAny(u8, content, " ,\t\n");
+        _ = it.next() orelse return fallback;
+        _ = it.next() orelse return fallback;
+        const w_str = it.next() orelse return fallback;
+        const h_str = it.next() orelse return fallback;
+        const w = std.fmt.parseFloat(f32, w_str) catch return fallback;
+        const h = std.fmt.parseFloat(f32, h_str) catch return fallback;
+        if (w <= 0 or h <= 0) return fallback;
+        return ViewBox{ .w = w, .h = h };
+    }
+
+    /// Lade SVG-Datei und rastere zu RGBA-Textur.
+    /// Output: weiße Pixel mit Alpha-Mask — Tint-Farbe liefert image_view via background_color.
+    /// Rasterisiert im Quadrat (max-dim = 512), extrahiert danach den Content-Rect
+    /// in eine aspect-korrekte Textur.
+    pub fn createTextureFromSvg(
+        self: *Self,
+        allocator: std.mem.Allocator,
+        path: []const u8,
+    ) !ImageTexture {
+        const svg_mod = @import("../svg/mod.zig");
+
+        const file_data = try std.fs.cwd().readFileAlloc(allocator, path, 8 * 1024 * 1024);
+        defer allocator.free(file_data);
+
+        const vb = parseSvgViewBox(file_data);
+        const max_dim: u32 = 512;
+        const vb_max = @max(vb.w, vb.h);
+
+        // Square-Buffer rasterisieren (Rasterizer ist square-only)
+        const sq_buffer = try allocator.alloc(u8, max_dim * max_dim * 4);
+        defer allocator.free(sq_buffer);
+
+        _ = svg_mod.rasterize(allocator, file_data, vb_max, max_dim, sq_buffer) catch |err| {
+            log.err("SVG rasterize failed for '{s}': {}", .{ path, err });
+            return error.SvgRasterizeFailed;
+        };
+
+        // Tight content dimensions (Pixel): viewBox dims × scale
+        const scale: f32 = @as(f32, @floatFromInt(max_dim)) / vb_max;
+        const content_w: u32 = @intFromFloat(@round(vb.w * scale));
+        const content_h: u32 = @intFromFloat(@round(vb.h * scale));
+        const w = @max(content_w, 1);
+        const h = @max(content_h, 1);
+
+        // Content-Rect in aspect-korrekten Buffer kopieren, RGB=weiß setzen.
+        const out = try allocator.alloc(u8, w * h * 4);
+        defer allocator.free(out);
+        for (0..h) |y| {
+            for (0..w) |x| {
+                const src_idx = (y * max_dim + x) * 4;
+                const dst_idx = (y * w + x) * 4;
+                const a = sq_buffer[src_idx + 3];
+                out[dst_idx + 0] = 255;
+                out[dst_idx + 1] = 255;
+                out[dst_idx + 2] = 255;
+                out[dst_idx + 3] = a;
+            }
+        }
+
+        return self.createTextureFromPixels(out, w, h);
     }
 
     /// Erstelle ein Test-Pattern (Checkerboard)
