@@ -13,6 +13,8 @@ const editor_mod = @import("../editor/mod.zig");
 const wio = @import("wio");
 const tab_bar_mod = @import("tab_bar.zig");
 const file_explorer_mod = @import("file_explorer.zig");
+const image_view_mod = @import("image_view.zig");
+const file_types = @import("file_types.zig");
 
 const log = std.log.scoped(.ui);
 
@@ -72,6 +74,9 @@ pub const UI = struct {
     /// Pending Tab-Wechsel (von Tab-Bar oder RPC gesetzt, von main.zig verarbeitet)
     pending_tab_switch: ?[]const u8 = null,
 
+    // Map von Pfad zu geladener Textur-ID/Pointer
+    open_images: std.StringHashMap(*anyopaque),
+
     // Mouse state for immediate mode UI clicks
     mouse_pressed_this_frame: bool = false,
 
@@ -124,6 +129,9 @@ pub const UI = struct {
                     .file_explorer = file_explorer,
                     .show_file_explorer = true,
                     .current_directory = null,
+                    .open_images = std.StringHashMap(*anyopaque).init(allocator),
+                    .pending_tab_switch = null,
+                    .mouse_pressed_this_frame = false,
                 };
             };
             defer allocator.free(file_content);
@@ -155,6 +163,7 @@ pub const UI = struct {
             .file_explorer = file_explorer,
             .show_file_explorer = true,
             .current_directory = null,
+            .open_images = std.StringHashMap(*anyopaque).init(allocator),
         };
     }
 
@@ -173,6 +182,18 @@ pub const UI = struct {
         log.debug("UI.deinit: tab_bar done", .{});
         self.file_explorer.deinit();
         log.debug("UI.deinit: file_explorer done", .{});
+
+        // Bilder aufräumen
+        var iter = self.open_images.iterator();
+        while (iter.next()) |entry| {
+            const ImageTexture = @import("../clay_renderer/image_renderer.zig").ImageTexture;
+            const tex_ptr: *ImageTexture = @ptrCast(@alignCast(entry.value_ptr.*));
+            tex_ptr.deinit();
+            self.allocator.destroy(tex_ptr);
+            self.allocator.free(entry.key_ptr.*); // Key freigeben
+        }
+        self.open_images.deinit();
+
         if (self.current_directory) |dir| self.allocator.free(dir);
         log.debug("UI.deinit: finished", .{});
     }
@@ -386,8 +407,27 @@ pub const UI = struct {
                         self.mouse_pressed_this_frame,
                     );
 
-                    // Code Editor - füllt den restlichen Raum
-                    self.code_editor.render(self.frame_arena.allocator());
+                    // Aktiven Tab prüfen für Weiche (Editor vs Bild)
+                    var image_active = false;
+                    if (self.tab_bar.active_index) |idx| {
+                        if (idx < self.tab_bar.tabs.items.len) {
+                            const tab = self.tab_bar.tabs.items[idx];
+                            if (tab.kind == .image) {
+                                image_view_mod.ImageViewState.render(
+                                    self.frame_arena.allocator(),
+                                    tab.path,
+                                    t,
+                                    &self.open_images,
+                                );
+                                image_active = true;
+                            }
+                        }
+                    }
+
+                    // Code Editor - füllt den restlichen Raum (nur wenn kein Bild aktiv)
+                    if (!image_active) {
+                        self.code_editor.render(self.frame_arena.allocator());
+                    }
                 });
             });
         });

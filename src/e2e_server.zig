@@ -42,6 +42,7 @@ pub fn createDispatcher(alloc: std.mem.Allocator, ctx: *E2EContext) !*zigjr.RpcD
     rpc_dispatcher.* = try zigjr.RpcDispatcher.init(alloc);
 
     try rpc_dispatcher.addWithCtx("open_folder", ctx, openFolder);
+    try rpc_dispatcher.addWithCtx("open_file", ctx, openFile);
     try rpc_dispatcher.addWithCtx("close_tab", ctx, closeTab);
     try rpc_dispatcher.addWithCtx("set_active_tab", ctx, setActiveTab);
     try rpc_dispatcher.addWithCtx("click", ctx, click);
@@ -125,6 +126,29 @@ fn openFolder(ctx: *E2EContext, path: []const u8) ![]const u8 {
         const msg = try std.fmt.allocPrint(ctx.allocator, "error: {}", .{err});
         return msg;
     };
+
+    return ctx.allocator.dupe(u8, "ok") catch "error: out of memory";
+}
+
+/// Datei im Editor öffnen (oder Bild-Vorschau)
+fn openFile(ctx: *E2EContext, path: []const u8) ![]const u8 {
+    log.info("RPC: open_file('{s}')", .{path});
+
+    ctx.ui_system.tab_bar.openFile(path) catch |err| {
+        const msg = try std.fmt.allocPrint(ctx.allocator, "error: {}", .{err});
+        return msg;
+    };
+
+    // Wichtig: In main.zig wird pending_switch_path abgefragt, um den Editor-Inhalt zu setzen.
+    // tab_bar.openFile setzt active_index, aber nicht automatisch pending_switch_path (außer in setActive).
+    // Wir rufen setActive auf, um den Loader-Flow in main.zig zu triggern.
+    if (ctx.ui_system.tab_bar.active_index) |idx| {
+        ctx.ui_system.tab_bar.setActive(idx);
+    }
+
+    // Event Loop aufwecken, damit render_commands sofort generiert und geladen werden!
+    const wio = @import("wio");
+    wio.cancelWait();
 
     return ctx.allocator.dupe(u8, "ok") catch "error: out of memory";
 }

@@ -10,6 +10,9 @@ const Theme = ui.Theme;
 
 const log = std.log.scoped(.tab_bar);
 
+const file_types = @import("file_types.zig");
+const FileKind = file_types.FileKind;
+
 /// Ein geöffneter Tab (Datei)
 pub const Tab = struct {
     /// Dateipfad (owned)
@@ -20,6 +23,8 @@ pub const Tab = struct {
     modified: bool = false,
     /// Ist dieser Tab aktiv?
     is_active: bool = false,
+    /// Art der Datei (Text/Bild)
+    kind: FileKind = .text,
 };
 
 /// Tab-Bar State
@@ -63,6 +68,9 @@ pub const TabBarState = struct {
             }
         }
 
+        // Dateityp bestimmen
+        const kind = file_types.getFileKind(path);
+
         // Dateiname extrahieren
         const display_name = std.fs.path.basename(path);
         const path_copy = try self.allocator.dupe(u8, path);
@@ -73,6 +81,7 @@ pub const TabBarState = struct {
             .display_name = name_copy,
             .modified = false,
             .is_active = false,
+            .kind = kind,
         });
 
         // Neuen Tab aktivieren
