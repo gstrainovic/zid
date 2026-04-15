@@ -479,9 +479,7 @@ pub fn main() !void {
             
             if (kind == .terminal) {
                 // Terminal tabs are self-contained — no file loading needed.
-                // Just consume the pending switch path.
-                allocator.free(path);
-                ui_system.tab_bar.pending_switch_path = null;
+                // Path cleanup happens below at the common pending_switch_path free.
                 state_dirty = true;
                 wio.cancelWait();
             } else if (kind == .text) {
