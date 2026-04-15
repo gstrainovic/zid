@@ -114,7 +114,10 @@ cmd_pull() {
 
     echo ""
     echo "=== Pull: Submodule ==="
-    git submodule update --init --recursive
+    # Top-Level Submodule (NICHT --recursive: fancy-cat pinnt einen mupdf-Commit
+    # der im upstream force-pushed/gelöscht wurde — würde rekursiv fehlschlagen).
+    git submodule update --init
+    cmd_mupdf
     ok "All submodules updated"
 
     echo ""
@@ -123,6 +126,26 @@ cmd_pull() {
 
     echo ""
     cmd_status || true
+}
+
+cmd_mupdf() {
+    # fancy-cat/deps/mupdf: Pin im upstream nicht erreichbar (force-push).
+    # Daher klonen wir mupdf direkt auf einen verfügbaren Tag, anstatt den
+    # rekursiven submodule-update zu verwenden.
+    local MUPDF_PATH="$REPO_ROOT/libs/fancy-cat/deps/mupdf"
+    local MUPDF_TAG="1.26.5"
+    if [[ -d "$MUPDF_PATH/.git" ]] || [[ -f "$MUPDF_PATH/.git" ]]; then
+        if git -C "$MUPDF_PATH" cat-file -e HEAD 2>/dev/null && [[ -d "$MUPDF_PATH/include/mupdf" ]]; then
+            ok "fancy-cat/deps/mupdf (already present)"
+            return
+        fi
+    fi
+    rm -rf "$MUPDF_PATH"
+    echo "  clone mupdf $MUPDF_TAG (Pin im upstream nicht erreichbar)"
+    git clone --depth 1 --branch "$MUPDF_TAG" --recurse-submodules --shallow-submodules \
+        https://github.com/ArtifexSoftware/mupdf.git "$MUPDF_PATH" >/dev/null 2>&1 \
+        && ok "fancy-cat/deps/mupdf ($MUPDF_TAG)" \
+        || err "fancy-cat/deps/mupdf clone failed"
 }
 
 cmd_references() {
