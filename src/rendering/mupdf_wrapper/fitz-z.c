@@ -20,3 +20,22 @@ fz_page *fz_load_page_z(fz_context *ctx, fz_document *doc, int page_number) {
   fz_catch(ctx) {}
   return page;
 }
+
+void fz_run_page_z(fz_context *ctx, fz_page *page, fz_device *dev, fz_matrix ctm, fz_cookie *cookie) {
+  fz_try(ctx) { fz_run_page(ctx, page, dev, ctm, cookie); }
+  fz_catch(ctx) {}
+}
+
+fz_pixmap *fz_new_pixmap_with_bbox_z(fz_context *ctx, fz_colorspace *cs, fz_irect bbox, fz_colorspace *seps, int alpha) {
+  fz_pixmap *pix = NULL;
+  fz_try(ctx) { pix = fz_new_pixmap_with_bbox(ctx, cs, bbox, seps, alpha); }
+  fz_catch(ctx) {}
+  return pix;
+}
+
+fz_device *fz_new_draw_device_z(fz_context *ctx, fz_matrix ctm, fz_pixmap *pix) {
+  fz_device *dev = NULL;
+  fz_try(ctx) { dev = fz_new_draw_device(ctx, ctm, pix); }
+  fz_catch(ctx) {}
+  return dev;
+}

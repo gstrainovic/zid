@@ -294,8 +294,6 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
 - [x] **Bild-Datei Preview**
 - [x] **PDF-Datei Preview** (nutze fancy-cat / mupdf)
 
-  - [x] PNG/JPG im Editor-Tab anzeigen
-
 ## 🔮 Phase 10: Flow-Editor Integration (GPU-beschleunigt, Cross-Platform)
 
 **Ziel:** Flow's Editor-Kern (Rope Buffer, Syntax Highlighting, LSP, Actors) mit Vulkan-Ed's GUI (wgpu + Clay + wio) verbinden.
