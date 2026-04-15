@@ -1,0 +1,6 @@
+
+This file starts with an empty line.
+The line above is empty!
+And this one below too:
+
+End.
