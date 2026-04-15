@@ -37,7 +37,7 @@ fi
 
 # ---- Vor-Check 2: Byte-identische Phasen-Screenshots (spart Claude-Tokens) ----
 # Handle Subphasen (12A, 12B, ...) — extract base phase number
-BASE_PHASE=$(echo "$PHASE" | grep -oP '^\d+')
+BASE_PHASE=$(echo "$PHASE" | sed 's/[^0-9].*//')
 if [[ -n "$BASE_PHASE" ]]; then
     PREV_PHASE=$((BASE_PHASE - 1))
 else
