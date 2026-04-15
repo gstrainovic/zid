@@ -68,16 +68,20 @@ pub const PdfHandler = struct {
         const height = @as(u32, @intFromFloat((bound.y1 - bound.y0) * scale));
 
         const bbox = c.fz_make_irect(0, 0, @intCast(width), @intCast(height));
-        const pix = c.fz_new_pixmap_with_bbox(self.ctx, c.fz_device_rgb(self.ctx), bbox, null, 0);
+        const pix = c.fz_new_pixmap_with_bbox_z(self.ctx, c.fz_device_rgb(self.ctx), bbox, null, 0) orelse {
+            return error.FailedToCreatePixmap;
+        };
         defer c.fz_drop_pixmap(self.ctx, pix);
         
         c.fz_clear_pixmap_with_value(self.ctx, pix, 0xFF);
 
         const ctm = c.fz_scale(scale, scale);
-        const dev = c.fz_new_draw_device(self.ctx, ctm, pix);
+        const dev = c.fz_new_draw_device_z(self.ctx, ctm, pix) orelse {
+            return error.FailedToCreateDevice;
+        };
         defer c.fz_drop_device(self.ctx, dev);
         
-        c.fz_run_page(self.ctx, page, dev, c.fz_identity, null);
+        c.fz_run_page_z(self.ctx, page, dev, c.fz_identity, null);
         c.fz_close_device(self.ctx, dev);
 
         const samples = c.fz_pixmap_samples(self.ctx, pix);
@@ -85,12 +89,15 @@ pub const PdfHandler = struct {
         const pixels = try self.allocator.alloc(u8, width * height * 4);
         errdefer self.allocator.free(pixels);
 
-        // Convert RGB to RGBA
-        for (0..width * height) |i| {
-            pixels[i * 4 + 0] = samples[i * 3 + 0];
-            pixels[i * 4 + 1] = samples[i * 3 + 1];
-            pixels[i * 4 + 2] = samples[i * 3 + 2];
-            pixels[i * 4 + 3] = 255;
+        // Convert RGB to RGBA (optimized loop)
+        const total_pixels = width * height;
+        for (0..total_pixels) |i| {
+            const src_idx = i * 3;
+            const dst_idx = i * 4;
+            pixels[dst_idx + 0] = samples[src_idx + 0];
+            pixels[dst_idx + 1] = samples[src_idx + 1];
+            pixels[dst_idx + 2] = samples[src_idx + 2];
+            pixels[dst_idx + 3] = 255;
         }
 
         return .{

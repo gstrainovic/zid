@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const file_types = @import("ui/file_types.zig");
 const wio = @import("wio");
 const platform = @import("platform/mod.zig");
 const rendering = @import("rendering/mod.zig");
@@ -380,8 +381,8 @@ pub fn main() !void {
             ui_system.tab_bar.openFile(path) catch {};
 
             // Dateityp prüfen
-            const file_types = @import("ui/file_types.zig");
             const kind = file_types.getFileKind(path);
+            log.info("Opening file: {s} (kind: {s})", .{path, @tagName(kind)});
             
             if (kind == .text) {
                 // Text-Dateien in den Editor laden
@@ -408,6 +409,7 @@ pub fn main() !void {
                     const path_copy = allocator.dupe(u8, path) catch unreachable;
                     ui_system.open_images.put(path_copy, tex_ptr) catch {};
                     
+                    state_dirty = true;
                     // Force another frame to render the newly loaded texture!
                     wio.cancelWait();
                 }
@@ -415,6 +417,7 @@ pub fn main() !void {
                 // PDF-Dateien laden
                 if (!ui_system.open_pdfs.contains(path)) {
                     log.info("Loading PDF: {s}", .{path});
+                    const start_time = std.time.milliTimestamp();
                     const PdfHandler = @import("rendering/pdf_handler.zig").PdfHandler;
                     const handler = PdfHandler.init(allocator, path) catch |err| {
                         log.err("Failed to open PDF {s}: {}", .{path, err});
@@ -422,25 +425,38 @@ pub fn main() !void {
                         state_dirty = true;
                         continue;
                     };
+                    log.info("PDF Handler init took {}ms", .{std.time.milliTimestamp() - start_time});
                     
-                    // Erste Seite rendern
-                    const page_info = handler.renderPage(0, 2.0) catch |err| {
+                    const render_start = std.time.milliTimestamp();
+                    const page_info = handler.renderPage(0, 1.5) catch |err| {
                         log.err("Failed to render first PDF page: {}", .{err});
                         handler.deinit();
                         ui_system.file_explorer.file_to_open = null;
                         state_dirty = true;
                         continue;
                     };
+                    log.info("PDF Page render took {}ms", .{std.time.milliTimestamp() - render_start});
                     defer allocator.free(page_info.pixels);
+
+                    const tex_start = std.time.milliTimestamp();
+                    const tex = image_rdr.createTextureFromPixels(page_info.pixels, page_info.width, page_info.height) catch |err| {
+                        log.err("Failed to load image texture for PDF: {}", .{err});
+                        handler.deinit();
+                        ui_system.file_explorer.file_to_open = null;
+                        state_dirty = true;
+                        continue;
+                    };
+                    log.info("Texture upload took {}ms", .{std.time.milliTimestamp() - tex_start});
                     
-                    const tex = image_rdr.createTextureFromPixels(page_info.pixels, page_info.width, page_info.height) catch unreachable;
                     const tex_ptr = allocator.create(@import("clay_renderer/image_renderer.zig").ImageTexture) catch unreachable;
                     tex_ptr.* = tex;
                     
                     const path_copy = allocator.dupe(u8, path) catch unreachable;
+                    log.info("Adding to cache: {s}", .{path_copy});
                     ui_system.open_pdfs.put(path_copy, handler) catch {};
                     ui_system.open_images.put(path_copy, tex_ptr) catch {};
                     
+                    state_dirty = true;
                     wio.cancelWait();
                 }
             }
@@ -449,10 +465,9 @@ pub fn main() !void {
             state_dirty = true;
         }
 
-        // Phase 9: Tab-Wechsel verarbeiten
         if (ui_system.tab_bar.pending_switch_path) |path| {
-            const file_types = @import("ui/file_types.zig");
             const kind = file_types.getFileKind(path);
+            log.info("Switching to tab: {s} (kind: {s})", .{path, @tagName(kind)});
             
             if (kind == .text) {
                 // Nur Text-Dateien in den Editor laden
@@ -478,6 +493,35 @@ pub fn main() !void {
                     ui_system.open_images.put(path_copy, tex_ptr) catch {};
                     
                     // Force another frame to render the newly loaded texture!
+                    wio.cancelWait();
+                }
+            } else if (kind == .pdf) {
+                // PDF beim Tab-Wechsel sicherstellen dass es geladen ist
+                if (!ui_system.open_pdfs.contains(path)) {
+                    log.info("Loading PDF (tab switch): {s}", .{path});
+                    const PdfHandler = @import("rendering/pdf_handler.zig").PdfHandler;
+                    const handler = PdfHandler.init(allocator, path) catch |err| {
+                        log.err("Failed to open PDF {s}: {}", .{path, err});
+                        ui_system.tab_bar.pending_switch_path = null;
+                        continue;
+                    };
+                    
+                    const page_info = handler.renderPage(0, 1.5) catch |err| {
+                        log.err("Failed to render first PDF page: {}", .{err});
+                        handler.deinit();
+                        ui_system.tab_bar.pending_switch_path = null;
+                        continue;
+                    };
+                    defer allocator.free(page_info.pixels);
+
+                    const tex = image_rdr.createTextureFromPixels(page_info.pixels, page_info.width, page_info.height) catch unreachable;
+                    const tex_ptr = allocator.create(@import("clay_renderer/image_renderer.zig").ImageTexture) catch unreachable;
+                    tex_ptr.* = tex;
+                    
+                    const path_copy = allocator.dupe(u8, path) catch unreachable;
+                    ui_system.open_pdfs.put(path_copy, handler) catch {};
+                    ui_system.open_images.put(path_copy, tex_ptr) catch {};
+                    
                     wio.cancelWait();
                 }
             }

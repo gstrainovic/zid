@@ -446,15 +446,16 @@ pub const UI = struct {
                                 );
                                 image_active = true;
                             } else if (tab.kind == .pdf) {
-                                const maybe_handler = self.open_pdfs.get(tab.path);
-                                const maybe_texture = self.open_images.get(tab.path);
-                                if (maybe_handler) |handler_ptr| {
-                                    const handler: *PdfHandler = @ptrCast(@alignCast(handler_ptr));
-                                    if (PdfViewState.render(handler, maybe_texture, t, self.mouse_pressed_this_frame)) |delta| {
-                                        self.pending_pdf_page_change = .{ .path = tab.path, .delta = delta };
-                                    }
-                                }
-                                image_active = true; // Benutze image_active um Editor zu verstecken
+                                 const maybe_handler = self.open_pdfs.get(tab.path);
+                                 const maybe_texture = self.open_images.get(tab.path);
+                                 
+                                 if (maybe_handler) |handler_ptr| {
+                                     const handler: *PdfHandler = @ptrCast(@alignCast(handler_ptr));
+                                     if (PdfViewState.render(handler, maybe_texture, t, self.mouse_pressed_this_frame)) |delta| {
+                                         self.pending_pdf_page_change = .{ .path = tab.path, .delta = delta };
+                                     }
+                                 }
+                                 image_active = true; // Benutze image_active um Editor zu verstecken
                             }
                         }
                     }
