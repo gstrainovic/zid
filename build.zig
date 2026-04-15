@@ -129,6 +129,24 @@ pub fn build(b: *std.Build) void {
         exe.root_module.link_libc = true;
     }
 
+    // Automatische Kompilierung der MuPDF Font-Ressourcen (damit man nicht compile_fonts ausführen muss)
+    if (std.fs.cwd().openDir("libs/fancy-cat/deps/mupdf/generated/resources/fonts/urw", .{ .iterate = true })) |mut_dir| {
+        var dir = mut_dir;
+        defer dir.close();
+        var it = dir.iterate();
+        while (it.next() catch null) |entry| {
+            if (entry.kind == .file and std.mem.endsWith(u8, entry.name, ".c")) {
+                const fpath = b.fmt("libs/fancy-cat/deps/mupdf/generated/resources/fonts/urw/{s}", .{entry.name});
+                exe.addCSourceFile(.{
+                    .file = b.path(fpath),
+                    .flags = &[_][]const u8{ "-O3", "-std=c99" },
+                });
+            }
+        }
+    } else |_| {
+        @import("std").log.warn("MuPDF font directory not found, skipping font compilation.", .{});
+    }
+
     b.installArtifact(exe);
 
     // Run the app
