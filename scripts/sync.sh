@@ -19,6 +19,7 @@ OWN_SUBMODULES=("libs/gooey" "libs/wgpu_native_zig" "libs/wio")
 REFERENCES=(
     "reference/ghostty|https://github.com/ghostty-org/ghostty.git"
     "reference/lite-xl|https://github.com/lite-xl/lite-xl.git"
+    "reference/sev|https://github.com/dylancobb/sev.git"
 )
 
 RED='\033[0;31m'
