@@ -1610,7 +1610,11 @@ pub const CodeEditor = struct {
 
     fn renderLine(self: *Self, arena: std.mem.Allocator, line_idx: usize, line: []const u8) void {
         clay.UI()(.{
-            .layout = .{ .direction = .left_to_right, .child_alignment = .{ .x = .left, .y = .center } },
+            .layout = .{ 
+                .sizing = .{ .w = .grow, .h = .grow },
+                .direction = .left_to_right, 
+                .child_alignment = .{ .x = .left, .y = .center } 
+            },
         })({
             if (self.hasSelection()) {
                 self.renderSelection(arena, line_idx);
