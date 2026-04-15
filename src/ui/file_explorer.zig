@@ -414,6 +414,7 @@ fn fileIcon(filename: []const u8) []const u8 {
     if (std.mem.eql(u8, ext, ".toml")) return svg.Lucide.settings;
     if (std.mem.eql(u8, ext, ".svg")) return svg.Lucide.palette;
     if (std.mem.eql(u8, ext, ".png") or std.mem.eql(u8, ext, ".jpg")) return svg.Lucide.image;
+    if (std.mem.eql(u8, ext, ".pdf")) return svg.Lucide.file_text;
     if (std.mem.eql(u8, ext, ".log")) return svg.Lucide.clipboard;
     return svg.Lucide.file;
 }

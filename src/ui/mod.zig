@@ -9,6 +9,8 @@ const animation = @import("animation.zig");
 const Animation = animation.Animation;
 const AnimationType = animation.AnimationType;
 const AnimationManager = animation.AnimationManager;
+const PdfHandler = @import("../rendering/pdf_handler.zig").PdfHandler;
+const PdfViewState = @import("pdf_view.zig").PdfViewState;
 const editor_mod = @import("../editor/mod.zig");
 const wio = @import("wio");
 const tab_bar_mod = @import("tab_bar.zig");
@@ -42,6 +44,7 @@ pub const UIConfig = struct {
     padding: f32 = 12.0,
     gap: f32 = 8.0,
 };
+pub const PdfPageChange = struct { path: []const u8, delta: i16 };
 
 /// UI Hauptstruktur
 pub const components = @import("components/mod.zig");
@@ -71,11 +74,14 @@ pub const UI = struct {
     file_explorer: file_explorer_mod.FileExplorerState,
     show_file_explorer: bool = true,
     current_directory: ?[]const u8 = null,
-    /// Pending Tab-Wechsel (von Tab-Bar oder RPC gesetzt, von main.zig verarbeitet)
     pending_tab_switch: ?[]const u8 = null,
+    pending_pdf_page_change: ?PdfPageChange = null,
 
     // Map von Pfad zu geladener Textur-ID/Pointer
     open_images: std.StringHashMap(*anyopaque),
+    
+    // Phase 9: PDF Handler
+    open_pdfs: std.StringHashMap(*anyopaque),
 
     // Mouse state for immediate mode UI clicks
     mouse_pressed_this_frame: bool = false,
@@ -130,6 +136,7 @@ pub const UI = struct {
                     .show_file_explorer = true,
                     .current_directory = null,
                     .open_images = std.StringHashMap(*anyopaque).init(allocator),
+                    .open_pdfs = std.StringHashMap(*anyopaque).init(allocator),
                     .pending_tab_switch = null,
                     .mouse_pressed_this_frame = false,
                 };
@@ -164,6 +171,7 @@ pub const UI = struct {
             .show_file_explorer = true,
             .current_directory = null,
             .open_images = std.StringHashMap(*anyopaque).init(allocator),
+            .open_pdfs = std.StringHashMap(*anyopaque).init(allocator),
         };
     }
 
@@ -193,6 +201,14 @@ pub const UI = struct {
             self.allocator.free(entry.key_ptr.*); // Key freigeben
         }
         self.open_images.deinit();
+        
+        // PDFs aufräumen
+        var pdf_iter = self.open_pdfs.iterator();
+        while (pdf_iter.next()) |entry| {
+            const handler: *PdfHandler = @ptrCast(@alignCast(entry.value_ptr.*));
+            handler.deinit();
+        }
+        self.open_pdfs.deinit();
 
         if (self.current_directory) |dir| self.allocator.free(dir);
         log.debug("UI.deinit: finished", .{});
@@ -429,6 +445,16 @@ pub const UI = struct {
                                     &self.open_images,
                                 );
                                 image_active = true;
+                            } else if (tab.kind == .pdf) {
+                                const maybe_handler = self.open_pdfs.get(tab.path);
+                                const maybe_texture = self.open_images.get(tab.path);
+                                if (maybe_handler) |handler_ptr| {
+                                    const handler: *PdfHandler = @ptrCast(@alignCast(handler_ptr));
+                                    if (PdfViewState.render(handler, maybe_texture, t, self.mouse_pressed_this_frame)) |delta| {
+                                        self.pending_pdf_page_change = .{ .path = tab.path, .delta = delta };
+                                    }
+                                }
+                                image_active = true; // Benutze image_active um Editor zu verstecken
                             }
                         }
                     }

@@ -99,7 +99,20 @@ pub fn build(b: *std.Build) void {
         exe.root_module.linkSystemLibrary("dwrite", .{});
         exe.root_module.linkSystemLibrary("d2d1", .{});
         exe.root_module.linkSystemLibrary("ole32", .{});
+        exe.root_module.linkSystemLibrary("gdi32", .{});
+        exe.root_module.linkSystemLibrary("comdlg32", .{});
         exe.root_module.link_libc = true;
+
+        // MuPDF Integration
+        exe.root_module.addIncludePath(b.path("src/rendering/mupdf_wrapper"));
+        exe.root_module.addIncludePath(b.path("libs/fancy-cat/deps/mupdf/include"));
+        exe.root_module.addLibraryPath(b.path("libs/fancy-cat/deps/mupdf/build/release"));
+        exe.linkSystemLibrary("mupdf");
+        exe.linkSystemLibrary("mupdf-third");
+        exe.addCSourceFile(.{
+            .file = b.path("src/rendering/mupdf_wrapper/fitz-z.c"),
+            .flags = &[_][]const u8{ "-std=c99", "-w" },
+        });
     } else if (target.result.os.tag == .linux) {
         // wio (Wayland Backend) benötigt diese Libraries
         exe.root_module.linkSystemLibrary("wayland-client", .{});

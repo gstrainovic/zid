@@ -187,9 +187,7 @@ pub fn main() !void {
 
     // Phase 9: Aktuelle Datei als Tab öffnen (falls geladen)
     if (resolved_file_path) |path| {
-        ui_system.tab_bar.openFile(path) catch |err| {
-            log.warn("Failed to open tab for '{s}': {}", .{ path, err });
-        };
+        ui_system.file_explorer.file_to_open = path;
     }
 
     // 6. Clay Renderer initialisieren (WGPU)
@@ -340,6 +338,41 @@ pub fn main() !void {
         ui_system.updateScroll(0, scroll_delta_y * 10.0, delta_time_ms);
 
         var render_commands = ui_system.renderExample(&logo_texture);
+        
+        // Phase 9: PDF Seitenwechsel verarbeiten
+        if (ui_system.pending_pdf_page_change) |change| {
+            if (ui_system.open_pdfs.get(change.path)) |handler_ptr| {
+                const PdfHandler = @import("rendering/pdf_handler.zig").PdfHandler;
+                const handler: *PdfHandler = @ptrCast(@alignCast(handler_ptr));
+                
+                const old_page = handler.current_page;
+                const new_page = @as(i32, @intCast(handler.current_page)) + change.delta;
+                
+                if (new_page >= 0 and new_page < handler.total_pages) {
+                    handler.current_page = @intCast(new_page);
+                    
+                    if (handler.current_page != old_page) {
+                        log.info("PDF Page Change: {d} -> {d}", .{ old_page, handler.current_page });
+                        if (handler.renderPage(handler.current_page, 2.0)) |info| {
+                            defer allocator.free(info.pixels);
+                            
+                            // Alte Textur ersetzen
+                            if (ui_system.open_images.get(change.path)) |tex_ptr| {
+                                const ImageTexture = @import("clay_renderer/image_renderer.zig").ImageTexture;
+                                const tex_cast: *ImageTexture = @ptrCast(@alignCast(tex_ptr));
+                                tex_cast.deinit();
+                                tex_cast.* = image_rdr.createTextureFromPixels(info.pixels, info.width, info.height) catch unreachable;
+                            }
+                            wio.cancelWait();
+                        } else |err| {
+                            log.err("Failed to render PDF page {d}: {}", .{ handler.current_page, err });
+                        }
+                    }
+                }
+            }
+            ui_system.pending_pdf_page_change = null;
+        }
+
         var state_dirty: bool = false;
 
         // Phase 9: Datei öffnen verarbeiten
@@ -376,6 +409,38 @@ pub fn main() !void {
                     ui_system.open_images.put(path_copy, tex_ptr) catch {};
                     
                     // Force another frame to render the newly loaded texture!
+                    wio.cancelWait();
+                }
+            } else if (kind == .pdf) {
+                // PDF-Dateien laden
+                if (!ui_system.open_pdfs.contains(path)) {
+                    log.info("Loading PDF: {s}", .{path});
+                    const PdfHandler = @import("rendering/pdf_handler.zig").PdfHandler;
+                    const handler = PdfHandler.init(allocator, path) catch |err| {
+                        log.err("Failed to open PDF {s}: {}", .{path, err});
+                        ui_system.file_explorer.file_to_open = null;
+                        state_dirty = true;
+                        continue;
+                    };
+                    
+                    // Erste Seite rendern
+                    const page_info = handler.renderPage(0, 2.0) catch |err| {
+                        log.err("Failed to render first PDF page: {}", .{err});
+                        handler.deinit();
+                        ui_system.file_explorer.file_to_open = null;
+                        state_dirty = true;
+                        continue;
+                    };
+                    defer allocator.free(page_info.pixels);
+                    
+                    const tex = image_rdr.createTextureFromPixels(page_info.pixels, page_info.width, page_info.height) catch unreachable;
+                    const tex_ptr = allocator.create(@import("clay_renderer/image_renderer.zig").ImageTexture) catch unreachable;
+                    tex_ptr.* = tex;
+                    
+                    const path_copy = allocator.dupe(u8, path) catch unreachable;
+                    ui_system.open_pdfs.put(path_copy, handler) catch {};
+                    ui_system.open_images.put(path_copy, tex_ptr) catch {};
+                    
                     wio.cancelWait();
                 }
             }
