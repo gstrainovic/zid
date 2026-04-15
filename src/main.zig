@@ -341,7 +341,8 @@ pub fn main() !void {
         ui_system.setPointerState(mouse_x, mouse_y, mouse_down);
         ui_system.updateScroll(0, scroll_delta_y * 10.0, delta_time_ms);
 
-        const render_commands = ui_system.renderExample(&logo_texture);
+        var render_commands = ui_system.renderExample(&logo_texture);
+        var state_dirty: bool = false;
 
         // Phase 9: Datei öffnen verarbeiten
         if (ui_system.file_explorer.file_to_open) |path| {
@@ -382,6 +383,7 @@ pub fn main() !void {
             }
 
             ui_system.file_explorer.file_to_open = null;
+            state_dirty = true;
         }
 
         // Phase 9: Tab-Wechsel verarbeiten
@@ -420,6 +422,14 @@ pub fn main() !void {
             // pending_switch_path freigeben und nullen
             ui_system.allocator.free(path);
             ui_system.tab_bar.pending_switch_path = null;
+            state_dirty = true;
+        }
+
+        // State hat sich geändert (neue Tab / neue Textur) → gleichen Frame neu
+        // layouten, damit Image-View mit korrekter aspect_ratio rendert statt
+        // erst nach dem nächsten Input-Event.
+        if (state_dirty) {
+            render_commands = ui_system.renderExample(&logo_texture);
         }
 
         // Cursor-Form anpassen basierend auf Layout-Ergebnis

@@ -7,7 +7,7 @@ pub const FileKind = enum {
 
 pub fn getFileKind(path: []const u8) FileKind {
     const ext = std.fs.path.extension(path);
-    const images = [_][]const u8{ ".png", ".jpg", ".jpeg", ".bmp", ".gif" };
+    const images = [_][]const u8{ ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".svg" };
     
     // Einfacher Case-Insensitive Check ohne Buffer-Stress
     for (images) |img_ext| {

@@ -2,6 +2,7 @@ const std = @import("std");
 const clay = @import("clay");
 const ui = @import("mod.zig");
 const Theme = ui.Theme;
+const ImageTexture = @import("../clay_renderer/image_renderer.zig").ImageTexture;
 
 pub const ImageViewState = struct {
     pub fn render(
@@ -23,14 +24,26 @@ pub const ImageViewState = struct {
             .background_color = theme.bg,
         })({
             if (maybe_texture) |texture_ptr| {
-                // Echtes Bild rendern
+                // SVG-Texturen sind weiße Alpha-Masken — Tint via theme.text.
+                // Raster-Bilder (PNG/JPG/...) bleiben untinted (weiß = passthrough).
+                const is_svg = std.ascii.endsWithIgnoreCase(path, ".svg");
+                const tint: clay.Color = if (is_svg) theme.text else .{ 255, 255, 255, 255 };
+
+                // Aspect-Ratio aus ImageTexture, damit Clay nicht streckt
+                const tex: *const ImageTexture = @ptrCast(@alignCast(texture_ptr));
+                const aspect: f32 = if (tex.height > 0)
+                    @as(f32, @floatFromInt(tex.width)) / @as(f32, @floatFromInt(tex.height))
+                else
+                    1.0;
+
                 clay.UI()(.{
                     .id = clay.ElementId.ID("image_display"),
                     .layout = .{
-                        .sizing = .grow,
+                        .sizing = .{ .w = .grow, .h = .fit },
                     },
+                    .aspect_ratio = .{ .aspect_ratio = aspect },
                     .image = .{ .image_data = texture_ptr },
-                    .background_color = .{ 255, 255, 255, 255 }, // Full white tint = no tint
+                    .background_color = tint,
                 })({});
             } else {
                 // Platzhalter / Laden
