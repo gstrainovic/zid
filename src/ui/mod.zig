@@ -85,6 +85,9 @@ pub const UI = struct {
 
     // Mouse state for immediate mode UI clicks
     mouse_pressed_this_frame: bool = false,
+    mouse_x: f32 = 0,
+    mouse_y: f32 = 0,
+    is_mouse_down: bool = false,
 
     const Self = @This();
 
@@ -139,6 +142,9 @@ pub const UI = struct {
                     .open_pdfs = std.StringHashMap(*anyopaque).init(allocator),
                     .pending_tab_switch = null,
                     .mouse_pressed_this_frame = false,
+                    .mouse_x = 0,
+                    .mouse_y = 0,
+                    .is_mouse_down = false,
                 };
             };
             defer allocator.free(file_content);
@@ -336,7 +342,9 @@ pub const UI = struct {
 
     /// Maus-Position und Button-Status an Clay weiterleiten
     pub fn setPointerState(self: *Self, x: f32, y: f32, is_down: bool) void {
-        _ = self;
+        self.mouse_x = x;
+        self.mouse_y = y;
+        self.is_mouse_down = is_down;
         clay.setPointerState(.{ .x = x, .y = y }, is_down);
     }
 
@@ -402,6 +410,22 @@ pub const UI = struct {
                 },
                 .background_color = t.bg,
             })({
+                // Phase 15: Splitter Logic
+                const splitter_id = clay.ElementId.ID("ExplorerSplitter");
+                if (self.show_file_explorer) {
+                    if (self.file_explorer.is_resizing) {
+                        if (!self.is_mouse_down) {
+                            self.file_explorer.is_resizing = false;
+                        } else {
+                            self.file_explorer.width = self.mouse_x;
+                            if (self.file_explorer.width < 100) self.file_explorer.width = 100;
+                            if (self.file_explorer.width > 600) self.file_explorer.width = 600;
+                        }
+                    } else if (clay.pointerOver(splitter_id) and self.mouse_pressed_this_frame) {
+                        self.file_explorer.is_resizing = true;
+                    }
+                }
+
                 // File Explorer Sidebar
                 if (self.show_file_explorer) {
                     file_explorer_mod.renderFileExplorer(
@@ -412,6 +436,15 @@ pub const UI = struct {
                     );
                     // Deferred Toggle ausführen (nach Rendering, vor endLayout)
                     self.file_explorer.processPendingToggle();
+
+                    // Splitter
+                    clay.UI()(.{
+                        .id = splitter_id,
+                        .layout = .{
+                            .sizing = .{ .w = .fixed(4), .h = .grow },
+                        },
+                        .background_color = if (self.file_explorer.is_resizing) t.primary else if (clay.pointerOver(splitter_id)) t.secondary else t.border,
+                    })({});
                 }
 
                 // Editor Area (Tabs + Editor)
@@ -480,5 +513,13 @@ pub const UI = struct {
         }
 
         return commands;
+    }
+
+    /// Berechnet den gewünschten Cursor für diesen Frame
+    pub fn getDesiredCursor(self: *Self) wio.Cursor {
+        if (self.file_explorer.is_resizing or clay.pointerOver(clay.ElementId.ID("ExplorerSplitter"))) {
+            return .size_ew;
+        }
+        return self.code_editor.desired_cursor;
     }
 };
