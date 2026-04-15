@@ -311,7 +311,7 @@ pub const ClayRenderer = struct {
                             const r = info.color[0] / 255.0;
                             const g = info.color[1] / 255.0;
                             const b = info.color[2] / 255.0;
-                            const a = if (info.color[3] == 0) 1.0 else info.color[3] / 255.0;
+                            const a = info.color[3] / 255.0;
 
                             if (svg_gpu) |sg| {
                                 try sg.renderSvg(

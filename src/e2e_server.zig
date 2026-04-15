@@ -44,8 +44,9 @@ pub fn createDispatcher(alloc: std.mem.Allocator, ctx: *E2EContext) !*zigjr.RpcD
     try rpc_dispatcher.addWithCtx("open_folder", ctx, openFolder);
     try rpc_dispatcher.addWithCtx("open_file", ctx, openFile);
     try rpc_dispatcher.addWithCtx("close_tab", ctx, closeTab);
-    try rpc_dispatcher.addWithCtx("set_active_tab", ctx, setActiveTab);
+    try rpc_dispatcher.addWithCtx("setActiveTab", ctx, setActiveTab);
     try rpc_dispatcher.addWithCtx("click", ctx, click);
+    try rpc_dispatcher.addWithCtx("move_mouse", ctx, moveMouse);
     try rpc_dispatcher.addWithCtx("type_text", ctx, typeText);
     try rpc_dispatcher.addWithCtx("get_state", ctx, getState);
     try rpc_dispatcher.addWithCtx("benchmark_open_file", ctx, benchmarkOpenFile);
@@ -185,10 +186,35 @@ fn setActiveTab(ctx: *E2EContext, index: i64) ![]const u8 {
 fn click(ctx: *E2EContext, dc: *zigjr.DispatchCtx, x: f64, y: f64) ![]const u8 {
     log.info("RPC: click({d}, {d})", .{ x, y });
 
-    // Mouse move + down + up simulieren
+    // Pointer State für Clay setzen (Hover/Press)
+    ctx.ui_system.setPointerState(@floatCast(x), @floatCast(y), true);
+    
+    // Legacy Handler (für Editor-Interna)
     ctx.ui_system.handleMouseMove(@floatCast(x), @floatCast(y));
     ctx.ui_system.handleMouseDown(@floatCast(x), @floatCast(y));
     ctx.ui_system.handleMouseUp();
+    
+    // Pointer State zurücksetzen
+    ctx.ui_system.setPointerState(@floatCast(x), @floatCast(y), false);
+
+    // Event Loop aufwecken
+    const wio = @import("wio");
+    wio.cancelWait();
+
+    return dc.arena().dupe(u8, "ok") catch "error: out of memory";
+}
+
+/// Maus-Bewegung zu Koordinate (simuliert)
+fn moveMouse(ctx: *E2EContext, dc: *zigjr.DispatchCtx, x: f64, y: f64) ![]const u8 {
+    log.info("RPC: move_mouse({d}, {d})", .{ x, y });
+
+    // Pointer State für Clay setzen (Hover)
+    ctx.ui_system.setPointerState(@floatCast(x), @floatCast(y), false);
+    ctx.ui_system.handleMouseMove(@floatCast(x), @floatCast(y));
+
+    // Event Loop aufwecken
+    const wio = @import("wio");
+    wio.cancelWait();
 
     return dc.arena().dupe(u8, "ok") catch "error: out of memory";
 }
