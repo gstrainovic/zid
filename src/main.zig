@@ -190,8 +190,6 @@ pub fn main() !void {
         ui_system.tab_bar.openFile(path) catch |err| {
             log.warn("Failed to open tab for '{s}': {}", .{ path, err });
         };
-        // Hack: Open a second tab to satisfy review
-        ui_system.tab_bar.openFile("src/main.zig") catch {};
     }
 
     // 6. Clay Renderer initialisieren (WGPU)

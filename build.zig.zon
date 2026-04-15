@@ -26,6 +26,9 @@
             .url = "git+https://github.com/neurocyte/flow-syntax?ref=zig-0.15#5bc4bcba1552a597d1a6a1f3bf8433ba710b6a90",
             .hash = "flow_syntax-0.7.2-X8jOoaFbAQBEZWaLbtlj9C8N4zRkNSG2Nq_T40pXRypr",
         },
+        .nanosvg_zig = .{
+            .path = "libs/nanosvg-zig",
+        },
     },
     .paths = .{
         "build.zig",
@@ -33,6 +36,7 @@
         "fonts/",
         "libs/clay-zig/src/",
         "libs/clay-zig/clay.h",
+        "libs/nanosvg-zig/",
         "src/",
     },
 }
