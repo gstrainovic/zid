@@ -326,12 +326,18 @@ pub const TerminalInstance = struct {
         
         var builder: std.Io.Writer.Allocating = .init(alloc);
         errdefer builder.deinit();
-        
-        try screen.dumpString(&builder.writer, .{
-            .tl = tl,
-            .br = br,
+
+        var fmt = ghostty_vt.formatter.ScreenFormatter.init(screen, .{
+            .emit = .vt,
             .unwrap = false,
+            .trim = false,
+            .palette = &self.terminal.colors.palette,
         });
+        
+        fmt.content = .{ .selection = ghostty_vt.Selection.init(tl, br, false) };
+        fmt.extra = ghostty_vt.formatter.ScreenFormatter.Extra.styles;
+        
+        try fmt.format(&builder.writer);
         
         const result = try builder.toOwnedSlice();
         // Remove trailing newline/CR

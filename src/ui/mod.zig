@@ -268,7 +268,7 @@ pub const UI = struct {
         // If a terminal tab is active, forward input to the terminal
         if (self.getActiveTerminal()) |term| {
             // Convert key to terminal input sequence
-            const data: ?[]const u8 = switch (key) {
+            var data: ?[]const u8 = switch (key) {
                 .enter => "\r",
                 .backspace => "\x7f",
                 .tab => "\t",
@@ -284,6 +284,39 @@ pub const UI = struct {
                 .page_down => "\x1b[6~",
                 else => null,
             };
+
+            if (self.code_editor.mods.ctrl) {
+                data = switch (key) {
+                    .a => "\x01",
+                    .b => "\x02",
+                    .c => "\x03",
+                    .d => "\x04",
+                    .e => "\x05",
+                    .f => "\x06",
+                    .g => "\x07",
+                    .h => "\x08",
+                    .i => "\x09",
+                    .j => "\x0A",
+                    .k => "\x0B",
+                    .l => "\x0C",
+                    .m => "\x0D",
+                    .n => "\x0E",
+                    .o => "\x0F",
+                    .p => "\x10",
+                    .q => "\x11",
+                    .r => "\x12",
+                    .s => "\x13",
+                    .t => "\x14",
+                    .u => "\x15",
+                    .v => "\x16",
+                    .w => "\x17",
+                    .x => "\x18",
+                    .y => "\x19",
+                    .z => "\x1A",
+                    else => data,
+                };
+            }
+
             if (data) |d| {
                 term.sendInput(d) catch {};
             }
@@ -625,10 +658,22 @@ pub const UI = struct {
         const total_rows = term_instance.totalRows();
         const line_height: f32 = 24.0; 
 
-        // Update height from previous frame's bounding box
+        // Update height and width from previous frame's bounding box
         const term_data = clay.getElementData(clay.ElementId.ID("terminal_content_clip"));
         if (term_data.found) {
-            term_instance.height = term_data.bounding_box.height;
+            const bb = term_data.bounding_box;
+            term_instance.height = bb.height;
+            // Calculate cols/rows based on font size (16px) -> roughly 10px width per char
+            const char_w = measureTextWidth("W", 16.0);
+            if (char_w > 0) {
+                const cols: u16 = @intFromFloat(bb.width / char_w);
+                const rows: u16 = @intFromFloat(bb.height / line_height);
+                if (cols != term_instance.cols or rows != term_instance.rows) {
+                    if (cols > 0 and rows > 0) {
+                        term_instance.resize(cols, rows) catch {};
+                    }
+                }
+            }
         }
 
         const visible_rows = term_instance.visibleLineCount();
@@ -675,18 +720,173 @@ pub const UI = struct {
                                 .child_alignment = .{ .x = .left, .y = .center },
                             },
                         })({
-                            // Text segment
-                            clay.text(if (line_text.len > 0) line_text else " ", .{
-                                .font_size = 16,
-                                .color = .{ 204, 204, 204, 255 },
-                            });
+                            // Parse ANSI
+                            var pos: usize = 0;
+                            var current_fg: clay.Color = .{ 204, 204, 204, 255 }; // Default fg
+                            var current_bg: ?clay.Color = null; // Default bg
+                            var text_start: usize = 0;
+
+                            const default_fg: clay.Color = .{ 204, 204, 204, 255 };
+
+                            while (pos < line_text.len) {
+                                if (line_text[pos] == '\x1B' and pos + 1 < line_text.len and line_text[pos + 1] == '[') {
+                                    // Flush pending text
+                                    if (pos > text_start) {
+                                        const seg = line_text[text_start..pos];
+                                        if (current_bg) |bg| {
+                                            clay.UI()(.{ .background_color = bg })({
+                                                clay.text(arena_alloc.dupe(u8, seg) catch " ", .{ .font_size = 16, .color = current_fg });
+                                            });
+                                        } else {
+                                            clay.text(arena_alloc.dupe(u8, seg) catch " ", .{ .font_size = 16, .color = current_fg });
+                                        }
+                                    }
+
+                                    // Parse sequence
+                                    pos += 2;
+                                    var args: [16]u8 = undefined;
+                                    var arg_count: usize = 0;
+                                    var num: u8 = 0;
+                                    var has_num = false;
+
+                                    while (pos < line_text.len) {
+                                        const c = line_text[pos];
+                                        if (c >= '0' and c <= '9') {
+                                            num = num * 10 + (c - '0');
+                                            has_num = true;
+                                            pos += 1;
+                                        } else if (c == ';') {
+                                            if (arg_count < args.len) {
+                                                args[arg_count] = num;
+                                                arg_count += 1;
+                                            }
+                                            num = 0;
+                                            has_num = false;
+                                            pos += 1;
+                                        } else if (c == 'm') {
+                                            if (has_num and arg_count < args.len) {
+                                                args[arg_count] = num;
+                                                arg_count += 1;
+                                            }
+                                            pos += 1;
+                                            break;
+                                        } else {
+                                            // Unknown sequence character, just skip
+                                            pos += 1;
+                                            break;
+                                        }
+                                    }
+
+                                    // Process args (simplified SGR)
+                                    var arg_idx: usize = 0;
+                                    if (arg_count == 0) {
+                                        current_fg = default_fg;
+                                        current_bg = null;
+                                    }
+                                    while (arg_idx < arg_count) {
+                                        const code = args[arg_idx];
+                                        arg_idx += 1;
+                                        switch (code) {
+                                            0 => {
+                                                current_fg = default_fg;
+                                                current_bg = null;
+                                            },
+                                            30...37 => {
+                                                // Basic 8 foreground colors
+                                                current_fg = switch (code - 30) {
+                                                    0 => .{ 0, 0, 0, 255 },       // Black
+                                                    1 => .{ 205, 49, 49, 255 },   // Red
+                                                    2 => .{ 13, 188, 121, 255 },  // Green
+                                                    3 => .{ 229, 229, 16, 255 },  // Yellow
+                                                    4 => .{ 36, 114, 200, 255 },  // Blue
+                                                    5 => .{ 188, 63, 188, 255 },  // Magenta
+                                                    6 => .{ 17, 168, 205, 255 },  // Cyan
+                                                    7 => .{ 229, 229, 229, 255 }, // White
+                                                    else => default_fg,
+                                                };
+                                            },
+                                            38 => {
+                                                if (arg_idx + 1 < arg_count and args[arg_idx] == 5) {
+                                                    arg_idx += 2; // 256 colors not fully implemented
+                                                } else if (arg_idx + 3 < arg_count and args[arg_idx] == 2) {
+                                                    current_fg = .{ args[arg_idx + 1], args[arg_idx + 2], args[arg_idx + 3], 255 };
+                                                    arg_idx += 4;
+                                                }
+                                            },
+                                            39 => current_fg = default_fg,
+                                            40...47 => {
+                                                // Basic 8 background colors
+                                                current_bg = switch (code - 40) {
+                                                    0 => .{ 0, 0, 0, 255 },       // Black
+                                                    1 => .{ 205, 49, 49, 255 },   // Red
+                                                    2 => .{ 13, 188, 121, 255 },  // Green
+                                                    3 => .{ 229, 229, 16, 255 },  // Yellow
+                                                    4 => .{ 36, 114, 200, 255 },  // Blue
+                                                    5 => .{ 188, 63, 188, 255 },  // Magenta
+                                                    6 => .{ 17, 168, 205, 255 },  // Cyan
+                                                    7 => .{ 229, 229, 229, 255 }, // White
+                                                    else => null,
+                                                };
+                                            },
+                                            48 => {
+                                                if (arg_idx + 1 < arg_count and args[arg_idx] == 5) {
+                                                    arg_idx += 2;
+                                                } else if (arg_idx + 3 < arg_count and args[arg_idx] == 2) {
+                                                    current_bg = .{ args[arg_idx + 1], args[arg_idx + 2], args[arg_idx + 3], 255 };
+                                                    arg_idx += 4;
+                                                }
+                                            },
+                                            49 => current_bg = null,
+                                            90...97 => { // Bright foreground
+                                                current_fg = switch (code - 90) {
+                                                    0 => .{ 102, 102, 102, 255 }, // Bright Black
+                                                    1 => .{ 241, 76, 76, 255 },   // Bright Red
+                                                    2 => .{ 35, 209, 139, 255 },  // Bright Green
+                                                    3 => .{ 245, 245, 67, 255 },  // Bright Yellow
+                                                    4 => .{ 59, 142, 234, 255 },  // Bright Blue
+                                                    5 => .{ 214, 112, 214, 255 }, // Bright Magenta
+                                                    6 => .{ 41, 184, 219, 255 },  // Bright Cyan
+                                                    7 => .{ 255, 255, 255, 255 }, // Bright White
+                                                    else => default_fg,
+                                                };
+                                            },
+                                            else => {},
+                                        }
+                                    }
+                                    text_start = pos;
+                                } else {
+                                    pos += 1;
+                                }
+                            }
+
+                            // Flush remaining text
+                            if (pos > text_start) {
+                                const seg = line_text[text_start..pos];
+                                if (current_bg) |bg| {
+                                    clay.UI()(.{ .background_color = bg })({
+                                        clay.text(arena_alloc.dupe(u8, seg) catch " ", .{ .font_size = 16, .color = current_fg });
+                                    });
+                                } else {
+                                    clay.text(arena_alloc.dupe(u8, seg) catch " ", .{ .font_size = 16, .color = current_fg });
+                                }
+                            }
 
                             // Cursor logic for this line
                             if (i == cursor_abs_row) {
-                                const cursor_x_idx = @min(@as(usize, cursor.x), line_text.len);
-                                const text_before = line_text[0..cursor_x_idx];
-                                const exact_x = measureTextWidth(text_before, 16.0);
+                                // Strip ANSI for accurate width measurement
+                                var clean_line = std.ArrayList(u8).init(arena_alloc);
+                                var clean_pos: usize = 0;
+                                while (clean_pos < cursor.x and clean_pos < line_text.len) {
+                                    // Note: A more robust cursor X measurement would parse the ANSI strings 
+                                    // and measure just the visible characters.
+                                    clean_line.append(line_text[clean_pos]) catch {};
+                                    clean_pos += 1;
+                                }
+                                
+                                // This is a rough estimation since ANSI sequences affect the raw length.
+                                // A true fix requires tracking visual length during parse.
                                 const char_w = measureTextWidth("W", 16.0);
+                                const exact_x = @as(f32, @floatFromInt(cursor.x)) * char_w;
 
                                 clay.UI()(.{
                                     .id = clay.ElementId.ID("terminal_cursor"),
