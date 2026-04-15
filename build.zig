@@ -134,24 +134,39 @@ pub fn build(b: *std.Build) void {
         exe.root_module.linkSystemLibrary("harfbuzz", .{});
         exe.root_module.linkSystemLibrary("png", .{});
         exe.root_module.link_libc = true;
+
+        // MuPDF: System-Library verwenden (Fedora: libmupdf.so).
+        // Header kommen aus dem fancy-cat-Submodul; System-Header liefern nicht
+        // zwingend dieselbe Version. fitz-z.c ist unser setjmp-Wrapper.
+        exe.root_module.addIncludePath(b.path("src/rendering/mupdf_wrapper"));
+        exe.root_module.addIncludePath(b.path("libs/fancy-cat/deps/mupdf/include"));
+        // Fedoras mupdf.pc ist defekt (leeres -L) → pkg-config umgehen.
+        exe.root_module.linkSystemLibrary("mupdf", .{ .use_pkg_config = .no });
+        exe.addCSourceFile(.{
+            .file = b.path("src/rendering/mupdf_wrapper/fitz-z.c"),
+            .flags = &[_][]const u8{ "-std=c99", "-w" },
+        });
     }
 
-    // Automatische Kompilierung der MuPDF Font-Ressourcen (damit man nicht compile_fonts ausführen muss)
-    if (std.fs.cwd().openDir("libs/fancy-cat/deps/mupdf/generated/resources/fonts/urw", .{ .iterate = true })) |mut_dir| {
-        var dir = mut_dir;
-        defer dir.close();
-        var it = dir.iterate();
-        while (it.next() catch null) |entry| {
-            if (entry.kind == .file and std.mem.endsWith(u8, entry.name, ".c")) {
-                const fpath = b.fmt("libs/fancy-cat/deps/mupdf/generated/resources/fonts/urw/{s}", .{entry.name});
-                exe.addCSourceFile(.{
-                    .file = b.path(fpath),
-                    .flags = &[_][]const u8{ "-O3", "-std=c99" },
-                });
+    // Automatische Kompilierung der MuPDF Font-Ressourcen nur unter Windows
+    // (Linux verwendet System-libmupdf — Fonts sind dort bereits enthalten).
+    if (target.result.os.tag == .windows) {
+        if (std.fs.cwd().openDir("libs/fancy-cat/deps/mupdf/generated/resources/fonts/urw", .{ .iterate = true })) |mut_dir| {
+            var dir = mut_dir;
+            defer dir.close();
+            var it = dir.iterate();
+            while (it.next() catch null) |entry| {
+                if (entry.kind == .file and std.mem.endsWith(u8, entry.name, ".c")) {
+                    const fpath = b.fmt("libs/fancy-cat/deps/mupdf/generated/resources/fonts/urw/{s}", .{entry.name});
+                    exe.addCSourceFile(.{
+                        .file = b.path(fpath),
+                        .flags = &[_][]const u8{ "-O3", "-std=c99" },
+                    });
+                }
             }
+        } else |_| {
+            @import("std").log.warn("MuPDF font directory not found, skipping font compilation.", .{});
         }
-    } else |_| {
-        @import("std").log.warn("MuPDF font directory not found, skipping font compilation.", .{});
     }
 
     b.installArtifact(exe);

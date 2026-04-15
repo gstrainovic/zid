@@ -22,6 +22,7 @@
 [submodule "libs/fancy-cat"]
 	path = libs/fancy-cat
 	url = https://github.com/freref/fancy-cat.git
+	ignore = dirty
 [submodule "libs/nanosvg-zig"]
 	path = libs/nanosvg-zig
 	url = https://github.com/zweiler1/nanosvg-zig
