@@ -110,14 +110,32 @@ pub const TerminalInstance = struct {
         var buf: [4096]u8 = undefined;
 
         // Create a VT stream for proper escape sequence parsing.
-        // The stream persists parser state across reads (handles
-        // escape sequences split across read boundaries).
+        // The stream persists parser state across reads.
         var stream = self.terminal.vtStream();
 
+        const fds = self.pty.getFds();
+
         while (!self.should_stop.load(.acquire)) {
+            // Use poll to avoid blocking indefinitely in read()
+            // This allows us to check should_stop periodically.
+            if (builtin.os.tag != .windows) {
+                var poll_fds = [_]std.posix.pollfd{.{
+                    .fd = fds.read,
+                    .events = std.posix.POLL.IN,
+                    .revents = 0,
+                }};
+                const ret = std.posix.poll(&poll_fds, 100) catch |err| {
+                    if (err == error.Interrupted) continue;
+                    log.err("poll failed: {}", .{err});
+                    break;
+                };
+                if (ret == 0) continue; // Timeout
+                if (poll_fds[0].revents & (std.posix.POLL.HUP | std.posix.POLL.ERR | std.posix.POLL.NVAL) != 0) break;
+            }
+
             const n = self.pty.read(&buf) catch |err| {
-                if (err == error.BrokenPipe) {
-                    log.info("Shell process exited (broken pipe)", .{});
+                if (err == error.BrokenPipe or err == error.FileDescriptorInvalid) {
+                    log.info("Shell process connection closed (expected on exit)", .{});
                     self.mutex.lock();
                     self.exited = true;
                     self.mutex.unlock();
@@ -129,8 +147,12 @@ pub const TerminalInstance = struct {
             };
 
             if (n == 0) {
-                std.Thread.sleep(1 * std.time.ns_per_ms);
-                continue;
+                // EOF - Shell exited
+                log.info("Shell process exited (EOF)", .{});
+                self.mutex.lock();
+                self.exited = true;
+                self.mutex.unlock();
+                return;
             }
 
             // Feed output through VT stream (handles ANSI escapes, colors, cursor, etc.)
@@ -176,21 +198,34 @@ pub const TerminalInstance = struct {
     }
 
     pub fn deinit(self: *Self) void {
+        log.debug("TerminalInstance.deinit: starting", .{});
         // Signal read thread to stop
         self.should_stop.store(true, .release);
+        log.debug("TerminalInstance.deinit: should_stop signal set", .{});
 
         // Cleanup PTY first – this will close the pipes and force the blocking
         // read in the background thread to return (error.BrokenPipe on Windows, 0 on Linux).
         self.pty.deinit();
+        log.debug("TerminalInstance.deinit: PTY deinit done", .{});
 
         // Wait for read thread
         if (self.read_thread) |t| {
+            log.debug("TerminalInstance.deinit: joining read thread...", .{});
             t.join();
+            log.debug("TerminalInstance.deinit: read thread joined", .{});
         }
 
         // Cleanup rest
+        log.debug("TerminalInstance.deinit: freeing shell path...", .{});
         self.allocator.free(self.shell);
+        log.debug("TerminalInstance.deinit: shell path freed", .{});
+        
+        log.debug("TerminalInstance.deinit: deinitializing ghostty terminal...", .{});
         self.terminal.deinit(self.allocator);
+        log.debug("TerminalInstance.deinit: ghostty terminal deinit done", .{});
+        
+        log.debug("TerminalInstance.deinit: destroying self...", .{});
         self.allocator.destroy(self);
+        log.debug("TerminalInstance.deinit: finished", .{});
     }
 };

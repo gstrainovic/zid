@@ -56,21 +56,29 @@ pub const TabBarState = struct {
     }
 
     pub fn deinit(self: *Self) void {
+        log.debug("TabBarState.deinit: starting", .{});
         // Cleanup all terminal instances
         var term_iter = self.terminal_instances.iterator();
         while (term_iter.next()) |entry| {
+            log.debug("TabBarState.deinit: cleaning up terminal {s}", .{entry.key_ptr.*});
             entry.value_ptr.*.deinit();
+            log.debug("TabBarState.deinit: terminal {s} done", .{entry.key_ptr.*});
         }
         self.terminal_instances.deinit();
+        log.debug("TabBarState.deinit: terminal_instances hashmap done", .{});
 
-        for (self.tabs.items) |*tab| {
+        for (self.tabs.items, 0..) |*tab, i| {
+            log.debug("TabBarState.deinit: cleaning up tab {d}: {s}", .{ i, tab.path });
             self.allocator.free(tab.path);
             self.allocator.free(tab.display_name);
         }
         self.tabs.deinit(self.allocator);
+        log.debug("TabBarState.deinit: tabs list done", .{});
+
         if (self.pending_switch_path) |p| {
             self.allocator.free(p);
         }
+        log.debug("TabBarState.deinit: finished", .{});
     }
 
     /// Neuen Tab öffnen
@@ -84,7 +92,19 @@ pub const TabBarState = struct {
             }
         }
 
-        // Dateityp bestimmen
+        // Check if it's an existing terminal
+        if (self.terminal_instances.contains(path)) {
+            // It's a terminal but not in tabs? (Shouldn't happen with current logic, but for safety)
+            try self.tabs.append(self.allocator, .{
+                .path = try self.allocator.dupe(u8, path),
+                .display_name = try self.allocator.dupe(u8, path),
+                .modified = false,
+                .is_active = false,
+                .kind = .terminal,
+            });
+            self.setActive(self.tabs.items.len - 1);
+            return;
+        }
         const kind = file_types.getFileKind(path);
 
         // Dateiname extrahieren
