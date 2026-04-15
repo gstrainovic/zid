@@ -29,6 +29,9 @@
         .nanosvg_zig = .{
             .path = "libs/nanosvg-zig",
         },
+        .ghostty = .{
+            .path = "reference/ghostty",
+        },
     },
     .paths = .{
         "build.zig",

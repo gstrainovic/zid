@@ -7,6 +7,8 @@ const std = @import("std");
 const clay = @import("clay");
 const ui = @import("../ui/mod.zig");
 const Theme = ui.Theme;
+const terminal_mod = @import("../terminal/terminal_instance.zig");
+const TerminalInstance = terminal_mod.TerminalInstance;
 
 const log = std.log.scoped(.tab_bar);
 
@@ -38,6 +40,10 @@ pub const TabBarState = struct {
     pending_switch_path: ?[]const u8 = null,
     /// Menü für neuen Tab anzeigen?
     show_new_menu: bool = false,
+    /// Active terminal instances (keyed by tab path like "Terminal 1")
+    terminal_instances: std.StringHashMap(*TerminalInstance),
+    /// Counter for terminal tab naming
+    terminal_counter: u32 = 0,
 
     const Self = @This();
 
@@ -45,10 +51,18 @@ pub const TabBarState = struct {
         return Self{
             .allocator = allocator,
             .tabs = std.ArrayList(Tab).empty,
+            .terminal_instances = std.StringHashMap(*TerminalInstance).init(allocator),
         };
     }
 
     pub fn deinit(self: *Self) void {
+        // Cleanup all terminal instances
+        var term_iter = self.terminal_instances.iterator();
+        while (term_iter.next()) |entry| {
+            entry.value_ptr.*.deinit();
+        }
+        self.terminal_instances.deinit();
+
         for (self.tabs.items) |*tab| {
             self.allocator.free(tab.path);
             self.allocator.free(tab.display_name);
@@ -90,11 +104,63 @@ pub const TabBarState = struct {
         self.setActive(self.tabs.items.len - 1);
     }
 
+    /// Open a new terminal tab
+    pub fn openTerminal(self: *Self) void {
+        self.terminal_counter += 1;
+        const name = std.fmt.allocPrint(self.allocator, "Terminal {d}", .{self.terminal_counter}) catch return;
+        const path_copy = self.allocator.dupe(u8, name) catch {
+            self.allocator.free(name);
+            return;
+        };
+
+        // Create terminal instance (80x24 default)
+        const term = TerminalInstance.init(self.allocator, 80, 24) catch |err| {
+            log.err("Failed to create terminal: {}", .{err});
+            self.allocator.free(name);
+            self.allocator.free(path_copy);
+            return;
+        };
+
+        // Store terminal instance
+        self.terminal_instances.put(path_copy, term) catch {
+            term.deinit();
+            self.allocator.free(name);
+            self.allocator.free(path_copy);
+            return;
+        };
+
+        // Add tab
+        self.tabs.append(self.allocator, .{
+            .path = path_copy,
+            .display_name = name,
+            .modified = false,
+            .is_active = false,
+            .kind = .terminal,
+        }) catch {
+            _ = self.terminal_instances.remove(path_copy);
+            term.deinit();
+            self.allocator.free(name);
+            self.allocator.free(path_copy);
+            return;
+        };
+
+        self.setActive(self.tabs.items.len - 1);
+        log.info("Terminal tab opened: {s}", .{name});
+    }
+
     /// Tab schließen (nach Index)
     pub fn closeTab(self: *Self, index: usize) void {
         if (index >= self.tabs.items.len) return;
 
         const tab = self.tabs.orderedRemove(index);
+
+        // Cleanup terminal instance if this was a terminal tab
+        if (tab.kind == .terminal) {
+            if (self.terminal_instances.fetchRemove(tab.path)) |kv| {
+                kv.value.deinit();
+            }
+        }
+
         self.allocator.free(tab.path);
         self.allocator.free(tab.display_name);
 
@@ -273,7 +339,7 @@ pub fn renderTabBar(
         state.openFile("New File.txt") catch {};
     }
     if (create_new_term) {
-        state.openFile("New Terminal.term") catch {};
+        state.openTerminal();
     }
 
     // Tab schließen NACH dem Rendering (keine Listen-Modifikation während Iteration)

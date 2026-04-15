@@ -71,6 +71,13 @@ pub fn build(b: *std.Build) void {
     exe_mod.addImport("flow_core", flow_core_dep.module("flow-core"));
     exe_mod.addImport("syntax", syntax_mod);
     exe_mod.addImport("nanosvg", nanosvg_mod);
+
+    // ghostty-vt: Terminal emulator library
+    if (b.lazyDependency("ghostty", .{
+        .simd = false, // no SIMD for simpler build, no libc dep
+    })) |ghostty_dep| {
+        exe_mod.addImport("ghostty-vt", ghostty_dep.module("ghostty-vt"));
+    }
     // Shader als Resource-File installieren
     const shader_install_triangle = b.addInstallFileWithDir(b.path("shaders/triangle.wgsl"), .{ .custom = "share" }, "triangle.wgsl");
     b.getInstallStep().dependOn(&shader_install_triangle.step);

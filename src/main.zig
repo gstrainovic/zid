@@ -466,10 +466,25 @@ pub fn main() !void {
         }
 
         if (ui_system.tab_bar.pending_switch_path) |path| {
-            const kind = file_types.getFileKind(path);
+            // Get actual kind from the tab (not from file extension, since terminal tabs have no path)
+            const kind = blk: {
+                if (ui_system.tab_bar.active_index) |idx| {
+                    if (idx < ui_system.tab_bar.tabs.items.len) {
+                        break :blk ui_system.tab_bar.tabs.items[idx].kind;
+                    }
+                }
+                break :blk file_types.getFileKind(path);
+            };
             log.info("Switching to tab: {s} (kind: {s})", .{path, @tagName(kind)});
             
-            if (kind == .text) {
+            if (kind == .terminal) {
+                // Terminal tabs are self-contained — no file loading needed.
+                // Just consume the pending switch path.
+                allocator.free(path);
+                ui_system.tab_bar.pending_switch_path = null;
+                state_dirty = true;
+                wio.cancelWait();
+            } else if (kind == .text) {
                 // Nur Text-Dateien in den Editor laden
                 const content = std.fs.cwd().readFileAlloc(allocator, path, 64 * 1024 * 1024) catch |err| blk: {
                     log.err("Failed to load tab content for '{s}': {}", .{ path, err });

@@ -265,11 +265,42 @@ pub const UI = struct {
 
     /// Keyboard Input verarbeiten
     pub fn handleKeyPress(self: *Self, key: @import("wio").Button) void {
+        // If a terminal tab is active, forward input to the terminal
+        if (self.getActiveTerminal()) |term| {
+            // Convert key to terminal input sequence
+            const data: ?[]const u8 = switch (key) {
+                .enter => "\r",
+                .backspace => "\x7f",
+                .tab => "\t",
+                .escape => "\x1b",
+                .up => "\x1b[A",
+                .down => "\x1b[B",
+                .right => "\x1b[C",
+                .left => "\x1b[D",
+                .home => "\x1b[H",
+                .end => "\x1b[F",
+                .delete => "\x1b[3~",
+                .page_up => "\x1b[5~",
+                .page_down => "\x1b[6~",
+                else => null,
+            };
+            if (data) |d| {
+                term.sendInput(d) catch {};
+            }
+            return;
+        }
         self.code_editor.handleKeyPress(key);
     }
 
     /// Text Input verarbeiten
     pub fn handleChar(self: *Self, char_code: u21) void {
+        // Forward to terminal if active
+        if (self.getActiveTerminal()) |term| {
+            var buf: [4]u8 = undefined;
+            const len = std.unicode.utf8Encode(char_code, &buf) catch return;
+            term.sendInput(buf[0..len]) catch {};
+            return;
+        }
         self.code_editor.handleChar(char_code);
     }
 
@@ -465,8 +496,8 @@ pub const UI = struct {
                         self.mouse_pressed_this_frame,
                     );
 
-                    // Aktiven Tab prüfen für Weiche (Editor vs Bild)
-                    var image_active = false;
+                    // Aktiven Tab prüfen für Weiche (Editor vs Bild vs Terminal)
+                    var special_active = false;
                     if (self.tab_bar.active_index) |idx| {
                         if (idx < self.tab_bar.tabs.items.len) {
                             const tab = self.tab_bar.tabs.items[idx];
@@ -477,7 +508,7 @@ pub const UI = struct {
                                     t,
                                     &self.open_images,
                                 );
-                                image_active = true;
+                                special_active = true;
                             } else if (tab.kind == .pdf) {
                                  const maybe_handler = self.open_pdfs.get(tab.path);
                                  const maybe_texture = self.open_images.get(tab.path);
@@ -488,13 +519,17 @@ pub const UI = struct {
                                          self.pending_pdf_page_change = .{ .path = tab.path, .delta = delta };
                                      }
                                  }
-                                 image_active = true; // Benutze image_active um Editor zu verstecken
+                                 special_active = true;
+                            } else if (tab.kind == .terminal) {
+                                // Render terminal tab
+                                self.renderTerminalContent(tab.path, t);
+                                special_active = true;
                             }
                         }
                     }
 
-                    // Code Editor - füllt den restlichen Raum (nur wenn kein Bild aktiv)
-                    if (!image_active) {
+                    // Code Editor - füllt den restlichen Raum (nur wenn kein Spezial-Tab aktiv)
+                    if (!special_active) {
                         self.code_editor.render(self.frame_arena.allocator());
                     }
                 });
@@ -521,5 +556,60 @@ pub const UI = struct {
             return .size_ew;
         }
         return self.code_editor.desired_cursor;
+    }
+
+    /// Check if a terminal tab is currently active
+    pub fn isTerminalActive(self: *Self) bool {
+        if (self.tab_bar.active_index) |idx| {
+            if (idx < self.tab_bar.tabs.items.len) {
+                return self.tab_bar.tabs.items[idx].kind == .terminal;
+            }
+        }
+        return false;
+    }
+
+    /// Get the active terminal instance (if any)
+    pub fn getActiveTerminal(self: *Self) ?*@import("../terminal/terminal_instance.zig").TerminalInstance {
+        if (self.tab_bar.active_index) |idx| {
+            if (idx < self.tab_bar.tabs.items.len) {
+                const tab = self.tab_bar.tabs.items[idx];
+                if (tab.kind == .terminal) {
+                    return self.tab_bar.terminal_instances.get(tab.path);
+                }
+            }
+        }
+        return null;
+    }
+
+    /// Render terminal content in the content area
+    fn renderTerminalContent(self: *Self, path: []const u8, t: Theme) void {
+        const term_instance = self.tab_bar.terminal_instances.get(path) orelse return;
+        _ = t;
+
+        // Get screen text from ghostty-vt terminal
+        const screen_text = term_instance.getScreenText() catch |err| {
+            log.err("Failed to get terminal screen text: {}", .{err});
+            return;
+        };
+        defer self.allocator.free(screen_text);
+
+        // Convert to Clay string
+        const text_slice: []const u8 = if (screen_text.len > 0) screen_text else " ";
+
+        // Terminal container — dark bg, monospace font
+        clay.UI()(.{
+            .id = clay.ElementId.ID("terminal_content"),
+            .layout = .{
+                .sizing = .grow,
+                .padding = .{ .left = 8, .right = 8, .top = 8, .bottom = 8 },
+            },
+            .background_color = .{ 30, 30, 30, 255 },
+            .clip = .{ .vertical = true },
+        })({
+            clay.text(text_slice, .{
+                .font_size = 16,
+                .color = .{ 204, 204, 204, 255 },
+            });
+        });
     }
 };
