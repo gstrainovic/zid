@@ -63,6 +63,11 @@ pub const FileExplorerState = struct {
     /// Deferred Action: Folder-Toggle pending (wird nach Rendering ausgeführt)
     pending_toggle: ?u32 = null,
 
+    /// Aktuelle Breite der Sidebar
+    width: f32 = 250.0,
+    /// Wird gerade an der Sidebar gezogen?
+    is_resizing: bool = false,
+
     const Self = @This();
 
     pub fn init(allocator: std.mem.Allocator) Self {
@@ -71,6 +76,8 @@ pub const FileExplorerState = struct {
             .nodes = std.ArrayList(TreeNode).empty,
             .visible_entries = std.ArrayList(TreeEntry).empty,
             .expanded_nodes = std.AutoHashMap(u32, void).init(allocator),
+            .width = 250.0,
+            .is_resizing = false,
         };
     }
 
@@ -296,7 +303,7 @@ pub fn renderFileExplorer(
     clay.UI()(.{
         .id = sidebar_id,
         .layout = .{
-            .sizing = .{ .w = .fixed(300), .h = .grow },
+            .sizing = .{ .w = .fixed(state.width), .h = .grow },
             .direction = .top_to_bottom,
             .child_gap = 0,
         },

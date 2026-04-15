@@ -540,7 +540,7 @@ pub fn main() !void {
         }
 
         // Cursor-Form anpassen basierend auf Layout-Ergebnis
-        plat.setCursor(ui_system.code_editor.desired_cursor);
+        plat.setCursor(ui_system.getDesiredCursor());
 
         renderer.renderFrameWithText(
             &clay_rdr,
