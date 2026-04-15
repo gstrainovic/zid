@@ -147,10 +147,10 @@ pub const TerminalInstance = struct {
     }
 
     /// Get the plain text content of the terminal screen (for rendering)
-    pub fn getScreenText(self: *Self) ![]const u8 {
+    pub fn getScreenText(self: *Self, alloc: std.mem.Allocator) ![]const u8 {
         self.mutex.lock();
         defer self.mutex.unlock();
-        return try self.terminal.plainString(self.allocator);
+        return try self.terminal.plainString(alloc);
     }
 
     /// Resize the terminal
