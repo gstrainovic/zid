@@ -135,11 +135,12 @@ pub fn build(b: *std.Build) void {
         exe.root_module.linkSystemLibrary("png", .{});
         exe.root_module.link_libc = true;
 
-        // MuPDF: System-Library verwenden (Fedora: libmupdf.so).
-        // Header kommen aus dem fancy-cat-Submodul; System-Header liefern nicht
-        // zwingend dieselbe Version. fitz-z.c ist unser setjmp-Wrapper.
+        // MuPDF: System-Library + System-Header verwenden (Fedora: mupdf-devel).
+        // Der bundled Header-Pfad darf NICHT addiert werden — FZ_VERSION wird
+        // in fz_new_context() als Laufzeit-Check gegen libmupdf.so geprüft,
+        // und bundled (1.26.5) ≠ System (1.27.x) würde den Context verwerfen.
+        // fitz-z.c ist unser setjmp-Wrapper.
         exe.root_module.addIncludePath(b.path("src/rendering/mupdf_wrapper"));
-        exe.root_module.addIncludePath(b.path("libs/fancy-cat/deps/mupdf/include"));
         // Fedoras mupdf.pc ist defekt (leeres -L) → pkg-config umgehen.
         exe.root_module.linkSystemLibrary("mupdf", .{ .use_pkg_config = .no });
         exe.addCSourceFile(.{

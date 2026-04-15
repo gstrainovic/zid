@@ -422,16 +422,24 @@ pub fn main() !void {
                     const handler = PdfHandler.init(allocator, path) catch |err| {
                         log.err("Failed to open PDF {s}: {}", .{path, err});
                         ui_system.file_explorer.file_to_open = null;
+                        if (ui_system.tab_bar.pending_switch_path) |p| {
+                            ui_system.allocator.free(p);
+                            ui_system.tab_bar.pending_switch_path = null;
+                        }
                         state_dirty = true;
                         continue;
                     };
                     log.info("PDF Handler init took {}ms", .{std.time.milliTimestamp() - start_time});
-                    
+
                     const render_start = std.time.milliTimestamp();
                     const page_info = handler.renderPage(0, 1.5) catch |err| {
                         log.err("Failed to render first PDF page: {}", .{err});
                         handler.deinit();
                         ui_system.file_explorer.file_to_open = null;
+                        if (ui_system.tab_bar.pending_switch_path) |p| {
+                            ui_system.allocator.free(p);
+                            ui_system.tab_bar.pending_switch_path = null;
+                        }
                         state_dirty = true;
                         continue;
                     };
@@ -443,6 +451,10 @@ pub fn main() !void {
                         log.err("Failed to load image texture for PDF: {}", .{err});
                         handler.deinit();
                         ui_system.file_explorer.file_to_open = null;
+                        if (ui_system.tab_bar.pending_switch_path) |p| {
+                            ui_system.allocator.free(p);
+                            ui_system.tab_bar.pending_switch_path = null;
+                        }
                         state_dirty = true;
                         continue;
                     };
@@ -515,13 +527,15 @@ pub fn main() !void {
                     const PdfHandler = @import("rendering/pdf_handler.zig").PdfHandler;
                     const handler = PdfHandler.init(allocator, path) catch |err| {
                         log.err("Failed to open PDF {s}: {}", .{path, err});
+                        ui_system.allocator.free(path);
                         ui_system.tab_bar.pending_switch_path = null;
                         continue;
                     };
-                    
+
                     const page_info = handler.renderPage(0, 1.5) catch |err| {
                         log.err("Failed to render first PDF page: {}", .{err});
                         handler.deinit();
+                        ui_system.allocator.free(path);
                         ui_system.tab_bar.pending_switch_path = null;
                         continue;
                     };
