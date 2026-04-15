@@ -36,6 +36,8 @@ pub const TabBarState = struct {
     active_index: ?usize = null,
     /// Pending Pfad für Tab-Wechsel (wird von main.zig abgefragt)
     pending_switch_path: ?[]const u8 = null,
+    /// Menü für neuen Tab anzeigen?
+    show_new_menu: bool = false,
 
     const Self = @This();
 
@@ -141,8 +143,6 @@ pub fn renderTabBar(
     theme: Theme,
     mouse_pressed: bool,
 ) void {
-    if (state.tabs.items.len == 0) return;
-
     // Tab-Schließen und Tab-Wechsel NACH der Schleife verarbeiten (vermeidet Use-After-Free und endloses Re-Laden)
     var tab_to_close: ?usize = null;
     var tab_to_switch: ?usize = null;
@@ -174,7 +174,107 @@ pub fn renderTabBar(
                 if (r.do_switch) tab_to_switch = r.index;
             }
         }
+
+        const add_btn_id = clay.ElementId.ID("add_tab_btn");
+        const add_btn_hover = clay.pointerOver(add_btn_id);
+
+        clay.UI()(.{
+            .id = add_btn_id,
+            .layout = .{
+                .sizing = .{ .w = .fixed(32), .h = .fixed(32) },
+                .child_alignment = .{ .x = .center, .y = .center },
+            },
+            .background_color = if (add_btn_hover or state.show_new_menu) theme.primary else theme.surface,
+            .corner_radius = .{ .top_left = 4, .top_right = 4, .bottom_left = 4, .bottom_right = 4 },
+        })({
+            clay.text("+", .{
+                .font_size = 24,
+                .color = if (add_btn_hover or state.show_new_menu) theme.bg else theme.muted,
+                .wrap_mode = .none,
+            });
+        });
     });
+
+    const add_btn_id = clay.ElementId.ID("add_tab_btn");
+    if (mouse_pressed and clay.pointerOver(add_btn_id)) {
+        state.show_new_menu = !state.show_new_menu;
+    }
+
+    var create_new_file = false;
+    var create_new_term = false;
+
+    if (state.show_new_menu) {
+        clay.UI()(.{
+            .id = clay.ElementId.ID("add_tab_dropdown"),
+            .floating = .{
+                .attach_to = .to_element_with_id,
+                .parentId = add_btn_id.id,
+                .attach_points = .{ .element = .left_top, .parent = .left_bottom },
+                .z_index = 1000,
+                .offset = .{ .x = 0, .y = 4 },
+            },
+            .layout = .{
+                .sizing = .{ .w = .fixed(150) },
+                .direction = .top_to_bottom,
+                .padding = .{ .left = 4, .right = 4, .top = 4, .bottom = 4 },
+                .child_gap = 2,
+            },
+            .background_color = theme.surface,
+            .border = .{ .width = .{ .left = 1, .right = 1, .top = 1, .bottom = 1 }, .color = theme.border },
+            .corner_radius = .{ .top_left = 4, .top_right = 4, .bottom_left = 4, .bottom_right = 4 },
+        })({
+            const file_id = clay.ElementId.ID("menu_new_file");
+            const term_id = clay.ElementId.ID("menu_new_term");
+
+            const file_hover = clay.pointerOver(file_id);
+            const term_hover = clay.pointerOver(term_id);
+
+            if (mouse_pressed) {
+                if (file_hover) {
+                    create_new_file = true;
+                    state.show_new_menu = false;
+                } else if (term_hover) {
+                    create_new_term = true;
+                    state.show_new_menu = false;
+                } else if (!clay.pointerOver(clay.ElementId.ID("add_tab_dropdown")) and !clay.pointerOver(add_btn_id)) {
+                    state.show_new_menu = false;
+                }
+            }
+
+            clay.UI()(.{
+                .id = file_id,
+                .layout = .{
+                    .sizing = .{ .w = .grow, .h = .fixed(24) },
+                    .padding = .{ .left = 8, .right = 8 },
+                    .child_alignment = .{ .x = .left, .y = .center },
+                },
+                .background_color = if (file_hover) theme.primary else theme.surface,
+                .corner_radius = .{ .top_left = 2, .top_right = 2, .bottom_left = 2, .bottom_right = 2 },
+            })({
+                clay.text("New File", .{ .font_size = 18, .color = if (file_hover) theme.bg else theme.text, .wrap_mode = .none });
+            });
+
+            clay.UI()(.{
+                .id = term_id,
+                .layout = .{
+                    .sizing = .{ .w = .grow, .h = .fixed(24) },
+                    .padding = .{ .left = 8, .right = 8 },
+                    .child_alignment = .{ .x = .left, .y = .center },
+                },
+                .background_color = if (term_hover) theme.primary else theme.surface,
+                .corner_radius = .{ .top_left = 2, .top_right = 2, .bottom_left = 2, .bottom_right = 2 },
+            })({
+                clay.text("New Terminal", .{ .font_size = 18, .color = if (term_hover) theme.bg else theme.text, .wrap_mode = .none });
+            });
+        });
+    }
+
+    if (create_new_file) {
+        state.openFile("New File.txt") catch {};
+    }
+    if (create_new_term) {
+        state.openFile("New Terminal.term") catch {};
+    }
 
     // Tab schließen NACH dem Rendering (keine Listen-Modifikation während Iteration)
     if (tab_to_close) |idx| {
