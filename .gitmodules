@@ -19,3 +19,9 @@
 [submodule "libs/flow"]
 	path = libs/flow
 	url = https://github.com/neurocyte/flow.git
+[submodule "libs/fancy-cat"]
+	path = libs/fancy-cat
+	url = https://github.com/freref/fancy-cat.git
+[submodule "libs/nanosvg-zig"]
+	path = libs/nanosvg-zig
+	url = https://github.com/zweiler1/nanosvg-zig

@@ -14,9 +14,7 @@ pub const PdfViewState = struct {
         mouse_pressed: bool,
     ) ?i16 {
         _ = mouse_pressed;
-        const log = @import("std").log;
-        log.info("PdfViewState.render called for page {}", .{handler.current_page});
-
+        _ = handler;
 
         clay.UI()(.{
             .id = clay.ElementId.ID("pdf_view_container"),
