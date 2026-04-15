@@ -52,8 +52,8 @@ def main():
         send_rpc("open_terminal")
         time.sleep(1)
 
-        print("--- Sending 'ls' ---")
-        send_rpc("type_text", ["ls\n"])
+        print("--- Sending 'ls --color=always' ---")
+        send_rpc("type_text", ["ls --color=always\n"])
         time.sleep(1)
         
         print("--- Sending 'seq 1 200' ---")
