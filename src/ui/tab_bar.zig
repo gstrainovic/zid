@@ -280,7 +280,7 @@ pub fn renderTabBar(
                 .offset = .{ .x = 0, .y = 4 },
             },
             .layout = .{
-                .sizing = .{ .w = .fixed(150) },
+                .sizing = .{ .w = .fixed(200) },
                 .direction = .top_to_bottom,
                 .padding = .{ .left = 4, .right = 4, .top = 4, .bottom = 4 },
                 .child_gap = 2,

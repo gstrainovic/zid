@@ -275,7 +275,8 @@ const WindowsPty = struct {
     /// Check if the shell process has exited
     pub fn hasExited(self: *const Pty) bool {
         if (self.process_handle) |h| {
-            return windows.kernel32.WaitForSingleObject(h, 0) != @as(u32, 0x00000102); // WAIT_TIMEOUT
+            const res = windows.kernel32.WaitForSingleObject(h, 0);
+            return res == 0; // WAIT_OBJECT_0 = 0
         }
         return true;
     }
@@ -295,26 +296,92 @@ const WindowsPty = struct {
 // ─── POSIX PTY ────────────────────────────────────────────────────
 
 const PosixPty = struct {
-    // TODO: Implement using forkpty / openpty for Linux/macOS
-    // For now, this is a placeholder that will be filled when testing on Linux.
-
     master: std.posix.fd_t = -1,
-    slave: std.posix.fd_t = -1,
     child_pid: ?std.posix.pid_t = null,
     cols: u16 = 80,
     rows: u16 = 24,
 
     pub fn open(cols: u16, rows: u16) !Pty {
-        _ = cols;
-        _ = rows;
-        return error.NotImplemented;
+        const master = try std.posix.open("/dev/ptmx", .{ .ACCMODE = .RDWR, .NOCTTY = true }, 0);
+        errdefer std.posix.close(master);
+
+        // unlockpt(master)
+        const unlock: i32 = 0;
+        if (std.posix.system.ioctl(master, @bitCast(@as(u32, std.posix.system.T.IOCSPTLCK)), @intFromPtr(&unlock)) != 0) {
+            return error.UnlockPtFailed;
+        }
+
+        return Pty{
+            .master = master,
+            .cols = cols,
+            .rows = rows,
+        };
     }
 
     pub fn spawn(self: *Pty, shell: []const u8, cwd: ?[]const u8) !void {
-        _ = self;
-        _ = shell;
-        _ = cwd;
-        return error.NotImplemented;
+        // ptsname_r replacement using ioctl(TIOCGPTN)
+        var pty_num: i32 = 0;
+        if (std.posix.system.ioctl(self.master, @bitCast(@as(u32, std.posix.system.T.IOCGPTN)), @intFromPtr(&pty_num)) != 0) {
+            return error.GetPtyNumberFailed;
+        }
+
+        var slave_name_buf: [64]u8 = undefined;
+        const slave_name = try std.fmt.bufPrintZ(&slave_name_buf, "/dev/pts/{d}", .{pty_num});
+
+        const pid = try std.posix.fork();
+
+        if (pid == 0) {
+            // Child process
+            _ = std.os.linux.setsid();
+
+            const slave = std.posix.open(slave_name, .{ .ACCMODE = .RDWR }, 0) catch std.os.linux.exit(1);
+            defer std.posix.close(slave);
+
+            // Set as controlling terminal
+            if (std.posix.system.ioctl(slave, @bitCast(@as(u32, std.posix.system.T.IOCSCTTY)), @as(usize, 0)) != 0) {
+                std.os.linux.exit(1);
+            }
+
+            // Set initial size
+            var winsize = std.posix.winsize{
+                .row = self.rows,
+                .col = self.cols,
+                .xpixel = 0,
+                .ypixel = 0,
+            };
+            _ = std.posix.system.ioctl(slave, @bitCast(@as(u32, std.posix.system.T.IOCSWINSZ)), @intFromPtr(&winsize));
+
+            // Dup slave to stdin, stdout, stderr
+            std.posix.dup2(slave, std.posix.STDIN_FILENO) catch std.os.linux.exit(1);
+            std.posix.dup2(slave, std.posix.STDOUT_FILENO) catch std.os.linux.exit(1);
+            std.posix.dup2(slave, std.posix.STDERR_FILENO) catch std.os.linux.exit(1);
+
+            // Close master in child
+            std.posix.close(self.master);
+
+            // Change directory if requested
+            if (cwd) |c| {
+                std.posix.chdir(c) catch {};
+            }
+
+            // Setup environment: Inherit from parent
+            
+            // Convert shell to [*:0]const u8
+            const shell_z = try std.heap.page_allocator.dupeZ(u8, shell);
+
+            const argv = [_:null]?[*:0]const u8{
+                shell_z.ptr,
+                null,
+            };
+
+            const err = std.posix.execveZ(shell_z, &argv, @ptrCast(std.os.environ.ptr));
+            log.err("execveZ failed: {}", .{err});
+            std.os.linux.exit(1);
+        }
+
+        // Parent
+        self.child_pid = pid;
+        log.info("Child spawned with PID: {}", .{pid});
     }
 
     pub fn getFds(self: *const Pty) PtyFds {
@@ -330,19 +397,29 @@ const PosixPty = struct {
     }
 
     pub fn resize(self: *Pty, cols: u16, rows: u16) !void {
-        _ = self;
-        _ = cols;
-        _ = rows;
-        return error.NotImplemented;
+        var winsize = std.posix.winsize{
+            .row = rows,
+            .col = cols,
+            .xpixel = 0,
+            .ypixel = 0,
+        };
+        const res = std.posix.system.ioctl(self.master, @bitCast(@as(u32, std.posix.system.T.IOCSWINSZ)), @intFromPtr(&winsize));
+        if (res != 0) return error.ResizeFailed;
+        self.cols = cols;
+        self.rows = rows;
     }
 
     pub fn hasExited(self: *const Pty) bool {
-        _ = self;
-        return false;
+        if (self.child_pid) |pid| {
+            const res = std.posix.waitpid(pid, std.posix.W.NOHANG);
+            return res.pid != 0;
+        }
+        return true;
     }
 
     pub fn deinit(self: *Pty) void {
         if (self.master >= 0) std.posix.close(self.master);
+        // Kill child if still alive? Usually PTY closure handles this via SIGHUP
         self.* = undefined;
     }
 };

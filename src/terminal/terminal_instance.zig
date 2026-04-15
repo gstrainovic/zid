@@ -39,12 +39,19 @@ pub const TerminalInstance = struct {
     cols: u16,
     rows: u16,
 
+    /// Shell path (owned)
+    shell: []const u8,
+
     const Self = @This();
 
     /// Create a new terminal instance and spawn a shell
     pub fn init(allocator: std.mem.Allocator, cols: u16, rows: u16) !*Self {
         const self = try allocator.create(Self);
         errdefer allocator.destroy(self);
+
+        // Detect shell
+        const shell = try detectShell(allocator);
+        errdefer allocator.free(shell);
 
         // Initialize ghostty-vt terminal
         var terminal = try ghostty_vt.Terminal.init(allocator, .{
@@ -57,8 +64,6 @@ pub const TerminalInstance = struct {
         var pty = try ConPty.Pty.open(cols, rows);
         errdefer pty.deinit();
 
-        // Detect shell
-        const shell = detectShell();
         log.info("Using shell: {s}", .{shell});
 
         // Get CWD
@@ -74,6 +79,7 @@ pub const TerminalInstance = struct {
             .pty = pty,
             .cols = cols,
             .rows = rows,
+            .shell = shell,
         };
 
         // Start background read thread
@@ -83,21 +89,19 @@ pub const TerminalInstance = struct {
     }
 
     /// Detect the user's preferred shell
-    fn detectShell() []const u8 {
+    fn detectShell(allocator: std.mem.Allocator) ![]const u8 {
         if (builtin.os.tag == .windows) {
-            // Try PowerShell first, fall back to cmd.exe
-            if (std.process.getEnvVarOwned(std.heap.page_allocator, "COMSPEC")) |comspec| {
-                defer std.heap.page_allocator.free(comspec);
-                // COMSPEC is usually cmd.exe, but we prefer PowerShell
+            // Try COMSPEC (usually cmd.exe), but prefer PowerShell if it exists in PATH
+            if (std.process.getEnvVarOwned(allocator, "COMSPEC")) |comspec| {
+                return comspec;
             } else |_| {}
-            return "powershell.exe";
+            return try allocator.dupe(u8, "powershell.exe");
         } else {
             // Unix: use SHELL env var or fall back to /bin/sh
-            if (std.process.getEnvVarOwned(std.heap.page_allocator, "SHELL")) |shell| {
-                // Note: this leaks but it's called once
+            if (std.process.getEnvVarOwned(allocator, "SHELL")) |shell| {
                 return shell;
             } else |_| {}
-            return "/bin/sh";
+            return try allocator.dupe(u8, "/bin/sh");
         }
     }
 
@@ -175,13 +179,17 @@ pub const TerminalInstance = struct {
         // Signal read thread to stop
         self.should_stop.store(true, .release);
 
+        // Cleanup PTY first – this will close the pipes and force the blocking
+        // read in the background thread to return (error.BrokenPipe on Windows, 0 on Linux).
+        self.pty.deinit();
+
         // Wait for read thread
         if (self.read_thread) |t| {
             t.join();
         }
 
-        // Cleanup
-        self.pty.deinit();
+        // Cleanup rest
+        self.allocator.free(self.shell);
         self.terminal.deinit(self.allocator);
         self.allocator.destroy(self);
     }
