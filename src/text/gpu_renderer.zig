@@ -254,8 +254,6 @@ const vertex_buffers = [_]wgpu.VertexBufferLayout{
 
         self.atlas_texture = texture;
         self.atlas_texture_view = view;
-
-        log.debug("Atlas updated: {}x{}", .{ atlas_size, atlas_size });
     }
 
     /// Text rendern mit echtem Glyph-Atlas Rendering
