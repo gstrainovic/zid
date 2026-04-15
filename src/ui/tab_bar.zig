@@ -81,6 +81,16 @@ pub const TabBarState = struct {
         log.debug("TabBarState.deinit: finished", .{});
     }
 
+    /// Get the currently active tab
+    pub fn getActiveTab(self: *Self) ?*Tab {
+        if (self.active_index) |idx| {
+            if (idx < self.tabs.items.len) {
+                return &self.tabs.items[idx];
+            }
+        }
+        return null;
+    }
+
     /// Neuen Tab öffnen
     pub fn openFile(self: *Self, path: []const u8) !void {
         // Prüfen ob Datei bereits offen ist

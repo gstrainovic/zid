@@ -42,7 +42,123 @@ pub const TerminalInstance = struct {
     /// Shell path (owned)
     shell: []const u8,
 
+    // --- Scrolling & UI State ---
+    view_row: usize = 0,
+    scrollbar_dragging: bool = false,
+    scrollbar_drag_start_y: f32 = 0,
+    scrollbar_scroll_offset_at_drag_start: f32 = 0,
+    scrollbar_track_x: f32 = 0,
+    scrollbar_track_y: f32 = 0,
+    scrollbar_thumb_y: f32 = 0,
+    scrollbar_thumb_height: f32 = 0,
+    scrollbar_width: f32 = 10,
+    height: f32 = 400,
+
     const Self = @This();
+
+    pub fn totalRowsUnlocked(self: *Self) usize {
+        return self.terminal.screens.active.pages.total_rows;
+    }
+
+    pub fn visibleLineCount(self: *const Self) usize {
+        const line_height: f32 = 24.0;
+        const available = self.height;
+        if (available <= 0) return 24;
+        return @max(1, @as(usize, @intFromFloat(@floor(available / line_height))));
+    }
+
+    pub fn isAtBottom(self: *Self) bool {
+        const total = self.totalRowsUnlocked();
+        const visible = self.visibleLineCount();
+        const max_offset = if (total > visible) total - visible else 0;
+        return self.view_row >= max_offset;
+    }
+
+    pub fn scrollToBottom(self: *Self) void {
+        const total = self.totalRowsUnlocked();
+        const visible = self.visibleLineCount();
+        self.view_row = if (total > visible) total - visible else 0;
+    }
+
+    pub fn scrollLines(self: *Self, delta: i32) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        if (delta > 0) {
+            const amount = @as(usize, @intCast(delta));
+            self.view_row = if (amount > self.view_row) 0 else self.view_row - amount;
+        } else if (delta < 0) {
+            const amount = @as(usize, @intCast(-delta));
+            const total = self.totalRowsUnlocked();
+            const visible = self.visibleLineCount();
+            const max_offset = if (total > visible) total - visible else 0;
+            self.view_row = @min(self.view_row + amount, max_offset);
+        }
+    }
+
+    pub fn handleScrollbarMouseDown(self: *Self, x: f32, y: f32) bool {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        
+        const total = self.totalRowsUnlocked();
+        const visible = self.visibleLineCount();
+        if (total <= visible) return false;
+
+        if (x < self.scrollbar_track_x) return false;
+        if (x > self.scrollbar_track_x + self.scrollbar_width) return false;
+        if (y < self.scrollbar_track_y) return false;
+        if (y > self.scrollbar_track_y + self.height) return false;
+
+        if (y >= self.scrollbar_thumb_y and y <= self.scrollbar_thumb_y + self.scrollbar_thumb_height) {
+            self.scrollbar_dragging = true;
+            self.scrollbar_drag_start_y = y;
+            self.scrollbar_scroll_offset_at_drag_start = @as(f32, @floatFromInt(self.view_row));
+            return true;
+        }
+
+        if (y < self.scrollbar_thumb_y) {
+            const amount = visible;
+            self.view_row = if (amount > self.view_row) 0 else self.view_row - amount;
+        } else {
+            const amount = visible;
+            const max_offset = if (total > visible) total - visible else 0;
+            self.view_row = @min(self.view_row + amount, max_offset);
+        }
+        return true;
+    }
+
+    pub fn handleScrollbarMouseMove(self: *Self, x: f32, y: f32) void {
+        _ = x;
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        
+        const total = self.totalRowsUnlocked();
+        const visible = self.visibleLineCount();
+        if (total <= visible) return;
+
+        const track_height = self.height;
+        const thumb_ratio: f32 = @as(f32, @floatFromInt(visible)) / @as(f32, @floatFromInt(total));
+        const thumb_height = @max(20.0, track_height * thumb_ratio);
+        const max_offset: usize = total - visible;
+        const scrollable_height = track_height - thumb_height;
+
+        if (scrollable_height <= 0) return;
+
+        const delta_y = y - self.scrollbar_drag_start_y;
+        const scroll_delta_frac = delta_y / scrollable_height;
+        const scroll_delta_lines = scroll_delta_frac * @as(f32, @floatFromInt(max_offset));
+        const scroll_delta_int: i32 = @intFromFloat(@round(scroll_delta_lines));
+
+        var new_offset: isize = @as(isize, @intFromFloat(self.scrollbar_scroll_offset_at_drag_start)) + @as(isize, scroll_delta_int);
+        new_offset = @max(0, @min(new_offset, @as(isize, @intCast(max_offset))));
+
+        self.view_row = @as(usize, @intCast(new_offset));
+    }
+
+    pub fn handleMouseUp(self: *Self) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        self.scrollbar_dragging = false;
+    }
 
     /// Create a new terminal instance and spawn a shell
     pub fn init(allocator: std.mem.Allocator, cols: u16, rows: u16) !*Self {
@@ -157,7 +273,9 @@ pub const TerminalInstance = struct {
 
             // Feed output through VT stream (handles ANSI escapes, colors, cursor, etc.)
             self.mutex.lock();
+            const was_at_bottom = self.isAtBottom();
             stream.nextSlice(buf[0..n]);
+            if (was_at_bottom) self.scrollToBottom();
             self.mutex.unlock();
         }
     }
@@ -178,6 +296,48 @@ pub const TerminalInstance = struct {
         defer self.mutex.unlock();
         return try self.terminal.plainString(alloc);
     }
+
+    /// Get the current cursor position (relative to the active screen area)
+    pub fn getCursor(self: *Self) struct { x: u16, y: u16 } {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        const cursor = self.terminal.screens.active.cursor;
+        return .{ .x = cursor.x, .y = cursor.y };
+    }
+
+    /// Total number of rows including scrollback history
+    pub fn totalRows(self: *Self) usize {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        return self.terminal.screens.active.pages.total_rows;
+    }
+
+    /// Get a single line of text from the terminal (y is absolute row index)
+    pub fn getLine(self: *Self, y: usize, alloc: std.mem.Allocator) ![]const u8 {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        
+        const screen = self.terminal.screens.active;
+        const pt_tl = ghostty_vt.point.Point{ .history = .{ .x = 0, .y = @intCast(y) } };
+        const pt_br = ghostty_vt.point.Point{ .history = .{ .x = @as(u16, @intCast(@max(1, self.cols))) - 1, .y = @intCast(y) } };
+        
+        const tl = screen.pages.pin(pt_tl) orelse return error.InvalidRow;
+        const br = screen.pages.pin(pt_br) orelse tl;
+        
+        var builder: std.Io.Writer.Allocating = .init(alloc);
+        errdefer builder.deinit();
+        
+        try screen.dumpString(&builder.writer, .{
+            .tl = tl,
+            .br = br,
+            .unwrap = false,
+        });
+        
+        const result = try builder.toOwnedSlice();
+        // Remove trailing newline/CR
+        return std.mem.trimRight(u8, result, "\n\r");
+    }
+
 
     /// Resize the terminal
     pub fn resize(self: *Self, cols: u16, rows: u16) !void {

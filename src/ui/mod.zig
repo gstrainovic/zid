@@ -317,9 +317,19 @@ pub const UI = struct {
         self.code_editor.setAltState(pressed);
     }
 
-    /// Maus-Events an Editor weiterleiten
+    /// Maus-Events an Editor oder Terminal weiterleiten
     pub fn handleMouseDown(self: *Self, x: f32, y: f32) void {
         self.mouse_pressed_this_frame = true;
+        
+        if (self.tab_bar.getActiveTab()) |tab| {
+            if (tab.kind == .terminal) {
+                if (self.tab_bar.terminal_instances.get(tab.path)) |term| {
+                    _ = term.handleScrollbarMouseDown(x, y);
+                }
+                return;
+            }
+        }
+
         // Nur an Editor weitergeben wenn Klick innerhalb der code_editor-BBox
         // liegt (Vorframe-Daten). Sonst setzt jeder Sidebar-/Tab-Klick
         // zusätzlich den Cursor im Editor.
@@ -333,15 +343,39 @@ pub const UI = struct {
     }
 
     pub fn handleMouseMove(self: *Self, x: f32, y: f32) void {
+        if (self.tab_bar.getActiveTab()) |tab| {
+            if (tab.kind == .terminal) {
+                if (self.tab_bar.terminal_instances.get(tab.path)) |term| {
+                    term.handleScrollbarMouseMove(x, y);
+                }
+                return;
+            }
+        }
         self.code_editor.handleMouseMove(x, y);
     }
 
     pub fn handleMouseUp(self: *Self) void {
+        if (self.tab_bar.getActiveTab()) |tab| {
+            if (tab.kind == .terminal) {
+                if (self.tab_bar.terminal_instances.get(tab.path)) |term| {
+                    term.handleMouseUp();
+                }
+                return;
+            }
+        }
         self.code_editor.handleMouseUp();
     }
 
-    /// Scroll-Events an Editor weiterleiten
+    /// Scroll-Events an Editor oder Terminal weiterleiten
     pub fn handleScroll(self: *Self, delta: i32) void {
+        if (self.tab_bar.getActiveTab()) |tab| {
+            if (tab.kind == .terminal) {
+                if (self.tab_bar.terminal_instances.get(tab.path)) |term| {
+                    term.scrollLines(delta);
+                }
+                return;
+            }
+        }
         self.code_editor.scrollLines(delta);
     }
 
@@ -583,35 +617,138 @@ pub const UI = struct {
 
     /// Render terminal content in the content area
     fn renderTerminalContent(self: *Self, path: []const u8, t: Theme) void {
-        const term_instance = self.tab_bar.terminal_instances.get(path) orelse return;
         _ = t;
-
-        // Use frame_arena so the text survives until endLayout() processes it.
-        // frame_arena is reset at the start of each frame in beginLayout().
+        const term_instance = self.tab_bar.terminal_instances.get(path) orelse return;
+        
         const arena_alloc = self.frame_arena.allocator();
-        const screen_text = term_instance.getScreenText(arena_alloc) catch |err| {
-            log.err("Failed to get terminal screen text: {}", .{err});
-            return;
-        };
-        // No defer free — frame_arena handles cleanup
+        const cursor = term_instance.getCursor();
+        const total_rows = term_instance.totalRows();
+        const line_height: f32 = 24.0; 
 
-        // Convert to Clay string
-        const text_slice: []const u8 = if (screen_text.len > 0) screen_text else " ";
+        // Update height from previous frame's bounding box
+        const term_data = clay.getElementData(clay.ElementId.ID("terminal_content_clip"));
+        if (term_data.found) {
+            term_instance.height = term_data.bounding_box.height;
+        }
 
-        // Terminal container — dark bg, monospace font
+        const visible_rows = term_instance.visibleLineCount();
+        const history_count = if (total_rows > term_instance.rows) total_rows - term_instance.rows else 0;
+        const cursor_abs_row = history_count + cursor.y;
+
+        // Terminal container — dark bg
         clay.UI()(.{
-            .id = clay.ElementId.ID("terminal_content"),
+            .id = clay.ElementId.ID("terminal_outer"),
             .layout = .{
                 .sizing = .grow,
+                .direction = .left_to_right,
                 .padding = .{ .left = 8, .right = 8, .top = 8, .bottom = 8 },
             },
             .background_color = .{ 30, 30, 30, 255 },
-            .clip = .{ .vertical = true },
         })({
-            clay.text(text_slice, .{
-                .font_size = 16,
-                .color = .{ 204, 204, 204, 255 },
+            // Scrollable container for the terminal text
+            clay.UI()(.{
+                .id = clay.ElementId.ID("terminal_content_clip"),
+                .layout = .{
+                    .sizing = .grow,
+                },
+                .clip = .{ .vertical = true, .horizontal = true },
+            })({
+                clay.UI()(.{
+                    .id = clay.ElementId.ID("terminal_content"),
+                    .layout = .{
+                        .sizing = .{ .w = .grow, .h = .fit },
+                        .direction = .top_to_bottom,
+                    },
+                })({
+                    const start_line = @min(term_instance.view_row, total_rows);
+                    const end_line = @min(start_line + visible_rows + 1, total_rows);
+
+                    var i: usize = start_line;
+                    while (i < end_line) : (i += 1) {
+                        const line_text = term_instance.getLine(i, arena_alloc) catch "";
+                        
+                        clay.UI()(.{
+                            .id = clay.ElementId.IDI("term_row", @intCast(i)),
+                            .layout = .{
+                                .sizing = .{ .w = .grow, .h = .fixed(line_height) },
+                                .direction = .left_to_right,
+                                .child_alignment = .{ .x = .left, .y = .center },
+                            },
+                        })({
+                            // Text segment
+                            clay.text(if (line_text.len > 0) line_text else " ", .{
+                                .font_size = 16,
+                                .color = .{ 204, 204, 204, 255 },
+                            });
+
+                            // Cursor logic for this line
+                            if (i == cursor_abs_row) {
+                                const cursor_x_idx = @min(@as(usize, cursor.x), line_text.len);
+                                const text_before = line_text[0..cursor_x_idx];
+                                const exact_x = measureTextWidth(text_before, 16.0);
+                                const char_w = measureTextWidth("W", 16.0);
+
+                                clay.UI()(.{
+                                    .id = clay.ElementId.ID("terminal_cursor"),
+                                    .floating = .{
+                                        .attach_to = .to_parent,
+                                        .attach_points = .{ .element = .left_top, .parent = .left_top },
+                                        .offset = .{ .x = exact_x, .y = 0 },
+                                    },
+                                    .layout = .{
+                                        .sizing = .{ .w = .fixed(char_w), .h = .fixed(line_height) },
+                                    },
+                                    .background_color = .{ 200, 200, 200, 180 },
+                                })({});
+                            }
+                        });
+                    }
+                });
             });
+
+            // Vertical Custom Scrollbar (CodeEditor Parity)
+            if (total_rows > visible_rows) {
+                const track_data = clay.getElementData(clay.ElementId.ID("terminal_scrollbar_track"));
+                if (track_data.found) {
+                    term_instance.scrollbar_track_x = track_data.bounding_box.x;
+                    term_instance.scrollbar_track_y = track_data.bounding_box.y;
+                }
+
+                const track_height = term_instance.height;
+                const thumb_ratio: f32 = @as(f32, @floatFromInt(visible_rows)) / @as(f32, @floatFromInt(total_rows));
+                const thumb_height = @max(20.0, track_height * thumb_ratio);
+                const max_offset: usize = total_rows - visible_rows;
+                const scroll_frac: f32 = if (max_offset > 0)
+                    @as(f32, @floatFromInt(term_instance.view_row)) / @as(f32, @floatFromInt(max_offset))
+                else
+                    0.0;
+                const thumb_y = scroll_frac * (track_height - thumb_height);
+
+                term_instance.scrollbar_thumb_y = term_instance.scrollbar_track_y + thumb_y;
+                term_instance.scrollbar_thumb_height = thumb_height;
+
+                const track_color: clay.Color = .{ 30, 30, 46, 100 };
+                const thumb_color: clay.Color = .{ 88, 88, 120, 180 };
+
+                clay.UI()(.{
+                    .id = clay.ElementId.ID("terminal_scrollbar_track"),
+                    .layout = .{
+                        .sizing = .{ .w = .fixed(term_instance.scrollbar_width), .h = .grow },
+                        .direction = .top_to_bottom,
+                    },
+                    .background_color = track_color,
+                })({
+                    clay.UI()(.{
+                        .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(thumb_y) } },
+                    })({});
+                    clay.UI()(.{
+                        .id = clay.ElementId.ID("terminal_scrollbar_thumb"),
+                        .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(thumb_height) } },
+                        .background_color = thumb_color,
+                        .corner_radius = .all(3),
+                    })({});
+                });
+            }
         });
     }
 };
