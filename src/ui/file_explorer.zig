@@ -315,7 +315,7 @@ pub fn renderFileExplorer(
             .clip = .{ .vertical = true, .horizontal = true },
         })({
             for (state.visible_entries.items, 0..) |entry, i| {
-                renderTreeEntry(arena, state, entry, i, theme, effective_press);
+                renderTreeEntry(arena, state, entry, i, theme, effective_press, in_sidebar);
             }
         });
     });
@@ -329,6 +329,7 @@ fn renderTreeEntry(
     index: usize,
     theme: Theme,
     mouse_pressed: bool,
+    in_sidebar: bool,
 ) void {
     const node = state.nodes.items[entry.node_index];
     const is_selected = state.selected_index == index;
@@ -336,7 +337,7 @@ fn renderTreeEntry(
 
     const entry_id_str = std.fmt.allocPrint(arena, "tree_entry_{d}", .{index}) catch return;
     const element_id = clay.ElementId.ID(entry_id_str);
-    const is_hovered = clay.pointerOver(element_id);
+    const is_hovered = in_sidebar and clay.pointerOver(element_id);
 
     // Klick-Handling: visible_entries darf NICHT während der Iteration geändert werden!
     // Wir setzen pending_toggle und führen es nach dem Rendering aus.
