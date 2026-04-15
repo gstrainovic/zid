@@ -266,21 +266,25 @@ fn renderTab(
             });
         });
 
-        // Close Button (X) — feste Breite
-        const close_icon_color = if (is_close_hovered) theme.danger else if (is_active) theme.text else theme.muted;
+        // Close Button (X) — Text-basiert für maximale Zuverlässigkeit (kein SVG-Overhead)
+        const close_icon_color = if (is_close_hovered) theme.danger else text_color;
+
         clay.UI()(.{
             .id = close_id,
             .layout = .{
                 .sizing = .{ .w = .fixed(24), .h = .fixed(24) },
                 .child_alignment = .{ .x = .center, .y = .center },
             },
-            .corner_radius = .all(2),
+            // Kein Hintergrund-Rechteck mehr, nur das Icon ändert die Farbe
         })({
-            const svg = @import("components/svg.zig");
-            // EINDEUTIGE ID für SVG!
-            var svg_id_buf: [64]u8 = undefined;
-            const svg_id = std.fmt.bufPrint(&svg_id_buf, "tab_close_svg_{d}", .{index}) catch "tab_close_svg";
-            svg.Svg(arena, svg_id, svg.Lucide.x, 20, close_icon_color);
+            // 'x' rendern wenn Tab gehovert ODER aktiv ist
+            if (is_tab_hovered or is_active) {
+                clay.text("x", .{
+                    .font_size = 20,
+                    .color = close_icon_color,
+                    .wrap_mode = .none,
+                });
+            }
         });
     });
 

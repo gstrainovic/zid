@@ -239,8 +239,8 @@ pub fn main() !void {
 
     // Render Loop
     var frame_count: u32 = 0;
-    var mouse_x: f32 = 330; // 240 (explorer) + ~90 (tab width to reach X button)
-    var mouse_y: f32 = 20;  // Tab bar height is 36, X is vertically centered
+    var mouse_x: f32 = -1; 
+    var mouse_y: f32 = -1;  
     var mouse_down: bool = false;
     var shift_held: bool = false;
     var ctrl_held: bool = false;
