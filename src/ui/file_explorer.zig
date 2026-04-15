@@ -284,9 +284,17 @@ pub fn renderFileExplorer(
     theme: Theme,
     mouse_pressed: bool,
 ) void {
-    // Sidebar Container
+    // Sidebar-BBox-Gate: pointerOver(file_explorer) prüft nur ob Maus in der
+    // 300px-Sidebar steht. Tree-Entry-BBoxen können über Sidebar-Breite
+    // hinauswachsen (Font 24 + langer Dateiname), daher reicht Clay's
+    // .clip nicht als Hit-Test-Grenze. Nur wenn Klick tatsächlich in
+    // Sidebar-BBox → an Tree-Entries weiterleiten.
+    const sidebar_id = clay.ElementId.ID("file_explorer");
+    const in_sidebar = clay.pointerOver(sidebar_id);
+    const effective_press = mouse_pressed and in_sidebar;
+
     clay.UI()(.{
-        .id = clay.ElementId.ID("file_explorer"),
+        .id = sidebar_id,
         .layout = .{
             .sizing = .{ .w = .fixed(300), .h = .grow },
             .direction = .top_to_bottom,
@@ -294,8 +302,8 @@ pub fn renderFileExplorer(
         },
         .background_color = theme.surface,
         .border = .{ .width = .{ .right = 1 }, .color = theme.border },
+        .clip = .{ .vertical = true, .horizontal = true },
     })({
-        // Tree Content
         clay.UI()(.{
             .id = clay.ElementId.ID("file_tree_content"),
             .layout = .{
@@ -304,9 +312,10 @@ pub fn renderFileExplorer(
                 .child_gap = 0,
             },
             .background_color = theme.surface,
+            .clip = .{ .vertical = true, .horizontal = true },
         })({
             for (state.visible_entries.items, 0..) |entry, i| {
-                renderTreeEntry(arena, state, entry, i, theme, mouse_pressed);
+                renderTreeEntry(arena, state, entry, i, theme, effective_press);
             }
         });
     });
