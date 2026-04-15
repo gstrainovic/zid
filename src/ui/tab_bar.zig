@@ -63,7 +63,7 @@ pub const TabBarState = struct {
         for (self.tabs.items, 0..) |tab, i| {
             if (std.mem.eql(u8, tab.path, path)) {
                 // Bereits offen → aktivieren
-                self.active_index = i;
+                self.setActive(i);
                 return;
             }
         }
@@ -85,7 +85,7 @@ pub const TabBarState = struct {
         });
 
         // Neuen Tab aktivieren
-        self.active_index = self.tabs.items.len - 1;
+        self.setActive(self.tabs.items.len - 1);
     }
 
     /// Tab schließen (nach Index)

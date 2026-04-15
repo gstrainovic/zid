@@ -288,11 +288,11 @@ Linux:   FreeType+HarfBuzz + JetBrainsMono.ttf → Glyph-Atlas (RGBA Textur) →
   - [x] Ordner auf/zuklappen
   - [x] Datei-Icons via Gooey SVG-Pipeline (Phase 7)
   - [x] Datei öffnen per Klick → neuer Tab
-- [ ] **SVG-Datei Preview**
-  - [ ] SVG-Dateien im Editor-Tab als Bild anzeigen (wie VSCode)
-  - [ ] cairo.zig rasterisiert SVG → wgpu Texture → Textured Quad im Tab
-- [ ] **Bild-Datei Preview**
-  - [ ] PNG/JPG im Editor-Tab anzeigen
+- [x] **SVG-Datei Preview**
+  - [x] SVG-Dateien im Editor-Tab als Bild anzeigen (wie VSCode)
+  - [x] nanosvg rasterisiert SVG (Full Color) → wgpu Texture → Textured Quad im Tab
+- [x] **Bild-Datei Preview**
+  - [x] PNG/JPG im Editor-Tab anzeigen
 
 ## 🔮 Phase 10: Flow-Editor Integration (GPU-beschleunigt, Cross-Platform)
 

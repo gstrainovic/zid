@@ -26,8 +26,7 @@ pub const ImageViewState = struct {
             if (maybe_texture) |texture_ptr| {
                 // SVG-Texturen sind weiße Alpha-Masken — Tint via theme.text.
                 // Raster-Bilder (PNG/JPG/...) bleiben untinted (weiß = passthrough).
-                const is_svg = std.ascii.endsWithIgnoreCase(path, ".svg");
-                const tint: clay.Color = if (is_svg) theme.text else .{ 255, 255, 255, 255 };
+                const tint: clay.Color = .{ 255, 255, 255, 255 };
 
                 // Aspect-Ratio aus ImageTexture, damit Clay nicht streckt
                 const tex: *const ImageTexture = @ptrCast(@alignCast(texture_ptr));

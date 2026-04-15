@@ -50,6 +50,12 @@ pub fn build(b: *std.Build) void {
     });
     const syntax_mod = syntax_dep.module("syntax");
 
+    const nanosvg_dep = b.dependency("nanosvg_zig", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    const nanosvg_mod = nanosvg_dep.module("root");
+
     const exe_mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
@@ -64,6 +70,7 @@ pub fn build(b: *std.Build) void {
     exe_mod.addImport("zigjr", zigjr_dep.module("zigjr"));
     exe_mod.addImport("flow_core", flow_core_dep.module("flow-core"));
     exe_mod.addImport("syntax", syntax_mod);
+    exe_mod.addImport("nanosvg", nanosvg_mod);
     // Shader als Resource-File installieren
     const shader_install_triangle = b.addInstallFileWithDir(b.path("shaders/triangle.wgsl"), .{ .custom = "share" }, "triangle.wgsl");
     b.getInstallStep().dependOn(&shader_install_triangle.step);

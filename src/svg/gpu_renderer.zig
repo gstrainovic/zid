@@ -6,6 +6,7 @@
 const std = @import("std");
 const wgpu = @import("wgpu");
 const svg = @import("mod.zig");
+const nanosvg = @import("nanosvg");
 
 const log = std.log.scoped(.svg_renderer_gpu);
 

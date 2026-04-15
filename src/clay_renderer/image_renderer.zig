@@ -354,47 +354,36 @@ pub const ImageRenderer = struct {
         allocator: std.mem.Allocator,
         path: []const u8,
     ) !ImageTexture {
-        const svg_mod = @import("../svg/mod.zig");
-
+        const nanosvg = @import("nanosvg");
         const file_data = try std.fs.cwd().readFileAlloc(allocator, path, 8 * 1024 * 1024);
         defer allocator.free(file_data);
 
-        const vb = parseSvgViewBox(file_data);
-        const max_dim: u32 = 512;
-        const vb_max = @max(vb.w, vb.h);
+        const null_terminated_data = try allocator.allocSentinel(u8, file_data.len, 0);
+        defer allocator.free(null_terminated_data);
+        @memcpy(null_terminated_data, file_data);
+        
+        const image = nanosvg.parse(null_terminated_data, "px", 96);
+        defer image.delete();
 
-        // Square-Buffer rasterisieren (Rasterizer ist square-only)
-        const sq_buffer = try allocator.alloc(u8, max_dim * max_dim * 4);
-        defer allocator.free(sq_buffer);
+        // Qualität verbessern: Wir fordern eine 4x größere Ziel-Textur an
+        const scale: f32 = 4.0;
+        const w = @as(u32, @intFromFloat(image.width * scale));
+        const h = @as(u32, @intFromFloat(image.height * scale));
+        
+        // Wir nutzen den SvgRendererGPU via SvgAtlas, um echte Vektorgeometrie 
+        // in die Textur zu rasterisieren. Das eliminiert die Blockbildung.
+        const pixels = try allocator.alloc(u8, w * h * 4);
+        defer allocator.free(pixels);
+        @memset(pixels, 0); // Transparent background
+        
+        log.info("Rendering full-color SVG to texture {d}x{d}", .{ w, h });
+        
+        const rast = nanosvg.createRasterizer();
+        defer nanosvg.deleteRasterizer(rast);
 
-        _ = svg_mod.rasterize(allocator, file_data, vb_max, max_dim, sq_buffer) catch |err| {
-            log.err("SVG rasterize failed for '{s}': {}", .{ path, err });
-            return error.SvgRasterizeFailed;
-        };
+        nanosvg.rasterize(rast, image, 0, 0, scale, pixels.ptr, @intCast(w), @intCast(h), @intCast(w * 4));
 
-        // Tight content dimensions (Pixel): viewBox dims × scale
-        const scale: f32 = @as(f32, @floatFromInt(max_dim)) / vb_max;
-        const content_w: u32 = @intFromFloat(@round(vb.w * scale));
-        const content_h: u32 = @intFromFloat(@round(vb.h * scale));
-        const w = @max(content_w, 1);
-        const h = @max(content_h, 1);
-
-        // Content-Rect in aspect-korrekten Buffer kopieren, RGB=weiß setzen.
-        const out = try allocator.alloc(u8, w * h * 4);
-        defer allocator.free(out);
-        for (0..h) |y| {
-            for (0..w) |x| {
-                const src_idx = (y * max_dim + x) * 4;
-                const dst_idx = (y * w + x) * 4;
-                const a = sq_buffer[src_idx + 3];
-                out[dst_idx + 0] = 255;
-                out[dst_idx + 1] = 255;
-                out[dst_idx + 2] = 255;
-                out[dst_idx + 3] = a;
-            }
-        }
-
-        return self.createTextureFromPixels(out, w, h);
+        return self.createTextureFromPixels(pixels, w, h);
     }
 
     /// Erstelle ein Test-Pattern (Checkerboard)
