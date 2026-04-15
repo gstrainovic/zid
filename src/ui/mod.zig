@@ -267,7 +267,16 @@ pub const UI = struct {
     /// Maus-Events an Editor weiterleiten
     pub fn handleMouseDown(self: *Self, x: f32, y: f32) void {
         self.mouse_pressed_this_frame = true;
-        self.code_editor.handleMouseDown(x, y);
+        // Nur an Editor weitergeben wenn Klick innerhalb der code_editor-BBox
+        // liegt (Vorframe-Daten). Sonst setzt jeder Sidebar-/Tab-Klick
+        // zusätzlich den Cursor im Editor.
+        const editor_data = clay.getElementData(clay.ElementId.ID("code_editor"));
+        if (editor_data.found) {
+            const bb = editor_data.bounding_box;
+            if (x >= bb.x and x < bb.x + bb.width and y >= bb.y and y < bb.y + bb.height) {
+                self.code_editor.handleMouseDown(x, y);
+            }
+        }
     }
 
     pub fn handleMouseMove(self: *Self, x: f32, y: f32) void {
