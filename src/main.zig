@@ -188,12 +188,13 @@ pub fn main() !void {
 
     // Phase 9: Aktuelle Datei als Tab öffnen (falls geladen)
     if (resolved_file_path) |path| {
-        ui_system.file_explorer.file_to_open = path;
         if (std.mem.endsWith(u8, path, ".md")) {
             const preview_path = allocator.alloc(u8, path.len + 10) catch path;
             const final_path = std.fmt.bufPrint(@constCast(preview_path), "preview://{s}", .{path}) catch path;
             ui_system.tab_bar.openFile(final_path) catch {};
             if (preview_path.ptr != path.ptr) allocator.free(preview_path);
+        } else {
+            ui_system.file_explorer.file_to_open = path;
         }
     }
 
@@ -595,12 +596,15 @@ pub fn main() !void {
                 };
                 defer if (md_needs_free and md_content.ptr != "# Error".ptr) allocator.free(md_content);
 
+                var source_path_buf: [1024]u8 = undefined;
+                const abs_source_path = std.fs.cwd().realpath(source_path, &source_path_buf) catch source_path;
+
                 if (ui_system.open_markdown_views.getPtr(path)) |view_ptr| {
                     view_ptr.*.allocator.free(view_ptr.*.text);
                     view_ptr.*.text = view_ptr.*.allocator.dupe(u8, md_content) catch "";
                 } else {
                     const view = allocator.create(@import("ui/markdown_view.zig").MarkdownView) catch unreachable;
-                    view.* = @import("ui/markdown_view.zig").MarkdownView.init(ui_system.allocator, md_content, source_path);
+                    view.* = @import("ui/markdown_view.zig").MarkdownView.init(ui_system.allocator, md_content, abs_source_path);
                     const path_copy = allocator.dupe(u8, path) catch unreachable;
                     ui_system.open_markdown_views.put(path_copy, view) catch {};
                 }
