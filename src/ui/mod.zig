@@ -379,7 +379,9 @@ pub const UI = struct {
         if (self.tab_bar.getActiveTab()) |tab| {
             if (tab.kind == .terminal) {
                 if (self.tab_bar.terminal_instances.get(tab.path)) |term| {
-                    _ = term.handleScrollbarMouseDown(x, y);
+                    const char_w = measureTextWidth("W", 16.0);
+                    const line_h: f32 = 24.0;
+                    if (term.handleMouseDown(x, y, char_w, line_h, term.terminal_content_x, term.terminal_content_y)) return;
                 }
                 return;
             } else if (tab.kind == .markdown_preview) {
@@ -406,7 +408,9 @@ pub const UI = struct {
         if (self.tab_bar.getActiveTab()) |tab| {
             if (tab.kind == .terminal) {
                 if (self.tab_bar.terminal_instances.get(tab.path)) |term| {
-                    term.handleScrollbarMouseMove(x, y);
+                    const char_w = measureTextWidth("W", 16.0);
+                    const line_h: f32 = 24.0;
+                    term.handleMouseMove(x, y, char_w, line_h, term.terminal_content_x, term.terminal_content_y);
                 }
                 return;
             } else if (tab.kind == .markdown_preview) {
@@ -425,7 +429,7 @@ pub const UI = struct {
                 if (self.tab_bar.terminal_instances.get(tab.path)) |term| {
                     term.handleMouseUp();
                 }
-                return;
+                // No return here, might want to clear other states too
             } else if (tab.kind == .markdown_preview) {
                 if (self.open_markdown_views.get(tab.path)) |v| {
                     v.handleMouseUp();
@@ -737,7 +741,7 @@ pub const UI = struct {
         
         const arena_alloc = self.frame_arena.allocator();
         const cursor = term_instance.getCursor();
-        const total_rows = term_instance.totalRows();
+        const total_rows = term_instance.*.totalRows();
         const line_height: f32 = 24.0; 
 
         // Update height and width from previous frame's bounding box
@@ -745,6 +749,8 @@ pub const UI = struct {
         if (term_data.found) {
             const bb = term_data.bounding_box;
             term_instance.height = bb.height;
+            term_instance.terminal_content_x = bb.x;
+            term_instance.terminal_content_y = bb.y;
             // Calculate cols/rows based on font size (16px) -> roughly 10px width per char
             const char_w = measureTextWidth("W", 16.0);
             if (char_w > 0) {
@@ -992,6 +998,52 @@ pub const UI = struct {
                                     },
                                     .background_color = .{ 200, 200, 200, 180 },
                                 })({});
+                            }
+
+                            // Selection highlight pass for this line
+                            {
+                                var col: u16 = 0;
+                                var selection_start_col: ?u16 = null;
+                                const char_w = measureTextWidth("W", 16.0);
+
+                                while (col < term_instance.cols) {
+                                    if (term_instance.isSelected(col, i)) {
+                                        if (selection_start_col == null) selection_start_col = col;
+                                    } else {
+                                        if (selection_start_col) |start| {
+                                            const width = @as(f32, @floatFromInt(col - start)) * char_w;
+                                            clay.UI()(.{
+                                                .id = clay.ElementId.IDI("term_sel", @intCast(i * 1000 + start)),
+                                                .floating = .{
+                                                    .attach_to = .to_parent,
+                                                    .attach_points = .{ .element = .left_top, .parent = .left_top },
+                                                    .offset = .{ .x = @as(f32, @floatFromInt(start)) * char_w, .y = 0 },
+                                                },
+                                                .layout = .{
+                                                    .sizing = .{ .w = .fixed(width), .h = .fixed(line_height) },
+                                                },
+                                                .background_color = .{ 100, 100, 255, 60 },
+                                            })({});
+                                            selection_start_col = null;
+                                        }
+                                    }
+                                    col += 1;
+                                }
+                                if (selection_start_col) |start| {
+                                    const width = @as(f32, @floatFromInt(col - start)) * char_w;
+                                    clay.UI()(.{
+                                        .id = clay.ElementId.IDI("term_sel", @intCast(i * 1000 + start)),
+                                        .floating = .{
+                                            .attach_to = .to_parent,
+                                            .attach_points = .{ .element = .left_top, .parent = .left_top },
+                                            .offset = .{ .x = @as(f32, @floatFromInt(start)) * char_w, .y = 0 },
+                                        },
+                                        .layout = .{
+                                            .sizing = .{ .w = .fixed(width), .h = .fixed(line_height) },
+                                        },
+                                        .background_color = .{ 100, 100, 255, 60 },
+                                    })({});
+                                }
                             }
                         });
                     }
