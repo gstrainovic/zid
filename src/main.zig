@@ -193,6 +193,7 @@ pub fn main() !void {
             const preview_path = allocator.alloc(u8, path.len + 10) catch path;
             const final_path = std.fmt.bufPrint(@constCast(preview_path), "preview://{s}", .{path}) catch path;
             ui_system.tab_bar.openFile(final_path) catch {};
+            if (preview_path.ptr != path.ptr) allocator.free(preview_path);
         }
     }
 
@@ -575,25 +576,28 @@ pub fn main() !void {
                     path;
                 
                 const current_editor_path = ui_system.code_editor.buffer.get_file_path();
+                var md_needs_free = false;
                 const md_content = if (std.mem.eql(u8, source_path, current_editor_path)) blk: {
-                    // Use buffer content directly
                     break :blk ui_system.code_editor.buffer.store_to_string_cached(
                         ui_system.code_editor.buffer.root, 
                         ui_system.code_editor.buffer.file_eol_mode
                     );
                 } else blk: {
-                    // Load from disk
                     const content = std.fs.cwd().readFileAlloc(allocator, source_path, 10 * 1024 * 1024) catch |err| {
                         log.err("Failed to load markdown source '{s}': {}", .{ source_path, err });
-                        break :blk "# Error\nFailed to load file.";
+                        break :blk allocator.dupe(u8, "# Error\nFailed to load file.") catch {
+                            md_needs_free = false;
+                            break :blk "# Error";
+                        };
                     };
-                    defer allocator.free(content);
+                    md_needs_free = true;
                     break :blk content;
                 };
+                defer if (md_needs_free and md_content.ptr != "# Error".ptr) allocator.free(md_content);
 
                 if (ui_system.open_markdown_views.getPtr(path)) |view_ptr| {
-                    view_ptr.*.deinit();
-                    view_ptr.*.text = ui_system.allocator.dupe(u8, md_content) catch "";
+                    view_ptr.*.allocator.free(view_ptr.*.text);
+                    view_ptr.*.text = view_ptr.*.allocator.dupe(u8, md_content) catch "";
                 } else {
                     const view = allocator.create(@import("ui/markdown_view.zig").MarkdownView) catch unreachable;
                     view.* = @import("ui/markdown_view.zig").MarkdownView.init(ui_system.allocator, md_content, source_path);

@@ -412,7 +412,11 @@ pub const UI = struct {
                                 var md_view = self.open_markdown_views.get(tab.path);
                                 if (md_view == null) {
                                     const source_path = tab.path["preview://".len..];
-                                    const content = std.fs.cwd().readFileAlloc(self.allocator, source_path, 1024 * 1024) catch "Error loading markdown";
+                                    const content = std.fs.cwd().readFileAlloc(self.allocator, source_path, 1024 * 1024) catch |err| blk: {
+                                        std.log.err("Failed to load markdown for preview: {any}", .{err});
+                                        break :blk self.allocator.dupe(u8, "# Error\nFailed to load markdown") catch "# Error";
+                                    };
+                                    defer self.allocator.free(content);
                                     const new_view = self.allocator.create(markdown_view_mod.MarkdownView) catch unreachable;
                                     new_view.* = markdown_view_mod.MarkdownView.init(self.allocator, content, source_path);
                                     self.open_markdown_views.put(self.allocator.dupe(u8, tab.path) catch tab.path, new_view) catch {};
