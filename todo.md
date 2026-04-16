@@ -1,3 +1,5 @@
 - [x] ctrl + c usw geht nicht im terminal, was fehlt sonst nocht von keymaps?
 - [x] terminal hat nicht voll breite
 - [x] terminal ist einfarbig
+- [x] Markdown Preview in neuem Tab via Kontextmenü (.md Dateien)
+

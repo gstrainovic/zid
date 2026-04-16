@@ -205,6 +205,24 @@ fn click(ctx: *E2EContext, dc: *zigjr.DispatchCtx, x: f64, y: f64) ![]const u8 {
     return dc.arena().dupe(u8, "ok") catch "error: out of memory";
 }
 
+/// Maus-Rechtsklick an Koordinate
+fn rightClick(ctx: *E2EContext, dc: *zigjr.DispatchCtx, x: f64, y: f64) ![]const u8 {
+    log.info("RPC: right_click({d}, {d})", .{ x, y });
+
+    // Pointer position setzen
+    ctx.ui_system.setPointerState(@floatCast(x), @floatCast(y), false);
+    ctx.ui_system.handleMouseMove(@floatCast(x), @floatCast(y));
+    
+    // Rechtsklick simulieren (triggert Kontextmenü im Editor)
+    ctx.ui_system.handleKeyPress(.mouse_right);
+
+    // Event Loop aufwecken
+    const wio = @import("wio");
+    wio.cancelWait();
+
+    return dc.arena().dupe(u8, "ok") catch "error: out of memory";
+}
+
 /// Maus-Bewegung zu Koordinate (simuliert)
 fn moveMouse(ctx: *E2EContext, dc: *zigjr.DispatchCtx, x: f64, y: f64) ![]const u8 {
     log.info("RPC: move_mouse({d}, {d})", .{ x, y });

@@ -75,6 +75,7 @@ pub const Action = enum {
     ScrollUp,
     ScrollDown,
     ShowContextMenu,
+    MdPreview,
 };
 
 pub const KeyEvent = struct {

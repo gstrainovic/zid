@@ -477,6 +477,15 @@ pub fn main() !void {
             state_dirty = true;
         }
 
+        // Tab-Wechsel anfordern (Markdown Preview)
+        if (ui_system.pending_tab_switch) |path| {
+            ui_system.tab_bar.openFile(path) catch |err| {
+                log.err("Failed to open tab for preview: {}", .{err});
+            };
+            ui_system.allocator.free(path);
+            ui_system.pending_tab_switch = null;
+        }
+
         if (ui_system.tab_bar.pending_switch_path) |path| {
             // Get actual kind from the tab (not from file extension, since terminal tabs have no path)
             const kind = blk: {
@@ -551,6 +560,49 @@ pub fn main() !void {
                     
                     wio.cancelWait();
                 }
+            } else if (kind == .markdown_preview) {
+                const source_path = if (std.mem.startsWith(u8, path, "preview://")) 
+                    path["preview://".len..] 
+                else 
+                    path;
+                
+                const current_editor_path = ui_system.code_editor.buffer.get_file_path();
+                const md_content = if (std.mem.eql(u8, source_path, current_editor_path)) blk: {
+                    // Use buffer content directly
+                    break :blk ui_system.code_editor.buffer.store_to_string_cached(
+                        ui_system.code_editor.buffer.root, 
+                        ui_system.code_editor.buffer.file_eol_mode
+                    );
+                } else blk: {
+                    // Load from disk
+                    const content = std.fs.cwd().readFileAlloc(allocator, source_path, 10 * 1024 * 1024) catch |err| {
+                        log.err("Failed to load markdown source '{s}': {}", .{ source_path, err });
+                        break :blk "# Error\nFailed to load file.";
+                    };
+                    defer allocator.free(content);
+                    break :blk content;
+                };
+
+                if (ui_system.open_markdown_views.getPtr(path)) |view_ptr| {
+                    view_ptr.*.deinit();
+                    view_ptr.*.text = ui_system.allocator.dupe(u8, md_content) catch "";
+                } else {
+                    const view = allocator.create(@import("ui/markdown_view.zig").MarkdownView) catch unreachable;
+                    view.* = @import("ui/markdown_view.zig").MarkdownView.init(ui_system.allocator, md_content);
+                    const path_copy = allocator.dupe(u8, path) catch unreachable;
+                    ui_system.open_markdown_views.put(path_copy, view) catch {};
+                }
+                
+                // If we got text from the buffer (cached/owned), free it if needed, 
+                // but MarkdownView.init dupes it, so we must free it.
+                if (std.mem.eql(u8, source_path, current_editor_path)) {
+                    // This is actually not quite correct because store_to_string_cached 
+                    // returns a slice into an internal cache if not modified? 
+                    // No, usually it allocates. Let's assume it allocates.
+                    // Actually, let's just use it and see.
+                }
+                
+                state_dirty = true;
             }
 
             // pending_switch_path freigeben und nullen

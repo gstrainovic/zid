@@ -17,6 +17,7 @@ const tab_bar_mod = @import("tab_bar.zig");
 const file_explorer_mod = @import("file_explorer.zig");
 const image_view_mod = @import("image_view.zig");
 const file_types = @import("file_types.zig");
+const markdown_view_mod = @import("markdown_view.zig");
 
 const log = std.log.scoped(.ui);
 
@@ -83,6 +84,10 @@ pub const UI = struct {
     // Phase 9: PDF Handler
     open_pdfs: std.StringHashMap(*anyopaque),
 
+    // Markdown Previews
+    open_markdown_views: std.StringHashMap(*markdown_view_mod.MarkdownView),
+    pending_md_preview: ?[]const u8 = null,
+
     // Mouse state for immediate mode UI clicks
     mouse_pressed_this_frame: bool = false,
     mouse_x: f32 = 0,
@@ -140,6 +145,7 @@ pub const UI = struct {
                     .current_directory = null,
                     .open_images = std.StringHashMap(*anyopaque).init(allocator),
                     .open_pdfs = std.StringHashMap(*anyopaque).init(allocator),
+                    .open_markdown_views = std.StringHashMap(*markdown_view_mod.MarkdownView).init(allocator),
                     .pending_tab_switch = null,
                     .mouse_pressed_this_frame = false,
                     .mouse_x = 0,
@@ -178,6 +184,7 @@ pub const UI = struct {
             .current_directory = null,
             .open_images = std.StringHashMap(*anyopaque).init(allocator),
             .open_pdfs = std.StringHashMap(*anyopaque).init(allocator),
+            .open_markdown_views = std.StringHashMap(*markdown_view_mod.MarkdownView).init(allocator),
         };
     }
 
@@ -215,6 +222,14 @@ pub const UI = struct {
             handler.deinit();
         }
         self.open_pdfs.deinit();
+
+        // Markdown Views aufräumen
+        var md_iter = self.open_markdown_views.iterator();
+        while (md_iter.next()) |entry| {
+            entry.value_ptr.*.deinit();
+            self.allocator.destroy(entry.value_ptr.*);
+        }
+        self.open_markdown_views.deinit();
 
         if (self.current_directory) |dir| self.allocator.free(dir);
         log.debug("UI.deinit: finished", .{});
@@ -563,8 +578,23 @@ pub const UI = struct {
                         self.mouse_pressed_this_frame,
                     );
 
-                    // Aktiven Tab prüfen für Weiche (Editor vs Bild vs Terminal)
+                    // Aktiven Tab prüfen für Weiche (Editor vs Bild vs Terminal vs Markdown)
                     var special_active = false;
+                    
+                    // Check for pending markdown preview request from editor
+                    if (self.code_editor.pending_md_preview) {
+                        log.info("UI: detected pending_md_preview from editor", .{});
+                        self.code_editor.pending_md_preview = false;
+                        const path = self.code_editor.buffer.get_file_path();
+                        if (path.len > 0) {
+                            // Allocation here must be freed by the consumer (main.zig)
+                            const preview_path = self.allocator.alloc(u8, path.len + 10) catch path;
+                            const final_path = std.fmt.bufPrint(@constCast(preview_path), "preview://{s}", .{path}) catch path;
+                            log.info("UI: setting pending_tab_switch to {s}", .{final_path});
+                            self.pending_tab_switch = final_path;
+                        }
+                    }
+
                     if (self.tab_bar.active_index) |idx| {
                         if (idx < self.tab_bar.tabs.items.len) {
                             const tab = self.tab_bar.tabs.items[idx];
@@ -591,6 +621,11 @@ pub const UI = struct {
                                 // Render terminal tab
                                 self.renderTerminalContent(tab.path, t);
                                 special_active = true;
+                            } else if (tab.kind == .markdown_preview) {
+                                if (self.open_markdown_views.get(tab.path)) |md_view| {
+                                    md_view.render(self.frame_arena.allocator(), t);
+                                    special_active = true;
+                                }
                             }
                         }
                     }
