@@ -70,6 +70,7 @@ pub const UI = struct {
 
     // Text Renderer (für Measurement)
     text_renderer: ?*@import("../text/mod.zig").TextRenderer = null,
+    window: ?*wio.Window = null,
 
     // Phase 9: Tab-Bar und File Explorer
     tab_bar: tab_bar_mod.TabBarState,
@@ -246,6 +247,7 @@ pub const UI = struct {
     pub fn setupClay(self: *Self, window: *wio.Window, width: u32, height: u32, text_renderer: *@import("../text/mod.zig").TextRenderer) !void {
         log.debug("Setting up Clay layout: {}x{}", .{ width, height });
         self.text_renderer = text_renderer;
+        self.window = window;
         self.code_editor.window = window;
 
         // Globalen Measure-Context setzen (für Maus→Spalte)
@@ -395,8 +397,7 @@ pub const UI = struct {
                         v.showContextMenu(x, y);
                         return;
                     }
-                    v.show_context_menu = false;
-                    _ = v.handleScrollbarMouseDown(x, y);
+                    _ = v.handleMouseDown(x, y);
                 }
                 return;
             }
@@ -409,7 +410,7 @@ pub const UI = struct {
         if (editor_data.found) {
             const bb = editor_data.bounding_box;
             if (x >= bb.x and x < bb.x + bb.width and y >= bb.y and y < bb.y + bb.height) {
-                self.code_editor.handleMouseDown(x, y);
+                self.code_editor.handleMouseDown(x, y, button);
             }
         }
     }
@@ -684,6 +685,7 @@ pub const UI = struct {
                                     md_view = new_view;
                                 }
                                 if (md_view) |v| {
+                                    v.window = self.window;
                                     v.render(self.frame_arena.allocator(), t, self);
                                     special_active = true;
                                 }
@@ -748,6 +750,7 @@ pub const UI = struct {
     fn renderTerminalContent(self: *Self, path: []const u8, t: Theme) void {
         _ = t;
         const term_instance = self.tab_bar.terminal_instances.get(path) orelse return;
+        term_instance.window = self.window;
         
         const arena_alloc = self.frame_arena.allocator();
         const cursor = term_instance.getCursor();

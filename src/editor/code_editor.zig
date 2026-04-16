@@ -1288,7 +1288,7 @@ pub const CodeEditor = struct {
         self.mouse_y = y;
     }
 
-    pub fn handleMouseDown(self: *Self, x: f32, y: f32) void {
+    pub fn handleMouseDown(self: *Self, x: f32, y: f32, button: @import("wio").Button) void {
         self.mouse_x = x;
         self.mouse_y = y;
         self.mouse_down = true;
@@ -1316,6 +1316,13 @@ pub const CodeEditor = struct {
                 return;
             }
             self.show_context_menu = false;
+        }
+
+        if (button == .mouse_right) {
+            self.show_context_menu = true;
+            self.context_menu_x = x;
+            self.context_menu_y = y;
+            return;
         }
 
         if (self.handleScrollbarMouseDown(x, y)) return;

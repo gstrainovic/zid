@@ -34,6 +34,9 @@ pub const MarkdownView = struct {
     viewport_height: f32 = 0,
     content_height: f32 = 0,
 
+    /// Optional window for clipboard access
+    window: ?*@import("wio").Window = null,
+
     /// Context Menu State
     show_context_menu: bool = false,
     context_menu_x: f32 = 0,
@@ -71,8 +74,23 @@ pub const MarkdownView = struct {
         }
     }
 
-    pub fn handleScrollbarMouseDown(self: *Self, x: f32, y: f32) bool {
+    pub fn handleMouseDown(self: *Self, x: f32, y: f32) bool {
+        if (self.show_context_menu) {
+            if (clay.pointerOver(clay.getElementId("Copy"))) {
+                self.copySelection() catch {};
+                self.show_context_menu = false;
+                return true;
+            }
+            if (clay.pointerOver(clay.getElementId("Select All"))) {
+                self.selectAll();
+                self.show_context_menu = false;
+                return true;
+            }
+            self.show_context_menu = false;
+        }
+
         if (self.content_height <= self.viewport_height) return false;
+
 
         if (x < self.scrollbar_track_x) return false;
         if (x > self.scrollbar_track_x + self.scrollbar_width) return false;
@@ -132,6 +150,17 @@ pub const MarkdownView = struct {
         self.show_context_menu = true;
         self.context_menu_x = x;
         self.context_menu_y = y;
+    }
+
+    pub fn copySelection(self: *Self) !void {
+        const w = self.window orelse return;
+        // Vorerst den gesamten Text kopieren da noch keine Selektion implementiert ist
+        w.setClipboardText(self.text);
+    }
+
+    pub fn selectAll(self: *Self) void {
+        // Noch nicht implementiert
+        _ = self;
     }
 
     fn renderContextMenu(self: *Self) void {
