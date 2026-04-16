@@ -25,8 +25,14 @@ pub const MarkdownView = struct {
     }
 
     pub fn deinit(self: *Self) void {
-        self.allocator.free(self.text);
-        self.allocator.free(self.base_path);
+        if (self.text.len > 0 and self.text.ptr != "".ptr) {
+            self.allocator.free(self.text);
+        }
+        if (self.base_path.len > 0 and self.base_path.ptr != "".ptr) {
+            self.allocator.free(self.base_path);
+        }
+        self.text = "";
+        self.base_path = "";
     }
 
     pub fn render(self: *Self, arena: std.mem.Allocator, theme: Theme, ui_ptr: *ui_mod.UI) void {
@@ -135,6 +141,7 @@ pub const MarkdownView = struct {
                         .layout = .{
                             .sizing = .{ .w = .grow, .h = .fit },
                         },
+                        .background_color = .{ 255, 255, 255, 255 }, // Ensure untinted image
                         .aspect_ratio = .{ .aspect_ratio = aspect },
                         .image = .{ .image_data = texture_ptr },
                     })({});
