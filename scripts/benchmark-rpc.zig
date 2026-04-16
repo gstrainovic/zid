@@ -16,6 +16,12 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
+    std.debug.print("Building vulkan-ed...\n", .{});
+    _ = try std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = &[_][]const u8{ "zig", "build" },
+    });
+
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
 

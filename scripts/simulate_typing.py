@@ -2,6 +2,10 @@ import socket
 import json
 import time
 import sys
+import subprocess
+
+print("Building vulkan-ed...")
+subprocess.run(["zig", "build"], check=True)
 
 def send_rpc(method, params=[]):
     payload = {"jsonrpc": "2.0", "method": method, "params": params, "id": 1}

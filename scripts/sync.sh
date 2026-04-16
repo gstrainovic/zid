@@ -12,6 +12,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 REPO_ROOT="$(pwd)"
 
+echo "Building vulkan-ed..."
+zig build
+
 OWN_SUBMODULES=("libs/gooey" "libs/wgpu_native_zig" "libs/wio")
 
 # Referenz-Repos: Inspiration/Lesequelle, kein Build-Input.

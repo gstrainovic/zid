@@ -809,7 +809,12 @@ pub const UI = struct {
                                                 if (arg_idx + 1 < arg_count and args[arg_idx] == 5) {
                                                     arg_idx += 2; // 256 colors not fully implemented
                                                 } else if (arg_idx + 3 < arg_count and args[arg_idx] == 2) {
-                                                    current_fg = .{ args[arg_idx + 1], args[arg_idx + 2], args[arg_idx + 3], 255 };
+                                                    current_fg = .{ 
+                                                        @floatFromInt(args[arg_idx + 1]), 
+                                                        @floatFromInt(args[arg_idx + 2]), 
+                                                        @floatFromInt(args[arg_idx + 3]), 
+                                                        255 
+                                                    };
                                                     arg_idx += 4;
                                                 }
                                             },
@@ -832,7 +837,12 @@ pub const UI = struct {
                                                 if (arg_idx + 1 < arg_count and args[arg_idx] == 5) {
                                                     arg_idx += 2;
                                                 } else if (arg_idx + 3 < arg_count and args[arg_idx] == 2) {
-                                                    current_bg = .{ args[arg_idx + 1], args[arg_idx + 2], args[arg_idx + 3], 255 };
+                                                    current_bg = .{ 
+                                                        @floatFromInt(args[arg_idx + 1]), 
+                                                        @floatFromInt(args[arg_idx + 2]), 
+                                                        @floatFromInt(args[arg_idx + 3]), 
+                                                        255 
+                                                    };
                                                     arg_idx += 4;
                                                 }
                                             },
@@ -874,12 +884,12 @@ pub const UI = struct {
                             // Cursor logic for this line
                             if (i == cursor_abs_row) {
                                 // Strip ANSI for accurate width measurement
-                                var clean_line = std.ArrayList(u8).init(arena_alloc);
+                                var clean_line: std.ArrayListUnmanaged(u8) = .empty;
                                 var clean_pos: usize = 0;
                                 while (clean_pos < cursor.x and clean_pos < line_text.len) {
                                     // Note: A more robust cursor X measurement would parse the ANSI strings 
                                     // and measure just the visible characters.
-                                    clean_line.append(line_text[clean_pos]) catch {};
+                                    clean_line.append(arena_alloc, line_text[clean_pos]) catch {};
                                     clean_pos += 1;
                                 }
                                 

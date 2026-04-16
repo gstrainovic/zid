@@ -20,6 +20,9 @@ fi
 cd "$(dirname "$0")/.."
 REPO_ROOT="$(pwd)"
 
+echo "Building vulkan-ed..."
+zig build || exit 1
+
 PROMPT_FILE="$REPO_ROOT/.claude/reviewer-prompt.md"
 if [[ ! -f "$PROMPT_FILE" ]]; then
     echo "ERROR: reviewer prompt missing: $PROMPT_FILE" >&2

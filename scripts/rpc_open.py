@@ -18,6 +18,10 @@ def send_rpc(method, params=[]):
         return json.loads(response)
 
 if __name__ == "__main__":
+    import subprocess
+    print("Building vulkan-ed...")
+    subprocess.run(["zig", "build"], check=True)
+
     if len(sys.argv) < 2:
         print("Usage: rpc_open.py <file_path>")
         sys.exit(1)

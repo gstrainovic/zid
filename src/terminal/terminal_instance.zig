@@ -331,7 +331,7 @@ pub const TerminalInstance = struct {
             .emit = .vt,
             .unwrap = false,
             .trim = false,
-            .palette = &self.terminal.colors.palette,
+            .palette = &self.terminal.colors.palette.current,
         });
         
         fmt.content = .{ .selection = ghostty_vt.Selection.init(tl, br, false) };
@@ -351,7 +351,7 @@ pub const TerminalInstance = struct {
         defer self.mutex.unlock();
 
         try self.pty.resize(cols, rows);
-        try self.terminal.resize(.{ .cols = cols, .rows = rows });
+        try self.terminal.resize(self.allocator, cols, rows);
         self.cols = cols;
         self.rows = rows;
     }

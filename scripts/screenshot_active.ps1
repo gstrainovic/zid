@@ -2,6 +2,10 @@ param(
     [string]$OutFile = "screenshot_active.png"
 )
 
+Write-Host "Building vulkan-ed..."
+& zig build
+if ($LASTEXITCODE -ne 0) { exit 1 }
+
 $ScreenDir = "screenshots"
 if (-Not (Test-Path $ScreenDir)) { New-Item -ItemType Directory -Path $ScreenDir | Out-Null }
 $OutPath = Join-Path $ScreenDir $OutFile
