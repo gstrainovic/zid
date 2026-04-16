@@ -40,7 +40,6 @@ pub const MarkdownView = struct {
             std.log.scoped(.markdown).err("Failed to parse markdown: {any}", .{err});
             return;
         };
-        defer result.parser.deinit();
 
         clay.UI()(.{
             .id = clay.ElementId.ID("markdown_view"),
@@ -63,9 +62,9 @@ pub const MarkdownView = struct {
                 const layout_options = switch (container.content) {
                     .Document => clay.LayoutConfig{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .top_to_bottom, .child_gap = 16 },
                     .Quote => clay.LayoutConfig{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .top_to_bottom, .padding = .{ .left = 16, .right = 0, .top = 4, .bottom = 4 }, .child_gap = 8 },
-                    .List => clay.LayoutConfig{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .top_to_bottom, .padding = .{ .left = 24, .right = 0, .top = 0, .bottom = 0 }, .child_gap = 8 },
-                    .ListItem => clay.LayoutConfig{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .top_to_bottom, .child_gap = 4 },
-                    .Table => clay.LayoutConfig{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .top_to_bottom, .child_gap = 0 },
+                    .List => |_| clay.LayoutConfig{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .top_to_bottom, .padding = .{ .left = 24, .right = 0, .top = 0, .bottom = 0 }, .child_gap = 8 },
+                    .ListItem => |_| clay.LayoutConfig{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .top_to_bottom, .child_gap = 4 },
+                    .Table => |_| clay.LayoutConfig{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .top_to_bottom, .child_gap = 0 },
                 };
                 clay.UI()(.{
                     .layout = layout_options,
@@ -89,12 +88,16 @@ pub const MarkdownView = struct {
                         const multiplier: f32 = switch (h.level) { 1 => 2.0, 2 => 1.5, 3 => 1.2, else => 1.1 };
                         const size: u16 = @intFromFloat(@as(f32, @floatFromInt(self.font_size)) * multiplier);
                         clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .left_to_right, .child_gap = 4 } })({
-                            for (leaf.inlines.items) |*inline_item| { self.renderInline(inline_item, size, theme.text, arena, ui_ptr); }
+                            for (leaf.inlines.items) |*inline_item| {
+                                self.renderInline(inline_item, size, theme.text, arena, ui_ptr);
+                            }
                         });
                     },
                     .Paragraph => {
                         clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .left_to_right, .child_gap = 4 } })({
-                            for (leaf.inlines.items) |*inline_item| { self.renderInline(inline_item, self.font_size, theme.text, arena, ui_ptr); }
+                            for (leaf.inlines.items) |*inline_item| {
+                                self.renderInline(inline_item, self.font_size, theme.text, arena, ui_ptr);
+                            }
                         });
                     },
                     .Code => |c| {
@@ -103,12 +106,18 @@ pub const MarkdownView = struct {
                         });
                     },
                     .Alert => |a| {
-                         clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .padding = .all(16) }, .background_color = theme.surface, .border = .{ .width = .{ .left = 4 }, .color = theme.accent } })({
+                        clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .top_to_bottom, .padding = .all(16) }, .background_color = theme.surface, .border = .{ .width = .{ .left = 4 }, .color = theme.accent } })({
                             clay.text(if (a.alert) |at| at else "ALERT", .{ .font_size = self.font_size, .color = theme.accent });
-                            for (leaf.inlines.items) |*inline_item| { self.renderInline(inline_item, self.font_size, theme.text, arena, ui_ptr); }
+                            clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .left_to_right, .child_gap = 4 } })({
+                                for (leaf.inlines.items) |*inline_item| {
+                                    self.renderInline(inline_item, self.font_size, theme.text, arena, ui_ptr);
+                                }
+                            });
                         });
                     },
-                    .Break => { clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(8) } } })({}); },
+                    .Break => {
+                        clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(8) } } })({});
+                    },
                 }
             },
         }
@@ -120,7 +129,9 @@ pub const MarkdownView = struct {
                 clay.text(t.text, .{ .font_size = base_size, .color = base_color, .wrap_mode = .words });
             },
             .link => |l| {
-                for (l.text.items) |t| { clay.text(t.text, .{ .font_size = base_size, .color = .{ 100, 149, 237, 255 }, .wrap_mode = .words }); }
+                for (l.text.items) |t| {
+                    clay.text(t.text, .{ .font_size = base_size, .color = .{ 100, 149, 237, 255 }, .wrap_mode = .words });
+                }
             },
             .codespan => |c| {
                 clay.text(c.text, .{ .font_size = base_size, .color = base_color, .wrap_mode = .words });
@@ -135,14 +146,13 @@ pub const MarkdownView = struct {
                 if (ui_ptr.open_images.get(path)) |texture_ptr| {
                     const tex: *const ImageTexture = @ptrCast(@alignCast(texture_ptr));
                     const aspect: f32 = if (tex.height > 0) @as(f32, @floatFromInt(tex.width)) / @as(f32, @floatFromInt(tex.height)) else 1.0;
-                    
                     const max_w = @as(f32, @floatFromInt(tex.width));
-                    
+
                     clay.UI()(.{
                         .layout = .{
                             .sizing = .{ .w = .{ .type = .grow, .size = .{ .minmax = .{ .min = 0, .max = max_w } } }, .h = .fit },
                         },
-                        .background_color = .{ 255, 255, 255, 255 }, // Ensure untinted image
+                        .background_color = .{ 255, 255, 255, 255 },
                         .aspect_ratio = .{ .aspect_ratio = aspect },
                         .image = .{ .image_data = texture_ptr },
                     })({});
