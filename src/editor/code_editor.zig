@@ -210,8 +210,43 @@ pub const CodeEditor = struct {
     dirty_line_start: usize = 0,
     dirty_line_end: usize = 0,
     has_dirty_lines: bool = false,
+    is_modified: bool = false,
 
     const Self = @This();
+
+    pub fn isModified(self: *const Self) bool {
+        return self.is_modified;
+    }
+
+    pub fn getBuffer(self: *Self) *flow_core.Buffer {
+        return self.buffer;
+    }
+
+    pub fn setBuffer(self: *Self, new_buf: *flow_core.Buffer, path: []const u8) void {
+        self.destroyHighlighter();
+        self.buffer = new_buf;
+        self.setLanguageFromPath(path);
+        self.is_modified = new_buf.last_save != null and new_buf.root != new_buf.last_save.?; // Rough check
+        // We might want to save/restore cursor/view per buffer too...
+        // For now, reset them
+        self.cursor = .{};
+        self.view.row = 0;
+        self.view.col = 0;
+        self.edits_fully_tracked = false;
+        self.has_dirty_lines = true;
+        self.dirty_line_start = 0;
+        self.dirty_line_end = self.lineCount();
+    }
+
+    pub fn save(self: *Self) !void {
+        const path = self.buffer.get_file_path();
+        if (path.len == 0) return error.NoFilePath;
+
+        try self.buffer.store_to_file_and_clean(path);
+
+        self.is_modified = false;
+        std.log.scoped(.editor).info("Saved file: {s}", .{path});
+    }
 
     /// Setzt Dirty-Flag für Highlighting — OHNE sofortigen Reparse.
     /// MUSS nach Edit-Operationen aufgerufen werden.
@@ -257,13 +292,7 @@ pub const CodeEditor = struct {
         };
     }
 
-    pub fn init(allocator: std.mem.Allocator, file_path: ?[]const u8) Self {
-        _ = file_path;
-        const buf = flow_core.Buffer.create(allocator) catch @panic("OOM Buffer.create");
-        // Start with empty buffer
-        const empty_text: [0]u8 = .{};
-        buf.root = buf.load_from_string(&empty_text, &buf.file_eol_mode, &buf.file_utf8_sanitized) catch @panic("OOM load_from_string");
-
+    pub fn init(allocator: std.mem.Allocator, buffer: *flow_core.Buffer) Self {
         const view: flow_core.View = .{
             .rows = 20,
             .cols = 80,
@@ -279,7 +308,7 @@ pub const CodeEditor = struct {
 
         return Self{
             .allocator = allocator,
-            .buffer = buf,
+            .buffer = buffer,
             .cursor = cursor,
             .view = view,
             .keymap = keymap.Keymap.initDefault(allocator) catch null,
@@ -293,7 +322,7 @@ pub const CodeEditor = struct {
         if (self.highlighter) |hl| hl.destroy();
         if (self.bg_highlighter) |hl| hl.destroy();
         self.bg_queued_edits.deinit(self.allocator);
-        self.buffer.deinit();
+        // self.buffer.deinit(); // Buffer is managed by Tabs now
         if (self.keymap) |*km| km.deinit();
         self.line_scratch.deinit();
     }
@@ -588,6 +617,7 @@ pub const CodeEditor = struct {
     /// `old_text` = Text der gelöscht wird ("" bei reinem Insert).
     /// `new_text` = Text der eingefügt wird ("" bei reinem Delete).
     fn pushEditForChange(self: *Self, row: usize, col: usize, old_text: []const u8, new_text: []const u8) void {
+        self.is_modified = true;
         const hl = self.highlighter orelse return;
         const m = self.metrics();
         const line_start = self.buffer.root.line_start_byte(row, m);
@@ -1228,6 +1258,11 @@ pub const CodeEditor = struct {
             },
             .MdPreview => {
                 self.pending_md_preview = true;
+            },
+            .Save => {
+                self.save() catch |err| {
+                    std.log.scoped(.editor).err("Failed to save file: {}", .{err});
+                };
             },
             else => {},
         }

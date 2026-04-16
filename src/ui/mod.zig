@@ -112,7 +112,11 @@ pub const UI = struct {
 
         const clay_memory = try allocator.alloc(u8, generous_memory);
 
-        var code_editor = editor_mod.CodeEditor.init(allocator, default_file_path);
+        // Initialer leerer Buffer für den Editor
+        const initial_buf = try @import("flow_core").Buffer.create(allocator);
+        initial_buf.root = try initial_buf.load_from_string("", &initial_buf.file_eol_mode, &initial_buf.file_utf8_sanitized);
+
+        var code_editor = editor_mod.CodeEditor.init(allocator, initial_buf);
 
         // Phase 9: Tab-Bar und File Explorer initialisieren
         const tab_bar = tab_bar_mod.TabBarState.init(allocator);
@@ -126,14 +130,11 @@ pub const UI = struct {
         if (default_file_path) |path| {
             const file_content = std.fs.cwd().readFileAlloc(allocator, path, 64 * 1024 * 1024) catch |err| {
                 log.err("Failed to load default file '{s}': {}. Using fallback content.", .{ path, err });
-                code_editor.setText(
-                    \\// Failed to load file: {s}
-                    \\// Error: {}
-                );
-                // Formatiere Fehlermeldung in den Text
                 var buf: [256]u8 = undefined;
                 const msg = std.fmt.bufPrint(&buf, "// Failed to load: {s}\n// Error: {}", .{ path, err }) catch "// Failed to load file";
-                code_editor.setText(msg);
+                
+                initial_buf.root = initial_buf.load_from_string(msg, &initial_buf.file_eol_mode, &initial_buf.file_utf8_sanitized) catch initial_buf.root;
+
                 return Self{
                     .allocator = allocator,
                     .config = config,
@@ -160,18 +161,22 @@ pub const UI = struct {
                 };
             };
             defer allocator.free(file_content);
-            code_editor.setText(file_content);
+
+            initial_buf.root = try initial_buf.load_from_string(file_content, &initial_buf.file_eol_mode, &initial_buf.file_utf8_sanitized);
+            initial_buf.set_file_path(path);
+            initial_buf.last_save = initial_buf.root;
             code_editor.setLanguageFromPath(path);
             log.info("Loaded default file: {s} ({d} bytes)", .{ path, file_content.len });
         } else {
-            code_editor.setText(
+            const default_text = 
                 \\pub fn main() !void {
                 \\    std.log.info("Hello World", .{});
                 \\const x: u32 = 42;
                 \\// This is a comment
                 \\var y = x + 1;
                 \\}
-            );
+            ;
+            initial_buf.root = try initial_buf.load_from_string(default_text, &initial_buf.file_eol_mode, &initial_buf.file_utf8_sanitized);
         }
 
         return Self{
@@ -206,6 +211,27 @@ pub const UI = struct {
         log.debug("UI.deinit: clay_memory freed", .{});
         self.code_editor.deinit();
         log.debug("UI.deinit: code_editor done", .{});
+
+        // Deinit the current buffer if it's not managed by a tab 
+        // (e.g. initial buffer or a buffer whose tab was closed but is still in editor)
+        // Actually, for simplicity, let's just deinit it here and ensure tabs
+        // that still exist have their own logic or we handle it carefully.
+        // Wait, Tab.buffer is a pointer. If we deinit here, and it's also in a Tab,
+        // we'll have a double-free when tab_bar.deinit runs.
+        
+        // Better: let TabBarState.deinit handle all buffers it knows about.
+        // We only need to deinit the current buffer if it's NOT in any tab.
+        var buffer_in_tab = false;
+        for (self.tab_bar.tabs.items) |tab| {
+            if (tab.buffer == self.code_editor.buffer) {
+                buffer_in_tab = true;
+                break;
+            }
+        }
+        if (!buffer_in_tab) {
+            self.code_editor.buffer.deinit();
+        }
+
         self.tab_bar.deinit();
         log.debug("UI.deinit: tab_bar done", .{});
         self.file_explorer.deinit();
@@ -692,8 +718,13 @@ pub const UI = struct {
                         }
                     }
 
-                    // Code Editor - füllt den restlichen Raum (nur wenn kein Spezial-Tab aktiv)
+                    // Sync modified state from editor to active tab
                     if (!special_active) {
+                        if (self.tab_bar.getActiveTab()) |tab| {
+                            if (tab.kind == .text) {
+                                tab.modified = self.code_editor.is_modified;
+                            }
+                        }
                         self.code_editor.render(self.frame_arena.allocator());
                     }
                 });
