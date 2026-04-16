@@ -43,6 +43,9 @@ pub const TerminalInstance = struct {
     /// Shell path (owned)
     shell: []const u8,
 
+    /// Optional window for clipboard access
+    window: ?*@import("wio").Window = null,
+
     // --- Scrolling & UI State ---
     view_row: usize = 0,
     scrollbar_dragging: bool = false,
@@ -175,6 +178,20 @@ pub const TerminalInstance = struct {
     pub fn handleMouseDown(self: *Self, x: f32, y: f32, char_w: f32, line_h: f32, term_x: f32, term_y: f32) bool {
         if (self.handleScrollbarMouseDown(x, y)) return true;
 
+        if (self.show_context_menu) {
+            if (clay.pointerOver(clay.getElementId("Copy"))) {
+                self.copyToClipboard() catch {};
+                self.show_context_menu = false;
+                return true;
+            }
+            if (clay.pointerOver(clay.getElementId("Paste"))) {
+                self.pasteFromClipboard() catch {};
+                self.show_context_menu = false;
+                return true;
+            }
+            self.show_context_menu = false;
+        }
+
         self.mutex.lock();
         defer self.mutex.unlock();
 
@@ -253,6 +270,32 @@ pub const TerminalInstance = struct {
         const pin = screen.pages.pin(pt) orelse return false;
 
         return sel.contains(screen, pin);
+    }
+
+    pub fn copyToClipboard(self: *Self) !void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
+        const screen = self.terminal.screens.active;
+        const sel = screen.selection orelse return;
+
+        const text = try screen.selectionString(self.allocator, .{
+            .sel = sel,
+            .trim = false,
+        });
+        defer self.allocator.free(text);
+
+        if (self.window) |w| {
+            w.setClipboardText(text);
+        }
+    }
+
+    pub fn pasteFromClipboard(self: *Self) !void {
+        const w = self.window orelse return;
+        const text = w.getClipboardText(self.allocator) orelse return;
+        defer self.allocator.free(text);
+
+        try self.sendInput(text);
     }
 
     pub fn renderContextMenu(self: *Self) void {
