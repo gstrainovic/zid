@@ -16,7 +16,34 @@ const e2e_server = @import("e2e_server.zig");
 // Log-Level: debug
 pub const std_options: std.Options = .{
     .log_level = .debug,
+    .logFn = logFn,
 };
+
+fn logFn(
+    comptime level: std.log.Level,
+    comptime scope: @Type(.enum_literal),
+    comptime format: []const u8,
+    args: anytype,
+) void {
+    // Filter ghostty-vt noise
+    if (scope == .stream or scope == .terminal) {
+        if (level == .debug) return;
+    }
+
+    const level_txt = comptime level.asText();
+    const prefix = if (scope == .default) level_txt else level_txt ++ "(" ++ @tagName(scope) ++ ")";
+
+    const stderr_file = std.fs.File.stderr();
+    var buf: [4096]u8 = undefined;
+    var stderr_writer = stderr_file.writer(&buf);
+    const w = &stderr_writer.interface;
+
+    std.debug.lockStdErr();
+    defer std.debug.unlockStdErr();
+
+    w.print(prefix ++ ": " ++ format ++ "\n", args) catch return;
+    w.flush() catch return;
+}
 
 const log = std.log.scoped(.main);
 
