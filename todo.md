@@ -3,3 +3,4 @@
 - [x] terminal ist einfarbig
 - [x] Markdown Preview in neuem Tab via Kontextmenü (.md Dateien)
 - [x] Markdown Image Rendering Integration (Aspect Ratio, Base Path, Lazy Loading, Visibility & Leaks Fixed)
+- [x] Fix build for Zig 0.15.2 (std.os.getenv -> std.posix.getenv)

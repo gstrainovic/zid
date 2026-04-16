@@ -173,6 +173,15 @@ pub fn main() !void {
     defer ui_system.deinit();
 
     try ui_system.setupClay(&plat.window.?, plat.getSize().width, plat.getSize().height, &text_renderer);
+    
+    if (std.posix.getenv("FORCE_GUI_TEST") != null) {
+        ui_system.code_editor.show_context_menu = true;
+        ui_system.code_editor.context_menu_x = 200;
+        ui_system.code_editor.context_menu_y = 200;
+        // Scrollbar im Markdown Preview erzwingen: Markdown Tab öffnen
+        ui_system.tab_bar.openFile("/home/g/projects/vulkan-ed/AGENTS.md") catch {};
+        ui_system.pending_tab_switch = ui_system.allocator.dupe(u8, "preview:///home/g/projects/vulkan-ed/AGENTS.md") catch null;
+    }
 
     // Phase 9: File Explorer mit aktuellem Verzeichnis initialisieren
     const cwd = std.fs.cwd();
