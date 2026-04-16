@@ -212,23 +212,16 @@ pub const UI = struct {
         self.code_editor.deinit();
         log.debug("UI.deinit: code_editor done", .{});
 
-        // Deinit the current buffer if it's not managed by a tab 
-        // (e.g. initial buffer or a buffer whose tab was closed but is still in editor)
-        // Actually, for simplicity, let's just deinit it here and ensure tabs
-        // that still exist have their own logic or we handle it carefully.
-        // Wait, Tab.buffer is a pointer. If we deinit here, and it's also in a Tab,
-        // we'll have a double-free when tab_bar.deinit runs.
-        
-        // Better: let TabBarState.deinit handle all buffers it knows about.
-        // We only need to deinit the current buffer if it's NOT in any tab.
-        var buffer_in_tab = false;
+        // Deinit the initial buffer only if it's not in any tab (prevent double-free)
+        // TabBar.deinit will handle all buffers associated with tabs.
+        var initial_buf_in_tab = false;
         for (self.tab_bar.tabs.items) |tab| {
             if (tab.buffer == self.code_editor.buffer) {
-                buffer_in_tab = true;
+                initial_buf_in_tab = true;
                 break;
             }
         }
-        if (!buffer_in_tab) {
+        if (!initial_buf_in_tab) {
             self.code_editor.buffer.deinit();
         }
 

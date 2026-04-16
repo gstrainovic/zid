@@ -322,7 +322,7 @@ pub const CodeEditor = struct {
         if (self.highlighter) |hl| hl.destroy();
         if (self.bg_highlighter) |hl| hl.destroy();
         self.bg_queued_edits.deinit(self.allocator);
-        // self.buffer.deinit(); // Buffer is managed by Tabs now
+        // self.buffer.deinit(); // Buffer is managed by UI/TabBar to prevent double-free
         if (self.keymap) |*km| km.deinit();
         self.line_scratch.deinit();
     }
