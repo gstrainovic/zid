@@ -192,7 +192,7 @@ fn click(ctx: *E2EContext, dc: *zigjr.DispatchCtx, x: f64, y: f64) ![]const u8 {
     
     // Legacy Handler (für Editor-Interna)
     ctx.ui_system.handleMouseMove(@floatCast(x), @floatCast(y));
-    ctx.ui_system.handleMouseDown(@floatCast(x), @floatCast(y));
+    ctx.ui_system.handleMouseDown(@floatCast(x), @floatCast(y), .mouse_left);
     ctx.ui_system.handleMouseUp();
     
     // Pointer State zurücksetzen
@@ -210,11 +210,10 @@ fn rightClick(ctx: *E2EContext, dc: *zigjr.DispatchCtx, x: f64, y: f64) ![]const
     log.info("RPC: right_click({d}, {d})", .{ x, y });
 
     // Pointer position setzen
+    ctx.ui_system.setPointerState(@floatCast(x), @floatCast(y), true);
+    ctx.ui_system.handleMouseDown(@floatCast(x), @floatCast(y), .mouse_right);
+    ctx.ui_system.handleMouseUp();
     ctx.ui_system.setPointerState(@floatCast(x), @floatCast(y), false);
-    ctx.ui_system.handleMouseMove(@floatCast(x), @floatCast(y));
-    
-    // Rechtsklick simulieren (triggert Kontextmenü im Editor)
-    ctx.ui_system.handleKeyPress(.mouse_right);
 
     // Event Loop aufwecken
     const wio = @import("wio");

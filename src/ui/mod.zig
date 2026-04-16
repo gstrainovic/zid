@@ -373,12 +373,17 @@ pub const UI = struct {
     }
 
     /// Maus-Events an Editor oder Terminal weiterleiten
-    pub fn handleMouseDown(self: *Self, x: f32, y: f32) void {
+    pub fn handleMouseDown(self: *Self, x: f32, y: f32, button: wio.Button) void {
         self.mouse_pressed_this_frame = true;
         
         if (self.tab_bar.getActiveTab()) |tab| {
             if (tab.kind == .terminal) {
                 if (self.tab_bar.terminal_instances.get(tab.path)) |term| {
+                    if (button == .mouse_right) {
+                        term.showContextMenu(x, y);
+                        return;
+                    }
+                    term.show_context_menu = false;
                     const char_w = measureTextWidth("W", 16.0);
                     const line_h: f32 = 24.0;
                     if (term.handleMouseDown(x, y, char_w, line_h, term.terminal_content_x, term.terminal_content_y)) return;
@@ -386,6 +391,11 @@ pub const UI = struct {
                 return;
             } else if (tab.kind == .markdown_preview) {
                 if (self.open_markdown_views.get(tab.path)) |v| {
+                    if (button == .mouse_right) {
+                        v.showContextMenu(x, y);
+                        return;
+                    }
+                    v.show_context_menu = false;
                     _ = v.handleScrollbarMouseDown(x, y);
                 }
                 return;
@@ -1099,5 +1109,8 @@ pub const UI = struct {
                 });
             }
         });
+
+        // Context Menu
+        term_instance.renderContextMenu();
     }
 };
