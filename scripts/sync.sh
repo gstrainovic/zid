@@ -15,7 +15,7 @@ REPO_ROOT="$(pwd)"
 echo "Building vulkan-ed..."
 zig build
 
-OWN_SUBMODULES=("libs/gooey" "libs/wgpu_native_zig" "libs/wio")
+OWN_SUBMODULES=("libs/gooey" "libs/wgpu_native_zig" "libs/wio" "libs/zigdown")
 
 # Referenz-Repos: Inspiration/Lesequelle, kein Build-Input.
 # Format: "<relativer Pfad>|<git-URL>"

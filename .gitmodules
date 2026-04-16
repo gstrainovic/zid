@@ -26,3 +26,6 @@
 [submodule "libs/nanosvg-zig"]
 	path = libs/nanosvg-zig
 	url = https://github.com/zweiler1/nanosvg-zig
+[submodule "libs/zigdown"]
+	path = libs/zigdown
+	url = https://github.com/JacobCrabill/zigdown
