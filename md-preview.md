@@ -1,4 +1,4 @@
-﻿Verfügbare Markdown-Renderer (identifiziert in libs/ und reference/):
+Verfügbare Markdown-Renderer (identifiziert in libs/ und reference/):
 
 1. **Zigdown (libs/zigdown)**: Native Zig-Bibliothek, die einen AST (Abstract Syntax Tree) liefert. Jetzt integriert in src/ui/markdown_view.zig für ein reichhaltiges Rendering mittels Clay. Unterstützt:
    - Überschriften (H1-H6)
@@ -13,3 +13,5 @@
 4. **SDL-Wiki (reference/sev/vendored/SDL)**: Skripte zur Markdown-Verarbeitung für Dokumentation.
 
 Die primäre Lösung für die UI-Vorschau im Editor ist nun die auf **Zigdown** basierende Implementierung in src/ui/markdown_view.zig.
+
+![Zig Logo](libs/gooey/assets/ziglang_logo.png)
