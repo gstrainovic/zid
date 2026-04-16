@@ -54,6 +54,8 @@ pub fn createDispatcher(alloc: std.mem.Allocator, ctx: *E2EContext) !*zigjr.RpcD
     try rpc_dispatcher.addWithCtx("benchmark_open_file", ctx, benchmarkOpenFile);
     try rpc_dispatcher.addWithCtx("benchmark_load_file", ctx, benchmarkLoadFile);
     try rpc_dispatcher.addWithCtx("split_pane", ctx, splitPane);
+    try rpc_dispatcher.addWithCtx("show_context_menu", ctx, showContextMenuRpc);
+    try rpc_dispatcher.addWithCtx("close_active_tab", ctx, closeActiveTabRpc);
     try rpc_dispatcher.addWithCtx("shutdown", ctx, shutdown);
 
     return rpc_dispatcher;
@@ -305,6 +307,24 @@ fn splitPane(ctx: *E2EContext, dc: *zigjr.DispatchCtx) !void {
     _ = dc;
     log.info("RPC: split_pane()", .{});
     ctx.ui_system.pending_split = .vertical;
+}
+
+fn showContextMenuRpc(ctx: *E2EContext, dc: *zigjr.DispatchCtx, x: f64, y: f64) !void {
+    _ = dc;
+    log.info("RPC: show_context_menu({d}, {d})", .{ x, y });
+    const ed = ctx.ui_system.getActiveEditor();
+    ed.show_context_menu = true;
+    ed.context_menu_x = @floatCast(x);
+    ed.context_menu_y = @floatCast(y);
+}
+
+fn closeActiveTabRpc(ctx: *E2EContext, dc: *zigjr.DispatchCtx) !void {
+    _ = dc;
+    log.info("RPC: close_active_tab()", .{});
+    const tb = ctx.ui_system.getActiveTabBar();
+    if (tb.active_index) |idx| {
+        tb.closeTab(idx);
+    }
 }
 
 /// App beenden
