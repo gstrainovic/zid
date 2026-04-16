@@ -11,6 +11,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const ghostty_vt = @import("ghostty-vt");
 const ConPty = @import("conpty.zig");
+const clay = @import("clay");
 
 const log = std.log.scoped(.terminal_instance);
 
@@ -58,6 +59,11 @@ pub const TerminalInstance = struct {
 
     /// Mouse selection state
     selection_start_pin: ?ghostty_vt.PageList.Pin = null,
+
+    /// Context Menu state
+    show_context_menu: bool = false,
+    context_menu_x: f32 = 0,
+    context_menu_y: f32 = 0,
 
     const Self = @This();
 
@@ -188,11 +194,17 @@ pub const TerminalInstance = struct {
         if (screen.pages.pin(pt)) |pin| {
             self.selection_start_pin = pin;
             // Clear current selection on click
-            self.terminal.screens.active.clearSelection();
+            screen.clearSelection();
             return true;
         }
 
         return false;
+    }
+
+    pub fn showContextMenu(self: *Self, x: f32, y: f32) void {
+        self.show_context_menu = true;
+        self.context_menu_x = x;
+        self.context_menu_y = y;
     }
 
     pub fn handleMouseMove(self: *Self, x: f32, y: f32, char_w: f32, line_h: f32, term_x: f32, term_y: f32) void {
@@ -219,7 +231,7 @@ pub const TerminalInstance = struct {
             const sel = ghostty_vt.Selection{
                 .bounds = .{ .untracked = .{ .start = start_pin, .end = end_pin } },
             };
-            self.terminal.screens.active.select(sel) catch {};
+            screen.select(sel) catch {};
         }
     }
 
@@ -242,6 +254,62 @@ pub const TerminalInstance = struct {
 
         return sel.contains(screen, pin);
     }
+
+    pub fn renderContextMenu(self: *Self) void {
+        if (!self.show_context_menu) return;
+
+        const font_size: f32 = 16.0;
+        const item_height = font_size + 12;
+        const menu_width: f32 = 150;
+        const item_count: f32 = 2; // Copy, Paste
+        const menu_height = item_height * item_count + 8;
+
+        clay.UI()(.{
+            .id = clay.ElementId.ID("term_context_menu_anchor"),
+            .layout = .{ .sizing = .{ .w = .fixed(0), .h = .fixed(0) } },
+            .floating = .{
+                .attach_to = .to_root,
+                .attach_points = .{ .element = .left_top, .parent = .left_top },
+                .offset = .{ .x = self.context_menu_x, .y = self.context_menu_y },
+                .z_index = 1000,
+            },
+        })({
+            clay.UI()(.{
+                .id = clay.ElementId.ID("term_context_menu_container"),
+                .layout = .{
+                    .sizing = .{ .w = .fixed(menu_width), .h = .fixed(menu_height) },
+                    .direction = .top_to_bottom,
+                    .padding = .all(4),
+                },
+                .background_color = .{ 45, 45, 60, 255 },
+                .border = .{ .width = .all(1), .color = .{ 100, 100, 120, 255 } },
+                .corner_radius = .all(4),
+            })({
+                self.renderContextMenuItem("Copy", font_size);
+                self.renderContextMenuItem("Paste", font_size);
+            });
+        });
+    }
+
+    fn renderContextMenuItem(self: *Self, label: []const u8, font_size: f32) void {
+        _ = self;
+        const item_id = clay.getElementId(label);
+        const is_hovered = clay.pointerOver(item_id);
+
+        clay.UI()(.{
+            .id = item_id,
+            .layout = .{
+                .sizing = .{ .w = .grow, .h = .fixed(font_size + 12) },
+                .padding = .{ .left = 8, .right = 8 },
+                .child_alignment = .{ .x = .left, .y = .center },
+            },
+            .background_color = if (is_hovered) .{ 80, 80, 100, 255 } else .{ 0, 0, 0, 0 },
+            .corner_radius = .all(2),
+        })({
+            clay.text(label, .{ .font_size = @intFromFloat(font_size), .color = .{ 220, 220, 220, 255 } });
+        });
+    }
+
 
     /// Create a new terminal instance and spawn a shell
     pub fn init(allocator: std.mem.Allocator, cols: u16, rows: u16) !*Self {

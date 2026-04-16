@@ -322,9 +322,9 @@ pub fn main() !void {
                         ui_system.handleMouseMove(mouse_x, mouse_y);
                     },
                     .button_press => |btn| {
-                        if (btn == .mouse_left) {
-                            mouse_down = true;
-                            ui_system.handleMouseDown(mouse_x, mouse_y);
+                        if (btn == .mouse_left or btn == .mouse_right) {
+                            if (btn == .mouse_left) mouse_down = true;
+                            ui_system.handleMouseDown(mouse_x, mouse_y, btn);
                         } else if (btn == .left_shift or btn == .right_shift) {
                             shift_held = true;
                             ui_system.setShiftState(true);

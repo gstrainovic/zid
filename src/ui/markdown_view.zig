@@ -34,6 +34,11 @@ pub const MarkdownView = struct {
     viewport_height: f32 = 0,
     content_height: f32 = 0,
 
+    /// Context Menu State
+    show_context_menu: bool = false,
+    context_menu_x: f32 = 0,
+    context_menu_y: f32 = 0,
+
     const Self = @This();
 
     pub fn init(allocator: std.mem.Allocator, text: []const u8, base_path: []const u8) Self {
@@ -123,6 +128,67 @@ pub const MarkdownView = struct {
         self.scrollbar_dragging = false;
     }
 
+    pub fn showContextMenu(self: *Self, x: f32, y: f32) void {
+        self.show_context_menu = true;
+        self.context_menu_x = x;
+        self.context_menu_y = y;
+    }
+
+    fn renderContextMenu(self: *Self) void {
+        if (!self.show_context_menu) return;
+
+        const font_size_f: f32 = @floatFromInt(self.font_size);
+        const item_height = font_size_f + 12;
+        const menu_width: f32 = 180;
+        const item_count: f32 = 2; // Copy, Select All
+        const menu_height = item_height * item_count + 8;
+
+        clay.UI()(.{
+            .id = clay.ElementId.ID("md_context_menu_anchor"),
+            .layout = .{ .sizing = .{ .w = .fixed(0), .h = .fixed(0) } },
+            .floating = .{
+                .attach_to = .to_root,
+                .attach_points = .{ .element = .left_top, .parent = .left_top },
+                .offset = .{ .x = self.context_menu_x, .y = self.context_menu_y },
+                .z_index = 1000,
+            },
+        })({
+            clay.UI()(.{
+                .id = clay.ElementId.ID("md_context_menu_container"),
+                .layout = .{
+                    .sizing = .{ .w = .fixed(menu_width), .h = .fixed(menu_height) },
+                    .direction = .top_to_bottom,
+                    .padding = .all(4),
+                },
+                .background_color = .{ 45, 45, 60, 255 },
+                .border = .{ .width = .all(1), .color = .{ 100, 100, 120, 255 } },
+                .corner_radius = .all(4),
+            })({
+                self.renderContextMenuItem("Copy", font_size_f);
+                self.renderContextMenuItem("Select All", font_size_f);
+            });
+        });
+    }
+
+    fn renderContextMenuItem(self: *Self, label: []const u8, item_font_size: f32) void {
+        _ = self;
+        const item_id = clay.getElementId(label);
+        const is_hovered = clay.pointerOver(item_id);
+
+        clay.UI()(.{
+            .id = item_id,
+            .layout = .{
+                .sizing = .{ .w = .grow, .h = .fixed(item_font_size + 12) },
+                .padding = .{ .left = 8, .right = 8 },
+                .child_alignment = .{ .x = .left, .y = .center },
+            },
+            .background_color = if (is_hovered) .{ 80, 80, 100, 255 } else .{ 0, 0, 0, 0 },
+            .corner_radius = .all(2),
+        })({
+            clay.text(label, .{ .font_size = @intFromFloat(item_font_size), .color = .{ 220, 220, 220, 255 } });
+        });
+    }
+
     pub fn render(self: *Self, arena: std.mem.Allocator, theme: Theme, ui_ptr: *ui_mod.UI) void {
         var result = zigdown.parser.timedParse(arena, self.text, false) catch |err| {
             std.log.scoped(.markdown).err("Failed to parse markdown: {any}", .{err});
@@ -178,6 +244,9 @@ pub const MarkdownView = struct {
                 self.renderScrollbar();
             }
         });
+
+        // Context Menu
+        self.renderContextMenu();
     }
 
     fn renderScrollbar(self: *Self) void {
