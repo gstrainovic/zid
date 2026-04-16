@@ -137,6 +137,9 @@ pub const CodeEditor = struct {
     scrollbar_thumb_height: f32 = 0,
     scrollbar_container_width: f32 = 0,
 
+    pending_split_v: bool = false,
+    pending_split_h: bool = false,
+
     typing_in_progress: bool = false,
 
     pending_md_preview: bool = false,
@@ -800,9 +803,9 @@ pub const CodeEditor = struct {
             const m = self.metrics();
             // pushEdit für Delete der Selection
             const sel_text = self.getTextInRange(range) catch "";
-            const sel_owned = if (sel_text.len > 0) self.allocator.dupe(u8, sel_text) catch "" else "";
-            defer if (sel_owned.len > 0) self.allocator.free(sel_owned);
-            self.pushEditForChange(range.begin.row, range.begin.col, sel_owned, "");
+            defer if (sel_text.len > 0 and sel_text.ptr != "".ptr) self.allocator.free(sel_text);
+            
+            self.pushEditForChange(range.begin.row, range.begin.col, sel_text, "");
             const new_root = self.buffer.root.delete_range(range, self.buffer.allocator, null, m) catch return error.Stop;
             self.buffer.root = new_root;
             self.cursor = range.begin;
@@ -1540,11 +1543,11 @@ pub const CodeEditor = struct {
     // Rendering
     // =========================================================================
 
-    pub fn render(self: *Self, arena: std.mem.Allocator) void {
+    pub fn render(self: *Self, arena: std.mem.Allocator, mouse_pressed: bool) void {
         self.desired_cursor = .arrow;
 
         clay.UI()(.{
-            .id = clay.ElementId.ID("code_editor"),
+            .id = clay.ElementId.IDI("code_editor", @truncate(@intFromPtr(self))),
             .layout = .{
                 .sizing = .{ .w = .grow, .h = .grow },
                 .direction = .left_to_right,
@@ -1669,7 +1672,7 @@ pub const CodeEditor = struct {
         });
 
         if (self.show_context_menu) {
-            self.renderContextMenu(arena);
+            self.renderContextMenu(arena, mouse_pressed);
         }
     }
 
@@ -1916,7 +1919,7 @@ pub const CodeEditor = struct {
         self.view.row = @as(usize, @intCast(new_offset));
     }
 
-    fn renderContextMenu(self: *Self, arena: std.mem.Allocator) void {
+    fn renderContextMenu(self: *Self, arena: std.mem.Allocator, mouse_pressed: bool) void {
         if (std.process.getEnvVarOwned(arena, "FORCE_SHOW_MENU") catch null) |_| {
             if (!self.show_context_menu) {
                 self.show_context_menu = true;
@@ -1927,12 +1930,12 @@ pub const CodeEditor = struct {
         const item_height = @as(f32, @floatFromInt(self.font_size)) + 12;
         const menu_width: f32 = 200;
         
-        var item_count: f32 = 3;
+        var item_count: f32 = 5; // Cut, Copy, Paste + Split V, Split H
         const path = self.buffer.get_file_path();
         const is_md = std.mem.endsWith(u8, path, ".md");
         if (is_md) item_count += 1;
 
-        const menu_height = item_height * item_count + 8;
+        const menu_height = item_height * item_count + 8 + 8; // Extra padding for separators
 
         clay.UI()(.{
             .id = clay.ElementId.ID("context_menu_anchor"),
@@ -1964,8 +1967,40 @@ pub const CodeEditor = struct {
                 if (is_md) {
                     self.renderContextMenuItem("MD-Preview", "EditorMDPreview", .MdPreview, arena);
                 }
+
+                clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(1) } }, .background_color = .{ 80, 80, 80, 255 } })({});
+                
+                if (self.renderContextMenuItemClickable("Split Vertically", "EditorSplitV", arena, mouse_pressed)) {
+                    self.pending_split_v = true;
+                    self.show_context_menu = false;
+                }
+                if (self.renderContextMenuItemClickable("Split Horizontally", "EditorSplitH", arena, mouse_pressed)) {
+                    self.pending_split_h = true;
+                    self.show_context_menu = false;
+                }
             });
         });
+    }
+
+    fn renderContextMenuItemClickable(self: *Self, label: []const u8, id: []const u8, arena: std.mem.Allocator, mouse_pressed: bool) bool {
+        _ = arena;
+        const item_id = clay.getElementId(id);
+        const is_hovered = clay.pointerOver(item_id);
+        
+        clay.UI()(.{
+            .id = item_id,
+            .layout = .{
+                .sizing = .{ .w = .grow, .h = .fixed(@as(f32, @floatFromInt(self.font_size)) + 12) },
+                .padding = .{ .left = 8, .right = 8 },
+                .child_alignment = .{ .x = .left, .y = .center },
+            },
+            .background_color = if (is_hovered) .{ 70, 70, 90, 255 } else .{ 0, 0, 0, 0 },
+            .corner_radius = .all(2),
+        })({
+            clay.text(label, .{ .font_size = self.font_size, .color = .{ 220, 220, 220, 255 } });
+        });
+
+        return is_hovered and mouse_pressed;
     }
 
     fn renderContextMenuItem(self: *Self, label: []const u8, id: []const u8, _action: actions.Action, arena: std.mem.Allocator) void {

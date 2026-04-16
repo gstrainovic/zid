@@ -18,6 +18,8 @@ const file_explorer_mod = @import("file_explorer.zig");
 const image_view_mod = @import("image_view.zig");
 const file_types = @import("file_types.zig");
 const markdown_view_mod = @import("markdown_view.zig");
+const pane_mod = @import("pane.zig");
+const dialog_mod = @import("dialog.zig");
 
 
 const log = std.log.scoped(.ui);
@@ -48,6 +50,14 @@ pub const UIConfig = struct {
 };
 pub const PdfPageChange = struct { path: []const u8, delta: i16 };
 
+pub const ActiveDialog = struct {
+    dialog: dialog_mod.Dialog,
+    /// Context for the callback
+    context_usize: usize = 0,
+    context_ptr: ?*anyopaque = null,
+    callback: *const fn (*UI, dialog_mod.DialogResult, usize, ?*anyopaque) void,
+};
+
 /// UI Hauptstruktur
 pub const components = @import("components/mod.zig");
 pub const UI = struct {
@@ -65,20 +75,23 @@ pub const UI = struct {
     // Frame Arena für kurzlebige Daten (z.B. SvgRenderInfo)
     frame_arena: std.heap.ArenaAllocator,
 
-    // Code Editor
-    code_editor: editor_mod.CodeEditor,
+    // Pane System (Split-Views)
+    root_pane: *pane_mod.Pane,
+    active_pane: *pane_mod.Pane,
 
     // Text Renderer (für Measurement)
     text_renderer: ?*@import("../text/mod.zig").TextRenderer = null,
     window: ?*wio.Window = null,
 
-    // Phase 9: Tab-Bar und File Explorer
-    tab_bar: tab_bar_mod.TabBarState,
+    // Phase 9: File Explorer
     file_explorer: file_explorer_mod.FileExplorerState,
     show_file_explorer: bool = true,
     current_directory: ?[]const u8 = null,
     pending_tab_switch: ?[]const u8 = null,
     pending_pdf_page_change: ?PdfPageChange = null,
+    pending_split: ?pane_mod.PaneDirection = null,
+
+    active_dialog: ?ActiveDialog = null,
 
     // Map von Pfad zu geladener Textur-ID/Pointer
     open_images: std.StringHashMap(*anyopaque),
@@ -116,15 +129,13 @@ pub const UI = struct {
         const initial_buf = try @import("flow_core").Buffer.create(allocator);
         initial_buf.root = try initial_buf.load_from_string("", &initial_buf.file_eol_mode, &initial_buf.file_utf8_sanitized);
 
-        var code_editor = editor_mod.CodeEditor.init(allocator, initial_buf);
+        // Pane System initialisieren (mit einem initialen Leaf)
+        const root_pane = try pane_mod.Pane.createLeaf(allocator, initial_buf);
+        const active_pane = root_pane;
+        const leaf = &active_pane.data.leaf;
 
-        // Phase 9: Tab-Bar und File Explorer initialisieren
-        const tab_bar = tab_bar_mod.TabBarState.init(allocator);
+        // File Explorer initialisieren
         const file_explorer = file_explorer_mod.FileExplorerState.init(allocator);
-
-        // Callback für File Explorer: Wenn Datei geöffnet wird
-        // Hinweis: Callback muss static sein, wir speichern den Pfad direkt im Editor
-        _ = &file_explorer; // Callback wird später gesetzt
 
         // Default-Inhalt: Entweder Datei laden oder Hardcoded-Beispiel
         if (default_file_path) |path| {
@@ -143,9 +154,9 @@ pub const UI = struct {
                     .initialized = false,
                     .anim_manager = AnimationManager.init(allocator),
                     .frame_arena = std.heap.ArenaAllocator.init(allocator),
-                    .code_editor = code_editor,
+                    .root_pane = root_pane,
+                    .active_pane = active_pane,
                     .text_renderer = null,
-                    .tab_bar = tab_bar,
                     .file_explorer = file_explorer,
                     .show_file_explorer = true,
                     .current_directory = null,
@@ -165,7 +176,7 @@ pub const UI = struct {
             initial_buf.root = try initial_buf.load_from_string(file_content, &initial_buf.file_eol_mode, &initial_buf.file_utf8_sanitized);
             initial_buf.set_file_path(path);
             initial_buf.last_save = initial_buf.root;
-            code_editor.setLanguageFromPath(path);
+            leaf.code_editor.setLanguageFromPath(path);
             log.info("Loaded default file: {s} ({d} bytes)", .{ path, file_content.len });
         } else {
             const default_text = 
@@ -187,9 +198,9 @@ pub const UI = struct {
             .initialized = false,
             .anim_manager = AnimationManager.init(allocator),
             .frame_arena = std.heap.ArenaAllocator.init(allocator),
-            .code_editor = code_editor,
+            .root_pane = root_pane,
+            .active_pane = active_pane,
             .text_renderer = null,
-            .tab_bar = tab_bar,
             .file_explorer = file_explorer,
             .show_file_explorer = true,
             .current_directory = null,
@@ -209,24 +220,10 @@ pub const UI = struct {
         log.debug("UI.deinit: frame_arena done", .{});
         self.allocator.free(self.clay_memory);
         log.debug("UI.deinit: clay_memory freed", .{});
-        self.code_editor.deinit();
-        log.debug("UI.deinit: code_editor done", .{});
+        
+        self.root_pane.deinit();
+        log.debug("UI.deinit: root_pane done", .{});
 
-        // Deinit the initial buffer only if it's not in any tab (prevent double-free)
-        // TabBar.deinit will handle all buffers associated with tabs.
-        var initial_buf_in_tab = false;
-        for (self.tab_bar.tabs.items) |tab| {
-            if (tab.buffer == self.code_editor.buffer) {
-                initial_buf_in_tab = true;
-                break;
-            }
-        }
-        if (!initial_buf_in_tab) {
-            self.code_editor.buffer.deinit();
-        }
-
-        self.tab_bar.deinit();
-        log.debug("UI.deinit: tab_bar done", .{});
         self.file_explorer.deinit();
         log.debug("UI.deinit: file_explorer done", .{});
 
@@ -267,12 +264,12 @@ pub const UI = struct {
         log.debug("Setting up Clay layout: {}x{}", .{ width, height });
         self.text_renderer = text_renderer;
         self.window = window;
-        self.code_editor.window = window;
+        self.getActiveEditor().window = window;
 
         // Globalen Measure-Context setzen (für Maus→Spalte)
         g_text_renderer = text_renderer;
-        g_font_size = @floatFromInt(self.code_editor.font_size);
-        self.code_editor.measure_fn = cMeasureText;
+        g_font_size = @floatFromInt(self.getActiveEditor().font_size);
+        self.getActiveEditor().measure_fn = cMeasureText;
 
         const arena = clay.createArenaWithCapacityAndMemory(self.clay_memory);
 
@@ -328,7 +325,7 @@ pub const UI = struct {
                 else => null,
             };
 
-            if (self.code_editor.mods.ctrl) {
+            if (self.getActiveEditor().mods.ctrl) {
                 data = switch (key) {
                     .a => "\x01",
                     .b => "\x02",
@@ -365,7 +362,7 @@ pub const UI = struct {
             }
             return;
         }
-        self.code_editor.handleKeyPress(key);
+        self.getActiveEditor().handleKeyPress(key);
     }
 
     /// Text Input verarbeiten
@@ -377,29 +374,57 @@ pub const UI = struct {
             term.sendInput(buf[0..len]) catch {};
             return;
         }
-        self.code_editor.handleChar(char_code);
+        self.getActiveEditor().handleChar(char_code);
     }
 
     /// Modifier-State aktualisieren
     pub fn setShiftState(self: *Self, pressed: bool) void {
-        self.code_editor.setShiftState(pressed);
+        self.getActiveEditor().setShiftState(pressed);
     }
 
     pub fn setCtrlState(self: *Self, pressed: bool) void {
-        self.code_editor.setCtrlState(pressed);
+        self.getActiveEditor().setCtrlState(pressed);
     }
 
     pub fn setAltState(self: *Self, pressed: bool) void {
-        self.code_editor.setAltState(pressed);
+        self.getActiveEditor().setAltState(pressed);
+    }
+
+    fn findPaneAt(self: *Self, pane: *pane_mod.Pane, x: f32, y: f32) ?*pane_mod.Pane {
+        switch (pane.data) {
+            .leaf => {
+                const id = clay.ElementId.IDI("Pane", @truncate(@intFromPtr(pane)));
+                const data = clay.getElementData(id);
+                if (data.found) {
+                    const bb = data.bounding_box;
+                    if (x >= bb.x and x < bb.x + bb.width and y >= bb.y and y < bb.y + bb.height) {
+                        return pane;
+                    }
+                }
+            },
+            .split => |split| {
+                if (self.findPaneAt(split.children[0], x, y)) |p| return p;
+                if (self.findPaneAt(split.children[1], x, y)) |p| return p;
+            },
+        }
+        return null;
     }
 
     /// Maus-Events an Editor oder Terminal weiterleiten
     pub fn handleMouseDown(self: *Self, x: f32, y: f32, button: wio.Button) void {
         self.mouse_pressed_this_frame = true;
+        self.is_mouse_down = true;
+
+        if (self.findPaneAt(self.root_pane, x, y)) |pane| {
+            self.active_pane = pane;
+        }
+
+        const tab_bar = self.getActiveTabBar();
+        const editor = self.getActiveEditor();
         
-        if (self.tab_bar.getActiveTab()) |tab| {
+        if (tab_bar.getActiveTab()) |tab| {
             if (tab.kind == .terminal) {
-                if (self.tab_bar.terminal_instances.get(tab.path)) |term| {
+                if (tab_bar.terminal_instances.get(tab.path)) |term| {
                     if (button == .mouse_right) {
                         term.showContextMenu(x, y);
                         return;
@@ -422,21 +447,21 @@ pub const UI = struct {
         }
 
         // Nur an Editor weitergeben wenn Klick innerhalb der code_editor-BBox
-        // liegt (Vorframe-Daten). Sonst setzt jeder Sidebar-/Tab-Klick
-        // zusätzlich den Cursor im Editor.
-        const editor_data = clay.getElementData(clay.ElementId.ID("code_editor"));
+        // oder wenn Menü offen ist (damit Klicks auf das Menü ankommen)
+        const editor_id = clay.ElementId.IDI("code_editor", @truncate(@intFromPtr(editor)));
+        const editor_data = clay.getElementData(editor_id);
         if (editor_data.found) {
             const bb = editor_data.bounding_box;
-            if (x >= bb.x and x < bb.x + bb.width and y >= bb.y and y < bb.y + bb.height) {
-                self.code_editor.handleMouseDown(x, y, button);
+            if (editor.show_context_menu or (x >= bb.x and x < bb.x + bb.width and y >= bb.y and y < bb.y + bb.height)) {
+                editor.handleMouseDown(x, y, button);
             }
         }
     }
 
     pub fn handleMouseMove(self: *Self, x: f32, y: f32) void {
-        if (self.tab_bar.getActiveTab()) |tab| {
+        if (self.getActiveTabBar().getActiveTab()) |tab| {
             if (tab.kind == .terminal) {
-                if (self.tab_bar.terminal_instances.get(tab.path)) |term| {
+                if (self.getActiveTabBar().terminal_instances.get(tab.path)) |term| {
                     const char_w = measureTextWidth("W", 16.0);
                     const line_h: f32 = 24.0;
                     term.handleMouseMove(x, y, char_w, line_h, term.terminal_content_x, term.terminal_content_y);
@@ -449,13 +474,13 @@ pub const UI = struct {
                 return;
             }
         }
-        self.code_editor.handleMouseMove(x, y);
+        self.getActiveEditor().handleMouseMove(x, y);
     }
 
     pub fn handleMouseUp(self: *Self) void {
-        if (self.tab_bar.getActiveTab()) |tab| {
+        if (self.getActiveTabBar().getActiveTab()) |tab| {
             if (tab.kind == .terminal) {
-                if (self.tab_bar.terminal_instances.get(tab.path)) |term| {
+                if (self.getActiveTabBar().terminal_instances.get(tab.path)) |term| {
                     term.handleMouseUp();
                 }
                 // No return here, might want to clear other states too
@@ -466,14 +491,14 @@ pub const UI = struct {
                 return;
             }
         }
-        self.code_editor.handleMouseUp();
+        self.getActiveEditor().handleMouseUp();
     }
 
     /// Scroll-Events an Editor oder Terminal weiterleiten
     pub fn handleScroll(self: *Self, delta: i32) void {
-        if (self.tab_bar.getActiveTab()) |tab| {
+        if (self.getActiveTabBar().getActiveTab()) |tab| {
             if (tab.kind == .terminal) {
-                if (self.tab_bar.terminal_instances.get(tab.path)) |term| {
+                if (self.getActiveTabBar().terminal_instances.get(tab.path)) |term| {
                     term.scrollLines(delta);
                 }
                 return;
@@ -484,13 +509,13 @@ pub const UI = struct {
                 return;
             }
         }
-        self.code_editor.scrollLines(delta);
+        self.getActiveEditor().scrollLines(delta);
     }
 
     /// UI updaten (pro Frame)
     pub fn update(self: *Self, delta_ms: f32) void {
         self.anim_manager.update(delta_ms);
-        self.code_editor.time_ms += delta_ms;
+        self.getActiveEditor().time_ms += delta_ms;
     }
 
     /// Layout beginnen
@@ -510,7 +535,7 @@ pub const UI = struct {
     pub fn resize(self: *Self, width: u32, height: u32) void {
         clay.setLayoutDimensions(.{ .w = @floatFromInt(width), .h = @floatFromInt(height) });
         // Editor-Höhe aktualisieren für korrekte visibleLineCount-Berechnung
-        self.code_editor.height = @floatFromInt(height);
+        self.getActiveEditor().height = @floatFromInt(height);
     }
 
     /// Maus-Position und Button-Status an Clay weiterleiten
@@ -541,6 +566,7 @@ pub const UI = struct {
     }
 
     /// Beispiel: Layout mit Theme rendern
+    /// UI Beispiel rendern
     pub fn renderExample(self: *Self, image_data: ?*const anyopaque) []clay.RenderCommand {
         self.beginLayout();
 
@@ -632,9 +658,39 @@ pub const UI = struct {
                     })({});
                 }
 
+                // Recursive Pane Rendering
+                self.renderPane(self.root_pane, t);
+            });
+        });
+
+        const commands = self.endLayout();
+
+        // Handle global split requests
+        if (self.pending_split) |dir| {
+            self.splitActivePane(dir) catch |err| {
+                log.err("Failed to split pane: {}", .{err});
+            };
+            self.pending_split = null;
+        }
+
+        // Render Active Dialog
+        if (self.active_dialog) |ad| {
+            if (ad.dialog.render(t, self.mouse_pressed_this_frame)) |res| {
+                ad.callback(self, res, ad.context_usize, ad.context_ptr);
+                self.active_dialog = null;
+            }
+        }
+
+        return commands;
+    }
+
+    fn renderPane(self: *Self, pane: *pane_mod.Pane, t: Theme) void {
+        const allocator = self.frame_arena.allocator();
+        switch (pane.data) {
+            .leaf => |*leaf| {
                 // Editor Area (Tabs + Editor)
                 clay.UI()(.{
-                    .id = clay.ElementId.ID("EditorArea"),
+                    .id = clay.ElementId.IDI("Pane", @truncate(@intFromPtr(pane))),
                     .layout = .{
                         .sizing = .grow,
                         .direction = .top_to_bottom,
@@ -642,17 +698,35 @@ pub const UI = struct {
                     },
                     .background_color = t.bg,
                 })({
+                    // Focus handling: if clicked anywhere in this pane, make it active
+                    if (clay.pointerOver(clay.ElementId.IDI("Pane", @truncate(@intFromPtr(pane)))) and self.mouse_pressed_this_frame) {
+                        self.active_pane = pane;
+                    }
+
+                    const is_active = (self.active_pane == pane);
+
                     // Tab-Leiste
-                    tab_bar_mod.renderTabBar(
-                        self.frame_arena.allocator(),
-                        &self.tab_bar,
+                    if (tab_bar_mod.renderTabBar(
+                        allocator,
+                        &leaf.tab_bar,
                         t,
                         self.mouse_pressed_this_frame,
-                    );
+                    )) |req| {
+                        if (req.close) {
+                            const tab = &leaf.tab_bar.tabs.items[req.index];
+                            if (tab.modified) {
+                                self.showSaveConfirmationDialog(pane, req.index);
+                            } else {
+                                leaf.tab_bar.closeTab(req.index);
+                            }
+                        } else if (req.do_switch) {
+                            leaf.tab_bar.setActive(req.index);
+                        }
+                    }
 
-                    if (self.code_editor.pending_md_preview) {
-                        self.code_editor.pending_md_preview = false;
-                        const path = self.code_editor.buffer.get_file_path();
+                    if (leaf.code_editor.pending_md_preview) {
+                        leaf.code_editor.pending_md_preview = false;
+                        const path = leaf.code_editor.buffer.get_file_path();
                         if (path.len > 0) {
                             const preview_path = self.allocator.alloc(u8, path.len + 10) catch path;
                             const final_path = std.fmt.bufPrint(@constCast(preview_path), "preview://{s}", .{path}) catch path;
@@ -662,12 +736,13 @@ pub const UI = struct {
 
                     // Aktiven Tab prüfen für Weiche (Editor vs Bild vs Terminal)
                     var special_active = false;
-                    if (self.tab_bar.active_index) |idx| {
-                        if (idx < self.tab_bar.tabs.items.len) {
-                            const tab = self.tab_bar.tabs.items[idx];
+                    const tab_bar = &leaf.tab_bar;
+                    if (tab_bar.active_index) |idx| {
+                        if (idx < tab_bar.tabs.items.len) {
+                            const tab = &tab_bar.tabs.items[idx];
                             if (tab.kind == .image) {
                                 image_view_mod.ImageViewState.render(
-                                    self.frame_arena.allocator(),
+                                    allocator,
                                     tab.path,
                                     t,
                                     &self.open_images,
@@ -686,7 +761,7 @@ pub const UI = struct {
                                  special_active = true;
                             } else if (tab.kind == .terminal) {
                                 // Render terminal tab
-                                self.renderTerminalContent(tab.path, t);
+                                self.renderTerminalContentInPane(pane, tab.path, t);
                                 special_active = true;
                             } else if (tab.kind == .markdown_preview) {
                                 var md_view = self.open_markdown_views.get(tab.path);
@@ -704,7 +779,7 @@ pub const UI = struct {
                                 }
                                 if (md_view) |v| {
                                     v.window = self.window;
-                                    v.render(self.frame_arena.allocator(), t, self);
+                                    v.render(allocator, t, self);
                                     special_active = true;
                                 }
                             }
@@ -713,29 +788,107 @@ pub const UI = struct {
 
                     // Sync modified state from editor to active tab
                     if (!special_active) {
-                        if (self.tab_bar.getActiveTab()) |tab| {
+                        if (tab_bar.getActiveTab()) |tab| {
                             if (tab.kind == .text) {
-                                tab.modified = self.code_editor.is_modified;
+                                tab.modified = leaf.code_editor.is_modified;
                             }
                         }
-                        self.code_editor.render(self.frame_arena.allocator());
+                        leaf.code_editor.render(allocator, self.mouse_pressed_this_frame);
+                    }
+
+                    // Handle split requests from this editor
+                    if (leaf.code_editor.pending_split_v) {
+                        leaf.code_editor.pending_split_v = false;
+                        self.pending_split = .vertical;
+                    }
+                    if (leaf.code_editor.pending_split_h) {
+                        leaf.code_editor.pending_split_h = false;
+                        self.pending_split = .horizontal;
+                    }
+
+                    // Highlight active pane
+                    if (is_active) {
+                        clay.UI()(.{
+                            .floating = .{ .attach_to = .to_parent, .attach_points = .{ .element = .left_top, .parent = .left_top } },
+                            .layout = .{ .sizing = .grow },
+                            .border = .{ .width = .{ .left = 2, .right = 2, .top = 2, .bottom = 2 }, .color = t.primary },
+                        })({});
                     }
                 });
-            });
-        });
 
-        const commands = self.endLayout();
+                // Update bounds for this specific editor (used for mouse conversion)
+                const editor_id = clay.ElementId.IDI("code_editor", @truncate(@intFromPtr(&leaf.code_editor)));
+                const editor_data = clay.getElementData(editor_id);
+                if (editor_data.found) {
+                    leaf.code_editor.content_origin_y = editor_data.bounding_box.y;
+                    leaf.code_editor.content_origin_x = editor_data.bounding_box.x;
+                    leaf.code_editor.height = editor_data.bounding_box.height;
+                    leaf.code_editor.scrollbar_container_width = editor_data.bounding_box.width;
+                }
+            },
+            .split => |*split| {
+                const direction = if (split.direction == .horizontal) clay.LayoutDirection.left_to_right else clay.LayoutDirection.top_to_bottom;
+                clay.UI()(.{
+                    .id = clay.ElementId.IDI("Split", @truncate(@intFromPtr(pane))),
+                    .layout = .{
+                        .sizing = .grow,
+                        .direction = direction,
+                    },
+                })({
+                    // First child
+                    clay.UI()(.{
+                        .layout = .{
+                            .sizing = if (split.direction == .horizontal)
+                                .{ .w = .percent(split.ratio), .h = .grow }
+                                else .{ .w = .grow, .h = .percent(split.ratio) },
+                        },
+                    })({
+                        self.renderPane(split.children[0], t);
+                    });
 
-        // Content-Position vom Editor für Maus-Konversion speichern (sev-Pattern)
-        const editor_data = clay.getElementData(clay.ElementId.ID("code_editor"));
-        if (editor_data.found) {
-            self.code_editor.content_origin_y = editor_data.bounding_box.y;
-            self.code_editor.content_origin_x = editor_data.bounding_box.x;
-            self.code_editor.height = editor_data.bounding_box.height;
-            self.code_editor.scrollbar_container_width = editor_data.bounding_box.width;
+                    // Splitter
+                    const splitter_id = clay.ElementId.IDI("Splitter", @truncate(@intFromPtr(pane)));
+                    clay.UI()(.{
+                        .id = splitter_id,
+                        .layout = .{
+                            .sizing = if (split.direction == .horizontal)
+                                .{ .w = .fixed(4), .h = .grow }
+                                else .{ .w = .grow, .h = .fixed(4) },
+                        },
+                        .background_color = if (split.is_resizing) t.primary else if (clay.pointerOver(splitter_id)) t.secondary else t.border,
+                    })({});
+
+                    // Second child
+                    clay.UI()(.{
+                        .layout = .{
+                            .sizing = .grow,
+                        },
+                    })({
+                        self.renderPane(split.children[1], t);
+                    });
+
+                    // Resize logic
+                    if (clay.pointerOver(splitter_id) and self.mouse_pressed_this_frame) {
+                        split.is_resizing = true;
+                    }
+                    if (split.is_resizing) {
+                        if (!self.is_mouse_down) {
+                            split.is_resizing = false;
+                        } else {
+                            const data = clay.getElementData(clay.ElementId.IDI("Split", @truncate(@intFromPtr(pane))));
+                            if (data.found) {
+                                if (split.direction == .horizontal) {
+                                    split.ratio = (self.mouse_x - data.bounding_box.x) / data.bounding_box.width;
+                                } else {
+                                    split.ratio = (self.mouse_y - data.bounding_box.y) / data.bounding_box.height;
+                                }
+                                split.ratio = std.math.clamp(split.ratio, 0.05, 0.95);
+                            }
+                        }
+                    }
+                });
+            },
         }
-
-        return commands;
     }
 
     /// Berechnet den gewünschten Cursor für diesen Frame
@@ -743,26 +896,110 @@ pub const UI = struct {
         if (self.file_explorer.is_resizing or clay.pointerOver(clay.ElementId.ID("ExplorerSplitter"))) {
             return .size_ew;
         }
-        return self.code_editor.desired_cursor;
+        return self.getActiveEditor().desired_cursor;
     }
 
     /// Check if a terminal tab is currently active
     pub fn isTerminalActive(self: *Self) bool {
-        if (self.tab_bar.active_index) |idx| {
-            if (idx < self.tab_bar.tabs.items.len) {
-                return self.tab_bar.tabs.items[idx].kind == .terminal;
+        const tab_bar = self.getActiveTabBar();
+        if (tab_bar.active_index) |idx| {
+            if (idx < tab_bar.tabs.items.len) {
+                return tab_bar.tabs.items[idx].kind == .terminal;
             }
         }
         return false;
     }
 
+    pub fn getActiveEditor(self: *Self) *editor_mod.CodeEditor {
+        return &self.active_pane.data.leaf.code_editor;
+    }
+
+    pub fn getActiveTabBar(self: *Self) *tab_bar_mod.TabBarState {
+        return &self.active_pane.data.leaf.tab_bar;
+    }
+
+    pub fn splitActivePane(self: *Self, direction: pane_mod.PaneDirection) !void {
+        const pane = self.active_pane;
+        if (pane.data != .leaf) return;
+
+        log.info("Splitting pane {s}", .{@as([]const u8, if (direction == .horizontal) "horizontally" else "vertically")});
+
+        // Current leaf data
+        const old_leaf = pane.data.leaf;
+
+        // Create new leaf
+        // Use the same buffer as the current editor for the new pane
+        const initial_buf = old_leaf.code_editor.buffer;
+        const new_leaf_pane = try pane_mod.Pane.createLeaf(self.allocator, initial_buf);
+        
+        // Move current leaf to a new child pane
+        const old_leaf_pane = try self.allocator.create(pane_mod.Pane);
+        old_leaf_pane.* = .{
+            .allocator = self.allocator,
+            .data = .{ .leaf = old_leaf },
+        };
+
+        // Turn current pane into a split
+        pane.data = .{
+            .split = .{
+                .direction = direction,
+                .ratio = 0.5,
+                .children = .{ old_leaf_pane, new_leaf_pane },
+            },
+        };
+        
+        // New pane becomes active
+        self.active_pane = new_leaf_pane;
+    }
+
+    fn showSaveConfirmationDialog(self: *Self, pane: *pane_mod.Pane, tab_index: usize) void {
+        const tab = &pane.data.leaf.tab_bar.tabs.items[tab_index];
+        
+        // Construct message
+        var msg_buf: [256]u8 = undefined;
+        const msg = std.fmt.bufPrint(&msg_buf, "Do you want to save changes to '{s}'?", .{tab.display_name}) catch "Do you want to save changes?";
+
+        self.active_dialog = .{
+            .dialog = .{
+                .title = "Unsaved Changes",
+                .message = self.allocator.dupe(u8, msg) catch msg,
+                .actions = &.{
+                    .{ .label = "Save", .result = .yes },
+                    .{ .label = "Don't Save", .result = .no },
+                    .{ .label = "Cancel", .result = .cancel },
+                },
+            },
+            .context_usize = tab_index,
+            .context_ptr = pane,
+            .callback = struct {
+                fn cb(ui: *UI, res: dialog_mod.DialogResult, idx: usize, ptr: ?*anyopaque) void {
+                    _ = ui;
+                    const p: *pane_mod.Pane = @ptrCast(@alignCast(ptr.?));
+                    const leaf = &p.data.leaf;
+                    switch (res) {
+                        .yes => {
+                            // TODO: Save logic. For now just close.
+                            // We need a way to save a specific buffer.
+                            leaf.tab_bar.closeTab(idx);
+                        },
+                        .no => {
+                            leaf.tab_bar.closeTab(idx);
+                        },
+                        .cancel => {},
+                    }
+                }
+            }.cb,
+        };
+    }
+
     /// Get the active terminal instance (if any)
     pub fn getActiveTerminal(self: *Self) ?*@import("../terminal/terminal_instance.zig").TerminalInstance {
-        if (self.tab_bar.active_index) |idx| {
-            if (idx < self.tab_bar.tabs.items.len) {
-                const tab = self.tab_bar.tabs.items[idx];
+        const tab_bar = self.getActiveTabBar();
+        if (tab_bar.active_index) |idx| {
+            if (idx < tab_bar.tabs.items.len) {
+                const tab = tab_bar.tabs.items[idx];
                 if (tab.kind == .terminal) {
-                    return self.tab_bar.terminal_instances.get(tab.path);
+                    return tab_bar.terminal_instances.get(tab.path);
                 }
             }
         }
@@ -770,9 +1007,10 @@ pub const UI = struct {
     }
 
     /// Render terminal content in the content area
-    fn renderTerminalContent(self: *Self, path: []const u8, t: Theme) void {
+    fn renderTerminalContentInPane(self: *Self, pane: *pane_mod.Pane, path: []const u8, t: Theme) void {
         _ = t;
-        const term_instance = self.tab_bar.terminal_instances.get(path) orelse return;
+        const leaf = &pane.data.leaf;
+        const term_instance = leaf.tab_bar.terminal_instances.get(path) orelse return;
         term_instance.window = self.window;
         
         const arena_alloc = self.frame_arena.allocator();
@@ -781,7 +1019,8 @@ pub const UI = struct {
         const line_height: f32 = 24.0; 
 
         // Update height and width from previous frame's bounding box
-        const term_data = clay.getElementData(clay.ElementId.ID("terminal_content_clip"));
+        const clip_id = clay.ElementId.IDI("terminal_content_clip", @truncate(@intFromPtr(pane)));
+        const term_data = clay.getElementData(clip_id);
         if (term_data.found) {
             const bb = term_data.bounding_box;
             term_instance.height = bb.height;
@@ -806,7 +1045,7 @@ pub const UI = struct {
 
         // Terminal container — dark bg
         clay.UI()(.{
-            .id = clay.ElementId.ID("terminal_outer"),
+            .id = clay.ElementId.IDI("terminal_outer", @truncate(@intFromPtr(pane))),
             .layout = .{
                 .sizing = .grow,
                 .direction = .left_to_right,
@@ -816,14 +1055,14 @@ pub const UI = struct {
         })({
             // Scrollable container for the terminal text
             clay.UI()(.{
-                .id = clay.ElementId.ID("terminal_content_clip"),
+                .id = clip_id,
                 .layout = .{
                     .sizing = .grow,
                 },
                 .clip = .{ .vertical = true, .horizontal = true },
             })({
                 clay.UI()(.{
-                    .id = clay.ElementId.ID("terminal_content"),
+                    .id = clay.ElementId.IDI("terminal_content", @truncate(@intFromPtr(pane))),
                     .layout = .{
                         .sizing = .{ .w = .grow, .h = .fit },
                         .direction = .top_to_bottom,
@@ -837,7 +1076,7 @@ pub const UI = struct {
                         const line_text = term_instance.getLine(i, arena_alloc) catch "";
                         
                         clay.UI()(.{
-                            .id = clay.ElementId.IDI("term_row", @intCast(i)),
+                            .id = clay.ElementId.IDI("term_row", @truncate(i ^ @intFromPtr(pane))),
                             .layout = .{
                                 .sizing = .{ .w = .grow, .h = .fixed(line_height) },
                                 .direction = .left_to_right,
@@ -1023,7 +1262,7 @@ pub const UI = struct {
                                 const exact_x = @as(f32, @floatFromInt(cursor.x)) * char_w;
 
                                 clay.UI()(.{
-                                    .id = clay.ElementId.ID("terminal_cursor"),
+                                    .id = clay.ElementId.IDI("terminal_cursor", @truncate(@intFromPtr(pane))),
                                     .floating = .{
                                         .attach_to = .to_parent,
                                         .attach_points = .{ .element = .left_top, .parent = .left_top },
@@ -1049,7 +1288,7 @@ pub const UI = struct {
                                         if (selection_start_col) |start| {
                                             const width = @as(f32, @floatFromInt(col - start)) * char_w;
                                             clay.UI()(.{
-                                                .id = clay.ElementId.IDI("term_sel", @intCast(i * 1000 + start)),
+                                                .id = clay.ElementId.IDI("term_sel", @truncate(i * 1000 + start ^ @intFromPtr(pane))),
                                                 .floating = .{
                                                     .attach_to = .to_parent,
                                                     .attach_points = .{ .element = .left_top, .parent = .left_top },
@@ -1068,7 +1307,7 @@ pub const UI = struct {
                                 if (selection_start_col) |start| {
                                     const width = @as(f32, @floatFromInt(col - start)) * char_w;
                                     clay.UI()(.{
-                                        .id = clay.ElementId.IDI("term_sel", @intCast(i * 1000 + start)),
+                                        .id = clay.ElementId.IDI("term_sel", @truncate(i * 1000 + start ^ @intFromPtr(pane))),
                                         .floating = .{
                                             .attach_to = .to_parent,
                                             .attach_points = .{ .element = .left_top, .parent = .left_top },
@@ -1088,7 +1327,8 @@ pub const UI = struct {
 
             // Vertical Custom Scrollbar (CodeEditor Parity)
             if (total_rows > visible_rows) {
-                const track_data = clay.getElementData(clay.ElementId.ID("terminal_scrollbar_track"));
+                const track_id = clay.ElementId.IDI("terminal_scrollbar_track", @truncate(@intFromPtr(pane)));
+                const track_data = clay.getElementData(track_id);
                 if (track_data.found) {
                     term_instance.scrollbar_track_x = track_data.bounding_box.x;
                     term_instance.scrollbar_track_y = track_data.bounding_box.y;
@@ -1111,7 +1351,7 @@ pub const UI = struct {
                 const thumb_color: clay.Color = .{ 88, 88, 120, 200 };
 
                 clay.UI()(.{
-                    .id = clay.ElementId.ID("terminal_scrollbar_track"),
+                    .id = track_id,
                     .floating = .{
                         .attach_to = .to_parent,
                         .attach_points = .{ .element = .right_top, .parent = .right_top },
@@ -1127,7 +1367,7 @@ pub const UI = struct {
                         .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(thumb_y) } },
                     })({});
                     clay.UI()(.{
-                        .id = clay.ElementId.ID("terminal_scrollbar_thumb"),
+                        .id = clay.ElementId.IDI("terminal_scrollbar_thumb", @truncate(@intFromPtr(pane))),
                         .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(thumb_height) } },
                         .background_color = thumb_color,
                         .corner_radius = .all(3),

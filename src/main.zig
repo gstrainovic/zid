@@ -200,13 +200,12 @@ pub fn main() !void {
     defer ui_system.deinit();
 
     try ui_system.setupClay(&plat.window.?, plat.getSize().width, plat.getSize().height, &text_renderer);
-    
     if (std.posix.getenv("FORCE_GUI_TEST") != null) {
-        ui_system.code_editor.show_context_menu = true;
-        ui_system.code_editor.context_menu_x = 200;
-        ui_system.code_editor.context_menu_y = 200;
+        ui_system.getActiveEditor().show_context_menu = true;
+        ui_system.getActiveEditor().context_menu_x = 200;
+        ui_system.getActiveEditor().context_menu_y = 200;
         // Scrollbar im Markdown Preview erzwingen: Markdown Tab öffnen
-        ui_system.tab_bar.openFile("/home/g/projects/vulkan-ed/AGENTS.md") catch {};
+        ui_system.getActiveTabBar().openFile("/home/g/projects/vulkan-ed/AGENTS.md") catch {};
         ui_system.pending_tab_switch = ui_system.allocator.dupe(u8, "preview:///home/g/projects/vulkan-ed/AGENTS.md") catch null;
     }
 
@@ -227,7 +226,7 @@ pub fn main() !void {
         if (std.mem.endsWith(u8, path, ".md")) {
             const preview_path = allocator.alloc(u8, path.len + 10) catch path;
             const final_path = std.fmt.bufPrint(@constCast(preview_path), "preview://{s}", .{path}) catch path;
-            ui_system.tab_bar.openFile(final_path) catch {};
+            ui_system.getActiveTabBar().openFile(final_path) catch {};
             if (preview_path.ptr != path.ptr) allocator.free(preview_path);
         } else {
             ui_system.file_explorer.file_to_open = path;
@@ -422,7 +421,7 @@ pub fn main() !void {
 
         // Phase 9: Datei öffnen verarbeiten
         if (ui_system.file_explorer.file_to_open) |path| {
-            ui_system.tab_bar.openFile(path) catch {};
+            ui_system.getActiveTabBar().openFile(path) catch {};
 
             // Dateityp prüfen
             const kind = file_types.getFileKind(path);
@@ -434,8 +433,8 @@ pub fn main() !void {
                     log.err("Failed to open {s}: {}", .{ path, err });
                     break :blk allocator.dupe(u8, "Fehler beim Öffnen der Datei.") catch unreachable;
                 };
-                ui_system.code_editor.setText(content);
-                ui_system.code_editor.setLanguageFromPath(path);
+                ui_system.getActiveEditor().setText(content);
+                ui_system.getActiveEditor().setLanguageFromPath(path);
                 allocator.free(content);
             } else if (kind == .image) {
                 // Bild-Dateien in den Textur-Cache laden
@@ -466,9 +465,9 @@ pub fn main() !void {
                     const handler = PdfHandler.init(allocator, path) catch |err| {
                         log.err("Failed to open PDF {s}: {}", .{path, err});
                         ui_system.file_explorer.file_to_open = null;
-                        if (ui_system.tab_bar.pending_switch_path) |p| {
+                        if (ui_system.getActiveTabBar().pending_switch_path) |p| {
                             ui_system.allocator.free(p);
-                            ui_system.tab_bar.pending_switch_path = null;
+                            ui_system.getActiveTabBar().pending_switch_path = null;
                         }
                         state_dirty = true;
                         continue;
@@ -480,9 +479,9 @@ pub fn main() !void {
                         log.err("Failed to render first PDF page: {}", .{err});
                         handler.deinit();
                         ui_system.file_explorer.file_to_open = null;
-                        if (ui_system.tab_bar.pending_switch_path) |p| {
+                        if (ui_system.getActiveTabBar().pending_switch_path) |p| {
                             ui_system.allocator.free(p);
-                            ui_system.tab_bar.pending_switch_path = null;
+                            ui_system.getActiveTabBar().pending_switch_path = null;
                         }
                         state_dirty = true;
                         continue;
@@ -495,9 +494,9 @@ pub fn main() !void {
                         log.err("Failed to load image texture for PDF: {}", .{err});
                         handler.deinit();
                         ui_system.file_explorer.file_to_open = null;
-                        if (ui_system.tab_bar.pending_switch_path) |p| {
+                        if (ui_system.getActiveTabBar().pending_switch_path) |p| {
                             ui_system.allocator.free(p);
-                            ui_system.tab_bar.pending_switch_path = null;
+                            ui_system.getActiveTabBar().pending_switch_path = null;
                         }
                         state_dirty = true;
                         continue;
@@ -524,7 +523,7 @@ pub fn main() !void {
         // Tab-Wechsel anfordern (Markdown Preview)
         if (ui_system.pending_tab_switch) |path| {
             log.info("Main: Opening preview tab for {s}", .{path});
-            ui_system.tab_bar.openFile(path) catch |err| {
+            ui_system.getActiveTabBar().openFile(path) catch |err| {
                 log.err("Failed to open tab for preview: {}", .{err});
             };
             ui_system.allocator.free(path);
@@ -532,12 +531,12 @@ pub fn main() !void {
             state_dirty = true;
         }
 
-        if (ui_system.tab_bar.pending_switch_path) |path| {
+        if (ui_system.getActiveTabBar().pending_switch_path) |path| {
             // Get actual kind from the tab (not from file extension, since terminal tabs have no path)
             const kind = blk: {
-                if (ui_system.tab_bar.active_index) |idx| {
-                    if (idx < ui_system.tab_bar.tabs.items.len) {
-                        break :blk ui_system.tab_bar.tabs.items[idx].kind;
+                if (ui_system.getActiveTabBar().active_index) |idx| {
+                    if (idx < ui_system.getActiveTabBar().tabs.items.len) {
+                        break :blk ui_system.getActiveTabBar().tabs.items[idx].kind;
                     }
                 }
                 break :blk file_types.getFileKind(path);
@@ -551,16 +550,16 @@ pub fn main() !void {
                 wio.cancelWait();
             } else if (kind == .text) {
                 // Check if tab already has a buffer
-                const active_tab = ui_system.tab_bar.getActiveTab();
+                const active_tab = ui_system.getActiveTabBar().getActiveTab();
                 if (active_tab != null and active_tab.?.buffer != null) {
-                    ui_system.code_editor.setBuffer(active_tab.?.buffer.?, path);
+                    ui_system.getActiveEditor().setBuffer(active_tab.?.buffer.?, path);
                 } else {
                     // Check if current editor buffer already matches this path (e.g. initial buffer)
-                    const current_buf_path = ui_system.code_editor.buffer.get_file_path();
+                    const current_buf_path = ui_system.getActiveEditor().buffer.get_file_path();
                     if (std.mem.eql(u8, current_buf_path, path)) {
                         log.info("Reusing existing buffer for {s}", .{path});
                         if (active_tab) |t| {
-                            t.buffer = ui_system.code_editor.buffer;
+                            t.buffer = ui_system.getActiveEditor().buffer;
                         }
                     } else {
                         // Load from disk
@@ -580,7 +579,7 @@ pub fn main() !void {
                             t.buffer = new_buf;
                         }
                         
-                        ui_system.code_editor.setBuffer(new_buf, path);
+                        ui_system.getActiveEditor().setBuffer(new_buf, path);
                     }
                 }
             } else if (kind == .image) {
@@ -607,7 +606,7 @@ pub fn main() !void {
                     const handler = PdfHandler.init(allocator, path) catch |err| {
                         log.err("Failed to open PDF {s}: {}", .{path, err});
                         ui_system.allocator.free(path);
-                        ui_system.tab_bar.pending_switch_path = null;
+                        ui_system.getActiveTabBar().pending_switch_path = null;
                         continue;
                     };
 
@@ -615,7 +614,7 @@ pub fn main() !void {
                         log.err("Failed to render first PDF page: {}", .{err});
                         handler.deinit();
                         ui_system.allocator.free(path);
-                        ui_system.tab_bar.pending_switch_path = null;
+                        ui_system.getActiveTabBar().pending_switch_path = null;
                         continue;
                     };
                     defer allocator.free(page_info.pixels);
@@ -636,12 +635,12 @@ pub fn main() !void {
                 else 
                     path;
                 
-                const current_editor_path = ui_system.code_editor.buffer.get_file_path();
+                const current_editor_path = ui_system.getActiveEditor().buffer.get_file_path();
                 var md_needs_free = false;
                 const md_content = if (std.mem.eql(u8, source_path, current_editor_path)) blk: {
-                    break :blk ui_system.code_editor.buffer.store_to_string_cached(
-                        ui_system.code_editor.buffer.root, 
-                        ui_system.code_editor.buffer.file_eol_mode
+                    break :blk ui_system.getActiveEditor().buffer.store_to_string_cached(
+                        ui_system.getActiveEditor().buffer.root, 
+                        ui_system.getActiveEditor().buffer.file_eol_mode
                     );
                 } else blk: {
                     const content = std.fs.cwd().readFileAlloc(allocator, source_path, 10 * 1024 * 1024) catch |err| {
@@ -683,7 +682,7 @@ pub fn main() !void {
 
             // pending_switch_path freigeben und nullen
             ui_system.allocator.free(path);
-            ui_system.tab_bar.pending_switch_path = null;
+            ui_system.getActiveTabBar().pending_switch_path = null;
             state_dirty = true;
         }
 
@@ -711,7 +710,7 @@ pub fn main() !void {
             &svg_atlas,
         );
 
-        const has_more_work = ui_system.code_editor.highlightChunked(2, ui_system.code_editor.time_ms);
+        const has_more_work = ui_system.getActiveEditor().highlightChunked(2, ui_system.getActiveEditor().time_ms);
 
         frame_count += 1;
 

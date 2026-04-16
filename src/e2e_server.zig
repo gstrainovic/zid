@@ -53,6 +53,7 @@ pub fn createDispatcher(alloc: std.mem.Allocator, ctx: *E2EContext) !*zigjr.RpcD
     try rpc_dispatcher.addWithCtx("get_state", ctx, getState);
     try rpc_dispatcher.addWithCtx("benchmark_open_file", ctx, benchmarkOpenFile);
     try rpc_dispatcher.addWithCtx("benchmark_load_file", ctx, benchmarkLoadFile);
+    try rpc_dispatcher.addWithCtx("split_pane", ctx, splitPane);
     try rpc_dispatcher.addWithCtx("shutdown", ctx, shutdown);
 
     return rpc_dispatcher;
@@ -137,7 +138,7 @@ fn openFolder(ctx: *E2EContext, path: []const u8) ![]const u8 {
 fn saveFile(ctx: *E2EContext, params: []const u8) ![]const u8 {
     _ = params;
     log.info("RPC: save_file()", .{});
-    ctx.ui_system.code_editor.save() catch |err| {
+    ctx.ui_system.getActiveEditor().save() catch |err| {
          const msg = try std.fmt.allocPrint(ctx.allocator, "error: {}", .{err});
          return msg;
     };
@@ -148,7 +149,7 @@ fn saveFile(ctx: *E2EContext, params: []const u8) ![]const u8 {
 fn openFile(ctx: *E2EContext, path: []const u8) ![]const u8 {
     log.info("RPC: open_file('{s}')", .{path});
 
-    ctx.ui_system.tab_bar.openFile(path) catch |err| {
+    ctx.ui_system.getActiveTabBar().openFile(path) catch |err| {
         const msg = try std.fmt.allocPrint(ctx.allocator, "error: {}", .{err});
         return msg;
     };
@@ -156,8 +157,8 @@ fn openFile(ctx: *E2EContext, path: []const u8) ![]const u8 {
     // Wichtig: In main.zig wird pending_switch_path abgefragt, um den Editor-Inhalt zu setzen.
     // tab_bar.openFile setzt active_index, aber nicht automatisch pending_switch_path (außer in setActive).
     // Wir rufen setActive auf, um den Loader-Flow in main.zig zu triggern.
-    if (ctx.ui_system.tab_bar.active_index) |idx| {
-        ctx.ui_system.tab_bar.setActive(idx);
+    if (ctx.ui_system.getActiveTabBar().active_index) |idx| {
+        ctx.ui_system.getActiveTabBar().setActive(idx);
     }
 
     // Event Loop aufwecken, damit render_commands sofort generiert und geladen werden!
@@ -171,12 +172,12 @@ fn openFile(ctx: *E2EContext, path: []const u8) ![]const u8 {
 fn closeTab(ctx: *E2EContext, index: i64) ![]const u8 {
     log.info("RPC: close_tab({d})", .{index});
 
-    if (index < 0 or @as(usize, @intCast(index)) >= ctx.ui_system.tab_bar.count()) {
-        const msg = try std.fmt.allocPrint(ctx.allocator, "error: tab index {d} out of range (only {d} tabs)", .{ index, ctx.ui_system.tab_bar.count() });
+    if (index < 0 or @as(usize, @intCast(index)) >= ctx.ui_system.getActiveTabBar().count()) {
+        const msg = try std.fmt.allocPrint(ctx.allocator, "error: tab index {d} out of range (only {d} tabs)", .{ index, ctx.ui_system.getActiveTabBar().count() });
         return msg;
     }
 
-    ctx.ui_system.tab_bar.closeTab(@intCast(index));
+    ctx.ui_system.getActiveTabBar().closeTab(@intCast(index));
 
     return ctx.allocator.dupe(u8, "ok") catch "error: out of memory";
 }
@@ -185,12 +186,12 @@ fn closeTab(ctx: *E2EContext, index: i64) ![]const u8 {
 fn setActiveTab(ctx: *E2EContext, index: i64) ![]const u8 {
     log.info("RPC: set_active_tab({d})", .{index});
 
-    if (index < 0 or @as(usize, @intCast(index)) >= ctx.ui_system.tab_bar.count()) {
-        const msg = try std.fmt.allocPrint(ctx.allocator, "error: tab index {d} out of range (only {d} tabs)", .{ index, ctx.ui_system.tab_bar.count() });
+    if (index < 0 or @as(usize, @intCast(index)) >= ctx.ui_system.getActiveTabBar().count()) {
+        const msg = try std.fmt.allocPrint(ctx.allocator, "error: tab index {d} out of range (only {d} tabs)", .{ index, ctx.ui_system.getActiveTabBar().count() });
         return msg;
     }
 
-    ctx.ui_system.tab_bar.setActive(@intCast(index));
+    ctx.ui_system.getActiveTabBar().setActive(@intCast(index));
 
     return ctx.allocator.dupe(u8, "ok") catch "error: out of memory";
 }
@@ -268,7 +269,7 @@ fn typeText(ctx: *E2EContext, dc: *zigjr.DispatchCtx, text: []const u8) ![]const
 /// Terminal öffnen
 fn openTerminalRpc(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     log.info("RPC: open_terminal", .{});
-    ctx.ui_system.tab_bar.openTerminal();
+    ctx.ui_system.getActiveTabBar().openTerminal();
     
     // Event Loop aufwecken
     const wio = @import("wio");
@@ -299,6 +300,13 @@ fn getState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     return buf.written();
 }
 
+/// Pane teilen
+fn splitPane(ctx: *E2EContext, dc: *zigjr.DispatchCtx) !void {
+    _ = dc;
+    log.info("RPC: split_pane()", .{});
+    ctx.ui_system.pending_split = .vertical;
+}
+
 /// App beenden
 fn shutdown(ctx: *E2EContext) zigjr.DispatchResult {
     log.info("RPC: shutdown", .{});
@@ -325,12 +333,12 @@ fn benchmarkOpenFile(ctx: *E2EContext, dc: *zigjr.DispatchCtx, path: []const u8,
     var i: usize = 0;
     while (i < iterations) : (i += 1) {
         // Schließe alle bestehenden Tabs für sauberen Benchmark
-        while (ctx.ui_system.tab_bar.count() > 0) {
-            ctx.ui_system.tab_bar.closeTab(0);
+        while (ctx.ui_system.getActiveTabBar().count() > 0) {
+            ctx.ui_system.getActiveTabBar().closeTab(0);
         }
 
         const t_start = std.time.microTimestamp();
-        ctx.ui_system.tab_bar.openFile(path) catch |err| {
+        ctx.ui_system.getActiveTabBar().openFile(path) catch |err| {
             const err_msg = try std.fmt.allocPrint(ctx.allocator,
                 \\{{"error": "openFile failed: {}", "iterations_completed": {d}}}
             , .{ err, i });
@@ -401,7 +409,7 @@ fn benchmarkLoadFile(ctx: *E2EContext, dc: *zigjr.DispatchCtx, path: []const u8,
 
         // Phase 2: Text parsen + tokenisieren (CPU)
         const t_parse_start = std.time.microTimestamp();
-        ctx.ui_system.code_editor.setText(content);
+        ctx.ui_system.getActiveEditor().setText(content);
         const t_parse_end = std.time.microTimestamp();
 
         const t_end = std.time.microTimestamp();
