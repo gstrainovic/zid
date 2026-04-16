@@ -175,12 +175,12 @@ pub const MarkdownView = struct {
 
             // Scrollbar
             if (self.content_height > self.viewport_height) {
-                self.renderScrollbar(theme);
+                self.renderScrollbar();
             }
         });
     }
 
-    fn renderScrollbar(self: *Self, theme: Theme) void {
+    fn renderScrollbar(self: *Self) void {
         const total = self.content_height;
         const visible = self.viewport_height;
         if (total <= visible) return;
@@ -195,11 +195,14 @@ pub const MarkdownView = struct {
         self.scrollbar_thumb_y = self.scrollbar_track_y + thumb_y;
         self.scrollbar_thumb_height = thumb_height;
 
-        const track_color: clay.Color = .{ theme.surface[0], theme.surface[1], theme.surface[2], 100 };
-        const thumb_color: clay.Color = .{ theme.accent[0], theme.accent[1], theme.accent[2], 180 };
+        const track_color: clay.Color = .{ 30, 30, 46, 100 };
+        const thumb_color: clay.Color = .{ 88, 88, 120, 180 };
 
         clay.UI()(.{
             .id = clay.ElementId.ID("md_scrollbar_track"),
+            .floating = .{
+                .z_index = 100, // Ensure it's above floating content
+            },
             .layout = .{
                 .sizing = .{ .w = .fixed(self.scrollbar_width), .h = .grow },
                 .direction = .top_to_bottom,
