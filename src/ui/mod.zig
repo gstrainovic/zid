@@ -385,7 +385,6 @@ pub const UI = struct {
                         term.showContextMenu(x, y);
                         return;
                     }
-                    term.show_context_menu = false;
                     const char_w = measureTextWidth("W", 16.0);
                     const line_h: f32 = 24.0;
                     if (term.handleMouseDown(x, y, char_w, line_h, term.terminal_content_x, term.terminal_content_y)) return;
