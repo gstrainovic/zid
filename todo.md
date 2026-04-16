@@ -1,6 +1,0 @@
-- [x] ctrl + c usw geht nicht im terminal, was fehlt sonst nocht von keymaps?
-- [x] terminal hat nicht voll breite
-- [x] terminal ist einfarbig
-- [x] Markdown Preview in neuem Tab via Kontextmenü (.md Dateien)
-- [x] Markdown Image Rendering Integration (Aspect Ratio, Base Path, Lazy Loading, Visibility & Leaks Fixed)
-- [x] Fix build for Zig 0.15.2 (std.os.getenv -> std.posix.getenv)
