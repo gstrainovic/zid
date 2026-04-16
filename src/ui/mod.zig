@@ -382,6 +382,11 @@ pub const UI = struct {
                     _ = term.handleScrollbarMouseDown(x, y);
                 }
                 return;
+            } else if (tab.kind == .markdown_preview) {
+                if (self.open_markdown_views.get(tab.path)) |v| {
+                    _ = v.handleScrollbarMouseDown(x, y);
+                }
+                return;
             }
         }
 
@@ -404,6 +409,11 @@ pub const UI = struct {
                     term.handleScrollbarMouseMove(x, y);
                 }
                 return;
+            } else if (tab.kind == .markdown_preview) {
+                if (self.open_markdown_views.get(tab.path)) |v| {
+                    v.handleScrollbarMouseMove(x, y);
+                }
+                return;
             }
         }
         self.code_editor.handleMouseMove(x, y);
@@ -414,6 +424,11 @@ pub const UI = struct {
             if (tab.kind == .terminal) {
                 if (self.tab_bar.terminal_instances.get(tab.path)) |term| {
                     term.handleMouseUp();
+                }
+                return;
+            } else if (tab.kind == .markdown_preview) {
+                if (self.open_markdown_views.get(tab.path)) |v| {
+                    v.handleMouseUp();
                 }
                 return;
             }
@@ -427,6 +442,11 @@ pub const UI = struct {
             if (tab.kind == .terminal) {
                 if (self.tab_bar.terminal_instances.get(tab.path)) |term| {
                     term.scrollLines(delta);
+                }
+                return;
+            } else if (tab.kind == .markdown_preview) {
+                if (self.open_markdown_views.get(tab.path)) |v| {
+                    v.scrollLines(delta);
                 }
                 return;
             }

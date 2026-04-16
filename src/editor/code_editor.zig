@@ -1309,8 +1309,8 @@ pub const CodeEditor = struct {
                 self.show_context_menu = false;
                 return;
             }
-            if (clay.pointerOver(clay.getElementId("Md Preview"))) {
-                std.log.scoped(.editor).info("Context Menu: Md Preview clicked", .{});
+            if (clay.pointerOver(clay.getElementId("MD-Preview"))) {
+                std.log.scoped(.editor).info("Context Menu: MD-Preview clicked", .{});
                 self.dispatchAction(.MdPreview);
                 self.show_context_menu = false;
                 return;
@@ -1870,8 +1870,15 @@ pub const CodeEditor = struct {
     }
 
     fn renderContextMenu(self: *Self, arena: std.mem.Allocator) void {
+        if (std.process.getEnvVarOwned(arena, "FORCE_SHOW_MENU") catch null) |_| {
+            if (!self.show_context_menu) {
+                self.show_context_menu = true;
+                self.context_menu_x = 100;
+                self.context_menu_y = 100;
+            }
+        }
         const item_height = @as(f32, @floatFromInt(self.font_size)) + 12;
-        const menu_width: f32 = 140;
+        const menu_width: f32 = 200;
         
         var item_count: f32 = 3;
         const path = self.buffer.get_file_path();
@@ -1908,7 +1915,7 @@ pub const CodeEditor = struct {
                 self.renderContextMenuItem("Copy", .Copy, arena);
                 self.renderContextMenuItem("Paste", .Paste, arena);
                 if (is_md) {
-                    self.renderContextMenuItem("Md Preview", .MdPreview, arena);
+                    self.renderContextMenuItem("MD-Preview", .MdPreview, arena);
                 }
             });
         });
