@@ -26,7 +26,7 @@ pub const Pane = struct {
 
     pub const LeafPane = struct {
         tab_bar: tab_bar_mod.TabBarState,
-        code_editor: editor_mod.CodeEditor,
+        code_editor: *editor_mod.CodeEditor,
     };
 
     pub const SplitPane = struct {
@@ -38,12 +38,15 @@ pub const Pane = struct {
 
     pub fn createLeaf(allocator: std.mem.Allocator, initial_buffer: *@import("flow_core").Buffer) !*Self {
         const self = try allocator.create(Self);
+        const editor = try allocator.create(editor_mod.CodeEditor);
+        editor.* = editor_mod.CodeEditor.init(allocator, initial_buffer);
+
         self.* = .{
             .allocator = allocator,
             .data = .{
                 .leaf = .{
                     .tab_bar = tab_bar_mod.TabBarState.init(allocator),
-                    .code_editor = editor_mod.CodeEditor.init(allocator, initial_buffer),
+                    .code_editor = editor,
                 },
             },
         };
@@ -54,6 +57,7 @@ pub const Pane = struct {
         switch (self.data) {
             .leaf => |*l| {
                 l.code_editor.deinit();
+                self.allocator.destroy(l.code_editor);
                 l.tab_bar.deinit();
             },
             .split => |*s| {

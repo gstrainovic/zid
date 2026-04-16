@@ -152,7 +152,7 @@ pub const UI = struct {
                 initial_buf.root = try initial_buf.load_from_string(msg, &initial_buf.file_eol_mode, &initial_buf.file_utf8_sanitized);
                 try open_buffers.put(try allocator.dupe(u8, "fallback"), initial_buf);
                 
-                const root_pane = try pane_mod.Pane.createLeaf(allocator, initial_buf);
+                const root_p = try pane_mod.Pane.createLeaf(allocator, initial_buf);
                 return Self{
                     .allocator = allocator,
                     .config = config,
@@ -161,8 +161,8 @@ pub const UI = struct {
                     .initialized = false,
                     .anim_manager = AnimationManager.init(allocator),
                     .frame_arena = std.heap.ArenaAllocator.init(allocator),
-                    .root_pane = root_pane,
-                    .active_pane = root_pane,
+                    .root_pane = root_p,
+                    .active_pane = root_p,
                     .text_renderer = null,
                     .file_explorer = file_explorer,
                     .show_file_explorer = true,
@@ -172,6 +172,11 @@ pub const UI = struct {
                     .open_markdown_views = std.StringHashMap(*markdown_view_mod.MarkdownView).init(allocator),
                     .open_buffers = open_buffers,
                     .image_renderer = null,
+                    .pending_tab_switch = null,
+                    .mouse_pressed_this_frame = false,
+                    .mouse_x = 0,
+                    .mouse_y = 0,
+                    .is_mouse_down = false,
                 };
             };
             defer allocator.free(file_content);
@@ -478,6 +483,8 @@ pub const UI = struct {
     }
 
     pub fn handleMouseMove(self: *Self, x: f32, y: f32) void {
+        self.mouse_x = x;
+        self.mouse_y = y;
         if (self.getActiveTabBar().getActiveTab()) |tab| {
             if (tab.kind == .terminal) {
                 if (self.getActiveTabBar().terminal_instances.get(tab.path)) |term| {
@@ -497,6 +504,7 @@ pub const UI = struct {
     }
 
     pub fn handleMouseUp(self: *Self) void {
+        self.is_mouse_down = false;
         if (self.getActiveTabBar().getActiveTab()) |tab| {
             if (tab.kind == .terminal) {
                 if (self.getActiveTabBar().terminal_instances.get(tab.path)) |term| {
@@ -584,7 +592,6 @@ pub const UI = struct {
         return tex_ptr;
     }
 
-    /// Beispiel: Layout mit Theme rendern
     /// UI Beispiel rendern
     pub fn renderExample(self: *Self, image_data: ?*const anyopaque) []clay.RenderCommand {
         self.beginLayout();
@@ -692,13 +699,15 @@ pub const UI = struct {
             self.pending_split = null;
         }
 
+        // Cleanup empty panes (close split if a pane becomes empty)
+        _ = self.cleanupEmptyPanes(null, self.root_pane);
+
         // Render Active Dialog
         if (self.active_dialog) |*ad| {
             if (ad.dialog.render(t, self.mouse_pressed_this_frame)) |res| {
                 ad.callback(self, res, ad.context_usize, ad.context_ptr);
                 if (ad.dialog.message.ptr != "".ptr) {
-                    // Check if it was duped (rough check, better to have a flag or always dupe)
-                    // For now, I'll always dupe and always free.
+                    // Always free duped message
                     self.allocator.free(ad.dialog.message);
                 }
                 self.active_dialog = null;
@@ -708,13 +717,51 @@ pub const UI = struct {
         return commands;
     }
 
+    fn cleanupEmptyPanes(self: *Self, parent: ?*pane_mod.Pane, pane: *pane_mod.Pane) bool {
+        switch (pane.data) {
+            .leaf => |*leaf| {
+                if (leaf.tab_bar.tabs.items.len == 0) {
+                    if (parent) |p| {
+                        // Find other child
+                        const split = &p.data.split;
+                        const other_idx: usize = if (split.children[0] == pane) 1 else 0;
+                        const other_child = split.children[other_idx];
+
+                        // Keep other child's data
+                        const other_data = other_child.data;
+                        const other_allocator = other_child.allocator;
+
+                        // Focus redirection
+                        if (self.active_pane == pane or self.active_pane == p) {
+                            self.active_pane = other_child;
+                        }
+
+                        // Destroy current empty pane and the other child's wrapper
+                        pane.deinit();
+                        p.data = other_data;
+                        other_allocator.destroy(other_child);
+
+                        return true;
+                    }
+                }
+            },
+            .split => |*split| {
+                if (self.cleanupEmptyPanes(pane, split.children[0])) return true;
+                if (self.cleanupEmptyPanes(pane, split.children[1])) return true;
+            },
+        }
+        return false;
+    }
+
     fn renderPane(self: *Self, pane: *pane_mod.Pane, t: Theme) void {
         const allocator = self.frame_arena.allocator();
         switch (pane.data) {
             .leaf => |*leaf| {
+                const pane_id = clay.ElementId.IDI("Pane", @truncate(@intFromPtr(pane)));
+
                 // Editor Area (Tabs + Editor)
                 clay.UI()(.{
-                    .id = clay.ElementId.IDI("Pane", @truncate(@intFromPtr(pane))),
+                    .id = pane_id,
                     .layout = .{
                         .sizing = .grow,
                         .direction = .top_to_bottom,
@@ -722,8 +769,8 @@ pub const UI = struct {
                     },
                     .background_color = t.bg,
                 })({
-                    // Focus handling: if clicked anywhere in this pane, make it active
-                    if (clay.pointerOver(clay.ElementId.IDI("Pane", @truncate(@intFromPtr(pane)))) and self.mouse_pressed_this_frame) {
+                    // Focus handling
+                    if (clay.pointerOver(pane_id) and self.mouse_pressed_this_frame) {
                         self.active_pane = pane;
                     }
 
@@ -758,24 +805,18 @@ pub const UI = struct {
                         }
                     }
 
-                    // Aktiven Tab prüfen für Weiche (Editor vs Bild vs Terminal)
+                    // Aktiven Tab prüfen
                     var special_active = false;
                     const tab_bar = &leaf.tab_bar;
                     if (tab_bar.active_index) |idx| {
                         if (idx < tab_bar.tabs.items.len) {
                             const tab = &tab_bar.tabs.items[idx];
                             if (tab.kind == .image) {
-                                image_view_mod.ImageViewState.render(
-                                    allocator,
-                                    tab.path,
-                                    t,
-                                    &self.open_images,
-                                );
+                                image_view_mod.ImageViewState.render(allocator, tab.path, t, &self.open_images);
                                 special_active = true;
                             } else if (tab.kind == .pdf) {
                                  const maybe_handler = self.open_pdfs.get(tab.path);
                                  const maybe_texture = self.open_images.get(tab.path);
-                                 
                                  if (maybe_handler) |handler_ptr| {
                                      const handler: *PdfHandler = @ptrCast(@alignCast(handler_ptr));
                                      if (PdfViewState.render(handler, maybe_texture, t, self.mouse_pressed_this_frame)) |delta| {
@@ -784,7 +825,6 @@ pub const UI = struct {
                                  }
                                  special_active = true;
                             } else if (tab.kind == .terminal) {
-                                // Render terminal tab
                                 self.renderTerminalContentInPane(pane, tab.path, t);
                                 special_active = true;
                             } else if (tab.kind == .markdown_preview) {
@@ -792,14 +832,14 @@ pub const UI = struct {
                                 if (md_view == null) {
                                     const source_path = tab.path["preview://".len..];
                                     const content = std.fs.cwd().readFileAlloc(self.allocator, source_path, 1024 * 1024) catch |err| blk: {
-                                        std.log.err("Failed to load markdown for preview: {any}", .{err});
-                                        break :blk self.allocator.dupe(u8, "# Error\nFailed to load markdown") catch "# Error";
+                                        std.log.err("Failed to load markdown: {any}", .{err});
+                                        break :blk self.allocator.dupe(u8, "# Error") catch "# Error";
                                     };
                                     defer self.allocator.free(content);
-                                    const new_view = self.allocator.create(markdown_view_mod.MarkdownView) catch unreachable;
-                                    new_view.* = markdown_view_mod.MarkdownView.init(self.allocator, content, source_path);
-                                    self.open_markdown_views.put(self.allocator.dupe(u8, tab.path) catch tab.path, new_view) catch {};
-                                    md_view = new_view;
+                                    const new_v = self.allocator.create(markdown_view_mod.MarkdownView) catch unreachable;
+                                    new_v.* = markdown_view_mod.MarkdownView.init(self.allocator, content, source_path);
+                                    self.open_markdown_views.put(self.allocator.dupe(u8, tab.path) catch tab.path, new_v) catch {};
+                                    md_view = new_v;
                                 }
                                 if (md_view) |v| {
                                     v.window = self.window;
@@ -810,7 +850,6 @@ pub const UI = struct {
                         }
                     }
 
-                    // Sync modified state from editor to active tab
                     if (!special_active) {
                         if (tab_bar.getActiveTab()) |tab| {
                             if (tab.kind == .text) {
@@ -820,7 +859,6 @@ pub const UI = struct {
                         leaf.code_editor.render(allocator, self.mouse_pressed_this_frame);
                     }
 
-                    // Handle split requests from this editor
                     if (leaf.code_editor.pending_split_v) {
                         leaf.code_editor.pending_split_v = false;
                         self.pending_split = .vertical;
@@ -830,7 +868,6 @@ pub const UI = struct {
                         self.pending_split = .horizontal;
                     }
 
-                    // Highlight active pane
                     if (is_active) {
                         clay.UI()(.{
                             .floating = .{ .attach_to = .to_parent, .attach_points = .{ .element = .left_top, .parent = .left_top } },
@@ -840,8 +877,8 @@ pub const UI = struct {
                     }
                 });
 
-                // Update bounds for this specific editor (used for mouse conversion)
-                const editor_id = clay.ElementId.IDI("code_editor", @truncate(@intFromPtr(&leaf.code_editor)));
+                // Update bounds
+                const editor_id = clay.ElementId.IDI("code_editor", @truncate(@intFromPtr(leaf.code_editor)));
                 const editor_data = clay.getElementData(editor_id);
                 if (editor_data.found) {
                     leaf.code_editor.content_origin_y = editor_data.bounding_box.y;
@@ -854,12 +891,8 @@ pub const UI = struct {
                 const direction = if (split.direction == .horizontal) clay.LayoutDirection.left_to_right else clay.LayoutDirection.top_to_bottom;
                 clay.UI()(.{
                     .id = clay.ElementId.IDI("Split", @truncate(@intFromPtr(pane))),
-                    .layout = .{
-                        .sizing = .grow,
-                        .direction = direction,
-                    },
+                    .layout = .{ .sizing = .grow, .direction = direction },
                 })({
-                    // First child
                     clay.UI()(.{
                         .layout = .{
                             .sizing = if (split.direction == .horizontal)
@@ -870,7 +903,6 @@ pub const UI = struct {
                         self.renderPane(split.children[0], t);
                     });
 
-                    // Splitter
                     const splitter_id = clay.ElementId.IDI("Splitter", @truncate(@intFromPtr(pane)));
                     clay.UI()(.{
                         .id = splitter_id,
@@ -882,19 +914,11 @@ pub const UI = struct {
                         .background_color = if (split.is_resizing) t.primary else if (clay.pointerOver(splitter_id)) t.secondary else t.border,
                     })({});
 
-                    // Second child
-                    clay.UI()(.{
-                        .layout = .{
-                            .sizing = .grow,
-                        },
-                    })({
+                    clay.UI()(.{ .layout = .{ .sizing = .grow } })({
                         self.renderPane(split.children[1], t);
                     });
 
-                    // Resize logic
-                    if (clay.pointerOver(splitter_id) and self.mouse_pressed_this_frame) {
-                        split.is_resizing = true;
-                    }
+                    if (clay.pointerOver(splitter_id) and self.mouse_pressed_this_frame) split.is_resizing = true;
                     if (split.is_resizing) {
                         if (!self.is_mouse_down) {
                             split.is_resizing = false;
@@ -924,38 +948,27 @@ pub const UI = struct {
     }
 
     pub fn getOrCreateBuffer(self: *Self, path: []const u8) !*@import("flow_core").Buffer {
-        if (self.open_buffers.get(path)) |buf| {
-            return buf;
-        }
-
-        const content = std.fs.cwd().readFileAlloc(self.allocator, path, 64 * 1024 * 1024) catch |err| {
-            log.err("Failed to load file '{s}': {}", .{ path, err });
-            return err;
-        };
+        if (self.open_buffers.get(path)) |buf| return buf;
+        const content = try std.fs.cwd().readFileAlloc(self.allocator, path, 64 * 1024 * 1024);
         defer self.allocator.free(content);
-
         const new_buf = try @import("flow_core").Buffer.create(self.allocator);
         new_buf.root = try new_buf.load_from_string(content, &new_buf.file_eol_mode, &new_buf.file_utf8_sanitized);
         new_buf.set_file_path(path);
         new_buf.last_save = new_buf.root;
-
         try self.open_buffers.put(try self.allocator.dupe(u8, path), new_buf);
         return new_buf;
     }
 
-    /// Check if a terminal tab is currently active
     pub fn isTerminalActive(self: *Self) bool {
         const tab_bar = self.getActiveTabBar();
         if (tab_bar.active_index) |idx| {
-            if (idx < tab_bar.tabs.items.len) {
-                return tab_bar.tabs.items[idx].kind == .terminal;
-            }
+            if (idx < tab_bar.tabs.items.len) return tab_bar.tabs.items[idx].kind == .terminal;
         }
         return false;
     }
 
     pub fn getActiveEditor(self: *Self) *editor_mod.CodeEditor {
-        return &self.active_pane.data.leaf.code_editor;
+        return self.active_pane.data.leaf.code_editor;
     }
 
     pub fn getActiveTabBar(self: *Self) *tab_bar_mod.TabBarState {
@@ -965,53 +978,23 @@ pub const UI = struct {
     pub fn splitActivePane(self: *Self, direction: pane_mod.PaneDirection) !void {
         const pane = self.active_pane;
         if (pane.data != .leaf) return;
-
-        log.info("Splitting pane {s}", .{@as([]const u8, if (direction == .horizontal) "horizontally" else "vertically")});
-
-        // Current leaf data
         const old_leaf = pane.data.leaf;
-
-        // Create new leaf
-        // Use the same buffer as the current editor for the new pane
-        const initial_buf = old_leaf.code_editor.buffer;
-        const new_leaf_pane = try pane_mod.Pane.createLeaf(self.allocator, initial_buf);
-        
-        // Move current leaf to a new child pane
+        const new_leaf_pane = try pane_mod.Pane.createLeaf(self.allocator, old_leaf.code_editor.buffer);
         const old_leaf_pane = try self.allocator.create(pane_mod.Pane);
-        old_leaf_pane.* = .{
-            .allocator = self.allocator,
-            .data = .{ .leaf = old_leaf },
-        };
-
-        // Turn current pane into a split
-        pane.data = .{
-            .split = .{
-                .direction = direction,
-                .ratio = 0.5,
-                .children = .{ old_leaf_pane, new_leaf_pane },
-            },
-        };
-        
-        // New pane becomes active
+        old_leaf_pane.* = .{ .allocator = self.allocator, .data = .{ .leaf = old_leaf } };
+        pane.data = .{ .split = .{ .direction = direction, .ratio = 0.5, .children = .{ old_leaf_pane, new_leaf_pane } } };
         self.active_pane = new_leaf_pane;
     }
 
     fn showSaveConfirmationDialog(self: *Self, pane: *pane_mod.Pane, tab_index: usize) void {
         const tab = &pane.data.leaf.tab_bar.tabs.items[tab_index];
-        
-        // Construct message
         var msg_buf: [256]u8 = undefined;
-        const msg = std.fmt.bufPrint(&msg_buf, "Do you want to save changes to '{s}'?", .{tab.display_name}) catch "Do you want to save changes?";
-
+        const msg = std.fmt.bufPrint(&msg_buf, "Do you want to save changes to '{s}'?", .{tab.display_name}) catch "Save?";
         self.active_dialog = .{
             .dialog = .{
                 .title = "Unsaved Changes",
                 .message = self.allocator.dupe(u8, msg) catch msg,
-                .actions = &.{
-                    .{ .label = "Save", .result = .yes },
-                    .{ .label = "Don't Save", .result = .no },
-                    .{ .label = "Cancel", .result = .cancel },
-                },
+                .actions = &.{ .{ .label = "Save", .result = .yes }, .{ .label = "Don't Save", .result = .no }, .{ .label = "Cancel", .result = .cancel } },
             },
             .context_usize = tab_index,
             .context_ptr = pane,
@@ -1021,14 +1004,7 @@ pub const UI = struct {
                     const p: *pane_mod.Pane = @ptrCast(@alignCast(ptr.?));
                     const leaf = &p.data.leaf;
                     switch (res) {
-                        .yes => {
-                            // TODO: Save logic. For now just close.
-                            // We need a way to save a specific buffer.
-                            leaf.tab_bar.closeTab(idx);
-                        },
-                        .no => {
-                            leaf.tab_bar.closeTab(idx);
-                        },
+                        .yes, .no => leaf.tab_bar.closeTab(idx),
                         .cancel => {},
                     }
                 }
@@ -1036,33 +1012,26 @@ pub const UI = struct {
         };
     }
 
-    /// Get the active terminal instance (if any)
     pub fn getActiveTerminal(self: *Self) ?*@import("../terminal/terminal_instance.zig").TerminalInstance {
         const tab_bar = self.getActiveTabBar();
         if (tab_bar.active_index) |idx| {
             if (idx < tab_bar.tabs.items.len) {
                 const tab = tab_bar.tabs.items[idx];
-                if (tab.kind == .terminal) {
-                    return tab_bar.terminal_instances.get(tab.path);
-                }
+                if (tab.kind == .terminal) return tab_bar.terminal_instances.get(tab.path);
             }
         }
         return null;
     }
 
-    /// Render terminal content in the content area
     fn renderTerminalContentInPane(self: *Self, pane: *pane_mod.Pane, path: []const u8, t: Theme) void {
         _ = t;
         const leaf = &pane.data.leaf;
         const term_instance = leaf.tab_bar.terminal_instances.get(path) orelse return;
         term_instance.window = self.window;
-        
         const arena_alloc = self.frame_arena.allocator();
         const cursor = term_instance.getCursor();
         const total_rows = term_instance.*.totalRows();
         const line_height: f32 = 24.0; 
-
-        // Update height and width from previous frame's bounding box
         const clip_id = clay.ElementId.IDI("terminal_content_clip", @truncate(@intFromPtr(pane)));
         const term_data = clay.getElementData(clip_id);
         if (term_data.found) {
@@ -1070,279 +1039,89 @@ pub const UI = struct {
             term_instance.height = bb.height;
             term_instance.terminal_content_x = bb.x;
             term_instance.terminal_content_y = bb.y;
-            // Calculate cols/rows based on font size (16px) -> roughly 10px width per char
             const char_w = measureTextWidth("W", 16.0);
             if (char_w > 0) {
                 const cols: u16 = @intFromFloat(bb.width / char_w);
                 const rows: u16 = @intFromFloat(bb.height / line_height);
                 if (cols != term_instance.cols or rows != term_instance.rows) {
-                    if (cols > 0 and rows > 0) {
-                        term_instance.resize(cols, rows) catch {};
-                    }
+                    if (cols > 0 and rows > 0) term_instance.resize(cols, rows) catch {};
                 }
             }
         }
-
         const visible_rows = term_instance.visibleLineCount();
         const history_count = if (total_rows > term_instance.rows) total_rows - term_instance.rows else 0;
         const cursor_abs_row = history_count + cursor.y;
-
-        // Terminal container — dark bg
         clay.UI()(.{
             .id = clay.ElementId.IDI("terminal_outer", @truncate(@intFromPtr(pane))),
-            .layout = .{
-                .sizing = .grow,
-                .direction = .left_to_right,
-                .padding = .{ .left = 8, .right = 8, .top = 8, .bottom = 8 },
-            },
+            .layout = .{ .sizing = .grow, .direction = .left_to_right, .padding = .{ .left = 8, .right = 8, .top = 8, .bottom = 8 } },
             .background_color = .{ 30, 30, 30, 255 },
         })({
-            // Scrollable container for the terminal text
-            clay.UI()(.{
-                .id = clip_id,
-                .layout = .{
-                    .sizing = .grow,
-                },
-                .clip = .{ .vertical = true, .horizontal = true },
-            })({
-                clay.UI()(.{
-                    .id = clay.ElementId.IDI("terminal_content", @truncate(@intFromPtr(pane))),
-                    .layout = .{
-                        .sizing = .{ .w = .grow, .h = .fit },
-                        .direction = .top_to_bottom,
-                    },
-                })({
+            clay.UI()(.{ .id = clip_id, .layout = .{ .sizing = .grow }, .clip = .{ .vertical = true, .horizontal = true } })({
+                clay.UI()(.{ .id = clay.ElementId.IDI("terminal_content", @truncate(@intFromPtr(pane))), .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .top_to_bottom } })({
                     const start_line = @min(term_instance.view_row, total_rows);
                     const end_line = @min(start_line + visible_rows + 1, total_rows);
-
                     var i: usize = start_line;
                     while (i < end_line) : (i += 1) {
                         const line_text = term_instance.getLine(i, arena_alloc) catch "";
-                        
-                        clay.UI()(.{
-                            .id = clay.ElementId.IDI("term_row", @truncate(i ^ @intFromPtr(pane))),
-                            .layout = .{
-                                .sizing = .{ .w = .grow, .h = .fixed(line_height) },
-                                .direction = .left_to_right,
-                                .child_alignment = .{ .x = .left, .y = .center },
-                            },
-                        })({
-                            // Parse ANSI
+                        clay.UI()(.{ .id = clay.ElementId.IDI("term_row", @truncate(i ^ @intFromPtr(pane))), .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(line_height) }, .direction = .left_to_right, .child_alignment = .{ .x = .left, .y = .center } } })({
                             var pos: usize = 0;
-                            var current_fg: clay.Color = .{ 204, 204, 204, 255 }; // Default fg
-                            var current_bg: ?clay.Color = null; // Default bg
+                            var current_fg: clay.Color = .{ 204, 204, 204, 255 };
+                            var current_bg: ?clay.Color = null;
                             var text_start: usize = 0;
-
                             const default_fg: clay.Color = .{ 204, 204, 204, 255 };
-
                             while (pos < line_text.len) {
                                 if (line_text[pos] == '\x1B' and pos + 1 < line_text.len and line_text[pos + 1] == '[') {
-                                    // Flush pending text
                                     if (pos > text_start) {
                                         const seg = line_text[text_start..pos];
-                                        if (current_bg) |bg| {
-                                            clay.UI()(.{ .background_color = bg })({
-                                                clay.text(arena_alloc.dupe(u8, seg) catch " ", .{ .font_size = 16, .color = current_fg });
-                                            });
-                                        } else {
-                                            clay.text(arena_alloc.dupe(u8, seg) catch " ", .{ .font_size = 16, .color = current_fg });
-                                        }
+                                        if (current_bg) |bg| { clay.UI()(.{ .background_color = bg })({ clay.text(arena_alloc.dupe(u8, seg) catch " ", .{ .font_size = 16, .color = current_fg }); }); } else { clay.text(arena_alloc.dupe(u8, seg) catch " ", .{ .font_size = 16, .color = current_fg }); }
                                     }
-
-                                    // Parse sequence
                                     pos += 2;
                                     var args: [16]u8 = undefined;
                                     var arg_count: usize = 0;
                                     var num: u8 = 0;
                                     var has_num = false;
-
                                     while (pos < line_text.len) {
                                         const c = line_text[pos];
-                                        if (c >= '0' and c <= '9') {
-                                            num = num * 10 + (c - '0');
-                                            has_num = true;
-                                            pos += 1;
-                                        } else if (c == ';') {
-                                            if (arg_count < args.len) {
-                                                args[arg_count] = num;
-                                                arg_count += 1;
-                                            }
-                                            num = 0;
-                                            has_num = false;
-                                            pos += 1;
-                                        } else if (c == 'm') {
-                                            if (has_num and arg_count < args.len) {
-                                                args[arg_count] = num;
-                                                arg_count += 1;
-                                            }
-                                            pos += 1;
-                                            break;
-                                        } else {
-                                            // Unknown sequence character, just skip
-                                            pos += 1;
-                                            break;
-                                        }
+                                        if (c >= '0' and c <= '9') { num = num * 10 + (c - '0'); has_num = true; pos += 1; } else if (c == ';') { if (arg_count < args.len) { args[arg_count] = num; arg_count += 1; } num = 0; has_num = false; pos += 1; } else if (c == 'm') { if (has_num and arg_count < args.len) { args[arg_count] = num; arg_count += 1; } pos += 1; break; } else { pos += 1; break; }
                                     }
-
-                                    // Process args (simplified SGR)
                                     var arg_idx: usize = 0;
-                                    if (arg_count == 0) {
-                                        current_fg = default_fg;
-                                        current_bg = null;
-                                    }
+                                    if (arg_count == 0) { current_fg = default_fg; current_bg = null; }
                                     while (arg_idx < arg_count) {
                                         const code = args[arg_idx];
                                         arg_idx += 1;
                                         switch (code) {
-                                            0 => {
-                                                current_fg = default_fg;
-                                                current_bg = null;
-                                            },
-                                            30...37 => {
-                                                // Basic 8 foreground colors
-                                                current_fg = switch (code - 30) {
-                                                    0 => .{ 0, 0, 0, 255 },       // Black
-                                                    1 => .{ 205, 49, 49, 255 },   // Red
-                                                    2 => .{ 13, 188, 121, 255 },  // Green
-                                                    3 => .{ 229, 229, 16, 255 },  // Yellow
-                                                    4 => .{ 36, 114, 200, 255 },  // Blue
-                                                    5 => .{ 188, 63, 188, 255 },  // Magenta
-                                                    6 => .{ 17, 168, 205, 255 },  // Cyan
-                                                    7 => .{ 229, 229, 229, 255 }, // White
-                                                    else => default_fg,
-                                                };
-                                            },
-                                            38 => {
-                                                if (arg_idx + 1 < arg_count and args[arg_idx] == 5) {
-                                                    arg_idx += 2; // 256 colors not fully implemented
-                                                } else if (arg_idx + 3 < arg_count and args[arg_idx] == 2) {
-                                                    current_fg = .{ 
-                                                        @floatFromInt(args[arg_idx + 1]), 
-                                                        @floatFromInt(args[arg_idx + 2]), 
-                                                        @floatFromInt(args[arg_idx + 3]), 
-                                                        255 
-                                                    };
-                                                    arg_idx += 4;
-                                                }
-                                            },
+                                            0 => { current_fg = default_fg; current_bg = null; },
+                                            30...37 => { current_fg = switch (code - 30) { 0 => .{ 0, 0, 0, 255 }, 1 => .{ 205, 49, 49, 255 }, 2 => .{ 13, 188, 121, 255 }, 3 => .{ 229, 229, 16, 255 }, 4 => .{ 36, 114, 200, 255 }, 5 => .{ 188, 63, 188, 255 }, 6 => .{ 17, 168, 205, 255 }, 7 => .{ 229, 229, 229, 255 }, else => default_fg }; },
+                                            38 => { if (arg_idx + 1 < arg_count and args[arg_idx] == 5) { arg_idx += 2; } else if (arg_idx + 3 < arg_count and args[arg_idx] == 2) { current_fg = .{ @floatFromInt(args[arg_idx + 1]), @floatFromInt(args[arg_idx + 2]), @floatFromInt(args[arg_idx + 3]), 255 }; arg_idx += 4; } },
                                             39 => current_fg = default_fg,
-                                            40...47 => {
-                                                // Basic 8 background colors
-                                                current_bg = switch (code - 40) {
-                                                    0 => .{ 0, 0, 0, 255 },       // Black
-                                                    1 => .{ 205, 49, 49, 255 },   // Red
-                                                    2 => .{ 13, 188, 121, 255 },  // Green
-                                                    3 => .{ 229, 229, 16, 255 },  // Yellow
-                                                    4 => .{ 36, 114, 200, 255 },  // Blue
-                                                    5 => .{ 188, 63, 188, 255 },  // Magenta
-                                                    6 => .{ 17, 168, 205, 255 },  // Cyan
-                                                    7 => .{ 229, 229, 229, 255 }, // White
-                                                    else => null,
-                                                };
-                                            },
-                                            48 => {
-                                                if (arg_idx + 1 < arg_count and args[arg_idx] == 5) {
-                                                    arg_idx += 2;
-                                                } else if (arg_idx + 3 < arg_count and args[arg_idx] == 2) {
-                                                    current_bg = .{ 
-                                                        @floatFromInt(args[arg_idx + 1]), 
-                                                        @floatFromInt(args[arg_idx + 2]), 
-                                                        @floatFromInt(args[arg_idx + 3]), 
-                                                        255 
-                                                    };
-                                                    arg_idx += 4;
-                                                }
-                                            },
+                                            40...47 => { current_bg = switch (code - 40) { 0 => .{ 0, 0, 0, 255 }, 1 => .{ 205, 49, 49, 255 }, 2 => .{ 13, 188, 121, 255 }, 3 => .{ 229, 229, 16, 255 }, 4 => .{ 36, 114, 200, 255 }, 5 => .{ 188, 63, 188, 255 }, 6 => .{ 17, 168, 205, 255 }, 7 => .{ 229, 229, 229, 255 }, else => null }; },
+                                            48 => { if (arg_idx + 1 < arg_count and args[arg_idx] == 5) { arg_idx += 2; } else if (arg_idx + 3 < arg_count and args[arg_idx] == 2) { current_bg = .{ @floatFromInt(args[arg_idx + 1]), @floatFromInt(args[arg_idx + 2]), @floatFromInt(args[arg_idx + 3]), 255 }; arg_idx += 4; } },
                                             49 => current_bg = null,
-                                            90...97 => { // Bright foreground
-                                                current_fg = switch (code - 90) {
-                                                    0 => .{ 102, 102, 102, 255 }, // Bright Black
-                                                    1 => .{ 241, 76, 76, 255 },   // Bright Red
-                                                    2 => .{ 35, 209, 139, 255 },  // Bright Green
-                                                    3 => .{ 245, 245, 67, 255 },  // Bright Yellow
-                                                    4 => .{ 59, 142, 234, 255 },  // Bright Blue
-                                                    5 => .{ 214, 112, 214, 255 }, // Bright Magenta
-                                                    6 => .{ 41, 184, 219, 255 },  // Bright Cyan
-                                                    7 => .{ 255, 255, 255, 255 }, // Bright White
-                                                    else => default_fg,
-                                                };
-                                            },
+                                            90...97 => { current_fg = switch (code - 90) { 0 => .{ 102, 102, 102, 255 }, 1 => .{ 241, 76, 76, 255 }, 2 => .{ 35, 209, 139, 255 }, 3 => .{ 245, 245, 67, 255 }, 4 => .{ 59, 142, 234, 255 }, 5 => .{ 214, 112, 214, 255 }, 6 => .{ 41, 184, 219, 255 }, 7 => .{ 255, 255, 255, 255 }, else => default_fg }; },
                                             else => {},
                                         }
                                     }
                                     text_start = pos;
-                                } else {
-                                    pos += 1;
-                                }
+                                } else pos += 1;
                             }
-
-                            // Flush remaining text
                             if (pos > text_start) {
                                 const seg = line_text[text_start..pos];
-                                if (current_bg) |bg| {
-                                    clay.UI()(.{ .background_color = bg })({
-                                        clay.text(arena_alloc.dupe(u8, seg) catch " ", .{ .font_size = 16, .color = current_fg });
-                                    });
-                                } else {
-                                    clay.text(arena_alloc.dupe(u8, seg) catch " ", .{ .font_size = 16, .color = current_fg });
-                                }
+                                if (current_bg) |bg| { clay.UI()(.{ .background_color = bg })({ clay.text(arena_alloc.dupe(u8, seg) catch " ", .{ .font_size = 16, .color = current_fg }); }); } else { clay.text(arena_alloc.dupe(u8, seg) catch " ", .{ .font_size = 16, .color = current_fg }); }
                             }
-
-                            // Cursor logic for this line
                             if (i == cursor_abs_row) {
-                                // Strip ANSI for accurate width measurement
-                                var clean_line: std.ArrayListUnmanaged(u8) = .empty;
-                                var clean_pos: usize = 0;
-                                while (clean_pos < cursor.x and clean_pos < line_text.len) {
-                                    // Note: A more robust cursor X measurement would parse the ANSI strings 
-                                    // and measure just the visible characters.
-                                    clean_line.append(arena_alloc, line_text[clean_pos]) catch {};
-                                    clean_pos += 1;
-                                }
-                                
-                                // This is a rough estimation since ANSI sequences affect the raw length.
-                                // A true fix requires tracking visual length during parse.
                                 const char_w = measureTextWidth("W", 16.0);
                                 const exact_x = @as(f32, @floatFromInt(cursor.x)) * char_w;
-
-                                clay.UI()(.{
-                                    .id = clay.ElementId.IDI("terminal_cursor", @truncate(@intFromPtr(pane))),
-                                    .floating = .{
-                                        .attach_to = .to_parent,
-                                        .attach_points = .{ .element = .left_top, .parent = .left_top },
-                                        .offset = .{ .x = exact_x, .y = 0 },
-                                    },
-                                    .layout = .{
-                                        .sizing = .{ .w = .fixed(char_w), .h = .fixed(line_height) },
-                                    },
-                                    .background_color = .{ 200, 200, 200, 180 },
-                                })({});
+                                clay.UI()(.{ .id = clay.ElementId.IDI("terminal_cursor", @truncate(@intFromPtr(pane))), .floating = .{ .attach_to = .to_parent, .attach_points = .{ .element = .left_top, .parent = .left_top }, .offset = .{ .x = exact_x, .y = 0 } }, .layout = .{ .sizing = .{ .w = .fixed(char_w), .h = .fixed(line_height) } }, .background_color = .{ 200, 200, 200, 180 } })({});
                             }
-
-                            // Selection highlight pass for this line
                             {
                                 var col: u16 = 0;
                                 var selection_start_col: ?u16 = null;
                                 const char_w = measureTextWidth("W", 16.0);
-
                                 while (col < term_instance.cols) {
-                                    if (term_instance.isSelected(col, i)) {
-                                        if (selection_start_col == null) selection_start_col = col;
-                                    } else {
+                                    if (term_instance.isSelected(col, i)) { if (selection_start_col == null) selection_start_col = col; } else {
                                         if (selection_start_col) |start| {
                                             const width = @as(f32, @floatFromInt(col - start)) * char_w;
-                                            clay.UI()(.{
-                                                .id = clay.ElementId.IDI("term_sel", @truncate(i * 1000 + start ^ @intFromPtr(pane))),
-                                                .floating = .{
-                                                    .attach_to = .to_parent,
-                                                    .attach_points = .{ .element = .left_top, .parent = .left_top },
-                                                    .offset = .{ .x = @as(f32, @floatFromInt(start)) * char_w, .y = 0 },
-                                                },
-                                                .layout = .{
-                                                    .sizing = .{ .w = .fixed(width), .h = .fixed(line_height) },
-                                                },
-                                                .background_color = .{ 100, 100, 255, 60 },
-                                            })({});
+                                            clay.UI()(.{ .id = clay.ElementId.IDI("term_sel", @truncate(i * 1000 + start ^ @intFromPtr(pane))), .floating = .{ .attach_to = .to_parent, .attach_points = .{ .element = .left_top, .parent = .left_top }, .offset = .{ .x = @as(f32, @floatFromInt(start)) * char_w, .y = 0 } }, .layout = .{ .sizing = .{ .w = .fixed(width), .h = .fixed(line_height) } }, .background_color = .{ 100, 100, 255, 60 } })({});
                                             selection_start_col = null;
                                         }
                                     }
@@ -1350,77 +1129,31 @@ pub const UI = struct {
                                 }
                                 if (selection_start_col) |start| {
                                     const width = @as(f32, @floatFromInt(col - start)) * char_w;
-                                    clay.UI()(.{
-                                        .id = clay.ElementId.IDI("term_sel", @truncate(i * 1000 + start ^ @intFromPtr(pane))),
-                                        .floating = .{
-                                            .attach_to = .to_parent,
-                                            .attach_points = .{ .element = .left_top, .parent = .left_top },
-                                            .offset = .{ .x = @as(f32, @floatFromInt(start)) * char_w, .y = 0 },
-                                        },
-                                        .layout = .{
-                                            .sizing = .{ .w = .fixed(width), .h = .fixed(line_height) },
-                                        },
-                                        .background_color = .{ 100, 100, 255, 60 },
-                                    })({});
+                                    clay.UI()(.{ .id = clay.ElementId.IDI("term_sel", @truncate(i * 1000 + start ^ @intFromPtr(pane))), .floating = .{ .attach_to = .to_parent, .attach_points = .{ .element = .left_top, .parent = .left_top }, .offset = .{ .x = @as(f32, @floatFromInt(start)) * char_w, .y = 0 } }, .layout = .{ .sizing = .{ .w = .fixed(width), .h = .fixed(line_height) } }, .background_color = .{ 100, 100, 255, 60 } })({});
                                 }
                             }
                         });
                     }
                 });
             });
-
-            // Vertical Custom Scrollbar (CodeEditor Parity)
             if (total_rows > visible_rows) {
                 const track_id = clay.ElementId.IDI("terminal_scrollbar_track", @truncate(@intFromPtr(pane)));
                 const track_data = clay.getElementData(track_id);
-                if (track_data.found) {
-                    term_instance.scrollbar_track_x = track_data.bounding_box.x;
-                    term_instance.scrollbar_track_y = track_data.bounding_box.y;
-                }
-
+                if (track_data.found) { term_instance.scrollbar_track_x = track_data.bounding_box.x; term_instance.scrollbar_track_y = track_data.bounding_box.y; }
                 const track_height = term_instance.height;
                 const thumb_ratio: f32 = @as(f32, @floatFromInt(visible_rows)) / @as(f32, @floatFromInt(total_rows));
                 const thumb_height = @max(20.0, track_height * thumb_ratio);
                 const max_offset: usize = total_rows - visible_rows;
-                const scroll_frac: f32 = if (max_offset > 0)
-                    @as(f32, @floatFromInt(term_instance.view_row)) / @as(f32, @floatFromInt(max_offset))
-                else
-                    0.0;
+                const scroll_frac: f32 = if (max_offset > 0) @as(f32, @floatFromInt(term_instance.view_row)) / @as(f32, @floatFromInt(max_offset)) else 0.0;
                 const thumb_y = scroll_frac * (track_height - thumb_height);
-
                 term_instance.scrollbar_thumb_y = term_instance.scrollbar_track_y + thumb_y;
                 term_instance.scrollbar_thumb_height = thumb_height;
-
-                const track_color: clay.Color = .{ 30, 30, 46, 255 };
-                const thumb_color: clay.Color = .{ 88, 88, 120, 200 };
-
-                clay.UI()(.{
-                    .id = track_id,
-                    .floating = .{
-                        .attach_to = .to_parent,
-                        .attach_points = .{ .element = .right_top, .parent = .right_top },
-                        .z_index = 1000,
-                    },
-                    .layout = .{
-                        .sizing = .{ .w = .fixed(term_instance.scrollbar_width), .h = .grow },
-                        .direction = .top_to_bottom,
-                    },
-                    .background_color = track_color,
-                })({
-                    clay.UI()(.{
-                        .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(thumb_y) } },
-                    })({});
-                    clay.UI()(.{
-                        .id = clay.ElementId.IDI("terminal_scrollbar_thumb", @truncate(@intFromPtr(pane))),
-                        .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(thumb_height) } },
-                        .background_color = thumb_color,
-                        .corner_radius = .all(3),
-                    })({});
+                clay.UI()(.{ .id = track_id, .floating = .{ .attach_to = .to_parent, .attach_points = .{ .element = .right_top, .parent = .right_top }, .z_index = 1000 }, .layout = .{ .sizing = .{ .w = .fixed(term_instance.scrollbar_width), .h = .grow }, .direction = .top_to_bottom }, .background_color = .{ 30, 30, 46, 255 } })({
+                    clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(thumb_y) } } })({});
+                    clay.UI()(.{ .id = clay.ElementId.IDI("terminal_scrollbar_thumb", @truncate(@intFromPtr(pane))), .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(thumb_height) } }, .background_color = .{ 88, 88, 120, 200 }, .corner_radius = .all(3) })({});
                 });
             }
         });
-
-        // Context Menu
         term_instance.renderContextMenu();
     }
 };

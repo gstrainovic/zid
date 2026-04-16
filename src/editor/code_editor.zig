@@ -63,7 +63,7 @@ fn renderHighlightedLine(
 ) void {
     const tags = hl.tagsForLine(line_idx, line.len, arena) catch {
         const persistent = arena.dupe(u8, line) catch "";
-        clay.text(persistent, .{ .font_size = font_size, .color = plain_color });
+        clay.text(persistent, .{ .font_size = font_size, .color = plain_color, .wrap_mode = .none });
         return;
     };
     std.sort.insertion(flow_core.highlight.ColorTag, tags, {}, lessThanTag);
@@ -79,15 +79,15 @@ fn renderHighlightedLine(
 
         if (actual_start > pos) {
             const seg = arena.dupe(u8, line[pos..actual_start]) catch "";
-            clay.text(seg, .{ .font_size = font_size, .color = plain_color });
+            clay.text(seg, .{ .font_size = font_size, .color = plain_color, .wrap_mode = .none });
         }
         const seg = arena.dupe(u8, line[actual_start..tag.end]) catch "";
-        clay.text(seg, .{ .font_size = font_size, .color = colorFromTag(tag.fg) });
+        clay.text(seg, .{ .font_size = font_size, .color = colorFromTag(tag.fg), .wrap_mode = .none });
         pos = tag.end;
     }
     if (pos < line.len) {
         const seg = arena.dupe(u8, line[pos..]) catch "";
-        clay.text(seg, .{ .font_size = font_size, .color = plain_color });
+        clay.text(seg, .{ .font_size = font_size, .color = plain_color, .wrap_mode = .none });
     }
 }
 
@@ -1709,7 +1709,7 @@ pub const CodeEditor = struct {
                 renderHighlightedLine(arena, self.highlighter.?, line_idx, line, self.font_size, plain_color);
             } else {
                 const persistent = arena.dupe(u8, line) catch "";
-                clay.text(persistent, .{ .font_size = self.font_size, .color = plain_color });
+                clay.text(persistent, .{ .font_size = self.font_size, .color = plain_color, .wrap_mode = .none });
             }
 
             if (line_idx == self.cursor.row) {
@@ -1945,7 +1945,7 @@ pub const CodeEditor = struct {
             }
         }
         const item_height = @as(f32, @floatFromInt(self.font_size)) + 12;
-        const menu_width: f32 = 200;
+        const menu_width: f32 = 300;
         
         var item_count: f32 = 5; // Cut, Copy, Paste + Split V, Split H
         const path = self.buffer.get_file_path();
@@ -2008,7 +2008,7 @@ pub const CodeEditor = struct {
             .background_color = if (is_hovered) .{ 70, 70, 90, 255 } else .{ 0, 0, 0, 0 },
             .corner_radius = .all(2),
         })({
-            clay.text(label, .{ .font_size = self.font_size, .color = .{ 220, 220, 220, 255 } });
+            clay.text(label, .{ .font_size = self.font_size, .color = .{ 220, 220, 220, 255 }, .wrap_mode = .none });
         });
 
         return is_hovered and mouse_pressed;
