@@ -20,7 +20,7 @@ def send_rpc(method, params=[]):
 if __name__ == "__main__":
     import subprocess
     print("Building vulkan-ed...")
-    subprocess.run(["zig", "build"], check=True)
+    
 
     if len(sys.argv) < 2:
         print("Usage: rpc_open.py <method> [params...]")

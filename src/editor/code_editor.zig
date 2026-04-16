@@ -1944,15 +1944,11 @@ pub const CodeEditor = struct {
                 self.context_menu_y = 100;
             }
         }
-        const item_height = @as(f32, @floatFromInt(self.font_size)) + 12;
-        const menu_width: f32 = 300;
         
         var item_count: f32 = 5; // Cut, Copy, Paste + Split V, Split H
         const path = self.buffer.get_file_path();
         const is_md = std.mem.endsWith(u8, path, ".md");
         if (is_md) item_count += 1;
-
-        const menu_height = item_height * item_count + 8 + 8; // Extra padding for separators
 
         clay.UI()(.{
             .id = clay.ElementId.ID("context-menu-anchor"),
@@ -1967,9 +1963,10 @@ pub const CodeEditor = struct {
             clay.UI()(.{
                 .id = clay.ElementId.ID("context-menu-container"),
                 .layout = .{
-                    .sizing = .{ .w = .fixed(menu_width), .h = .fixed(menu_height) },
+                    .sizing = .{ .w = .fit, .h = .fit },
                     .direction = .top_to_bottom,
-                    .padding = .all(4),
+                    .padding = .all(8),
+                    .child_gap = 4,
                 },
                 .background_color = .{ 45, 45, 60, 255 },
                 .border = .{ .width = .all(1), .color = .{ 100, 100, 120, 255 } },
@@ -2029,15 +2026,15 @@ pub const CodeEditor = struct {
         clay.UI()(.{
             .id = item_id,
             .layout = .{
-                .sizing = .{ .w = .grow, .h = .fixed(@floatFromInt(self.font_size + 12)) },
-                .padding = .{ .left = 8, .right = 8 },
+                .sizing = .{ .w = .fixed(250), .h = .fixed(@floatFromInt(self.font_size + 12)) },
+                .padding = .{ .left = 12, .right = 12, .top = 6, .bottom = 6 },
                 .child_alignment = .{ .x = .left, .y = .center },
             },
             .background_color = if (is_hovered) .{ 80, 80, 100, 255 } else .{ 0, 0, 0, 0 },
             .corner_radius = .all(2),
         })({
             const persistent = arena.dupe(u8, label) catch "";
-            clay.text(persistent, .{ .font_size = self.font_size - 2, .color = .{ 220, 220, 240, 255 } });
+            clay.text(persistent, .{ .font_size = self.font_size - 2, .color = .{ 220, 220, 240, 255 }, .wrap_mode = .none });
         });
     }
 
