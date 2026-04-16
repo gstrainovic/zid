@@ -71,9 +71,7 @@ pub const TabBarState = struct {
 
         for (self.tabs.items, 0..) |*tab, i| {
             log.debug("TabBarState.deinit: cleaning up tab {d}: {s}", .{ i, tab.path });
-            if (tab.buffer) |buf| {
-                buf.deinit();
-            }
+            // Buffer will be deinitialized by UI.open_buffers
             self.allocator.free(tab.path);
             self.allocator.free(tab.display_name);
         }
@@ -195,9 +193,7 @@ pub const TabBarState = struct {
 
         const tab = self.tabs.orderedRemove(index);
 
-        if (tab.buffer) |buf| {
-            buf.deinit();
-        }
+        // Ownership of buffer is in UI.open_buffers
 
         // Cleanup terminal instance if this was a terminal tab
         if (tab.kind == .terminal) {
