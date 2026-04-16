@@ -555,24 +555,33 @@ pub fn main() !void {
                 if (active_tab != null and active_tab.?.buffer != null) {
                     ui_system.code_editor.setBuffer(active_tab.?.buffer.?, path);
                 } else {
-                    // Load from disk
-                    const content = std.fs.cwd().readFileAlloc(allocator, path, 64 * 1024 * 1024) catch |err| {
-                        log.err("Failed to load tab content for '{s}': {}", .{ path, err });
-                        continue;
-                    };
-                    defer allocator.free(content);
-                    
-                    // Create new buffer
-                    const new_buf = try @import("flow_core").Buffer.create(allocator);
-                    new_buf.root = try new_buf.load_from_string(content, &new_buf.file_eol_mode, &new_buf.file_utf8_sanitized);
-                    new_buf.set_file_path(path);
-                    new_buf.last_save = new_buf.root;
+                    // Check if current editor buffer already matches this path (e.g. initial buffer)
+                    const current_buf_path = ui_system.code_editor.buffer.get_file_path();
+                    if (std.mem.eql(u8, current_buf_path, path)) {
+                        log.info("Reusing existing buffer for {s}", .{path});
+                        if (active_tab) |t| {
+                            t.buffer = ui_system.code_editor.buffer;
+                        }
+                    } else {
+                        // Load from disk
+                        const content = std.fs.cwd().readFileAlloc(allocator, path, 64 * 1024 * 1024) catch |err| {
+                            log.err("Failed to load tab content for '{s}': {}", .{ path, err });
+                            continue;
+                        };
+                        defer allocator.free(content);
+                        
+                        // Create new buffer
+                        const new_buf = try @import("flow_core").Buffer.create(allocator);
+                        new_buf.root = try new_buf.load_from_string(content, &new_buf.file_eol_mode, &new_buf.file_utf8_sanitized);
+                        new_buf.set_file_path(path);
+                        new_buf.last_save = new_buf.root;
 
-                    if (active_tab) |t| {
-                        t.buffer = new_buf;
+                        if (active_tab) |t| {
+                            t.buffer = new_buf;
+                        }
+                        
+                        ui_system.code_editor.setBuffer(new_buf, path);
                     }
-                    
-                    ui_system.code_editor.setBuffer(new_buf, path);
                 }
             } else if (kind == .image) {
                 // Bild beim Tab-Wechsel sicherstellen dass es geladen ist
