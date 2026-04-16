@@ -76,6 +76,8 @@ pub const Action = enum {
     ScrollDown,
     ShowContextMenu,
     MdPreview,
+    SplitVertical,
+    SplitHorizontal,
 };
 
 pub const KeyEvent = struct {
