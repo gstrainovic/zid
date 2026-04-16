@@ -4,7 +4,7 @@ const zigdown = @import("zigdown");
 const ui_mod = @import("mod.zig");
 const Theme = ui_mod.Theme;
 const ImageTexture = @import("../clay_renderer/image_renderer.zig").ImageTexture;
-
+const flow_core = @import("flow_core");
 const Block = zigdown.Block;
 const Inline = zigdown.Inline;
 
@@ -14,6 +14,26 @@ pub const MarkdownView = struct {
     font_size: u16 = 20,
     base_path: []const u8 = "",
 
+    /// View for scrolling
+    view: flow_core.View,
+
+    /// Scrollbar-Dragging State
+    scrollbar_dragging: bool = false,
+    scrollbar_drag_start_y: f32 = 0,
+    scrollbar_scroll_offset_at_drag_start: f32 = 0,
+
+    /// Scrollbar Bounds
+    scrollbar_track_x: f32 = 0,
+    scrollbar_track_y: f32 = 0,
+    scrollbar_thumb_y: f32 = 0,
+    scrollbar_thumb_height: f32 = 0,
+    scrollbar_container_width: f32 = 0,
+    scrollbar_width: f32 = 10,
+
+    scroll_offset_y: f32 = 0,
+    viewport_height: f32 = 0,
+    content_height: f32 = 0,
+
     const Self = @This();
 
     pub fn init(allocator: std.mem.Allocator, text: []const u8, base_path: []const u8) Self {
@@ -21,6 +41,7 @@ pub const MarkdownView = struct {
             .allocator = allocator,
             .text = allocator.dupe(u8, text) catch "",
             .base_path = allocator.dupe(u8, base_path) catch "",
+            .view = .{},
         };
     }
 
@@ -35,24 +56,165 @@ pub const MarkdownView = struct {
         self.base_path = "";
     }
 
+    pub fn scrollLines(self: *Self, delta: i32) void {
+        const scroll_speed: f32 = 60.0;
+        if (delta > 0) {
+            self.scroll_offset_y = @max(0, self.scroll_offset_y - @as(f32, @floatFromInt(delta)) * scroll_speed);
+        } else if (delta < 0) {
+            const max_scroll = @max(0, self.content_height - self.viewport_height);
+            self.scroll_offset_y = @min(max_scroll, self.scroll_offset_y + @as(f32, @floatFromInt(-delta)) * scroll_speed);
+        }
+    }
+
+    pub fn handleScrollbarMouseDown(self: *Self, x: f32, y: f32) bool {
+        if (self.content_height <= self.viewport_height) return false;
+
+        if (x < self.scrollbar_track_x) return false;
+        if (x > self.scrollbar_track_x + self.scrollbar_width) return false;
+        if (y < self.scrollbar_track_y) return false;
+        if (y > self.scrollbar_track_y + self.viewport_height) return false;
+
+        if (y >= self.scrollbar_thumb_y and y <= self.scrollbar_thumb_y + self.scrollbar_thumb_height) {
+            self.scrollbar_dragging = true;
+            self.scrollbar_drag_start_y = y;
+            self.scrollbar_scroll_offset_at_drag_start = self.scroll_offset_y;
+            return true;
+        }
+
+        // Jump to position
+        const track_height = self.viewport_height;
+        const total_height = self.content_height;
+        const thumb_height = self.scrollbar_thumb_height;
+        const scrollable_height = track_height - thumb_height;
+
+        if (scrollable_height > 0) {
+            const click_pos_rel = (y - self.scrollbar_track_y) - (thumb_height / 2.0);
+            const scroll_frac = @max(0, @min(1.0, click_pos_rel / scrollable_height));
+            self.scroll_offset_y = scroll_frac * (total_height - track_height);
+        }
+
+        return true;
+    }
+
+    pub fn handleScrollbarMouseMove(self: *Self, x: f32, y: f32) void {
+        _ = x;
+        if (!self.scrollbar_dragging) return;
+        if (self.content_height <= self.viewport_height) return;
+
+        const track_height = self.viewport_height;
+        const total_height = self.content_height;
+        const thumb_height = self.scrollbar_thumb_height;
+        const scrollable_height = track_height - thumb_height;
+
+        if (scrollable_height <= 0) return;
+
+        const delta_y = y - self.scrollbar_drag_start_y;
+        const scroll_delta_frac = delta_y / scrollable_height;
+        const scroll_delta_px = scroll_delta_frac * (total_height - track_height);
+
+        var new_offset = self.scrollbar_scroll_offset_at_drag_start + scroll_delta_px;
+        const max_scroll = total_height - track_height;
+        new_offset = @max(0, @min(new_offset, max_scroll));
+
+        self.scroll_offset_y = new_offset;
+    }
+
+    pub fn handleMouseUp(self: *Self) void {
+        self.scrollbar_dragging = false;
+    }
+
     pub fn render(self: *Self, arena: std.mem.Allocator, theme: Theme, ui_ptr: *ui_mod.UI) void {
         var result = zigdown.parser.timedParse(arena, self.text, false) catch |err| {
             std.log.scoped(.markdown).err("Failed to parse markdown: {any}", .{err});
             return;
         };
 
+        // Update layout info from previous frame
+        const clip_data = clay.getElementData(clay.ElementId.ID("md_viewport"));
+        const content_data = clay.getElementData(clay.ElementId.ID("md_content"));
+        if (clip_data.found) {
+            self.viewport_height = clip_data.bounding_box.height;
+            self.scrollbar_track_x = clip_data.bounding_box.x + clip_data.bounding_box.width;
+            self.scrollbar_track_y = clip_data.bounding_box.y;
+        }
+        if (content_data.found) {
+            self.content_height = content_data.bounding_box.height;
+        }
+
         clay.UI()(.{
-            .id = clay.ElementId.ID("markdown_view"),
+            .id = clay.ElementId.ID("markdown_view_root"),
             .layout = .{
                 .sizing = .{ .w = .grow, .h = .grow },
-                .direction = .top_to_bottom,
-                .padding = .all(24),
-                .child_gap = 16,
+                .direction = .left_to_right,
             },
             .background_color = theme.bg,
-            .clip = .{ .vertical = true },
         })({
-            self.renderBlock(&result.parser.document, arena, theme, ui_ptr);
+            // Content area
+            clay.UI()(.{
+                .id = clay.ElementId.ID("md_viewport"),
+                .layout = .{ .sizing = .grow },
+                .clip = .{ .vertical = true },
+            })({
+                clay.UI()(.{
+                    .id = clay.ElementId.ID("md_content"),
+                    .floating = .{
+                        .attach_to = .to_parent,
+                        .attach_points = .{ .element = .left_top, .parent = .left_top },
+                        .offset = .{ .x = 0, .y = -self.scroll_offset_y },
+                    },
+                    .layout = .{
+                        .sizing = .{ .w = .fixed(if (clip_data.found) clip_data.bounding_box.width else 800), .h = .fit },
+                        .direction = .top_to_bottom,
+                        .padding = .all(24),
+                        .child_gap = 16,
+                    },
+                })({
+                    self.renderBlock(&result.parser.document, arena, theme, ui_ptr);
+                });
+            });
+
+            // Scrollbar
+            if (self.content_height > self.viewport_height) {
+                self.renderScrollbar(theme);
+            }
+        });
+    }
+
+    fn renderScrollbar(self: *Self, theme: Theme) void {
+        const total = self.content_height;
+        const visible = self.viewport_height;
+        if (total <= visible) return;
+
+        const track_height = visible;
+        const thumb_ratio = visible / total;
+        const thumb_height = @max(20.0, track_height * thumb_ratio);
+        const max_scroll = total - visible;
+        const scroll_frac = if (max_scroll > 0) self.scroll_offset_y / max_scroll else 0;
+        const thumb_y = scroll_frac * (track_height - thumb_height);
+
+        self.scrollbar_thumb_y = self.scrollbar_track_y + thumb_y;
+        self.scrollbar_thumb_height = thumb_height;
+
+        const track_color: clay.Color = .{ theme.surface[0], theme.surface[1], theme.surface[2], 100 };
+        const thumb_color: clay.Color = .{ theme.accent[0], theme.accent[1], theme.accent[2], 180 };
+
+        clay.UI()(.{
+            .id = clay.ElementId.ID("md_scrollbar_track"),
+            .layout = .{
+                .sizing = .{ .w = .fixed(self.scrollbar_width), .h = .grow },
+                .direction = .top_to_bottom,
+            },
+            .background_color = track_color,
+        })({
+            clay.UI()(.{
+                .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(thumb_y) } },
+            })({});
+            clay.UI()(.{
+                .id = clay.ElementId.ID("md_scrollbar_thumb"),
+                .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(thumb_height) } },
+                .background_color = thumb_color,
+                .corner_radius = .all(3),
+            })({});
         });
     }
 
