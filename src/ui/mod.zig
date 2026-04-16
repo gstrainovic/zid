@@ -1019,11 +1019,16 @@ pub const UI = struct {
                 term_instance.scrollbar_thumb_y = term_instance.scrollbar_track_y + thumb_y;
                 term_instance.scrollbar_thumb_height = thumb_height;
 
-                const track_color: clay.Color = .{ 30, 30, 46, 100 };
-                const thumb_color: clay.Color = .{ 88, 88, 120, 180 };
+                const track_color: clay.Color = .{ 30, 30, 46, 255 };
+                const thumb_color: clay.Color = .{ 88, 88, 120, 200 };
 
                 clay.UI()(.{
                     .id = clay.ElementId.ID("terminal_scrollbar_track"),
+                    .floating = .{
+                        .attach_to = .to_parent,
+                        .attach_points = .{ .element = .right_top, .parent = .right_top },
+                        .z_index = 1000,
+                    },
                     .layout = .{
                         .sizing = .{ .w = .fixed(term_instance.scrollbar_width), .h = .grow },
                         .direction = .top_to_bottom,

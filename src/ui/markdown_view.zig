@@ -153,7 +153,7 @@ pub const MarkdownView = struct {
             clay.UI()(.{
                 .id = clay.ElementId.ID("md_viewport"),
                 .layout = .{ .sizing = .grow },
-                .clip = .{ .vertical = true },
+                .clip = .{ .vertical = true, .horizontal = true },
             })({
                 clay.UI()(.{
                     .id = clay.ElementId.ID("md_content"),
@@ -195,13 +195,15 @@ pub const MarkdownView = struct {
         self.scrollbar_thumb_y = self.scrollbar_track_y + thumb_y;
         self.scrollbar_thumb_height = thumb_height;
 
-        const track_color: clay.Color = .{ 30, 30, 46, 100 };
-        const thumb_color: clay.Color = .{ 88, 88, 120, 180 };
+        const track_color: clay.Color = .{ 30, 30, 46, 255 }; // Fully opaque track
+        const thumb_color: clay.Color = .{ 88, 88, 120, 200 };
 
         clay.UI()(.{
             .id = clay.ElementId.ID("md_scrollbar_track"),
             .floating = .{
-                .z_index = 100, // Ensure it's above floating content
+                .attach_to = .to_parent,
+                .attach_points = .{ .element = .right_top, .parent = .right_top },
+                .z_index = 1000,
             },
             .layout = .{
                 .sizing = .{ .w = .fixed(self.scrollbar_width), .h = .grow },
