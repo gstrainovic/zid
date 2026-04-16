@@ -479,11 +479,13 @@ pub fn main() !void {
 
         // Tab-Wechsel anfordern (Markdown Preview)
         if (ui_system.pending_tab_switch) |path| {
+            log.info("Main: Opening preview tab for {s}", .{path});
             ui_system.tab_bar.openFile(path) catch |err| {
                 log.err("Failed to open tab for preview: {}", .{err});
             };
             ui_system.allocator.free(path);
             ui_system.pending_tab_switch = null;
+            state_dirty = true;
         }
 
         if (ui_system.tab_bar.pending_switch_path) |path| {

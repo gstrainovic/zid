@@ -56,6 +56,13 @@ pub fn build(b: *std.Build) void {
     });
     const nanosvg_mod = nanosvg_dep.module("root");
 
+    const zigdown_dep = b.dependency("zigdown", .{
+        .target = target,
+        .optimize = optimize,
+        .builtin_ts_parsers = @as([]const u8, ""),
+    });
+    const zigdown_mod = zigdown_dep.module("zigdown");
+
     const exe_mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
@@ -71,6 +78,7 @@ pub fn build(b: *std.Build) void {
     exe_mod.addImport("flow_core", flow_core_dep.module("flow-core"));
     exe_mod.addImport("syntax", syntax_mod);
     exe_mod.addImport("nanosvg", nanosvg_mod);
+    exe_mod.addImport("zigdown", zigdown_mod);
 
     // ghostty-vt: Terminal emulator library
     if (b.lazyDependency("ghostty", .{
