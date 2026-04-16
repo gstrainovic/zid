@@ -222,5 +222,22 @@ fn mapScopeToColor(scope: []const u8) u32 {
     if (std.mem.startsWith(u8, scope, "attribute")) return yellow;
     if (std.mem.startsWith(u8, scope, "label")) return sky;
     if (std.mem.startsWith(u8, scope, "tag")) return mauve;
+
+    // Markup (Markdown)
+    if (std.mem.startsWith(u8, scope, "markup.heading")) return mauve;
+    if (std.mem.startsWith(u8, scope, "markup.bold")) return peach;
+    if (std.mem.startsWith(u8, scope, "markup.italic")) return peach;
+    if (std.mem.startsWith(u8, scope, "markup.link")) return blue;
+    if (std.mem.startsWith(u8, scope, "markup.list")) return teal;
+    if (std.mem.startsWith(u8, scope, "markup.quote")) return green;
+    if (std.mem.startsWith(u8, scope, "markup.raw")) return yellow; // Inline code
+    if (std.mem.startsWith(u8, scope, "markup")) return text;
+
+    // Legacy/Other Markdown Scopes
+    if (std.mem.startsWith(u8, scope, "text.title")) return mauve;
+    if (std.mem.startsWith(u8, scope, "text.literal")) return yellow;
+    if (std.mem.startsWith(u8, scope, "punctuation.special")) return mauve;
+    if (std.mem.startsWith(u8, scope, "punctuation.delimiter")) return overlay1;
+
     return text;
 }
