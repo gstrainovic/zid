@@ -115,10 +115,16 @@ pub const TabBarState = struct {
             self.setActive(self.tabs.items.len - 1);
             return;
         }
-        const kind = file_types.getFileKind(path);
 
-        // Dateiname extrahieren
-        const display_name = std.fs.path.basename(path);
+        var kind = file_types.getFileKind(path);
+        var display_name = std.fs.path.basename(path);
+
+        if (std.mem.startsWith(u8, path, "preview://")) {
+            kind = .markdown_preview;
+            display_name = std.fs.path.basename(path["preview://".len..]);
+        }
+
+        // Dupe strings for tab
         const path_copy = try self.allocator.dupe(u8, path);
         const name_copy = try self.allocator.dupe(u8, display_name);
 

@@ -195,15 +195,20 @@ pub const DirectWriteFace = struct {
 
         // Get metrics to calculate exact size and offsets
         const gm = self.glyphMetrics(glyph_id);
-        const physical_width = @as(u32, @intFromFloat(@ceil(gm.width * scale))) + 2;
-        const physical_height = @as(u32, @intFromFloat(@ceil(gm.height * scale))) + 2;
+        
+        // Ratio between the requested physical rasterization size and the base point_size
+        const physical_size = font_size * scale;
+        const size_ratio = physical_size / self.point_size;
+        
+        const physical_width = @as(u32, @intFromFloat(@ceil(gm.width * size_ratio))) + 2;
+        const physical_height = @as(u32, @intFromFloat(@ceil(gm.height * size_ratio))) + 2;
         
         // Render at padding offset
         const padding = 8.0;
-        // The glyph starts at baseline_x + gm.bearing_x * scale. 
+        // The glyph starts at baseline_x + gm.bearing_x * size_ratio. 
         // We want the resulting RasterizedGlyph to have the correct internal offsets.
-        const baseline_x = padding - (gm.bearing_x * scale) + subpixel_x;
-        const baseline_y = padding + (gm.bearing_y * scale);
+        const baseline_x = padding - (gm.bearing_x * size_ratio) + subpixel_x;
+        const baseline_y = padding + (gm.bearing_y * size_ratio);
 
         // Create default rendering params
         var rendering_params: ?*anyopaque = null;
@@ -244,9 +249,9 @@ pub const DirectWriteFace = struct {
         return RasterizedGlyph{
             .width = physical_width,
             .height = physical_height,
-            .offset_x = @as(i32, @intFromFloat(@floor(gm.bearing_x * scale))),
-            .offset_y = @as(i32, @intFromFloat(@floor(gm.bearing_y * scale))),
-            .advance_x = gm.advance_x,
+            .offset_x = @as(i32, @intFromFloat(@floor(gm.bearing_x * size_ratio))),
+            .offset_y = @as(i32, @intFromFloat(@floor(gm.bearing_y * size_ratio))),
+            .advance_x = gm.advance_x * (font_size / self.point_size),
             .is_color = false,
         };
     }

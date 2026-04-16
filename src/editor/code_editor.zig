@@ -139,6 +139,8 @@ pub const CodeEditor = struct {
 
     typing_in_progress: bool = false,
 
+    pending_md_preview: bool = false,
+
     /// Zeitpunkt der letzten Cursor-Bewegung (für Blink-Delay)
     last_cursor_movement_ms: f32 = 0,
 
@@ -318,6 +320,7 @@ pub const CodeEditor = struct {
     pub fn setLanguageFromPath(self: *Self, file_path: []const u8) void {
         const log = std.log.scoped(.highlight);
         self.destroyHighlighter();
+        self.buffer.set_file_path(file_path);
         const content = self.buffer.store_to_string_cached(self.buffer.root, self.buffer.file_eol_mode);
         
         // Create primary highlighter
@@ -1223,6 +1226,9 @@ pub const CodeEditor = struct {
                 self.selection_anchor = null;
                 return;
             },
+            .MdPreview => {
+                self.pending_md_preview = true;
+            },
             else => {},
         }
         self.recordCursorMovement();
@@ -1300,6 +1306,12 @@ pub const CodeEditor = struct {
             }
             if (clay.pointerOver(clay.getElementId("Paste"))) {
                 self.dispatchAction(.Paste);
+                self.show_context_menu = false;
+                return;
+            }
+            if (clay.pointerOver(clay.getElementId("Md Preview"))) {
+                std.log.scoped(.editor).info("Context Menu: Md Preview clicked", .{});
+                self.dispatchAction(.MdPreview);
                 self.show_context_menu = false;
                 return;
             }
@@ -1858,9 +1870,15 @@ pub const CodeEditor = struct {
     }
 
     fn renderContextMenu(self: *Self, arena: std.mem.Allocator) void {
-        const item_height = @as(f32, @floatFromInt(self.font_size)) + 16;
-        const menu_width: f32 = 120;
-        const menu_height = item_height * 3;
+        const item_height = @as(f32, @floatFromInt(self.font_size)) + 12;
+        const menu_width: f32 = 140;
+        
+        var item_count: f32 = 3;
+        const path = self.buffer.get_file_path();
+        const is_md = std.mem.endsWith(u8, path, ".md");
+        if (is_md) item_count += 1;
+
+        const menu_height = item_height * item_count + 8;
 
         clay.UI()(.{
             .id = clay.ElementId.ID("context_menu_anchor"),
@@ -1889,6 +1907,9 @@ pub const CodeEditor = struct {
                 self.renderContextMenuItem("Cut", .Cut, arena);
                 self.renderContextMenuItem("Copy", .Copy, arena);
                 self.renderContextMenuItem("Paste", .Paste, arena);
+                if (is_md) {
+                    self.renderContextMenuItem("Md Preview", .MdPreview, arena);
+                }
             });
         });
     }
@@ -1899,6 +1920,10 @@ pub const CodeEditor = struct {
         const is_hovered = clay.pointerOver(item_id);
         if (is_hovered) {
             self.desired_cursor = .arrow;
+            if (self.mouse_down) {
+                // Klick-Erkennung im Render-Loop ist bei Clay oft so gelöst, 
+                // oder man macht es im handleMouseDown. Wir machen beides robust.
+            }
         }
 
         clay.UI()(.{

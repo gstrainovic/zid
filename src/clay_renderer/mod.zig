@@ -266,10 +266,11 @@ pub const ClayRenderer = struct {
                         const bbox = cmd.bounding_box;
 
                         // Baseline berechnen: bbox.y + scaled_ascender
-                        var baseline_y = bbox.y + @as(f32, @floatFromInt(text_data.font_size)) * 0.8; // Fallback
+                        // Snap to integer pixels to prevent vertical jitter between fragments
+                        var baseline_y = @round(bbox.y + @as(f32, @floatFromInt(text_data.font_size)) * 0.8); // Fallback
                         if (text_renderer.ts_ptr.getMetrics()) |metrics| {
                             const scale = @as(f32, @floatFromInt(text_data.font_size)) / metrics.point_size;
-                            baseline_y = bbox.y + metrics.ascender * scale;
+                            baseline_y = @round(bbox.y + metrics.ascender * scale);
                         }
 
                         const col = text_data.text_color;
