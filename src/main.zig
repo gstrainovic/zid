@@ -189,6 +189,11 @@ pub fn main() !void {
     // Phase 9: Aktuelle Datei als Tab öffnen (falls geladen)
     if (resolved_file_path) |path| {
         ui_system.file_explorer.file_to_open = path;
+        if (std.mem.endsWith(u8, path, ".md")) {
+            const preview_path = allocator.alloc(u8, path.len + 10) catch path;
+            const final_path = std.fmt.bufPrint(@constCast(preview_path), "preview://{s}", .{path}) catch path;
+            ui_system.tab_bar.openFile(final_path) catch {};
+        }
     }
 
     // 6. Clay Renderer initialisieren (WGPU)
@@ -213,6 +218,7 @@ pub fn main() !void {
         plat.getSize().height,
     );
     defer image_rdr.deinit();
+    ui_system.image_renderer = &image_rdr;
 
     // Logo Textur laden (PNG via gooey)
     var logo_texture = image_rdr.createTextureFromPath(allocator, "libs/gooey/assets/ziglang_logo.png") catch |err| blk: {
@@ -590,7 +596,7 @@ pub fn main() !void {
                     view_ptr.*.text = ui_system.allocator.dupe(u8, md_content) catch "";
                 } else {
                     const view = allocator.create(@import("ui/markdown_view.zig").MarkdownView) catch unreachable;
-                    view.* = @import("ui/markdown_view.zig").MarkdownView.init(ui_system.allocator, md_content);
+                    view.* = @import("ui/markdown_view.zig").MarkdownView.init(ui_system.allocator, md_content, source_path);
                     const path_copy = allocator.dupe(u8, path) catch unreachable;
                     ui_system.open_markdown_views.put(path_copy, view) catch {};
                 }
