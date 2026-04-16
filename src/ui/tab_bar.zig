@@ -247,13 +247,19 @@ pub const TabBarState = struct {
     }
 };
 
-/// Tab-Bar rendern (Clay Layout)
+pub const TabRequest = struct {
+    index: usize,
+    close: bool = false,
+    do_switch: bool = false,
+};
+
+/// Tab-Bar für Clay rendern
 pub fn renderTabBar(
     arena: std.mem.Allocator,
     state: *TabBarState,
     theme: Theme,
     mouse_pressed: bool,
-) void {
+) ?TabRequest {
     // Tab-Schließen und Tab-Wechsel NACH der Schleife verarbeiten (vermeidet Use-After-Free und endloses Re-Laden)
     var tab_to_close: ?usize = null;
     var tab_to_switch: ?usize = null;
@@ -387,23 +393,11 @@ pub fn renderTabBar(
         state.openTerminal();
     }
 
-    // Tab schließen NACH dem Rendering (keine Listen-Modifikation während Iteration)
-    if (tab_to_close) |idx| {
-        state.closeTab(idx);
-    }
+    if (tab_to_close) |idx| return .{ .index = idx, .close = true };
+    if (tab_to_switch) |idx| return .{ .index = idx, .do_switch = true };
 
-    // Tab wechseln NACH dem Rendering (nur einmal, nicht pro Frame)
-    if (tab_to_switch) |idx| {
-        state.setActive(idx);
-    }
+    return null;
 }
-
-/// Request von renderTab
-const TabRequest = struct {
-    index: usize,
-    close: bool = false,
-    do_switch: bool = false,
-};
 
 /// Einzelnen Tab rendern
 /// Gibt optional Request zurück (deferred close oder switch)
