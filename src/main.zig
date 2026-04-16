@@ -549,39 +549,17 @@ pub fn main() !void {
                 state_dirty = true;
                 wio.cancelWait();
             } else if (kind == .text) {
-                // Check if tab already has a buffer
-                const active_tab = ui_system.getActiveTabBar().getActiveTab();
-                if (active_tab != null and active_tab.?.buffer != null) {
-                    ui_system.getActiveEditor().setBuffer(active_tab.?.buffer.?, path);
-                } else {
-                    // Check if current editor buffer already matches this path (e.g. initial buffer)
-                    const current_buf_path = ui_system.getActiveEditor().buffer.get_file_path();
-                    if (std.mem.eql(u8, current_buf_path, path)) {
-                        log.info("Reusing existing buffer for {s}", .{path});
-                        if (active_tab) |t| {
-                            t.buffer = ui_system.getActiveEditor().buffer;
-                        }
-                    } else {
-                        // Load from disk
-                        const content = std.fs.cwd().readFileAlloc(allocator, path, 64 * 1024 * 1024) catch |err| {
-                            log.err("Failed to load tab content for '{s}': {}", .{ path, err });
-                            continue;
-                        };
-                        defer allocator.free(content);
-                        
-                        // Create new buffer
-                        const new_buf = try @import("flow_core").Buffer.create(allocator);
-                        new_buf.root = try new_buf.load_from_string(content, &new_buf.file_eol_mode, &new_buf.file_utf8_sanitized);
-                        new_buf.set_file_path(path);
-                        new_buf.last_save = new_buf.root;
-
-                        if (active_tab) |t| {
-                            t.buffer = new_buf;
-                        }
-                        
-                        ui_system.getActiveEditor().setBuffer(new_buf, path);
-                    }
+                // Fetch or create buffer from ui_system (ensures central ownership)
+                const new_buf = ui_system.getOrCreateBuffer(path) catch |err| {
+                    log.err("Failed to load/get buffer for '{s}': {}", .{ path, err });
+                    continue;
+                };
+                
+                if (ui_system.getActiveTabBar().getActiveTab()) |t| {
+                    t.buffer = new_buf;
                 }
+                
+                ui_system.getActiveEditor().setBuffer(new_buf, path);
             } else if (kind == .image) {
                 // Bild beim Tab-Wechsel sicherstellen dass es geladen ist
                 if (!ui_system.open_images.contains(path)) {

@@ -93,6 +93,9 @@ pub const UI = struct {
 
     active_dialog: ?ActiveDialog = null,
 
+    // Alle aktuell offenen Buffer (zentrales Ownership)
+    open_buffers: std.StringHashMap(*@import("flow_core").Buffer),
+
     // Map von Pfad zu geladener Textur-ID/Pointer
     open_images: std.StringHashMap(*anyopaque),
     
@@ -125,27 +128,31 @@ pub const UI = struct {
 
         const clay_memory = try allocator.alloc(u8, generous_memory);
 
-        // Initialer leerer Buffer für den Editor
-        const initial_buf = try @import("flow_core").Buffer.create(allocator);
-        initial_buf.root = try initial_buf.load_from_string("", &initial_buf.file_eol_mode, &initial_buf.file_utf8_sanitized);
-
-        // Pane System initialisieren (mit einem initialen Leaf)
-        const root_pane = try pane_mod.Pane.createLeaf(allocator, initial_buf);
-        const active_pane = root_pane;
-        const leaf = &active_pane.data.leaf;
-
         // File Explorer initialisieren
         const file_explorer = file_explorer_mod.FileExplorerState.init(allocator);
 
+        var open_buffers = std.StringHashMap(*@import("flow_core").Buffer).init(allocator);
+        errdefer {
+            var it = open_buffers.iterator();
+            while (it.next()) |entry| {
+                entry.value_ptr.*.deinit();
+                allocator.free(entry.key_ptr.*);
+            }
+            open_buffers.deinit();
+        }
+
+        // Initialer leerer Buffer für den Editor
+        const initial_buf = try @import("flow_core").Buffer.create(allocator);
+        
         // Default-Inhalt: Entweder Datei laden oder Hardcoded-Beispiel
         if (default_file_path) |path| {
             const file_content = std.fs.cwd().readFileAlloc(allocator, path, 64 * 1024 * 1024) catch |err| {
                 log.err("Failed to load default file '{s}': {}. Using fallback content.", .{ path, err });
-                var buf: [256]u8 = undefined;
-                const msg = std.fmt.bufPrint(&buf, "// Failed to load: {s}\n// Error: {}", .{ path, err }) catch "// Failed to load file";
+                const msg = "// Failed to load file";
+                initial_buf.root = try initial_buf.load_from_string(msg, &initial_buf.file_eol_mode, &initial_buf.file_utf8_sanitized);
+                try open_buffers.put(try allocator.dupe(u8, "fallback"), initial_buf);
                 
-                initial_buf.root = initial_buf.load_from_string(msg, &initial_buf.file_eol_mode, &initial_buf.file_utf8_sanitized) catch initial_buf.root;
-
+                const root_pane = try pane_mod.Pane.createLeaf(allocator, initial_buf);
                 return Self{
                     .allocator = allocator,
                     .config = config,
@@ -155,7 +162,7 @@ pub const UI = struct {
                     .anim_manager = AnimationManager.init(allocator),
                     .frame_arena = std.heap.ArenaAllocator.init(allocator),
                     .root_pane = root_pane,
-                    .active_pane = active_pane,
+                    .active_pane = root_pane,
                     .text_renderer = null,
                     .file_explorer = file_explorer,
                     .show_file_explorer = true,
@@ -163,12 +170,8 @@ pub const UI = struct {
                     .open_images = std.StringHashMap(*anyopaque).init(allocator),
                     .open_pdfs = std.StringHashMap(*anyopaque).init(allocator),
                     .open_markdown_views = std.StringHashMap(*markdown_view_mod.MarkdownView).init(allocator),
+                    .open_buffers = open_buffers,
                     .image_renderer = null,
-                    .pending_tab_switch = null,
-                    .mouse_pressed_this_frame = false,
-                    .mouse_x = 0,
-                    .mouse_y = 0,
-                    .is_mouse_down = false,
                 };
             };
             defer allocator.free(file_content);
@@ -176,8 +179,8 @@ pub const UI = struct {
             initial_buf.root = try initial_buf.load_from_string(file_content, &initial_buf.file_eol_mode, &initial_buf.file_utf8_sanitized);
             initial_buf.set_file_path(path);
             initial_buf.last_save = initial_buf.root;
-            leaf.code_editor.setLanguageFromPath(path);
             log.info("Loaded default file: {s} ({d} bytes)", .{ path, file_content.len });
+            try open_buffers.put(try allocator.dupe(u8, path), initial_buf);
         } else {
             const default_text = 
                 \\pub fn main() !void {
@@ -188,7 +191,14 @@ pub const UI = struct {
                 \\}
             ;
             initial_buf.root = try initial_buf.load_from_string(default_text, &initial_buf.file_eol_mode, &initial_buf.file_utf8_sanitized);
+            try open_buffers.put(try allocator.dupe(u8, "scratchpad"), initial_buf);
         }
+
+        // Pane System initialisieren (mit einem initialen Leaf)
+        const root_pane = try pane_mod.Pane.createLeaf(allocator, initial_buf);
+        const active_pane = root_pane;
+        const leaf = &active_pane.data.leaf;
+        if (default_file_path) |path| leaf.code_editor.setLanguageFromPath(path);
 
         return Self{
             .allocator = allocator,
@@ -207,6 +217,7 @@ pub const UI = struct {
             .open_images = std.StringHashMap(*anyopaque).init(allocator),
             .open_pdfs = std.StringHashMap(*anyopaque).init(allocator),
             .open_markdown_views = std.StringHashMap(*markdown_view_mod.MarkdownView).init(allocator),
+            .open_buffers = open_buffers,
             .image_renderer = null,
         };
     }
@@ -226,6 +237,14 @@ pub const UI = struct {
 
         self.file_explorer.deinit();
         log.debug("UI.deinit: file_explorer done", .{});
+
+        // Buffer aufräumen (Zentrales Ownership)
+        var buf_iter = self.open_buffers.iterator();
+        while (buf_iter.next()) |entry| {
+            entry.value_ptr.*.deinit();
+            self.allocator.free(entry.key_ptr.*);
+        }
+        self.open_buffers.deinit();
 
         // Bilder aufräumen
         var iter = self.open_images.iterator();
@@ -674,9 +693,14 @@ pub const UI = struct {
         }
 
         // Render Active Dialog
-        if (self.active_dialog) |ad| {
+        if (self.active_dialog) |*ad| {
             if (ad.dialog.render(t, self.mouse_pressed_this_frame)) |res| {
                 ad.callback(self, res, ad.context_usize, ad.context_ptr);
+                if (ad.dialog.message.ptr != "".ptr) {
+                    // Check if it was duped (rough check, better to have a flag or always dupe)
+                    // For now, I'll always dupe and always free.
+                    self.allocator.free(ad.dialog.message);
+                }
                 self.active_dialog = null;
             }
         }
@@ -897,6 +921,26 @@ pub const UI = struct {
             return .size_ew;
         }
         return self.getActiveEditor().desired_cursor;
+    }
+
+    pub fn getOrCreateBuffer(self: *Self, path: []const u8) !*@import("flow_core").Buffer {
+        if (self.open_buffers.get(path)) |buf| {
+            return buf;
+        }
+
+        const content = std.fs.cwd().readFileAlloc(self.allocator, path, 64 * 1024 * 1024) catch |err| {
+            log.err("Failed to load file '{s}': {}", .{ path, err });
+            return err;
+        };
+        defer self.allocator.free(content);
+
+        const new_buf = try @import("flow_core").Buffer.create(self.allocator);
+        new_buf.root = try new_buf.load_from_string(content, &new_buf.file_eol_mode, &new_buf.file_utf8_sanitized);
+        new_buf.set_file_path(path);
+        new_buf.last_save = new_buf.root;
+
+        try self.open_buffers.put(try self.allocator.dupe(u8, path), new_buf);
+        return new_buf;
     }
 
     /// Check if a terminal tab is currently active
