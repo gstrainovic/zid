@@ -1294,22 +1294,22 @@ pub const CodeEditor = struct {
         self.mouse_down = true;
 
         if (self.show_context_menu) {
-            if (clay.pointerOver(clay.getElementId("Cut"))) {
+            if (clay.pointerOver(clay.getElementId("EditorCut"))) {
                 self.dispatchAction(.Cut);
                 self.show_context_menu = false;
                 return;
             }
-            if (clay.pointerOver(clay.getElementId("Copy"))) {
+            if (clay.pointerOver(clay.getElementId("EditorCopy"))) {
                 self.dispatchAction(.Copy);
                 self.show_context_menu = false;
                 return;
             }
-            if (clay.pointerOver(clay.getElementId("Paste"))) {
+            if (clay.pointerOver(clay.getElementId("EditorPaste"))) {
                 self.dispatchAction(.Paste);
                 self.show_context_menu = false;
                 return;
             }
-            if (clay.pointerOver(clay.getElementId("MD-Preview"))) {
+            if (clay.pointerOver(clay.getElementId("EditorMDPreview"))) {
                 std.log.scoped(.editor).info("Context Menu: MD-Preview clicked", .{});
                 self.dispatchAction(.MdPreview);
                 self.show_context_menu = false;
@@ -1923,19 +1923,19 @@ pub const CodeEditor = struct {
                 if (clay.hovered()) {
                     self.desired_cursor = .arrow;
                 }
-                self.renderContextMenuItem("Cut", .Cut, arena);
-                self.renderContextMenuItem("Copy", .Copy, arena);
-                self.renderContextMenuItem("Paste", .Paste, arena);
+                self.renderContextMenuItem("Cut", "EditorCut", .Cut, arena);
+                self.renderContextMenuItem("Copy", "EditorCopy", .Copy, arena);
+                self.renderContextMenuItem("Paste", "EditorPaste", .Paste, arena);
                 if (is_md) {
-                    self.renderContextMenuItem("MD-Preview", .MdPreview, arena);
+                    self.renderContextMenuItem("MD-Preview", "EditorMDPreview", .MdPreview, arena);
                 }
             });
         });
     }
 
-    fn renderContextMenuItem(self: *Self, label: []const u8, _action: actions.Action, arena: std.mem.Allocator) void {
+    fn renderContextMenuItem(self: *Self, label: []const u8, id: []const u8, _action: actions.Action, arena: std.mem.Allocator) void {
         _ = _action;
-        const item_id = clay.getElementId(label);
+        const item_id = clay.getElementId(id);
         const is_hovered = clay.pointerOver(item_id);
         if (is_hovered) {
             self.desired_cursor = .arrow;

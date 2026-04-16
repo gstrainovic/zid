@@ -179,13 +179,13 @@ pub const TerminalInstance = struct {
         if (self.handleScrollbarMouseDown(x, y)) return true;
 
         if (self.show_context_menu) {
-            if (clay.pointerOver(clay.getElementId("Copy"))) {
-                self.copyToClipboard() catch {};
+            if (clay.pointerOver(clay.getElementId("TermCopy"))) {
+                self.copyToClipboard() catch |err| log.err("Copy failed: {}", .{err});
                 self.show_context_menu = false;
                 return true;
             }
-            if (clay.pointerOver(clay.getElementId("Paste"))) {
-                self.pasteFromClipboard() catch {};
+            if (clay.pointerOver(clay.getElementId("TermPaste"))) {
+                self.pasteFromClipboard() catch |err| log.err("Paste failed: {}", .{err});
                 self.show_context_menu = false;
                 return true;
             }
@@ -277,7 +277,10 @@ pub const TerminalInstance = struct {
         defer self.mutex.unlock();
 
         const screen = self.terminal.screens.active;
-        const sel = screen.selection orelse return;
+        const sel = screen.selection orelse {
+            log.info("Copy: No selection", .{});
+            return;
+        };
 
         const text = try screen.selectionString(self.allocator, .{
             .sel = sel,
@@ -286,15 +289,20 @@ pub const TerminalInstance = struct {
         defer self.allocator.free(text);
 
         if (self.window) |w| {
+            log.info("Copy: {d} bytes to clipboard", .{text.len});
             w.setClipboardText(text);
         }
     }
 
     pub fn pasteFromClipboard(self: *Self) !void {
         const w = self.window orelse return;
-        const text = w.getClipboardText(self.allocator) orelse return;
+        const text = w.getClipboardText(self.allocator) orelse {
+            log.info("Paste: Clipboard empty", .{});
+            return;
+        };
         defer self.allocator.free(text);
 
+        log.info("Paste: {d} bytes from clipboard", .{text.len});
         try self.sendInput(text);
     }
 
@@ -328,15 +336,15 @@ pub const TerminalInstance = struct {
                 .border = .{ .width = .all(1), .color = .{ 100, 100, 120, 255 } },
                 .corner_radius = .all(4),
             })({
-                self.renderContextMenuItem("Copy", font_size);
-                self.renderContextMenuItem("Paste", font_size);
+                self.renderContextMenuItem("Copy", "TermCopy", font_size);
+                self.renderContextMenuItem("Paste", "TermPaste", font_size);
             });
         });
     }
 
-    fn renderContextMenuItem(self: *Self, label: []const u8, font_size: f32) void {
+    fn renderContextMenuItem(self: *Self, label: []const u8, id: []const u8, font_size: f32) void {
         _ = self;
-        const item_id = clay.getElementId(label);
+        const item_id = clay.getElementId(id);
         const is_hovered = clay.pointerOver(item_id);
 
         clay.UI()(.{

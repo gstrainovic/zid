@@ -76,12 +76,12 @@ pub const MarkdownView = struct {
 
     pub fn handleMouseDown(self: *Self, x: f32, y: f32) bool {
         if (self.show_context_menu) {
-            if (clay.pointerOver(clay.getElementId("Copy"))) {
+            if (clay.pointerOver(clay.getElementId("MDCopy"))) {
                 self.copySelection() catch {};
                 self.show_context_menu = false;
                 return true;
             }
-            if (clay.pointerOver(clay.getElementId("Select All"))) {
+            if (clay.pointerOver(clay.getElementId("MDSelectAll"))) {
                 self.selectAll();
                 self.show_context_menu = false;
                 return true;
@@ -193,15 +193,15 @@ pub const MarkdownView = struct {
                 .border = .{ .width = .all(1), .color = .{ 100, 100, 120, 255 } },
                 .corner_radius = .all(4),
             })({
-                self.renderContextMenuItem("Copy", font_size_f);
-                self.renderContextMenuItem("Select All", font_size_f);
+                self.renderContextMenuItem("Copy", "MDCopy", font_size_f);
+                self.renderContextMenuItem("Select All", "MDSelectAll", font_size_f);
             });
         });
     }
 
-    fn renderContextMenuItem(self: *Self, label: []const u8, item_font_size: f32) void {
+    fn renderContextMenuItem(self: *Self, label: []const u8, id: []const u8, item_font_size: f32) void {
         _ = self;
-        const item_id = clay.getElementId(label);
+        const item_id = clay.getElementId(id);
         const is_hovered = clay.pointerOver(item_id);
 
         clay.UI()(.{
