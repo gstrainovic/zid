@@ -49,6 +49,7 @@ pub fn createDispatcher(alloc: std.mem.Allocator, ctx: *E2EContext) !*zigjr.RpcD
     try rpc_dispatcher.addWithCtx("move_mouse", ctx, moveMouse);
     try rpc_dispatcher.addWithCtx("type_text", ctx, typeText);
     try rpc_dispatcher.addWithCtx("open_terminal", ctx, openTerminalRpc);
+    try rpc_dispatcher.addWithCtx("save_file", ctx, saveFile);
     try rpc_dispatcher.addWithCtx("get_state", ctx, getState);
     try rpc_dispatcher.addWithCtx("benchmark_open_file", ctx, benchmarkOpenFile);
     try rpc_dispatcher.addWithCtx("benchmark_load_file", ctx, benchmarkLoadFile);
@@ -129,6 +130,17 @@ fn openFolder(ctx: *E2EContext, path: []const u8) ![]const u8 {
         return msg;
     };
 
+    return ctx.allocator.dupe(u8, "ok") catch "error: out of memory";
+}
+
+/// Datei speichern
+fn saveFile(ctx: *E2EContext, params: []const u8) ![]const u8 {
+    _ = params;
+    log.info("RPC: save_file()", .{});
+    ctx.ui_system.code_editor.save() catch |err| {
+         const msg = try std.fmt.allocPrint(ctx.allocator, "error: {}", .{err});
+         return msg;
+    };
     return ctx.allocator.dupe(u8, "ok") catch "error: out of memory";
 }
 

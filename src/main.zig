@@ -550,15 +550,30 @@ pub fn main() !void {
                 state_dirty = true;
                 wio.cancelWait();
             } else if (kind == .text) {
-                // Nur Text-Dateien in den Editor laden
-                const content = std.fs.cwd().readFileAlloc(allocator, path, 64 * 1024 * 1024) catch |err| blk: {
-                    log.err("Failed to load tab content for '{s}': {}", .{ path, err });
-                    const msg = try allocator.dupe(u8, "Fehler beim Laden der Datei.");
-                    break :blk msg;
-                };
-                ui_system.code_editor.setText(content);
-                ui_system.code_editor.setLanguageFromPath(path);
-                allocator.free(content);
+                // Check if tab already has a buffer
+                const active_tab = ui_system.tab_bar.getActiveTab();
+                if (active_tab != null and active_tab.?.buffer != null) {
+                    ui_system.code_editor.setBuffer(active_tab.?.buffer.?, path);
+                } else {
+                    // Load from disk
+                    const content = std.fs.cwd().readFileAlloc(allocator, path, 64 * 1024 * 1024) catch |err| {
+                        log.err("Failed to load tab content for '{s}': {}", .{ path, err });
+                        continue;
+                    };
+                    defer allocator.free(content);
+                    
+                    // Create new buffer
+                    const new_buf = try @import("flow_core").Buffer.create(allocator);
+                    new_buf.root = try new_buf.load_from_string(content, &new_buf.file_eol_mode, &new_buf.file_utf8_sanitized);
+                    new_buf.set_file_path(path);
+                    new_buf.last_save = new_buf.root;
+
+                    if (active_tab) |t| {
+                        t.buffer = new_buf;
+                    }
+                    
+                    ui_system.code_editor.setBuffer(new_buf, path);
+                }
             } else if (kind == .image) {
                 // Bild beim Tab-Wechsel sicherstellen dass es geladen ist
                 if (!ui_system.open_images.contains(path)) {

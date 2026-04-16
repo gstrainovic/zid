@@ -27,6 +27,8 @@ pub const Tab = struct {
     is_active: bool = false,
     /// Art der Datei (Text/Bild)
     kind: FileKind = .text,
+    /// Optional: cached buffer for text files to preserve modified state
+    buffer: ?*@import("flow_core").Buffer = null,
 };
 
 /// Tab-Bar State
@@ -69,6 +71,9 @@ pub const TabBarState = struct {
 
         for (self.tabs.items, 0..) |*tab, i| {
             log.debug("TabBarState.deinit: cleaning up tab {d}: {s}", .{ i, tab.path });
+            if (tab.buffer) |buf| {
+                buf.deinit();
+            }
             self.allocator.free(tab.path);
             self.allocator.free(tab.display_name);
         }
@@ -189,6 +194,10 @@ pub const TabBarState = struct {
         if (index >= self.tabs.items.len) return;
 
         const tab = self.tabs.orderedRemove(index);
+
+        if (tab.buffer) |buf| {
+            buf.deinit();
+        }
 
         // Cleanup terminal instance if this was a terminal tab
         if (tab.kind == .terminal) {
