@@ -2,6 +2,9 @@
 
 ## Working Rules
 
+0. **Falls es keine todo.md gib:*
+   - Überspringe die Punkte 1, 2, 4, 5
+
 1. **todo.md ist das Gesetz**
    - Reihenfolge der Phasen strikt einhalten
    - Nicht springen oder überspringen
@@ -42,11 +45,9 @@
    - Todo.md aktualisieren bevor commit
    - Commit message beschreibt was implementiert wurde
 
-6. **Gooey Referenz**
-   - Von Gooey übernehmen statt neu erfinden
-   - Code kopieren und anpassen für wio+wgpu+Clay
-   - Nicht Gooey's Platform-Layer nutzen (wir haben wio)
-   - Gooey's Component-Logik als Vorlage verwenden
+6. **./lib und ./referece als Referenz**
+   - Übernehmen statt neu erfinden
+   - Code kopieren und anpassen
 
 ## Screenshot Tool
 
@@ -142,7 +143,7 @@ Warum diese Wahl:
 
 ## Submodule-Sync zwischen Linux und Windows
 
-Eigene Forks: `libs/gooey`, `libs/wgpu_native_zig`, `libs/wio`.
+Eigene Forks: `./libs`
 Diese koennen lokale Commits haben, die gepusht werden muessen.
 
 **Automatische Absicherung:**
