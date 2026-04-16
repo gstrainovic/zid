@@ -173,7 +173,7 @@ pub const MarkdownView = struct {
         const menu_height = item_height * item_count + 8;
 
         clay.UI()(.{
-            .id = clay.ElementId.ID("md_context_menu_anchor"),
+            .id = clay.ElementId.ID("md-context-menu-anchor"),
             .layout = .{ .sizing = .{ .w = .fixed(0), .h = .fixed(0) } },
             .floating = .{
                 .attach_to = .to_root,
@@ -183,7 +183,7 @@ pub const MarkdownView = struct {
             },
         })({
             clay.UI()(.{
-                .id = clay.ElementId.ID("md_context_menu_container"),
+                .id = clay.ElementId.ID("md-context-menu-container"),
                 .layout = .{
                     .sizing = .{ .w = .fixed(menu_width), .h = .fixed(menu_height) },
                     .direction = .top_to_bottom,

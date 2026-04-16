@@ -1262,6 +1262,12 @@ pub const CodeEditor = struct {
             .MdPreview => {
                 self.pending_md_preview = true;
             },
+            .SplitVertical => {
+                self.pending_split_v = true;
+            },
+            .SplitHorizontal => {
+                self.pending_split_h = true;
+            },
             .Save => {
                 self.save() catch |err| {
                     std.log.scoped(.editor).err("Failed to save file: {}", .{err});
@@ -1332,24 +1338,34 @@ pub const CodeEditor = struct {
         self.mouse_down = true;
 
         if (self.show_context_menu) {
-            if (clay.pointerOver(clay.getElementId("EditorCut"))) {
+            if (clay.pointerOver(clay.getElementId("Editor-Cut"))) {
                 self.dispatchAction(.Cut);
                 self.show_context_menu = false;
                 return;
             }
-            if (clay.pointerOver(clay.getElementId("EditorCopy"))) {
+            if (clay.pointerOver(clay.getElementId("Editor-Copy"))) {
                 self.dispatchAction(.Copy);
                 self.show_context_menu = false;
                 return;
             }
-            if (clay.pointerOver(clay.getElementId("EditorPaste"))) {
+            if (clay.pointerOver(clay.getElementId("Editor-Paste"))) {
                 self.dispatchAction(.Paste);
                 self.show_context_menu = false;
                 return;
             }
-            if (clay.pointerOver(clay.getElementId("EditorMDPreview"))) {
+            if (clay.pointerOver(clay.getElementId("Editor-MD-Preview"))) {
                 std.log.scoped(.editor).info("Context Menu: MD-Preview clicked", .{});
                 self.dispatchAction(.MdPreview);
+                self.show_context_menu = false;
+                return;
+            }
+            if (clay.pointerOver(clay.getElementId("Editor-Split-V"))) {
+                self.dispatchAction(.SplitVertical);
+                self.show_context_menu = false;
+                return;
+            }
+            if (clay.pointerOver(clay.getElementId("Editor-Split-H"))) {
+                self.dispatchAction(.SplitHorizontal);
                 self.show_context_menu = false;
                 return;
             }
@@ -1920,6 +1936,7 @@ pub const CodeEditor = struct {
     }
 
     fn renderContextMenu(self: *Self, arena: std.mem.Allocator, mouse_pressed: bool) void {
+        _ = mouse_pressed;
         if (std.process.getEnvVarOwned(arena, "FORCE_SHOW_MENU") catch null) |_| {
             if (!self.show_context_menu) {
                 self.show_context_menu = true;
@@ -1938,7 +1955,7 @@ pub const CodeEditor = struct {
         const menu_height = item_height * item_count + 8 + 8; // Extra padding for separators
 
         clay.UI()(.{
-            .id = clay.ElementId.ID("context_menu_anchor"),
+            .id = clay.ElementId.ID("context-menu-anchor"),
             .layout = .{ .sizing = .{ .w = .fixed(0), .h = .fixed(0) } },
             .floating = .{
                 .attach_to = .to_root,
@@ -1948,7 +1965,7 @@ pub const CodeEditor = struct {
             },
         })({
             clay.UI()(.{
-                .id = clay.ElementId.ID("context_menu_container"),
+                .id = clay.ElementId.ID("context-menu-container"),
                 .layout = .{
                     .sizing = .{ .w = .fixed(menu_width), .h = .fixed(menu_height) },
                     .direction = .top_to_bottom,
@@ -1961,23 +1978,17 @@ pub const CodeEditor = struct {
                 if (clay.hovered()) {
                     self.desired_cursor = .arrow;
                 }
-                self.renderContextMenuItem("Cut", "EditorCut", .Cut, arena);
-                self.renderContextMenuItem("Copy", "EditorCopy", .Copy, arena);
-                self.renderContextMenuItem("Paste", "EditorPaste", .Paste, arena);
+                self.renderContextMenuItem("Cut", "Editor-Cut", .Cut, arena);
+                self.renderContextMenuItem("Copy", "Editor-Copy", .Copy, arena);
+                self.renderContextMenuItem("Paste", "Editor-Paste", .Paste, arena);
                 if (is_md) {
-                    self.renderContextMenuItem("MD-Preview", "EditorMDPreview", .MdPreview, arena);
+                    self.renderContextMenuItem("MD-Preview", "Editor-MD-Preview", .MdPreview, arena);
                 }
 
                 clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(1) } }, .background_color = .{ 80, 80, 80, 255 } })({});
                 
-                if (self.renderContextMenuItemClickable("Split Vertically", "EditorSplitV", arena, mouse_pressed)) {
-                    self.pending_split_v = true;
-                    self.show_context_menu = false;
-                }
-                if (self.renderContextMenuItemClickable("Split Horizontally", "EditorSplitH", arena, mouse_pressed)) {
-                    self.pending_split_h = true;
-                    self.show_context_menu = false;
-                }
+                self.renderContextMenuItem("Split Vertically", "Editor-Split-V", .SplitVertical, arena);
+                self.renderContextMenuItem("Split Horizontally", "Editor-Split-H", .SplitHorizontal, arena);
             });
         });
     }
