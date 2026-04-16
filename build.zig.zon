@@ -1,8 +1,7 @@
 .{
-    .name = "vulkan-ed",
+    .fingerprint = 0xe53b65ee4e846b20,
+    .name = .vulkan_ed,
     .version = "0.1.0",
-    .fingerprint = 0xe53b65ee896dabc0,
-    .minimum_zig_version = "0.13.0",
     .dependencies = .{
         .wio = .{
             .path = "libs/wio",
