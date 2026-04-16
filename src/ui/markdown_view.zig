@@ -44,7 +44,12 @@ pub const MarkdownView = struct {
 
         clay.UI()(.{
             .id = clay.ElementId.ID("markdown_view"),
-            .layout = .{ .sizing = .{ .w = .grow, .h = .grow }, .direction = .top_to_bottom, .padding = .all(32), .child_gap = 16 },
+            .layout = .{
+                .sizing = .{ .w = .grow, .h = .grow },
+                .direction = .top_to_bottom,
+                .padding = .all(24),
+                .child_gap = 16,
+            },
             .background_color = theme.bg,
             .clip = .{ .vertical = true },
         })({
@@ -83,12 +88,12 @@ pub const MarkdownView = struct {
                     .Heading => |h| {
                         const multiplier: f32 = switch (h.level) { 1 => 2.0, 2 => 1.5, 3 => 1.2, else => 1.1 };
                         const size: u16 = @intFromFloat(@as(f32, @floatFromInt(self.font_size)) * multiplier);
-                        clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .left_to_right, .child_gap = 0 } })({
+                        clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .left_to_right, .child_gap = 4 } })({
                             for (leaf.inlines.items) |*inline_item| { self.renderInline(inline_item, size, theme.text, arena, ui_ptr); }
                         });
                     },
                     .Paragraph => {
-                        clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .left_to_right, .child_gap = 0 } })({
+                        clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .left_to_right, .child_gap = 4 } })({
                             for (leaf.inlines.items) |*inline_item| { self.renderInline(inline_item, self.font_size, theme.text, arena, ui_ptr); }
                         });
                     },
@@ -112,15 +117,7 @@ pub const MarkdownView = struct {
     fn renderInline(self: *Self, item: *const Inline, base_size: u16, base_color: clay.Color, arena: std.mem.Allocator, ui_ptr: *ui_mod.UI) void {
         switch (item.content) {
             .text => |t| {
-                var content = arena.dupe(u8, t.text) catch "";
-                while (std.mem.indexOf(u8, content, "&#x20;")) |idx| {
-                    const replaced = arena.alloc(u8, content.len - 5) catch break;
-                    std.mem.copyForwards(u8, replaced[0..idx], content[0..idx]);
-                    replaced[idx] = ' ';
-                    std.mem.copyForwards(u8, replaced[idx + 1 ..], content[idx + 6 ..]);
-                    content = replaced;
-                }
-                clay.text(content, .{ .font_size = base_size, .color = base_color, .wrap_mode = .words });
+                clay.text(t.text, .{ .font_size = base_size, .color = base_color, .wrap_mode = .words });
             },
             .link => |l| {
                 for (l.text.items) |t| { clay.text(t.text, .{ .font_size = base_size, .color = .{ 100, 149, 237, 255 }, .wrap_mode = .words }); }
@@ -131,21 +128,24 @@ pub const MarkdownView = struct {
             .image => |img| {
                 var path: []const u8 = img.src;
                 if (!std.fs.path.isAbsolute(path) and self.base_path.len > 0) {
-                    const dir = std.fs.path.dirname(self.base_path) orelse "";
+                    const dir = std.fs.path.dirname(self.base_path) orelse ".";
                     path = std.fs.path.join(arena, &[_][]const u8{ dir, img.src }) catch img.src;
                 }
+
                 if (ui_ptr.open_images.get(path)) |texture_ptr| {
                     const tex: *const ImageTexture = @ptrCast(@alignCast(texture_ptr));
                     const aspect: f32 = if (tex.height > 0) @as(f32, @floatFromInt(tex.width)) / @as(f32, @floatFromInt(tex.height)) else 1.0;
+                    
+                    const max_w = @as(f32, @floatFromInt(tex.width));
+                    
                     clay.UI()(.{
                         .layout = .{
-                            .sizing = .{ .w = .grow, .h = .fit },
+                            .sizing = .{ .w = .{ .type = .grow, .size = .{ .minmax = .{ .min = 0, .max = max_w } } }, .h = .fit },
                         },
                         .background_color = .{ 255, 255, 255, 255 }, // Ensure untinted image
                         .aspect_ratio = .{ .aspect_ratio = aspect },
                         .image = .{ .image_data = texture_ptr },
                     })({});
-                    std.log.scoped(.markdown).info("Successfully rendered image: {s}", .{path});
                 } else {
                     _ = ui_ptr.getOrCreateTexture(path);
                     clay.UI()(.{
