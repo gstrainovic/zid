@@ -53,6 +53,11 @@ pub const TerminalInstance = struct {
     scrollbar_thumb_height: f32 = 0,
     scrollbar_width: f32 = 10,
     height: f32 = 400,
+    terminal_content_x: f32 = 0,
+    terminal_content_y: f32 = 0,
+
+    /// Mouse selection state
+    selection_start_pin: ?ghostty_vt.PageList.Pin = null,
 
     const Self = @This();
 
@@ -158,6 +163,84 @@ pub const TerminalInstance = struct {
         self.mutex.lock();
         defer self.mutex.unlock();
         self.scrollbar_dragging = false;
+        self.selection_start_pin = null;
+    }
+
+    pub fn handleMouseDown(self: *Self, x: f32, y: f32, char_w: f32, line_h: f32, term_x: f32, term_y: f32) bool {
+        if (self.handleScrollbarMouseDown(x, y)) return true;
+
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
+        const local_x = x - term_x;
+        const local_y = y - term_y;
+
+        if (local_x < 0 or local_y < 0) return false;
+
+        const col = @as(u16, @intFromFloat(@floor(local_x / char_w)));
+        const row_in_view = @as(usize, @intFromFloat(@floor(local_y / line_h)));
+        const abs_row = self.view_row + row_in_view;
+
+        if (abs_row >= self.totalRowsUnlocked()) return false;
+
+        const pt = ghostty_vt.point.Point{ .history = .{ .x = col, .y = @intCast(abs_row) } };
+        const screen = self.terminal.screens.active;
+        if (screen.pages.pin(pt)) |pin| {
+            self.selection_start_pin = pin;
+            // Clear current selection on click
+            self.terminal.screens.active.clearSelection();
+            return true;
+        }
+
+        return false;
+    }
+
+    pub fn handleMouseMove(self: *Self, x: f32, y: f32, char_w: f32, line_h: f32, term_x: f32, term_y: f32) void {
+        if (self.scrollbar_dragging) {
+            self.handleScrollbarMouseMove(x, y);
+            return;
+        }
+
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
+        const start_pin = self.selection_start_pin orelse return;
+
+        const local_x = x - term_x;
+        const local_y = y - term_y;
+
+        const col = @as(u16, @intFromFloat(@floor(@max(0, local_x) / char_w)));
+        const row_in_view = @as(usize, @intFromFloat(@floor(@max(0, local_y) / line_h)));
+        const abs_row = self.view_row + row_in_view;
+
+        const pt = ghostty_vt.point.Point{ .history = .{ .x = col, .y = @intCast(abs_row) } };
+        const screen = self.terminal.screens.active;
+        if (screen.pages.pin(pt)) |end_pin| {
+            const sel = ghostty_vt.Selection{
+                .bounds = .{ .untracked = .{ .start = start_pin, .end = end_pin } },
+            };
+            self.terminal.screens.active.select(sel) catch {};
+        }
+    }
+
+    /// Total number of rows including scrollback history
+    pub fn totalRows(self: *Self) usize {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        return self.terminal.screens.active.pages.total_rows;
+    }
+
+    pub fn isSelected(self: *Self, col: u16, abs_row: usize) bool {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
+        const screen = self.terminal.screens.active;
+        const sel = screen.selection orelse return false;
+
+        const pt = ghostty_vt.point.Point{ .history = .{ .x = col, .y = @intCast(abs_row) } };
+        const pin = screen.pages.pin(pt) orelse return false;
+
+        return sel.contains(screen, pin);
     }
 
     /// Create a new terminal instance and spawn a shell
@@ -303,13 +386,6 @@ pub const TerminalInstance = struct {
         defer self.mutex.unlock();
         const cursor = self.terminal.screens.active.cursor;
         return .{ .x = cursor.x, .y = cursor.y };
-    }
-
-    /// Total number of rows including scrollback history
-    pub fn totalRows(self: *Self) usize {
-        self.mutex.lock();
-        defer self.mutex.unlock();
-        return self.terminal.screens.active.pages.total_rows;
     }
 
     /// Get a single line of text from the terminal (y is absolute row index)
