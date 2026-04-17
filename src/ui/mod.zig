@@ -242,7 +242,7 @@ pub const UI = struct {
     }
 
     /// Clay initialisieren (nach Window Creation)
-    pub fn setupClay(self: *Self, window: *wio.Window, width: u32, height: u32, text_renderer: *@import("../text/mod.zig").TextRenderer) !void {
+    pub fn setupClay(self: *Self, window: ?*wio.Window, width: u32, height: u32, text_renderer: *@import("../text/mod.zig").TextRenderer) !void {
         log.debug("Setting up Clay layout: {}x{}", .{ width, height });
         self.text_renderer = text_renderer;
         self.window = window;

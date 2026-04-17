@@ -57,6 +57,7 @@ pub fn main() !void {
     var theme_override: ?ui.Theme = null;
     var default_file_path: ?[]const u8 = null;
     var e2e_mode = false;
+    var headless_mode = false;
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
 
@@ -76,6 +77,10 @@ pub fn main() !void {
         } else if (std.mem.eql(u8, args[i], "--e2e")) {
             e2e_mode = true;
             log.info("E2E mode enabled — RPC server on port 9999", .{});
+        } else if (std.mem.eql(u8, args[i], "--headless")) {
+            headless_mode = true;
+            e2e_mode = true;
+            log.info("Headless mode enabled — no window, RPC server on port 9999", .{});
         } else if (default_file_path == null) {
             // Erstes nicht-Flag Argument = Dateipfad
             default_file_path = args[i];
@@ -125,31 +130,40 @@ pub fn main() !void {
         .vsync = true,
         .clear_color = .{ 0.05, 0.05, 0.05, 1.0 },
     });
+    defer renderer.deinit();
+    rendering.Renderer.g_renderer_ptr = &renderer;
 
     // 2. Platform initialisieren (wio - NACH wgpu, vermeidet EGL-Konflikt)
-    var plat = try platform.Platform.init(allocator, .{
+    // Headless: kein Platform/Window/Surface nötig
+    var plat: platform.Platform = if (headless_mode) undefined else try platform.Platform.init(allocator, .{
         .title = "vulkan-ed",
         .width = 1200,
         .height = 800,
     });
 
-    // defer wird REVERSE ausgeführt: plat.deinit() ZUERST geschrieben → ZULETZT ausgeführt
-    defer plat.deinit();     // wird zuletzt ausgeführt (nach renderer)
-    defer renderer.deinit(); // wird zuerst ausgeführt (vor plat)
+    // Headless: use default viewport dimensions
+    const viewport_width: u32 = if (headless_mode) 1200 else plat.getSize().width;
+    const viewport_height: u32 = if (headless_mode) 800 else plat.getSize().height;
 
-    // Window erstellen (NACH renderer)
-    try plat.createWindow();
-    plat.setTextInput(true);
-
-    // Surface vom Window erstellen
-    if (builtin.os.tag == .linux) {
-        try renderer.setWindow(plat.getWaylandDisplay(), plat.getWaylandSurface());
-    } else {
-        // Auf Windows nimmt WGPU das HWND direkt (wio window handle)
-        // renderer.setWindow für Windows muss implementiert sein oder passend aufgerufen werden
-        try renderer.setWindow(null, plat.window.?.backend.window);
+    // defer cleanup
+    defer {
+        if (!headless_mode) plat.deinit();
     }
-    try renderer.configureSwapChain(plat.getSize().width, plat.getSize().height);
+
+    // Window erstellen (NACH renderer) - Headless: kein Window nötig
+    if (!headless_mode) {
+        try plat.createWindow();
+        plat.setTextInput(true);
+
+        // Surface vom Window erstellen
+        if (builtin.os.tag == .linux) {
+            try renderer.setWindow(plat.getWaylandDisplay(), plat.getWaylandSurface());
+        } else {
+            // Auf Windows nimmt WGPU das HWND direkt (wio window handle)
+            try renderer.setWindow(null, plat.window.?.backend.window);
+        }
+        try renderer.configureSwapChain(plat.getSize().width, plat.getSize().height);
+    }
 
     // 3. Text Renderer initialisieren (DirectWrite/FreeType)
     var text_renderer = try text.TextRenderer.init(allocator, .{
@@ -164,8 +178,8 @@ pub fn main() !void {
         renderer.device.?,
         renderer.queue.?,
         renderer.swap_chain_format,
-        plat.getSize().width,
-        plat.getSize().height,
+        viewport_width,
+        viewport_height,
     );
     defer text_gpu.deinit();
 
@@ -191,7 +205,8 @@ pub fn main() !void {
     }, resolved_file_path);
     defer ui_system.deinit();
 
-    try ui_system.setupClay(&plat.window.?, plat.getSize().width, plat.getSize().height, &text_renderer);
+    try ui_system.setupClay(null, viewport_width, viewport_height, &text_renderer);
+
     const force_gui_test = if (std.process.getEnvVarOwned(allocator, "FORCE_GUI_TEST")) |val| blk: {
         allocator.free(val);
         break :blk true;
@@ -235,8 +250,8 @@ pub fn main() !void {
         renderer.device.?,
         renderer.queue.?,
         renderer.swap_chain_format,
-        plat.getSize().width,
-        plat.getSize().height,
+        viewport_width,
+        viewport_height,
         1.0, // scale_factor
     );
     defer clay_rdr.deinit();
@@ -260,6 +275,18 @@ pub fn main() !void {
     };
     defer logo_texture.deinit();
 
+    // Headless: globals für screenshot
+    rendering.Renderer.g_clay_rdr = @ptrCast(&clay_rdr);
+    rendering.Renderer.g_text_gpu = @ptrCast(&text_gpu);
+    rendering.Renderer.g_text_renderer = @ptrCast(&text_renderer);
+    rendering.Renderer.g_image_rdr = @ptrCast(&image_rdr);
+    rendering.Renderer.g_svg_gpu = @ptrCast(&svg_gpu);
+    rendering.Renderer.g_svg_atlas = @ptrCast(&svg_atlas);
+    rendering.Renderer.g_viewport_width = viewport_width;
+    rendering.Renderer.g_viewport_height = viewport_height;
+    renderer.width = viewport_width;
+    renderer.height = viewport_height;
+
     log.info("=== vulkan-ed ready ===", .{});
     log.info("Press Ctrl+C to exit (or close window)", .{});
 
@@ -271,6 +298,16 @@ pub fn main() !void {
         const e2e_server_sock = try e2e_listen_addr.listen(.{ .reuse_address = true });
         e2e_ctx = e2e_server.E2EContext.init(allocator, &ui_system, e2e_server_sock);
         e2e_thread = try e2e_server.start(&e2e_ctx.?);
+    }
+
+    // In headless mode: just wait for E2E shutdown (no rendering loop)
+    if (headless_mode) {
+        log.info("=== vulkan-ed headless ready — waiting for RPC requests ===", .{});
+        while (e2e_ctx == null or !e2e_ctx.?.shutdown_flag.load(.seq_cst)) {
+            std.Thread.sleep(std.time.ns_per_ms * 100);
+        }
+        log.info("Headless mode shutdown requested", .{});
+        return;
     }
 
     // Render Loop

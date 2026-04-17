@@ -57,6 +57,7 @@ pub fn createDispatcher(alloc: std.mem.Allocator, ctx: *E2EContext) !*zigjr.RpcD
     try rpc_dispatcher.addWithCtx("show_context_menu", ctx, showContextMenuRpc);
     try rpc_dispatcher.addWithCtx("close_active_tab", ctx, closeActiveTabRpc);
     try rpc_dispatcher.addWithCtx("shutdown", ctx, shutdown);
+    try rpc_dispatcher.addWithCtx("screenshot", ctx, screenshot);
 
     return rpc_dispatcher;
 }
@@ -338,6 +339,73 @@ fn closeActiveTabRpc(ctx: *E2EContext, dc: *zigjr.DispatchCtx) !void {
         tb.closeTab(idx);
     }
     @import("wio").cancelWait();
+}
+
+/// Screenshot: rendert aktuellen Frame und speichert als PPM nach /tmp/vulkan-screenshot.ppm
+fn screenshot(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
+    _ = dc;
+    log.info("=== SCREENSHOT RPC CALLED ===", .{});
+
+    const renderer_ptr = @import("rendering/mod.zig").Renderer.g_renderer_ptr orelse return "error: no renderer";
+    const renderer = renderer_ptr;
+    const mod = @import("rendering/mod.zig").Renderer;
+
+    const path = "/tmp/vulkan-screenshot.ppm";
+
+    // Headless: UI rendern mit Clay
+    const commands = ctx.ui_system.renderExample(null);
+    log.info("screenshot: got {d} commands", .{commands.len});
+
+    // Debug: count command types
+    var rect_count: usize = 0;
+    var text_count: usize = 0;
+    var image_count: usize = 0;
+    for (commands) |cmd| {
+        switch (cmd.command_type) {
+            .rectangle => rect_count += 1,
+            .text => text_count += 1,
+            .image => image_count += 1,
+            else => {},
+        }
+    }
+    log.debug("screenshot: rects={d} texts={d} images={d}", .{ rect_count, text_count, image_count });
+    const w = if (renderer.width == 0) mod.g_viewport_width else renderer.width;
+    const h = if (renderer.height == 0) mod.g_viewport_height else renderer.height;
+    log.info("screenshot: rendering {d}x{d}", .{ w, h });
+    const rgba = renderer.headlessRenderToBuffer(
+        ctx.allocator,
+        w,
+        h,
+        mod.g_clay_rdr,
+        mod.g_text_gpu,
+        mod.g_text_renderer,
+        mod.g_image_rdr,
+        mod.g_svg_gpu,
+        mod.g_svg_atlas,
+        commands,
+    ) catch |err| {
+        log.err("headlessRenderToBuffer failed: {}, using clear color", .{err});
+        // Fallback: just render clear color
+        try renderer.headlessScreenshot(ctx.allocator, path);
+        return try ctx.allocator.dupe(u8, path);
+    };
+    defer ctx.allocator.free(rgba);
+
+    // Write PPM
+    var file = try std.fs.createFileAbsolute(path, .{});
+    defer file.close();
+    var header: [256]u8 = undefined;
+    const header_slice = std.fmt.bufPrint(&header, "P6\n{d} {d}\n255\n", .{ w, h }) catch unreachable;
+    try file.writeAll(header_slice);
+
+    var src_idx: usize = 0;
+    var pixel_count: usize = 0;
+    while (pixel_count < w * h) : (pixel_count += 1) {
+        try file.writeAll(rgba[src_idx..src_idx + 3]);
+        src_idx += 4;
+    }
+
+    return try ctx.allocator.dupe(u8, path);
 }
 
 /// App beenden
