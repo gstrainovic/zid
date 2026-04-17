@@ -180,6 +180,7 @@ fn closeTab(ctx: *E2EContext, index: i64) ![]const u8 {
     }
 
     ctx.ui_system.getActiveTabBar().closeTab(@intCast(index));
+    @import("wio").cancelWait();
 
     return ctx.allocator.dupe(u8, "ok") catch "error: out of memory";
 }
@@ -194,6 +195,7 @@ fn setActiveTab(ctx: *E2EContext, index: i64) ![]const u8 {
     }
 
     ctx.ui_system.getActiveTabBar().setActive(@intCast(index));
+    @import("wio").cancelWait();
 
     return ctx.allocator.dupe(u8, "ok") catch "error: out of memory";
 }
@@ -264,6 +266,7 @@ fn typeText(ctx: *E2EContext, dc: *zigjr.DispatchCtx, text: []const u8) ![]const
         // Kurze Pause simulieren (optional, aber realistischer)
         std.Thread.sleep(10 * std.time.ns_per_ms);
     }
+    @import("wio").cancelWait();
 
     return dc.arena().dupe(u8, "ok") catch "error: out of memory";
 }
@@ -334,6 +337,7 @@ fn closeActiveTabRpc(ctx: *E2EContext, dc: *zigjr.DispatchCtx) !void {
     if (tb.active_index) |idx| {
         tb.closeTab(idx);
     }
+    @import("wio").cancelWait();
 }
 
 /// App beenden
