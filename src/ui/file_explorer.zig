@@ -68,6 +68,23 @@ pub const FileExplorerState = struct {
     /// Wird gerade an der Sidebar gezogen?
     is_resizing: bool = false,
 
+    /// Scrolling state
+    scroll_offset_y: f32 = 0,
+    viewport_height: f32 = 0,
+    content_height: f32 = 0,
+
+    /// Scrollbar-Dragging State
+    scrollbar_dragging: bool = false,
+    scrollbar_drag_start_y: f32 = 0,
+    scrollbar_scroll_offset_at_drag_start: f32 = 0,
+
+    /// Scrollbar Bounds
+    scrollbar_track_x: f32 = 0,
+    scrollbar_track_y: f32 = 0,
+    scrollbar_thumb_y: f32 = 0,
+    scrollbar_thumb_height: f32 = 0,
+    scrollbar_width: f32 = 10,
+
     const Self = @This();
 
     pub fn init(allocator: std.mem.Allocator) Self {
@@ -270,6 +287,72 @@ pub const FileExplorerState = struct {
             self.toggleNode(node_index) catch {};
         }
     }
+
+    pub fn scrollLines(self: *Self, delta: i32) void {
+        const scroll_speed: f32 = 60.0;
+        if (delta > 0) {
+            self.scroll_offset_y = @max(0, self.scroll_offset_y - @as(f32, @floatFromInt(delta)) * scroll_speed);
+        } else if (delta < 0) {
+            const max_scroll = @max(0, self.content_height - self.viewport_height);
+            self.scroll_offset_y = @min(max_scroll, self.scroll_offset_y + @as(f32, @floatFromInt(-delta)) * scroll_speed);
+        }
+    }
+
+    pub fn handleMouseDown(self: *Self, x: f32, y: f32) bool {
+        if (self.content_height <= self.viewport_height) return false;
+
+        if (x < self.scrollbar_track_x) return false;
+        if (x > self.scrollbar_track_x + self.scrollbar_width) return false;
+        if (y < self.scrollbar_track_y) return false;
+        if (y > self.scrollbar_track_y + self.viewport_height) return false;
+
+        if (y >= self.scrollbar_thumb_y and y <= self.scrollbar_thumb_y + self.scrollbar_thumb_height) {
+            self.scrollbar_dragging = true;
+            self.scrollbar_drag_start_y = y;
+            self.scrollbar_scroll_offset_at_drag_start = self.scroll_offset_y;
+            return true;
+        }
+
+        // Jump to position
+        const track_height = self.viewport_height;
+        const total_height = self.content_height;
+        const thumb_height = self.scrollbar_thumb_height;
+        const scrollable_height = track_height - thumb_height;
+
+        if (scrollable_height > 0) {
+            const click_pos_rel = (y - self.scrollbar_track_y) - (thumb_height / 2.0);
+            const scroll_frac = @max(0, @min(1.0, click_pos_rel / scrollable_height));
+            self.scroll_offset_y = scroll_frac * (total_height - track_height);
+        }
+
+        return true;
+    }
+
+    pub fn handleMouseMove(self: *Self, _: f32, y: f32) void {
+        if (!self.scrollbar_dragging) return;
+        if (self.content_height <= self.viewport_height) return;
+
+        const track_height = self.viewport_height;
+        const total_height = self.content_height;
+        const thumb_height = self.scrollbar_thumb_height;
+        const scrollable_height = track_height - thumb_height;
+
+        if (scrollable_height <= 0) return;
+
+        const delta_y = y - self.scrollbar_drag_start_y;
+        const scroll_delta_frac = delta_y / scrollable_height;
+        const scroll_delta_px = scroll_delta_frac * (total_height - track_height);
+
+        var new_offset = self.scrollbar_scroll_offset_at_drag_start + scroll_delta_px;
+        const max_scroll = total_height - track_height;
+        new_offset = @max(0, @min(new_offset, max_scroll));
+
+        self.scroll_offset_y = new_offset;
+    }
+
+    pub fn handleMouseUp(self: *Self) void {
+        self.scrollbar_dragging = false;
+    }
 };
 
 /// Tree-Lines zeichnen (│ ├ └)
@@ -291,6 +374,18 @@ pub fn renderFileExplorer(
     theme: Theme,
     mouse_pressed: bool,
 ) void {
+    // Update layout info from previous frame
+    const clip_data = clay.getElementData(clay.ElementId.ID("file_tree_viewport"));
+    const content_data = clay.getElementData(clay.ElementId.ID("file_tree_content"));
+    if (clip_data.found) {
+        state.viewport_height = clip_data.bounding_box.height;
+        state.scrollbar_track_x = clip_data.bounding_box.x + clip_data.bounding_box.width - state.scrollbar_width;
+        state.scrollbar_track_y = clip_data.bounding_box.y;
+    }
+    if (content_data.found) {
+        state.content_height = content_data.bounding_box.height;
+    }
+
     // Sidebar-BBox-Gate: pointerOver(file_explorer) prüft nur ob Maus in der
     // 300px-Sidebar steht. Tree-Entry-BBoxen können über Sidebar-Breite
     // hinauswachsen (Font 24 + langer Dateiname), daher reicht Clay's
@@ -309,22 +404,75 @@ pub fn renderFileExplorer(
         },
         .background_color = theme.surface,
         .border = .{ .width = .{ .right = 1 }, .color = theme.border },
-        .clip = .{ .vertical = true, .horizontal = true },
     })({
         clay.UI()(.{
-            .id = clay.ElementId.ID("file_tree_content"),
+            .id = clay.ElementId.ID("file_tree_viewport"),
             .layout = .{
                 .sizing = .grow,
-                .direction = .top_to_bottom,
-                .child_gap = 0,
             },
-            .background_color = theme.surface,
-            .clip = .{ .vertical = true, .horizontal = true },
+            .clip = .{ .vertical = true, .horizontal = true, .child_offset = .{ .x = 0, .y = -state.scroll_offset_y } },
         })({
-            for (state.visible_entries.items, 0..) |entry, i| {
-                renderTreeEntry(arena, state, entry, i, theme, effective_press, in_sidebar);
-            }
+            clay.UI()(.{
+                .id = clay.ElementId.ID("file_tree_content"),
+                .layout = .{
+                    .sizing = .{ .w = .grow, .h = .fit },
+                    .direction = .top_to_bottom,
+                    .child_gap = 0,
+                },
+            })({
+                for (state.visible_entries.items, 0..) |entry, i| {
+                    renderTreeEntry(arena, state, entry, i, theme, effective_press, in_sidebar);
+                }
+            });
         });
+
+        // Scrollbar
+        if (state.content_height > state.viewport_height) {
+            renderScrollbar(state, theme);
+        }
+    });
+}
+
+fn renderScrollbar(state: *FileExplorerState, theme: Theme) void {
+    const total = state.content_height;
+    const visible = state.viewport_height;
+    if (total <= visible) return;
+
+    const track_height = visible;
+    const thumb_ratio = visible / total;
+    const thumb_height = @max(20.0, track_height * thumb_ratio);
+    const max_scroll = total - visible;
+    const scroll_frac = if (max_scroll > 0) state.scroll_offset_y / max_scroll else 0;
+    const thumb_y = scroll_frac * (track_height - thumb_height);
+
+    state.scrollbar_thumb_y = state.scrollbar_track_y + thumb_y;
+    state.scrollbar_thumb_height = thumb_height;
+
+    const track_color: clay.Color = .{ 30, 30, 46, 255 };
+    const thumb_color: clay.Color = .{ 88, 88, 120, 200 };
+
+    clay.UI()(.{
+        .id = clay.ElementId.ID("file_explorer_scrollbar_track"),
+        .floating = .{
+            .attach_to = .to_parent,
+            .attach_points = .{ .element = .right_top, .parent = .right_top },
+            .z_index = 1000,
+        },
+        .layout = .{
+            .sizing = .{ .w = .fixed(state.scrollbar_width), .h = .grow },
+            .direction = .top_to_bottom,
+        },
+        .background_color = track_color,
+    })({
+        clay.UI()(.{
+            .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(thumb_y) } },
+        })({});
+        clay.UI()(.{
+            .id = clay.ElementId.ID("file_explorer_scrollbar_thumb"),
+            .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(thumb_height) } },
+            .background_color = if (state.scrollbar_dragging) theme.primary else thumb_color,
+            .corner_radius = .all(3),
+        })({});
     });
 }
 

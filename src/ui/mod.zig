@@ -398,6 +398,10 @@ pub const UI = struct {
         self.mouse_pressed_this_frame = true;
         self.is_mouse_down = true;
 
+        if (self.show_file_explorer) {
+            if (self.file_explorer.handleMouseDown(x, y)) return;
+        }
+
         // Priority: If a context menu is open, it must handle the click first (to either trigger an action or close)
         const current_editor = self.getActiveEditor();
         if (!current_editor.show_context_menu) {
@@ -448,6 +452,11 @@ pub const UI = struct {
     pub fn handleMouseMove(self: *Self, x: f32, y: f32) void {
         self.mouse_x = x;
         self.mouse_y = y;
+
+        if (self.show_file_explorer) {
+            self.file_explorer.handleMouseMove(x, y);
+        }
+
         if (self.getActiveTabBar().getActiveTab()) |tab| {
             if (tab.kind == .terminal) {
                 if (self.getActiveTabBar().terminal_instances.get(tab.path)) |term| {
@@ -469,6 +478,11 @@ pub const UI = struct {
 
     pub fn handleMouseUp(self: *Self) void {
         self.is_mouse_down = false;
+
+        if (self.show_file_explorer) {
+            self.file_explorer.handleMouseUp();
+        }
+
         if (self.getActiveTabBar().getActiveTab()) |tab| {
             if (tab.kind == .terminal) {
                 if (self.getActiveTabBar().terminal_instances.get(tab.path)) |term| {
@@ -487,6 +501,11 @@ pub const UI = struct {
 
     /// Scroll-Events an Editor oder Terminal weiterleiten
     pub fn handleScroll(self: *Self, delta: i32) void {
+        if (self.show_file_explorer and clay.pointerOver(clay.ElementId.ID("file_explorer"))) {
+            self.file_explorer.scrollLines(delta);
+            return;
+        }
+
         if (self.getActiveTabBar().getActiveTab()) |tab| {
             if (tab.kind == .terminal) {
                 if (self.getActiveTabBar().terminal_instances.get(tab.path)) |term| {
