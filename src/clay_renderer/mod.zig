@@ -190,7 +190,21 @@ pub const ClayRenderer = struct {
         svg_atlas: anytype,
         render_commands: []clay.RenderCommand,
     ) !void {
-        if (render_commands.len == 0) return {};
+        if (render_commands.len == 0) return;
+
+        // Count command types
+        var rect_count: usize = 0;
+        var text_count: usize = 0;
+        var image_count: usize = 0;
+        for (render_commands) |cmd| {
+            switch (cmd.command_type) {
+                .rectangle => rect_count += 1,
+                .text => text_count += 1,
+                .image => image_count += 1,
+                else => {},
+            }
+        }
+        log.debug("command counts: rect={d} text={d} image={d}", .{ rect_count, text_count, image_count });
 
         // Vertices für Rechtecke sammeln
         var rect_vertices = std.ArrayListUnmanaged(RectangleVertex){};
@@ -366,8 +380,8 @@ pub const ClayRenderer = struct {
                     // Scissor rect must be within viewport bounds
                     const sx: u32 = @intFromFloat(@max(0, bbox.x));
                     const sy: u32 = @intFromFloat(@max(0, bbox.y));
-                    const sw: u32 = @intFromFloat(@min(self.viewport_width - @as(f32, @floatFromInt(sx)), bbox.width));
-                    const sh: u32 = @intFromFloat(@min(self.viewport_height - @as(f32, @floatFromInt(sy)), bbox.height));
+                    const sw: u32 = @intFromFloat(@max(0, @min(self.viewport_width - @as(f32, @floatFromInt(sx)), bbox.width)));
+                    const sh: u32 = @intFromFloat(@max(0, @min(self.viewport_height - @as(f32, @floatFromInt(sy)), bbox.height)));
                     
                     if (sw > 0 and sh > 0) {
                         render_pass.setScissorRect(sx, sy, sw, sh);

@@ -8,7 +8,6 @@ test_data/
 
 # Screenshots (local only)
 screenshots/
-*.png
 
 # OS files
 .DS_Store
