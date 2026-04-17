@@ -303,10 +303,19 @@ fn getState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
 }
 
 /// Pane teilen
-fn splitPane(ctx: *E2EContext, dc: *zigjr.DispatchCtx) !void {
-    _ = dc;
-    log.info("RPC: split_pane()", .{});
-    ctx.ui_system.pending_split = .vertical;
+fn splitPane(ctx: *E2EContext, dc: *zigjr.DispatchCtx, direction: []const u8) ![]const u8 {
+    log.info("RPC: split_pane('{s}')", .{direction});
+    if (std.mem.eql(u8, direction, "h")) {
+        ctx.ui_system.pending_split = .horizontal;
+    } else {
+        ctx.ui_system.pending_split = .vertical;
+    }
+    
+    // Event Loop aufwecken
+    const wio = @import("wio");
+    wio.cancelWait();
+    
+    return dc.arena().dupe(u8, "ok") catch "error: out of memory";
 }
 
 fn showContextMenuRpc(ctx: *E2EContext, dc: *zigjr.DispatchCtx, x: f64, y: f64) !void {

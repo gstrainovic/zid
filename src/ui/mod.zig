@@ -439,8 +439,12 @@ pub const UI = struct {
         self.mouse_pressed_this_frame = true;
         self.is_mouse_down = true;
 
-        if (self.findPaneAt(self.root_pane, x, y)) |pane| {
-            self.active_pane = pane;
+        // Priority: If a context menu is open, it must handle the click first (to either trigger an action or close)
+        const current_editor = self.getActiveEditor();
+        if (!current_editor.show_context_menu) {
+            if (self.findPaneAt(self.root_pane, x, y)) |pane| {
+                self.active_pane = pane;
+            }
         }
 
         const tab_bar = self.getActiveTabBar();
@@ -980,6 +984,12 @@ pub const UI = struct {
         if (pane.data != .leaf) return;
         const old_leaf = pane.data.leaf;
         const new_leaf_pane = try pane_mod.Pane.createLeaf(self.allocator, old_leaf.code_editor.buffer);
+        
+        // Copy current tab info to the new pane if it exists, so it's not immediately cleaned up as "empty"
+        if (pane.data.leaf.tab_bar.getActiveTab()) |active_tab| {
+            try new_leaf_pane.data.leaf.tab_bar.openFile(active_tab.path);
+        }
+
         const old_leaf_pane = try self.allocator.create(pane_mod.Pane);
         old_leaf_pane.* = .{ .allocator = self.allocator, .data = .{ .leaf = old_leaf } };
         pane.data = .{ .split = .{ .direction = direction, .ratio = 0.5, .children = .{ old_leaf_pane, new_leaf_pane } } };
