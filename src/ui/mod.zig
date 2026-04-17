@@ -952,7 +952,35 @@ pub const UI = struct {
         if (self.file_explorer.is_resizing or clay.pointerOver(clay.ElementId.ID("ExplorerSplitter"))) {
             return .size_ew;
         }
-        return self.getActiveEditor().desired_cursor;
+        
+        // Splitter Checks (iterating splits could be added, but we just check if any editor wants a text cursor)
+        var desired: wio.Cursor = .arrow;
+        self.checkCursorRecursive(self.root_pane, &desired);
+        return desired;
+    }
+
+    fn checkCursorRecursive(self: *Self, pane: *pane_mod.Pane, desired: *wio.Cursor) void {
+        switch (pane.data) {
+            .leaf => |*leaf| {
+                if (leaf.code_editor.desired_cursor != .arrow) {
+                    desired.* = leaf.code_editor.desired_cursor;
+                }
+            },
+            .split => |*split| {
+                for (split.children) |child| {
+                    self.checkCursorRecursive(child, desired);
+                }
+                
+                const split_id = clay.ElementId.IDI("split_handle", @truncate(@intFromPtr(pane)));
+                if (clay.pointerOver(split_id)) {
+                    if (split.direction == .horizontal) {
+                        desired.* = .size_ew;
+                    } else {
+                        desired.* = .size_ns;
+                    }
+                }
+            },
+        }
     }
 
     pub fn getOrCreateBuffer(self: *Self, path: []const u8) !*@import("flow_core").Buffer {
