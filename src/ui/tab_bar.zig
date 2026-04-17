@@ -441,9 +441,7 @@ fn renderTab(
     mouse_x: f32,
     mouse_y: f32,
 ) ?TabRequest {
-    // _ = state; // Removed discard as state is used for scoped IDs
     const state_id_base = @as(u32, @truncate(@intFromPtr(state)));
-    log.debug("renderTab state={*} id_base=0x{x} index={d}", .{ state, state_id_base, index });
     const tab_id = clay.ElementId.IDI("tab", state_id_base ^ @as(u32, @intCast(index)));
     const close_id = clay.ElementId.IDI("tab_close", state_id_base ^ @as(u32, @intCast(index)));
 
