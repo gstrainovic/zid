@@ -310,10 +310,6 @@ pub const TerminalInstance = struct {
         if (!self.show_context_menu) return;
 
         const font_size: f32 = 16.0;
-        const item_height = font_size + 12;
-        const menu_width: f32 = 150;
-        const item_count: f32 = 2; // Copy, Paste
-        const menu_height = item_height * item_count + 8;
 
         clay.UI()(.{
             .id = clay.ElementId.ID("term-context-menu-anchor"),
@@ -328,7 +324,7 @@ pub const TerminalInstance = struct {
             clay.UI()(.{
                 .id = clay.ElementId.ID("term-context-menu-container"),
                 .layout = .{
-                    .sizing = .{ .w = .fixed(menu_width), .h = .fixed(menu_height) },
+                    .sizing = .{ .w = .fit, .h = .fit },
                     .direction = .top_to_bottom,
                     .padding = .all(4),
                 },
@@ -350,7 +346,7 @@ pub const TerminalInstance = struct {
         clay.UI()(.{
             .id = item_id,
             .layout = .{
-                .sizing = .{ .w = .grow, .h = .fixed(font_size + 12) },
+                .sizing = .{ .w = .fit, .h = .fixed(font_size + 12) },
                 .padding = .{ .left = 8, .right = 8 },
                 .child_alignment = .{ .x = .left, .y = .center },
             },
