@@ -192,8 +192,8 @@ pub fn main() !void {
         renderer.device.?,
         renderer.queue.?,
         renderer.swap_chain_format,
-        plat.getSize().width,
-        plat.getSize().height,
+        viewport_width,
+        viewport_height,
     );
     defer svg_gpu.deinit();
 
@@ -262,8 +262,8 @@ pub fn main() !void {
         renderer.device.?,
         renderer.queue.?,
         renderer.swap_chain_format,
-        plat.getSize().width,
-        plat.getSize().height,
+        viewport_width,
+        viewport_height,
     );
     defer image_rdr.deinit();
     ui_system.image_renderer = &image_rdr;
