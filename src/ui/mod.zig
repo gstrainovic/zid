@@ -949,7 +949,18 @@ pub const UI = struct {
 
     pub fn getOrCreateBuffer(self: *Self, path: []const u8) !*@import("flow_core").Buffer {
         if (self.open_buffers.get(path)) |buf| return buf;
-        const content = try std.fs.cwd().readFileAlloc(self.allocator, path, 64 * 1024 * 1024);
+
+        // Try to load existing file
+        const content = std.fs.cwd().readFileAlloc(self.allocator, path, 64 * 1024 * 1024) catch |not_found| {
+            if (not_found == error.FileNotFound) {
+                // New file - create empty buffer
+                const new_buf = try @import("flow_core").Buffer.create(self.allocator);
+                new_buf.set_file_path(path);
+                try self.open_buffers.put(try self.allocator.dupe(u8, path), new_buf);
+                return new_buf;
+            }
+            return not_found;
+        };
         defer self.allocator.free(content);
         const new_buf = try @import("flow_core").Buffer.create(self.allocator);
         new_buf.root = try new_buf.load_from_string(content, &new_buf.file_eol_mode, &new_buf.file_utf8_sanitized);
