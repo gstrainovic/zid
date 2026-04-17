@@ -200,7 +200,11 @@ pub fn main() !void {
     defer ui_system.deinit();
 
     try ui_system.setupClay(&plat.window.?, plat.getSize().width, plat.getSize().height, &text_renderer);
-    if (std.posix.getenv("FORCE_GUI_TEST") != null) {
+    const force_gui_test = if (std.process.getEnvVarOwned(allocator, "FORCE_GUI_TEST")) |val| blk: {
+        allocator.free(val);
+        break :blk true;
+    } else |_| false;
+    if (force_gui_test) {
         ui_system.getActiveEditor().show_context_menu = true;
         ui_system.getActiveEditor().context_menu_x = 200;
         ui_system.getActiveEditor().context_menu_y = 200;
