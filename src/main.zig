@@ -90,21 +90,13 @@ pub fn main() !void {
     const resolved_file_path: ?[]const u8 = if (default_file_path) |p|
         p
     else blk: {
-        // 1) Dev-Modus: test_data/app.log im CWD (zig build run)
-        if (std.fs.cwd().access("test_data/app.log", .{}) catch null) |_| {
-            break :blk try std.fs.path.resolve(allocator, &.{"test_data/app.log"});
+        // 1) Dev-Modus: README.md im CWD
+        if (std.fs.cwd().access("README.md", .{}) catch null) |_| {
+            break :blk try std.fs.path.resolve(allocator, &.{"README.md"});
         }
-        // 2) Installiert: <exe_dir>/../share/app.log (zig-out/bin -> zig-out/share)
+        // 2) Installiert: <exe_dir>/../share/README.md (zig-out/bin -> zig-out/share)
         if (exe_dir) |dir| {
-            const sp = try std.fs.path.join(allocator, &.{ dir, "..", "share", "app.log" });
-            defer allocator.free(sp);
-            if (std.fs.accessAbsolute(sp, .{}) catch null) |_| {
-                break :blk try std.fs.path.resolve(allocator, &.{sp});
-            }
-        }
-        // 3) Installiert: <exe_dir>/share/app.log
-        if (exe_dir) |dir| {
-            const sp = try std.fs.path.join(allocator, &.{ dir, "share", "app.log" });
+            const sp = try std.fs.path.join(allocator, &.{ dir, "..", "share", "README.md" });
             defer allocator.free(sp);
             if (std.fs.accessAbsolute(sp, .{}) catch null) |_| {
                 break :blk try std.fs.path.resolve(allocator, &.{sp});

@@ -48,72 +48,58 @@ pub const UIConfig = struct {
     padding: f32 = 12.0,
     gap: f32 = 8.0,
 };
-pub const PdfPageChange = struct { path: []const u8, delta: i16 };
-
-pub const ActiveDialog = struct {
-    dialog: dialog_mod.Dialog,
-    /// Context for the callback
-    context_usize: usize = 0,
-    context_ptr: ?*anyopaque = null,
-    callback: *const fn (*UI, dialog_mod.DialogResult, usize, ?*anyopaque) void,
-};
 
 /// UI Hauptstruktur
 pub const components = @import("components/mod.zig");
+
 pub const UI = struct {
+    pub const TabCloseRequest = struct { pane: *pane_mod.Pane, index: usize };
+    pub const PdfPageChange = struct { path: []const u8, delta: i16 };
+    pub const ActiveDialog = struct {
+        dialog: dialog_mod.Dialog,
+        context_usize: usize = 0,
+        context_ptr: ?*anyopaque = null,
+        callback: *const fn (*UI, dialog_mod.DialogResult, usize, ?*anyopaque) void,
+        message_needs_free: bool = false,
+    };
+
     allocator: std.mem.Allocator,
     config: UIConfig,
     theme: Theme,
-    initialized: bool = false,
+    initialized: bool,
 
-    // Clay Memory Arena
-    clay_memory: []u8 = &[_]u8{},
-
-    // Animationen
+    clay_memory: []u8,
     anim_manager: AnimationManager,
-
-    // Frame Arena für kurzlebige Daten (z.B. SvgRenderInfo)
     frame_arena: std.heap.ArenaAllocator,
 
-    // Pane System (Split-Views)
     root_pane: *pane_mod.Pane,
     active_pane: *pane_mod.Pane,
 
-    // Text Renderer (für Measurement)
-    text_renderer: ?*@import("../text/mod.zig").TextRenderer = null,
-    window: ?*wio.Window = null,
+    text_renderer: ?*@import("../text/mod.zig").TextRenderer,
+    window: ?*wio.Window,
 
-    // Phase 9: File Explorer
     file_explorer: file_explorer_mod.FileExplorerState,
-    show_file_explorer: bool = true,
-    current_directory: ?[]const u8 = null,
-    pending_tab_switch: ?[]const u8 = null,
-    pending_pdf_page_change: ?PdfPageChange = null,
-    pending_split: ?pane_mod.PaneDirection = null,
+    show_file_explorer: bool,
+    current_directory: ?[]const u8,
+    pending_tab_switch: ?[]const u8,
+    pending_pdf_page_change: ?PdfPageChange,
+    pending_split: ?pane_mod.PaneDirection,
 
-    active_dialog: ?ActiveDialog = null,
+    active_dialog: ?ActiveDialog,
+    pending_tab_closes: std.ArrayList(TabCloseRequest),
 
-    // Alle aktuell offenen Buffer (zentrales Ownership)
     open_buffers: std.StringHashMap(*@import("flow_core").Buffer),
-
-    // Map von Pfad zu geladener Textur-ID/Pointer
     open_images: std.StringHashMap(*anyopaque),
-    
-    // Phase 9: PDF Handler
     open_pdfs: std.StringHashMap(*anyopaque),
-
-    // Markdown Previews
     open_markdown_views: std.StringHashMap(*markdown_view_mod.MarkdownView),
-    pending_md_preview: ?[]const u8 = null,
+    pending_md_preview: ?[]const u8,
 
-    // Image/SVG Renderers
-    image_renderer: ?*@import("../clay_renderer/image_renderer.zig").ImageRenderer = null,
+    image_renderer: ?*@import("../clay_renderer/image_renderer.zig").ImageRenderer,
 
-    // Mouse state for immediate mode UI clicks
-    mouse_pressed_this_frame: bool = false,
-    mouse_x: f32 = 0,
-    mouse_y: f32 = 0,
-    is_mouse_down: bool = false,
+    mouse_pressed_this_frame: bool,
+    mouse_x: f32,
+    mouse_y: f32,
+    is_mouse_down: bool,
 
     const Self = @This();
 
@@ -121,115 +107,85 @@ pub const UI = struct {
     pub fn init(allocator: std.mem.Allocator, config: UIConfig, default_file_path: ?[]const u8) !Self {
         log.debug("Initializing UI system", .{});
 
-        // Clay Memory allozieren (großzügiger Puffer für viele Elemente/Zeilen)
+        // Clay Memory allozieren
         const min_memory = clay.minMemorySize();
-        const generous_memory = @max(min_memory, 10 * 1024 * 1024); // 10 MB
-        log.debug("Clay requires {} bytes, allocating {} bytes", .{ min_memory, generous_memory });
-
+        const generous_memory = @max(min_memory, 10 * 1024 * 1024);
         const clay_memory = try allocator.alloc(u8, generous_memory);
 
         // File Explorer initialisieren
         const file_explorer = file_explorer_mod.FileExplorerState.init(allocator);
 
         var open_buffers = std.StringHashMap(*@import("flow_core").Buffer).init(allocator);
-        errdefer {
-            var it = open_buffers.iterator();
-            while (it.next()) |entry| {
-                entry.value_ptr.*.deinit();
-                allocator.free(entry.key_ptr.*);
-            }
-            open_buffers.deinit();
-        }
-
-        // Initialer leerer Buffer für den Editor
         const initial_buf = try @import("flow_core").Buffer.create(allocator);
         
-        // Default-Inhalt: Entweder Datei laden oder Hardcoded-Beispiel
+        // Content laden
         if (default_file_path) |path| {
-            const file_content = std.fs.cwd().readFileAlloc(allocator, path, 64 * 1024 * 1024) catch |err| {
-                log.err("Failed to load default file '{s}': {}. Using fallback content.", .{ path, err });
-                const msg = "// Failed to load file";
-                initial_buf.root = try initial_buf.load_from_string(msg, &initial_buf.file_eol_mode, &initial_buf.file_utf8_sanitized);
-                try open_buffers.put(try allocator.dupe(u8, "fallback"), initial_buf);
-                
-                const root_p = try pane_mod.Pane.createLeaf(allocator, initial_buf);
-                return Self{
-                    .allocator = allocator,
-                    .config = config,
-                    .theme = Theme.dark(),
-                    .clay_memory = clay_memory,
-                    .initialized = false,
-                    .anim_manager = AnimationManager.init(allocator),
-                    .frame_arena = std.heap.ArenaAllocator.init(allocator),
-                    .root_pane = root_p,
-                    .active_pane = root_p,
-                    .text_renderer = null,
-                    .file_explorer = file_explorer,
-                    .show_file_explorer = true,
-                    .current_directory = null,
-                    .open_images = std.StringHashMap(*anyopaque).init(allocator),
-                    .open_pdfs = std.StringHashMap(*anyopaque).init(allocator),
-                    .open_markdown_views = std.StringHashMap(*markdown_view_mod.MarkdownView).init(allocator),
-                    .open_buffers = open_buffers,
-                    .image_renderer = null,
-                    .pending_tab_switch = null,
-                    .mouse_pressed_this_frame = false,
-                    .mouse_x = 0,
-                    .mouse_y = 0,
-                    .is_mouse_down = false,
-                };
-            };
-            defer allocator.free(file_content);
-
-            initial_buf.root = try initial_buf.load_from_string(file_content, &initial_buf.file_eol_mode, &initial_buf.file_utf8_sanitized);
-            initial_buf.set_file_path(path);
-            initial_buf.last_save = initial_buf.root;
-            log.info("Loaded default file: {s} ({d} bytes)", .{ path, file_content.len });
-            try open_buffers.put(try allocator.dupe(u8, path), initial_buf);
+            if (std.fs.cwd().readFileAlloc(allocator, path, 64 * 1024 * 1024)) |file_content| {
+                defer allocator.free(file_content);
+                initial_buf.root = try initial_buf.load_from_string(file_content, &initial_buf.file_eol_mode, &initial_buf.file_utf8_sanitized);
+                initial_buf.set_file_path(path);
+                initial_buf.last_save = initial_buf.root;
+                log.info("Loaded default file: {s} ({d} bytes)", .{ path, file_content.len });
+                try open_buffers.put(try allocator.dupe(u8, path), initial_buf);
+            } else |err| {
+                log.err("Failed to load default file '{s}': {}. Using fallback.", .{ path, err });
+                initial_buf.root = try initial_buf.load_from_string("// Error loading file", &initial_buf.file_eol_mode, &initial_buf.file_utf8_sanitized);
+                try open_buffers.put(try allocator.dupe(u8, "error"), initial_buf);
+            }
         } else {
-            const default_text = 
-                \\pub fn main() !void {
-                \\    std.log.info("Hello World", .{});
-                \\const x: u32 = 42;
-                \\// This is a comment
-                \\var y = x + 1;
-                \\}
-            ;
+            const default_text = "pub fn main() !void {\n    std.log.info(\"Hello World\", .{});\n}\n";
             initial_buf.root = try initial_buf.load_from_string(default_text, &initial_buf.file_eol_mode, &initial_buf.file_utf8_sanitized);
             try open_buffers.put(try allocator.dupe(u8, "scratchpad"), initial_buf);
         }
 
-        // Pane System initialisieren (mit einem initialen Leaf)
         const root_pane = try pane_mod.Pane.createLeaf(allocator, initial_buf);
         const active_pane = root_pane;
-        const leaf = &active_pane.data.leaf;
-        if (default_file_path) |path| leaf.code_editor.setLanguageFromPath(path);
+        if (default_file_path) |path| active_pane.data.leaf.code_editor.setLanguageFromPath(path);
 
         return Self{
             .allocator = allocator,
             .config = config,
             .theme = Theme.dark(),
-            .clay_memory = clay_memory,
             .initialized = false,
+            .clay_memory = clay_memory,
             .anim_manager = AnimationManager.init(allocator),
             .frame_arena = std.heap.ArenaAllocator.init(allocator),
             .root_pane = root_pane,
             .active_pane = active_pane,
             .text_renderer = null,
+            .window = null,
             .file_explorer = file_explorer,
             .show_file_explorer = true,
             .current_directory = null,
+            .pending_tab_switch = null,
+            .pending_pdf_page_change = null,
+            .pending_split = null,
+            .active_dialog = null,
+            .pending_tab_closes = std.ArrayList(TabCloseRequest).init(allocator),
+            .open_buffers = open_buffers,
             .open_images = std.StringHashMap(*anyopaque).init(allocator),
             .open_pdfs = std.StringHashMap(*anyopaque).init(allocator),
             .open_markdown_views = std.StringHashMap(*markdown_view_mod.MarkdownView).init(allocator),
-            .open_buffers = open_buffers,
+            .pending_md_preview = null,
             .image_renderer = null,
+            .mouse_pressed_this_frame = false,
+            .mouse_x = 0.0,
+            .mouse_y = 0.0,
+            .is_mouse_down = false,
         };
     }
 
     /// UI aufräumen
     pub fn deinit(self: *Self) void {
         log.debug("UI.deinit: start", .{});
+
+        if (self.active_dialog) |ad| {
+            if (ad.message_needs_free) {
+                self.allocator.free(ad.dialog.message);
+            }
+            self.active_dialog = null;
+        }
+
         self.anim_manager.deinit();
         log.debug("UI.deinit: anim_manager done", .{});
         self.frame_arena.deinit();
@@ -280,6 +236,8 @@ pub const UI = struct {
         self.open_markdown_views.deinit();
 
         if (self.current_directory) |dir| self.allocator.free(dir);
+        self.pending_tab_closes.deinit();
+
         log.debug("UI.deinit: finished", .{});
     }
 
@@ -703,6 +661,20 @@ pub const UI = struct {
             self.pending_split = null;
         }
 
+        // Process deferred tab closes
+        while (self.pending_tab_closes.popOrNull()) |req: TabCloseRequest| {
+            // Verify pane is still valid and has tabs
+            switch (req.pane.data) {
+                .leaf => |*leaf| {
+                    if (req.index < leaf.tab_bar.tabs.items.len) {
+                        leaf.tab_bar.closeTab(req.index);
+                        wio.cancelWait();
+                    }
+                },
+                else => {},
+            }
+        }
+
         // Cleanup empty panes (close split if a pane becomes empty)
         _ = self.cleanupEmptyPanes(null, self.root_pane);
 
@@ -710,8 +682,7 @@ pub const UI = struct {
         if (self.active_dialog) |*ad| {
             if (ad.dialog.render(t, self.mouse_pressed_this_frame)) |res| {
                 ad.callback(self, res, ad.context_usize, ad.context_ptr);
-                if (ad.dialog.message.ptr != "".ptr) {
-                    // Always free duped message
+                if (ad.message_needs_free) {
                     self.allocator.free(ad.dialog.message);
                 }
                 self.active_dialog = null;
@@ -726,6 +697,7 @@ pub const UI = struct {
             .leaf => |*leaf| {
                 if (leaf.tab_bar.tabs.items.len == 0) {
                     if (parent) |p| {
+                        log.debug("cleanupEmptyPanes: found empty leaf, collapsing split. Parent: {*}, Leaf: {*}", .{ p, pane });
                         // Find other child
                         const split = &p.data.split;
                         const other_idx: usize = if (split.children[0] == pane) 1 else 0;
@@ -735,9 +707,10 @@ pub const UI = struct {
                         const other_data = other_child.data;
                         const other_allocator = other_child.allocator;
 
-                        // Focus redirection
-                        if (self.active_pane == pane or self.active_pane == p) {
-                            self.active_pane = other_child;
+                        // Focus redirection: If either the closed pane or the parent was active, 
+                        // redirection focus to the parent (which now becomes the sibling).
+                        if (self.active_pane == pane or self.active_pane == p or self.active_pane == other_child) {
+                            self.active_pane = p;
                         }
 
                         // Destroy current empty pane and the other child's wrapper
@@ -788,11 +761,13 @@ pub const UI = struct {
                         self.mouse_pressed_this_frame,
                     )) |req| {
                         if (req.close) {
+                            log.debug("renderPane: tab close requested for index {d}", .{req.index});
                             const tab = &leaf.tab_bar.tabs.items[req.index];
                             if (tab.modified) {
                                 self.showSaveConfirmationDialog(pane, req.index);
                             } else {
-                                leaf.tab_bar.closeTab(req.index);
+                                // Defer the closure to after the layout cycle
+                                self.pending_tab_closes.append(.{ .pane = pane, .index = req.index }) catch {};
                             }
                         } else if (req.do_switch) {
                             leaf.tab_bar.setActive(req.index);
@@ -972,54 +947,100 @@ pub const UI = struct {
     }
 
     pub fn getActiveEditor(self: *Self) *editor_mod.CodeEditor {
-        return self.active_pane.data.leaf.code_editor;
+        var p = self.active_pane;
+        while (p.data == .split) {
+            p = p.data.split.children[0];
+        }
+        return p.data.leaf.code_editor;
     }
 
     pub fn getActiveTabBar(self: *Self) *tab_bar_mod.TabBarState {
-        return &self.active_pane.data.leaf.tab_bar;
+        var p = self.active_pane;
+        while (p.data == .split) {
+            p = p.data.split.children[0];
+        }
+        return &p.data.leaf.tab_bar;
     }
 
     pub fn splitActivePane(self: *Self, direction: pane_mod.PaneDirection) !void {
         const pane = self.active_pane;
         if (pane.data != .leaf) return;
-        const old_leaf = pane.data.leaf;
-        const new_leaf_pane = try pane_mod.Pane.createLeaf(self.allocator, old_leaf.code_editor.buffer);
-        
-        // Copy current tab info to the new pane if it exists, so it's not immediately cleaned up as "empty"
-        if (pane.data.leaf.tab_bar.getActiveTab()) |active_tab| {
-            try new_leaf_pane.data.leaf.tab_bar.openFile(active_tab.path);
-        }
 
-        const old_leaf_pane = try self.allocator.create(pane_mod.Pane);
-        old_leaf_pane.* = .{ .allocator = self.allocator, .data = .{ .leaf = old_leaf } };
-        pane.data = .{ .split = .{ .direction = direction, .ratio = 0.5, .children = .{ old_leaf_pane, new_leaf_pane } } };
-        self.active_pane = new_leaf_pane;
+        // 1. Get current state
+        const current_leaf = pane.data.leaf;
+        const current_buffer = current_leaf.code_editor.buffer;
+
+        // 2. Create TWO brand new independent leaves
+        const old_content_leaf = try pane_mod.Pane.createLeaf(self.allocator, current_buffer);
+        const new_split_leaf = try pane_mod.Pane.createLeaf(self.allocator, current_buffer);
+
+        // 3. Deep-copy tab state (dupes strings)
+        try old_content_leaf.data.leaf.tab_bar.cloneFrom(&current_leaf.tab_bar);
+        try new_split_leaf.data.leaf.tab_bar.cloneFrom(&current_leaf.tab_bar);
+
+        // 4. CLEANUP ORIGINAL DATA before overwriting
+        // Copy the old data so we can deinit it safely after replacing the union branch
+        var old_editor = current_leaf.code_editor;
+        var old_tab_bar = current_leaf.tab_bar;
+
+        // 5. Transform original pane into a split node
+        pane.data = .{ .split = .{ 
+            .direction = direction, 
+            .ratio = 0.5, 
+            .children = .{ old_content_leaf, new_split_leaf } 
+        } };
+
+        // 6. Now it's safe to deinit old resources
+        old_editor.deinit();
+        self.allocator.destroy(old_editor);
+        old_tab_bar.deinit();
+
+        // 7. Update focus
+        self.active_pane = new_split_leaf;
+        
+        wio.cancelWait();
     }
 
     fn showSaveConfirmationDialog(self: *Self, pane: *pane_mod.Pane, tab_index: usize) void {
         const tab = &pane.data.leaf.tab_bar.tabs.items[tab_index];
         var msg_buf: [256]u8 = undefined;
         const msg = std.fmt.bufPrint(&msg_buf, "Do you want to save changes to '{s}'?", .{tab.display_name}) catch "Save?";
+        
+        const duped_msg = self.allocator.dupe(u8, msg) catch msg;
+        const needs_free = (duped_msg.ptr != msg.ptr);
+
         self.active_dialog = .{
             .dialog = .{
                 .title = "Unsaved Changes",
-                .message = self.allocator.dupe(u8, msg) catch msg,
-                .actions = &.{ .{ .label = "Save", .result = .yes }, .{ .label = "Don't Save", .result = .no }, .{ .label = "Cancel", .result = .cancel } },
+                .message = duped_msg,
+                .actions = &.{
+                    .{ .label = "Save", .result = .yes },
+                    .{ .label = "Don't Save", .result = .no },
+                    .{ .label = "Cancel", .result = .cancel },
+                },
             },
             .context_usize = tab_index,
             .context_ptr = pane,
-            .callback = struct {
-                fn cb(ui: *UI, res: dialog_mod.DialogResult, idx: usize, ptr: ?*anyopaque) void {
-                    _ = ui;
-                    const p: *pane_mod.Pane = @ptrCast(@alignCast(ptr.?));
-                    const leaf = &p.data.leaf;
-                    switch (res) {
-                        .yes, .no => leaf.tab_bar.closeTab(idx),
-                        .cancel => {},
-                    }
-                }
-            }.cb,
+            .callback = handleSaveConfirmation,
+            .message_needs_free = needs_free,
         };
+    }
+
+    fn handleSaveConfirmation(ui: *UI, res: dialog_mod.DialogResult, idx: usize, ptr: ?*anyopaque) void {
+        const p: *pane_mod.Pane = @ptrCast(@alignCast(ptr.?));
+        const leaf = &p.data.leaf;
+        switch (res) {
+            .yes => {
+                leaf.code_editor.save() catch |err| {
+                    log.err("Failed to save during close: {}", .{err});
+                };
+                ui.pending_tab_closes.append(.{ .pane = p, .index = idx }) catch {};
+            },
+            .no => {
+                ui.pending_tab_closes.append(.{ .pane = p, .index = idx }) catch {};
+            },
+            .cancel => {},
+        }
     }
 
     pub fn getActiveTerminal(self: *Self) ?*@import("../terminal/terminal_instance.zig").TerminalInstance {

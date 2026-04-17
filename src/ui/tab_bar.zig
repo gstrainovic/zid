@@ -35,7 +35,7 @@ pub const Tab = struct {
 pub const TabBarState = struct {
     allocator: std.mem.Allocator,
     /// Liste der offenen Tabs
-    tabs: std.ArrayList(Tab),
+    tabs: std.ArrayListUnmanaged(Tab),
     /// Index des aktiven Tabs (null = keine Datei offen)
     active_index: ?usize = null,
     /// Pending Pfad für Tab-Wechsel (wird von main.zig abgefragt)
@@ -52,7 +52,7 @@ pub const TabBarState = struct {
     pub fn init(allocator: std.mem.Allocator) Self {
         return Self{
             .allocator = allocator,
-            .tabs = std.ArrayList(Tab).empty,
+            .tabs = .empty,
             .terminal_instances = std.StringHashMap(*TerminalInstance).init(allocator),
         };
     }
@@ -143,6 +143,28 @@ pub const TabBarState = struct {
         self.setActive(self.tabs.items.len - 1);
     }
 
+    pub fn cloneFrom(self: *Self, other: *const TabBarState) !void {
+        // Clear current tabs
+        for (self.tabs.items) |tab| {
+            self.allocator.free(tab.path);
+            self.allocator.free(tab.display_name);
+        }
+        self.tabs.clearRetainingCapacity();
+
+        // Copy tabs from other
+        for (other.tabs.items) |tab| {
+            try self.tabs.append(self.allocator, .{
+                .path = try self.allocator.dupe(u8, tab.path),
+                .display_name = try self.allocator.dupe(u8, tab.display_name),
+                .kind = tab.kind,
+                .modified = tab.modified,
+                .is_active = tab.is_active,
+                .buffer = tab.buffer,
+            });
+        }
+        self.active_index = other.active_index;
+    }
+
     /// Open a new terminal tab
     pub fn openTerminal(self: *Self) void {
         self.terminal_counter += 1;
@@ -207,18 +229,15 @@ pub const TabBarState = struct {
 
         // Active Index anpassen
         if (self.active_index) |active| {
-            if (active == index) {
-                // Geschlossener Tab war aktiv → neuen aktiven wählen
-                if (self.tabs.items.len > 0) {
-                    self.active_index = @min(active, self.tabs.items.len - 1);
-                } else {
-                    self.active_index = null;
-                    // pending_switch_path freigeben wenn letzter Tab geschlossen
-                    if (self.pending_switch_path) |p| {
-                        self.allocator.free(p);
-                        self.pending_switch_path = null;
-                    }
+            if (self.tabs.items.len == 0) {
+                self.active_index = null;
+                if (self.pending_switch_path) |p| {
+                    self.allocator.free(p);
+                    self.pending_switch_path = null;
                 }
+            } else if (active == index) {
+                // Geschlossener Tab war aktiv → neuen aktiven wählen
+                self.active_index = @min(active, self.tabs.items.len - 1);
             } else if (active > index) {
                 // Aktiver Tab war nach dem geschlossenen → Index dekrementieren
                 self.active_index = active - 1;
@@ -262,7 +281,7 @@ pub fn renderTabBar(
 
     // Tab-Bar Container — horizontal scrollbar wenn Tabs nicht passen
     clay.UI()(.{
-        .id = clay.ElementId.IDI("tab_bar_container", @truncate(@intFromPtr(state))),
+        .id = clay.ElementId.IDI("tab_bar_container", @as(u32, @truncate(@intFromPtr(state) >> 4))),
         .layout = .{
             .sizing = .{ .w = .grow, .h = .fixed(44) },
             .direction = .left_to_right,
@@ -308,7 +327,7 @@ pub fn renderTabBar(
         });
     });
 
-    const add_btn_id = clay.ElementId.IDI("add_tab_btn", @truncate(@intFromPtr(state)));
+    const add_btn_id = clay.ElementId.IDI("add_tab_btn", @as(u32, @truncate(@intFromPtr(state) >> 4)));
     if (mouse_pressed and clay.pointerOver(add_btn_id)) {
         state.show_new_menu = !state.show_new_menu;
     }
@@ -407,8 +426,9 @@ fn renderTab(
     mouse_pressed: bool,
 ) ?TabRequest {
     // _ = state; // Removed discard as state is used for scoped IDs
-    const tab_id = clay.ElementId.IDI("tab", @truncate(@intFromPtr(state) ^ index));
-    const close_id = clay.ElementId.IDI("tab_close", @truncate(@intFromPtr(state) ^ index));
+    const state_id_base = @as(u32, @truncate(@intFromPtr(state) >> 4));
+    const tab_id = clay.ElementId.IDI("tab", state_id_base ^ @as(u32, @intCast(index)));
+    const close_id = clay.ElementId.IDI("tab_close", state_id_base ^ @as(u32, @intCast(index)));
 
     const is_tab_hovered = clay.pointerOver(tab_id);
     const is_close_hovered = clay.pointerOver(close_id);
@@ -454,7 +474,7 @@ fn renderTab(
     })({
         // Tab-Name — Container mit fester Breite für den Text
         clay.UI()(.{
-            .id = clay.ElementId.IDI("tab_text_container", @truncate(@intFromPtr(state) ^ index)),
+            .id = clay.ElementId.IDI("tab_text_container", state_id_base ^ @as(u32, @intCast(index))),
             .layout = .{
                 .sizing = .{ .w = .fixed(text_width + 8.0), .h = .fixed(32) },
                 .child_alignment = .{ .y = .center },
