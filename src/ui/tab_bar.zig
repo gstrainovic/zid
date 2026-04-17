@@ -262,7 +262,7 @@ pub fn renderTabBar(
 
     // Tab-Bar Container — horizontal scrollbar wenn Tabs nicht passen
     clay.UI()(.{
-        .id = clay.ElementId.ID("tab_bar_container"),
+        .id = clay.ElementId.IDI("tab_bar_container", @truncate(@intFromPtr(state))),
         .layout = .{
             .sizing = .{ .w = .grow, .h = .fixed(44) },
             .direction = .left_to_right,
@@ -288,7 +288,7 @@ pub fn renderTabBar(
             }
         }
 
-        const add_btn_id = clay.ElementId.ID("add_tab_btn");
+        const add_btn_id = clay.ElementId.IDI("add_tab_btn", @truncate(@intFromPtr(state)));
         const add_btn_hover = clay.pointerOver(add_btn_id);
 
         clay.UI()(.{
@@ -308,7 +308,7 @@ pub fn renderTabBar(
         });
     });
 
-    const add_btn_id = clay.ElementId.ID("add_tab_btn");
+    const add_btn_id = clay.ElementId.IDI("add_tab_btn", @truncate(@intFromPtr(state)));
     if (mouse_pressed and clay.pointerOver(add_btn_id)) {
         state.show_new_menu = !state.show_new_menu;
     }
@@ -318,7 +318,7 @@ pub fn renderTabBar(
 
     if (state.show_new_menu) {
         clay.UI()(.{
-            .id = clay.ElementId.ID("add_tab_dropdown"),
+            .id = clay.ElementId.IDI("add_tab_dropdown", @truncate(@intFromPtr(state))),
             .floating = .{
                 .attach_to = .to_element_with_id,
                 .parentId = add_btn_id.id,
@@ -336,8 +336,8 @@ pub fn renderTabBar(
             .border = .{ .width = .{ .left = 1, .right = 1, .top = 1, .bottom = 1 }, .color = theme.border },
             .corner_radius = .{ .top_left = 4, .top_right = 4, .bottom_left = 4, .bottom_right = 4 },
         })({
-            const file_id = clay.ElementId.ID("menu_new_file");
-            const term_id = clay.ElementId.ID("menu_new_term");
+            const file_id = clay.ElementId.IDI("menu_new_file", @truncate(@intFromPtr(state)));
+            const term_id = clay.ElementId.IDI("menu_new_term", @truncate(@intFromPtr(state)));
 
             const file_hover = clay.pointerOver(file_id);
             const term_hover = clay.pointerOver(term_id);
@@ -349,7 +349,7 @@ pub fn renderTabBar(
                 } else if (term_hover) {
                     create_new_term = true;
                     state.show_new_menu = false;
-                } else if (!clay.pointerOver(clay.ElementId.ID("add_tab_dropdown")) and !clay.pointerOver(add_btn_id)) {
+                } else if (!clay.pointerOver(clay.ElementId.IDI("add_tab_dropdown", @truncate(@intFromPtr(state)))) and !clay.pointerOver(add_btn_id)) {
                     state.show_new_menu = false;
                 }
             }
@@ -406,9 +406,9 @@ fn renderTab(
     theme: Theme,
     mouse_pressed: bool,
 ) ?TabRequest {
-    _ = state;
-    const tab_id = clay.ElementId.IDI("tab", @intCast(index));
-    const close_id = clay.ElementId.IDI("tab_close", @intCast(index));
+    // _ = state; // Removed discard as state is used for scoped IDs
+    const tab_id = clay.ElementId.IDI("tab", @truncate(@intFromPtr(state) ^ index));
+    const close_id = clay.ElementId.IDI("tab_close", @truncate(@intFromPtr(state) ^ index));
 
     const is_tab_hovered = clay.pointerOver(tab_id);
     const is_close_hovered = clay.pointerOver(close_id);
@@ -454,7 +454,7 @@ fn renderTab(
     })({
         // Tab-Name — Container mit fester Breite für den Text
         clay.UI()(.{
-            .id = clay.ElementId.IDI("tab_text_container", @intCast(index)),
+            .id = clay.ElementId.IDI("tab_text_container", @truncate(@intFromPtr(state) ^ index)),
             .layout = .{
                 .sizing = .{ .w = .fixed(text_width + 8.0), .h = .fixed(32) },
                 .child_alignment = .{ .y = .center },
