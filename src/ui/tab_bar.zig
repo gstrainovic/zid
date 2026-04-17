@@ -312,7 +312,6 @@ pub fn renderTabBar(
         }
 
         const add_btn_id = clay.ElementId.IDI("add_tab_btn", @truncate(@intFromPtr(state)));
-        const add_btn_hover = clay.pointerOver(add_btn_id);
 
         clay.UI()(.{
             .id = add_btn_id,
@@ -320,19 +319,26 @@ pub fn renderTabBar(
                 .sizing = .{ .w = .fixed(32), .h = .fixed(32) },
                 .child_alignment = .{ .x = .center, .y = .center },
             },
-            .background_color = if (add_btn_hover or state.show_new_menu) theme.primary else theme.surface,
+            .background_color = theme.surface,
             .corner_radius = .{ .top_left = 4, .top_right = 4, .bottom_left = 4, .bottom_right = 4 },
         })({
             clay.text("+", .{
                 .font_size = 24,
-                .color = if (add_btn_hover or state.show_new_menu) theme.bg else theme.muted,
+                .color = theme.muted,
                 .wrap_mode = .none,
             });
         });
     });
 
-    const add_btn_id = clay.ElementId.IDI("add_tab_btn", @as(u32, @truncate(@intFromPtr(state))));
-    if (mouse_pressed and clay.pointerOver(add_btn_id)) {
+    // Bounding-Box Check für add_btn (nach clay.UI())
+    const add_btn_id_check = clay.ElementId.IDI("add_tab_btn", @as(u32, @truncate(@intFromPtr(state))));
+    const add_btn_data = clay.getElementData(add_btn_id_check);
+    const add_btn_hover = if (add_btn_data.found) blk: {
+        const bb = add_btn_data.bounding_box;
+        break :blk mouse_x >= bb.x and mouse_x < bb.x + bb.width and mouse_y >= bb.y and mouse_y < bb.y + bb.height;
+    } else false;
+
+    if (mouse_pressed and add_btn_hover) {
         state.show_new_menu = !state.show_new_menu;
     }
 
@@ -340,11 +346,15 @@ pub fn renderTabBar(
     var create_new_term = false;
 
     if (state.show_new_menu) {
+        const dropdown_id = clay.ElementId.IDI("add_tab_dropdown", @truncate(@intFromPtr(state)));
+        const file_id = clay.ElementId.IDI("menu_new_file", @truncate(@intFromPtr(state)));
+        const term_id = clay.ElementId.IDI("menu_new_term", @truncate(@intFromPtr(state)));
+
         clay.UI()(.{
-            .id = clay.ElementId.IDI("add_tab_dropdown", @truncate(@intFromPtr(state))),
+            .id = dropdown_id,
             .floating = .{
                 .attach_to = .to_element_with_id,
-                .parentId = add_btn_id.id,
+                .parentId = add_btn_id_check.id,
                 .attach_points = .{ .element = .left_top, .parent = .left_bottom },
                 .z_index = 1000,
                 .offset = .{ .x = 0, .y = 4 },
@@ -359,24 +369,6 @@ pub fn renderTabBar(
             .border = .{ .width = .{ .left = 1, .right = 1, .top = 1, .bottom = 1 }, .color = theme.border },
             .corner_radius = .{ .top_left = 4, .top_right = 4, .bottom_left = 4, .bottom_right = 4 },
         })({
-            const file_id = clay.ElementId.IDI("menu_new_file", @truncate(@intFromPtr(state)));
-            const term_id = clay.ElementId.IDI("menu_new_term", @truncate(@intFromPtr(state)));
-
-            const file_hover = clay.pointerOver(file_id);
-            const term_hover = clay.pointerOver(term_id);
-
-            if (mouse_pressed) {
-                if (file_hover) {
-                    create_new_file = true;
-                    state.show_new_menu = false;
-                } else if (term_hover) {
-                    create_new_term = true;
-                    state.show_new_menu = false;
-                } else if (!clay.pointerOver(clay.ElementId.IDI("add_tab_dropdown", @truncate(@intFromPtr(state)))) and !clay.pointerOver(add_btn_id)) {
-                    state.show_new_menu = false;
-                }
-            }
-
             clay.UI()(.{
                 .id = file_id,
                 .layout = .{
@@ -384,10 +376,10 @@ pub fn renderTabBar(
                     .padding = .{ .left = 8, .right = 8 },
                     .child_alignment = .{ .x = .left, .y = .center },
                 },
-                .background_color = if (file_hover) theme.primary else theme.surface,
+                .background_color = theme.surface,
                 .corner_radius = .{ .top_left = 2, .top_right = 2, .bottom_left = 2, .bottom_right = 2 },
             })({
-                clay.text("New File", .{ .font_size = 18, .color = if (file_hover) theme.bg else theme.text, .wrap_mode = .none });
+                clay.text("New File", .{ .font_size = 18, .color = theme.text, .wrap_mode = .none });
             });
 
             clay.UI()(.{
@@ -397,12 +389,47 @@ pub fn renderTabBar(
                     .padding = .{ .left = 8, .right = 8 },
                     .child_alignment = .{ .x = .left, .y = .center },
                 },
-                .background_color = if (term_hover) theme.primary else theme.surface,
+                .background_color = theme.surface,
                 .corner_radius = .{ .top_left = 2, .top_right = 2, .bottom_left = 2, .bottom_right = 2 },
             })({
-                clay.text("New Terminal", .{ .font_size = 18, .color = if (term_hover) theme.bg else theme.text, .wrap_mode = .none });
+                clay.text("New Terminal", .{ .font_size = 18, .color = theme.text, .wrap_mode = .none });
             });
         });
+
+        // Bounding-Box Checks für dropdown items (nach clay.UI())
+        var file_hover = false;
+        var term_hover = false;
+        var dropdown_hover = false;
+
+        const dropdown_data = clay.getElementData(dropdown_id);
+        if (dropdown_data.found) {
+            const db = dropdown_data.bounding_box;
+            dropdown_hover = mouse_x >= db.x and mouse_x < db.x + db.width and mouse_y >= db.y and mouse_y < db.y + db.height;
+        }
+
+        const file_data = clay.getElementData(file_id);
+        if (file_data.found) {
+            const fb = file_data.bounding_box;
+            file_hover = mouse_x >= fb.x and mouse_x < fb.x + fb.width and mouse_y >= fb.y and mouse_y < fb.y + fb.height;
+        }
+
+        const term_data = clay.getElementData(term_id);
+        if (term_data.found) {
+            const tb = term_data.bounding_box;
+            term_hover = mouse_x >= tb.x and mouse_x < tb.x + tb.width and mouse_y >= tb.y and mouse_y < tb.y + tb.height;
+        }
+
+        if (mouse_pressed) {
+            if (file_hover) {
+                create_new_file = true;
+                state.show_new_menu = false;
+            } else if (term_hover) {
+                create_new_term = true;
+                state.show_new_menu = false;
+            } else if (!dropdown_hover and !add_btn_hover) {
+                state.show_new_menu = false;
+            }
+        }
     }
 
     if (create_new_file) {
