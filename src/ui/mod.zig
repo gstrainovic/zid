@@ -464,6 +464,7 @@ pub const UI = struct {
             }
         }
         self.getActiveEditor().handleMouseMove(x, y);
+        self.getActiveEditor().desired_cursor = if (self.getActiveEditor().last_frame_hovered) .text else .arrow;
     }
 
     pub fn handleMouseUp(self: *Self) void {
@@ -952,32 +953,24 @@ pub const UI = struct {
         if (self.file_explorer.is_resizing or clay.pointerOver(clay.ElementId.ID("ExplorerSplitter"))) {
             return .size_ew;
         }
-        
+
+        // Rekursiv das Pane unter der Maus finden — nicht das aktive Pane,
+        // denn bei Splits zeigt getActiveEditor() immer auf children[0].
         var desired: wio.Cursor = .arrow;
-        self.checkCursorRecursive(self.root_pane, &desired);
+        self.findCursorRecursive(self.root_pane, &desired);
         return desired;
     }
 
-    fn checkCursorRecursive(self: *Self, pane: *pane_mod.Pane, desired: *wio.Cursor) void {
+    fn findCursorRecursive(self: *Self, pane: *pane_mod.Pane, desired: *wio.Cursor) void {
         switch (pane.data) {
             .leaf => |*leaf| {
-                if (leaf.code_editor.desired_cursor == .text) {
+                if (leaf.code_editor.last_frame_hovered and leaf.code_editor.desired_cursor == .text) {
                     desired.* = .text;
                 }
             },
             .split => |*split| {
-                for (split.children) |child| {
-                    self.checkCursorRecursive(child, desired);
-                }
-                
-                const split_id = clay.ElementId.IDI("split_handle", @truncate(@intFromPtr(pane)));
-                if (clay.pointerOver(split_id)) {
-                    if (split.direction == .horizontal) {
-                        desired.* = .size_ew;
-                    } else {
-                        desired.* = .size_ns;
-                    }
-                }
+                self.findCursorRecursive(split.children[0], desired);
+                self.findCursorRecursive(split.children[1], desired);
             },
         }
     }
