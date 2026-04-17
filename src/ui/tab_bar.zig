@@ -461,7 +461,12 @@ fn renderTab(
     const text_width = ui.measureTextWidth(label_str, 24.0);
     const total_width: f32 = 8.0 + text_width + 8.0 + 8.0 + 24.0;
 
-    // Tab-Element erstellen (mit Standard-Farben)
+    // Tab-Element erstellen - mit aktiven/hover Farben
+    // Farben basieren auf letztem Frame's hover state (immediate mode üblich)
+    const bg_color = if (is_active) theme.bg else if (is_tab_hovered) [4]f32{ theme.bg[0], theme.bg[1], theme.bg[2], 128.0 } else theme.surface;
+    const text_color = if (is_active) theme.text else theme.muted;
+    const border_color = if (is_active) theme.accent else .{ 0.0, 0.0, 0.0, 0.0 };
+
     clay.UI()(.{
         .id = tab_id,
         .layout = .{
@@ -470,10 +475,10 @@ fn renderTab(
             .child_alignment = .{ .x = .left, .y = .center },
             .padding = .{ .left = 8, .right = 8 },
         },
-        .background_color = theme.surface,
+        .background_color = bg_color,
         .border = .{
             .width = .{ .bottom = 2 },
-            .color = .{ 0.0, 0.0, 0.0, 0.0 },
+            .color = border_color,
         },
         .corner_radius = .{ .top_left = 4, .top_right = 4 },
     })({
@@ -487,12 +492,13 @@ fn renderTab(
         })({
             clay.text(label_str, .{
                 .font_size = 24,
-                .color = theme.muted,
+                .color = text_color,
                 .wrap_mode = .none,
             });
         });
 
-        // Close Button (X)
+        // Close Button (X) - Element immer erstellen, Text nur bei hover/aktiv
+        const close_icon_color = if (is_close_hovered) theme.danger else text_color;
         clay.UI()(.{
             .id = close_id,
             .layout = .{
@@ -500,17 +506,17 @@ fn renderTab(
                 .child_alignment = .{ .x = .center, .y = .center },
             },
         })({
-            if (is_active) {
+            if (is_tab_hovered or is_active) {
                 clay.text("x", .{
                     .font_size = 20,
-                    .color = theme.muted,
+                    .color = close_icon_color,
                     .wrap_mode = .none,
                 });
             }
         });
     });
 
-    // Bounding-Box Checks NACH clay.UI(), damit Bounds bekannt sind
+    // Bounding-Box Checks für hover detection (für nächsten frame)
     const tab_data = clay.getElementData(tab_id);
     if (tab_data.found) {
         const bb = tab_data.bounding_box;
