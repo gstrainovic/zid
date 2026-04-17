@@ -179,7 +179,7 @@ pub const CodeEditor = struct {
     context_menu_x: f32 = 0,
     context_menu_y: f32 = 0,
 
-    /// Aktueller Mauszeiger-Typ
+    last_frame_hovered: bool = false,
     desired_cursor: wio.Cursor = .arrow,
 
     /// Reusable line buffer for getLine — contents valid only until next getLine call.
@@ -1572,8 +1572,11 @@ pub const CodeEditor = struct {
             },
             .background_color = self.bg_color,
         })({
-            if (clay.pointerOver(editor_id)) {
+            self.last_frame_hovered = clay.pointerOver(editor_id);
+            if (self.last_frame_hovered) {
                 self.desired_cursor = .text;
+            } else {
+                self.desired_cursor = .arrow;
             }
 
             // Phase 5: Progress Indicator
