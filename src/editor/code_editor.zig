@@ -1562,15 +1562,17 @@ pub const CodeEditor = struct {
     pub fn render(self: *Self, arena: std.mem.Allocator, mouse_pressed: bool) void {
         self.desired_cursor = .arrow;
 
+        const editor_id = clay.ElementId.IDI("code_editor", @truncate(@intFromPtr(self)));
+
         clay.UI()(.{
-            .id = clay.ElementId.IDI("code_editor", @truncate(@intFromPtr(self))),
+            .id = editor_id,
             .layout = .{
                 .sizing = .{ .w = .grow, .h = .grow },
                 .direction = .left_to_right,
             },
             .background_color = self.bg_color,
         })({
-            if (clay.hovered()) {
+            if (clay.pointerOver(editor_id)) {
                 self.desired_cursor = .text;
             }
 
