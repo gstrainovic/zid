@@ -42,6 +42,9 @@ pub const MarkdownView = struct {
     context_menu_x: f32 = 0,
     context_menu_y: f32 = 0,
 
+    pending_split_v: bool = false,
+    pending_split_h: bool = false,
+
     const Self = @This();
 
     pub fn init(allocator: std.mem.Allocator, text: []const u8, base_path: []const u8) Self {
@@ -83,6 +86,16 @@ pub const MarkdownView = struct {
             }
             if (clay.pointerOver(clay.getElementId("MDSelectAll"))) {
                 self.selectAll();
+                self.show_context_menu = false;
+                return true;
+            }
+            if (clay.pointerOver(clay.getElementId("MDSplitV"))) {
+                self.pending_split_v = true;
+                self.show_context_menu = false;
+                return true;
+            }
+            if (clay.pointerOver(clay.getElementId("MDSplitH"))) {
+                self.pending_split_h = true;
                 self.show_context_menu = false;
                 return true;
             }
@@ -167,10 +180,6 @@ pub const MarkdownView = struct {
         if (!self.show_context_menu) return;
 
         const font_size_f: f32 = @floatFromInt(self.font_size);
-        const item_height = font_size_f + 12;
-        const menu_width: f32 = 180;
-        const item_count: f32 = 2; // Copy, Select All
-        const menu_height = item_height * item_count + 8;
 
         clay.UI()(.{
             .id = clay.ElementId.ID("md-context-menu-anchor"),
@@ -185,9 +194,10 @@ pub const MarkdownView = struct {
             clay.UI()(.{
                 .id = clay.ElementId.ID("md-context-menu-container"),
                 .layout = .{
-                    .sizing = .{ .w = .fixed(menu_width), .h = .fixed(menu_height) },
+                    .sizing = .{ .w = .fit, .h = .fit },
                     .direction = .top_to_bottom,
-                    .padding = .all(4),
+                    .padding = .all(8),
+                    .child_gap = 4,
                 },
                 .background_color = .{ 45, 45, 60, 255 },
                 .border = .{ .width = .all(1), .color = .{ 100, 100, 120, 255 } },
@@ -195,6 +205,11 @@ pub const MarkdownView = struct {
             })({
                 self.renderContextMenuItem("Copy", "MDCopy", font_size_f);
                 self.renderContextMenuItem("Select All", "MDSelectAll", font_size_f);
+
+                clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(1) } }, .background_color = .{ 80, 80, 80, 255 } })({});
+
+                self.renderContextMenuItem("Split-Vertically", "MDSplitV", font_size_f);
+                self.renderContextMenuItem("Split-Horizontally", "MDSplitH", font_size_f);
             });
         });
     }
@@ -207,7 +222,7 @@ pub const MarkdownView = struct {
         clay.UI()(.{
             .id = item_id,
             .layout = .{
-                .sizing = .{ .w = .grow, .h = .fixed(item_font_size + 12) },
+                .sizing = .{ .w = .fit, .h = .fixed(item_font_size + 12) },
                 .padding = .{ .left = 8, .right = 8 },
                 .child_alignment = .{ .x = .left, .y = .center },
             },
@@ -248,17 +263,12 @@ pub const MarkdownView = struct {
             clay.UI()(.{
                 .id = clay.ElementId.ID("md_viewport"),
                 .layout = .{ .sizing = .grow },
-                .clip = .{ .vertical = true, .horizontal = true },
+                .clip = .{ .vertical = true, .horizontal = true, .child_offset = .{ .x = 0, .y = -self.scroll_offset_y } },
             })({
                 clay.UI()(.{
                     .id = clay.ElementId.ID("md_content"),
-                    .floating = .{
-                        .attach_to = .to_parent,
-                        .attach_points = .{ .element = .left_top, .parent = .left_top },
-                        .offset = .{ .x = 0, .y = -self.scroll_offset_y },
-                    },
                     .layout = .{
-                        .sizing = .{ .w = .fixed(if (clip_data.found) clip_data.bounding_box.width else 800), .h = .fit },
+                        .sizing = .{ .w = .grow, .h = .fit },
                         .direction = .top_to_bottom,
                         .padding = .all(24),
                         .child_gap = 16,

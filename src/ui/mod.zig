@@ -844,6 +844,14 @@ pub const UI = struct {
                                 if (md_view) |v| {
                                     v.window = self.window;
                                     v.render(allocator, t, self);
+                                    if (v.pending_split_v) {
+                                        v.pending_split_v = false;
+                                        self.pending_split = .vertical;
+                                    }
+                                    if (v.pending_split_h) {
+                                        v.pending_split_h = false;
+                                        self.pending_split = .horizontal;
+                                    }
                                     special_active = true;
                                 }
                             }

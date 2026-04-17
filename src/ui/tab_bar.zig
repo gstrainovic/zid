@@ -369,37 +369,38 @@ pub fn renderTabBar(
             .border = .{ .width = .{ .left = 1, .right = 1, .top = 1, .bottom = 1 }, .color = theme.border },
             .corner_radius = .{ .top_left = 4, .top_right = 4, .bottom_left = 4, .bottom_right = 4 },
         })({
+            const file_hover = clay.pointerOver(file_id);
             clay.UI()(.{
                 .id = file_id,
                 .layout = .{
-                    .sizing = .{ .w = .grow, .h = .fixed(24) },
+                    .sizing = .{ .w = .grow, .h = .fixed(32) },
                     .padding = .{ .left = 8, .right = 8 },
                     .child_alignment = .{ .x = .left, .y = .center },
                 },
-                .background_color = theme.surface,
-                .corner_radius = .{ .top_left = 2, .top_right = 2, .bottom_left = 2, .bottom_right = 2 },
+                .background_color = if (file_hover) .{ 80, 80, 100, 255 } else theme.surface,
+                .corner_radius = .all(2),
             })({
                 clay.text("New File", .{ .font_size = 18, .color = theme.text, .wrap_mode = .none });
             });
 
+            const term_hover = clay.pointerOver(term_id);
             clay.UI()(.{
                 .id = term_id,
                 .layout = .{
-                    .sizing = .{ .w = .grow, .h = .fixed(24) },
+                    .sizing = .{ .w = .grow, .h = .fixed(32) },
                     .padding = .{ .left = 8, .right = 8 },
                     .child_alignment = .{ .x = .left, .y = .center },
                 },
-                .background_color = theme.surface,
-                .corner_radius = .{ .top_left = 2, .top_right = 2, .bottom_left = 2, .bottom_right = 2 },
+                .background_color = if (term_hover) .{ 80, 80, 100, 255 } else theme.surface,
+                .corner_radius = .all(2),
             })({
                 clay.text("New Terminal", .{ .font_size = 18, .color = theme.text, .wrap_mode = .none });
             });
         });
 
-        // Hover-Checks für dropdown items (nach clay.UI())
+        const dropdown_hover = clay.pointerOver(dropdown_id);
         const file_hover = clay.pointerOver(file_id);
         const term_hover = clay.pointerOver(term_id);
-        const dropdown_hover = clay.pointerOver(dropdown_id);
 
         if (mouse_pressed) {
             if (file_hover) {
