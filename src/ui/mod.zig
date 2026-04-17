@@ -953,9 +953,11 @@ pub const UI = struct {
         // Try to load existing file
         const content = std.fs.cwd().readFileAlloc(self.allocator, path, 64 * 1024 * 1024) catch |not_found| {
             if (not_found == error.FileNotFound) {
-                // New file - create empty buffer
+                // New file - create empty buffer with initialized root
                 const new_buf = try @import("flow_core").Buffer.create(self.allocator);
+                new_buf.root = try new_buf.load_from_string("", &new_buf.file_eol_mode, &new_buf.file_utf8_sanitized);
                 new_buf.set_file_path(path);
+                new_buf.last_save = new_buf.root;
                 try self.open_buffers.put(try self.allocator.dupe(u8, path), new_buf);
                 return new_buf;
             }
