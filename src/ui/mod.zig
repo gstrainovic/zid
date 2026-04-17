@@ -953,7 +953,6 @@ pub const UI = struct {
             return .size_ew;
         }
         
-        // Splitter Checks (iterating splits could be added, but we just check if any editor wants a text cursor)
         var desired: wio.Cursor = .arrow;
         self.checkCursorRecursive(self.root_pane, &desired);
         return desired;
@@ -962,8 +961,8 @@ pub const UI = struct {
     fn checkCursorRecursive(self: *Self, pane: *pane_mod.Pane, desired: *wio.Cursor) void {
         switch (pane.data) {
             .leaf => |*leaf| {
-                if (leaf.code_editor.desired_cursor != .arrow) {
-                    desired.* = leaf.code_editor.desired_cursor;
+                if (leaf.code_editor.desired_cursor == .text) {
+                    desired.* = .text;
                 }
             },
             .split => |*split| {
