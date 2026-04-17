@@ -317,6 +317,7 @@ pub fn main() !void {
                         ui_system.handleMouseMove(mouse_x, mouse_y);
                     },
                     .button_press => |btn| {
+                        log.debug("button_press: btn={}", .{btn});
                         if (btn == .mouse_left or btn == .mouse_right) {
                             if (btn == .mouse_left) mouse_down = true;
                             ui_system.handleMouseDown(mouse_x, mouse_y, btn);

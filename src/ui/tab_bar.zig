@@ -274,6 +274,8 @@ pub fn renderTabBar(
     state: *TabBarState,
     theme: Theme,
     mouse_pressed: bool,
+    mouse_x: f32,
+    mouse_y: f32,
 ) ?TabRequest {
     // Tab-Schließen und Tab-Wechsel NACH der Schleife verarbeiten (vermeidet Use-After-Free und endloses Re-Laden)
     var tab_to_close: ?usize = null;
@@ -281,7 +283,7 @@ pub fn renderTabBar(
 
     // Tab-Bar Container — horizontal scrollbar wenn Tabs nicht passen
     clay.UI()(.{
-        .id = clay.ElementId.IDI("tab_bar_container", @as(u32, @truncate(@intFromPtr(state) >> 4))),
+        .id = clay.ElementId.IDI("tab_bar_container", @as(u32, @truncate(@intFromPtr(state)))),
         .layout = .{
             .sizing = .{ .w = .grow, .h = .fixed(44) },
             .direction = .left_to_right,
@@ -300,6 +302,8 @@ pub fn renderTabBar(
                 is_active,
                 theme,
                 mouse_pressed,
+                mouse_x,
+                mouse_y,
             );
             if (req) |r| {
                 if (r.close) tab_to_close = r.index;
@@ -327,7 +331,7 @@ pub fn renderTabBar(
         });
     });
 
-    const add_btn_id = clay.ElementId.IDI("add_tab_btn", @as(u32, @truncate(@intFromPtr(state) >> 4)));
+    const add_btn_id = clay.ElementId.IDI("add_tab_btn", @as(u32, @truncate(@intFromPtr(state))));
     if (mouse_pressed and clay.pointerOver(add_btn_id)) {
         state.show_new_menu = !state.show_new_menu;
     }
@@ -424,27 +428,19 @@ fn renderTab(
     is_active: bool,
     theme: Theme,
     mouse_pressed: bool,
+    mouse_x: f32,
+    mouse_y: f32,
 ) ?TabRequest {
     // _ = state; // Removed discard as state is used for scoped IDs
-    const state_id_base = @as(u32, @truncate(@intFromPtr(state) >> 4));
+    const state_id_base = @as(u32, @truncate(@intFromPtr(state)));
+    log.debug("renderTab state={*} id_base=0x{x} index={d}", .{ state, state_id_base, index });
     const tab_id = clay.ElementId.IDI("tab", state_id_base ^ @as(u32, @intCast(index)));
     const close_id = clay.ElementId.IDI("tab_close", state_id_base ^ @as(u32, @intCast(index)));
 
-    const is_tab_hovered = clay.pointerOver(tab_id);
-    const is_close_hovered = clay.pointerOver(close_id);
+    var is_tab_hovered = false;
+    var is_close_hovered = false;
 
-    if (mouse_pressed) {
-        if (is_close_hovered) {
-            return TabRequest{ .index = index, .close = true };
-        } else if (is_tab_hovered and !is_active) {
-            return TabRequest{ .index = index, .do_switch = true };
-        }
-    }
-
-    // Tab-Background
-    const bg_color = if (is_active) theme.bg else if (is_tab_hovered) [4]f32{ theme.bg[0], theme.bg[1], theme.bg[2], 128.0 } else theme.surface;
-    const text_color = if (is_active) theme.text else theme.muted;
-    const border_color = if (is_active) theme.accent else .{ 0.0, 0.0, 0.0, 0.0 };
+    var request: ?TabRequest = null;
 
     // Label vorab erzeugen (für modified-Indikator)
     const label_str = if (tab.modified)
@@ -455,8 +451,8 @@ fn renderTab(
     // Gemessene Breite + Puffer
     const text_width = ui.measureTextWidth(label_str, 24.0);
     const total_width: f32 = 8.0 + text_width + 8.0 + 8.0 + 24.0;
-    // log.info("[TAB] '{s}': text_width={d:.1}px, total_width={d:.1}px", .{ label_str, text_width, total_width });
 
+    // Tab-Element erstellen (mit Standard-Farben)
     clay.UI()(.{
         .id = tab_id,
         .layout = .{
@@ -465,14 +461,14 @@ fn renderTab(
             .child_alignment = .{ .x = .left, .y = .center },
             .padding = .{ .left = 8, .right = 8 },
         },
-        .background_color = bg_color,
+        .background_color = theme.surface,
         .border = .{
             .width = .{ .bottom = 2 },
-            .color = border_color,
+            .color = .{ 0.0, 0.0, 0.0, 0.0 },
         },
         .corner_radius = .{ .top_left = 4, .top_right = 4 },
     })({
-        // Tab-Name — Container mit fester Breite für den Text
+        // Tab-Name
         clay.UI()(.{
             .id = clay.ElementId.IDI("tab_text_container", state_id_base ^ @as(u32, @intCast(index))),
             .layout = .{
@@ -482,32 +478,50 @@ fn renderTab(
         })({
             clay.text(label_str, .{
                 .font_size = 24,
-                .color = text_color,
+                .color = theme.muted,
                 .wrap_mode = .none,
             });
         });
 
-        // Close Button (X) — Text-basiert für maximale Zuverlässigkeit (kein SVG-Overhead)
-        const close_icon_color = if (is_close_hovered) theme.danger else text_color;
-
+        // Close Button (X)
         clay.UI()(.{
             .id = close_id,
             .layout = .{
                 .sizing = .{ .w = .fixed(24), .h = .fixed(24) },
                 .child_alignment = .{ .x = .center, .y = .center },
             },
-            // Kein Hintergrund-Rechteck mehr, nur das Icon ändert die Farbe
         })({
-            // 'x' rendern wenn Tab gehovert ODER aktiv ist
-            if (is_tab_hovered or is_active) {
+            if (is_active) {
                 clay.text("x", .{
                     .font_size = 20,
-                    .color = close_icon_color,
+                    .color = theme.muted,
                     .wrap_mode = .none,
                 });
             }
         });
     });
 
-    return null;
+    // Bounding-Box Checks NACH clay.UI(), damit Bounds bekannt sind
+    const tab_data = clay.getElementData(tab_id);
+    if (tab_data.found) {
+        const bb = tab_data.bounding_box;
+        is_tab_hovered = mouse_x >= bb.x and mouse_x < bb.x + bb.width and mouse_y >= bb.y and mouse_y < bb.y + bb.height;
+    }
+
+    const close_data = clay.getElementData(close_id);
+    if (close_data.found) {
+        const cb = close_data.bounding_box;
+        is_close_hovered = mouse_x >= cb.x and mouse_x < cb.x + cb.width and mouse_y >= cb.y and mouse_y < cb.y + cb.height;
+    }
+
+    // Mouse-Event Processing
+    if (mouse_pressed) {
+        if (is_close_hovered) {
+            request = TabRequest{ .index = index, .close = true };
+        } else if (is_tab_hovered and !is_active) {
+            request = TabRequest{ .index = index, .do_switch = true };
+        }
+    }
+
+    return request;
 }

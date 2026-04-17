@@ -86,7 +86,7 @@ pub const UI = struct {
     pending_split: ?pane_mod.PaneDirection,
 
     active_dialog: ?ActiveDialog,
-    pending_tab_closes: std.ArrayList(TabCloseRequest),
+    pending_tab_closes: std.ArrayListUnmanaged(TabCloseRequest),
 
     open_buffers: std.StringHashMap(*@import("flow_core").Buffer),
     open_images: std.StringHashMap(*anyopaque),
@@ -161,7 +161,7 @@ pub const UI = struct {
             .pending_pdf_page_change = null,
             .pending_split = null,
             .active_dialog = null,
-            .pending_tab_closes = std.ArrayList(TabCloseRequest).init(allocator),
+            .pending_tab_closes = std.ArrayListUnmanaged(TabCloseRequest).empty,
             .open_buffers = open_buffers,
             .open_images = std.StringHashMap(*anyopaque).init(allocator),
             .open_pdfs = std.StringHashMap(*anyopaque).init(allocator),
@@ -236,7 +236,7 @@ pub const UI = struct {
         self.open_markdown_views.deinit();
 
         if (self.current_directory) |dir| self.allocator.free(dir);
-        self.pending_tab_closes.deinit();
+        self.pending_tab_closes.deinit(self.allocator);
 
         log.debug("UI.deinit: finished", .{});
     }
@@ -394,6 +394,7 @@ pub const UI = struct {
 
     /// Maus-Events an Editor oder Terminal weiterleiten
     pub fn handleMouseDown(self: *Self, x: f32, y: f32, button: wio.Button) void {
+        log.debug("handleMouseDown: x={} y={} button={}", .{ x, y, button });
         self.mouse_pressed_this_frame = true;
         self.is_mouse_down = true;
 
@@ -511,6 +512,10 @@ pub const UI = struct {
     pub fn beginLayout(self: *Self) void {
         _ = self.frame_arena.reset(.retain_capacity);
         clay.beginLayout();
+        if (self.mouse_pressed_this_frame) {
+            const hovered = clay.getPointerOverIds();
+            log.debug("beginLayout click: mouse=({d:.0},{d:.0}) hovered_count={d}", .{ self.mouse_x, self.mouse_y, hovered.len });
+        }
     }
 
     /// Layout beenden und Render Commands holen
@@ -532,6 +537,7 @@ pub const UI = struct {
         self.mouse_x = x;
         self.mouse_y = y;
         self.is_mouse_down = is_down;
+        if (is_down) log.debug("setPointerState click: ({d:.0}, {d:.0})", .{ x, y });
         clay.setPointerState(.{ .x = x, .y = y }, is_down);
     }
 
@@ -651,7 +657,25 @@ pub const UI = struct {
             });
         });
 
+        // Dialog INSIDE Clay layout (floating, z_index=2000 → overlays everything)
+        // Must be here so Clay can register element bounds and mouse_pressed_this_frame is still true
+        var pending_dialog_result: ?dialog_mod.DialogResult = null;
+        if (self.active_dialog) |*ad| {
+            pending_dialog_result = ad.dialog.render(t, self.mouse_pressed_this_frame);
+        }
+
         const commands = self.endLayout();
+
+        // Process deferred dialog result (after layout so no use-after-free)
+        if (pending_dialog_result) |res| {
+            if (self.active_dialog) |*ad| {
+                ad.callback(self, res, ad.context_usize, ad.context_ptr);
+                if (ad.message_needs_free) {
+                    self.allocator.free(ad.dialog.message);
+                }
+                self.active_dialog = null;
+            }
+        }
 
         // Handle global split requests
         if (self.pending_split) |dir| {
@@ -662,32 +686,27 @@ pub const UI = struct {
         }
 
         // Process deferred tab closes
-        while (self.pending_tab_closes.popOrNull()) |req: TabCloseRequest| {
+        while (self.pending_tab_closes.pop()) |req| {
+            log.debug("pending_tab_closes: processing close for pane={*} index={d}", .{ req.pane, req.index });
             // Verify pane is still valid and has tabs
             switch (req.pane.data) {
                 .leaf => |*leaf| {
+                    log.debug("pending_tab_closes: leaf has {d} tabs, closing index={d}", .{ leaf.tab_bar.tabs.items.len, req.index });
                     if (req.index < leaf.tab_bar.tabs.items.len) {
                         leaf.tab_bar.closeTab(req.index);
-                        wio.cancelWait();
+                        // Don't call cancelWait here - causes recursive render with destroyed pane!
+                    } else {
+                        log.warn("pending_tab_closes: index {d} out of range (len={d}), skipping", .{ req.index, leaf.tab_bar.tabs.items.len });
                     }
                 },
-                else => {},
+                else => {
+                    log.warn("pending_tab_closes: pane is not a leaf, skipping", .{});
+                },
             }
         }
 
         // Cleanup empty panes (close split if a pane becomes empty)
         _ = self.cleanupEmptyPanes(null, self.root_pane);
-
-        // Render Active Dialog
-        if (self.active_dialog) |*ad| {
-            if (ad.dialog.render(t, self.mouse_pressed_this_frame)) |res| {
-                ad.callback(self, res, ad.context_usize, ad.context_ptr);
-                if (ad.message_needs_free) {
-                    self.allocator.free(ad.dialog.message);
-                }
-                self.active_dialog = null;
-            }
-        }
 
         return commands;
     }
@@ -759,6 +778,8 @@ pub const UI = struct {
                         &leaf.tab_bar,
                         t,
                         self.mouse_pressed_this_frame,
+                        self.mouse_x,
+                        self.mouse_y,
                     )) |req| {
                         if (req.close) {
                             log.debug("renderPane: tab close requested for index {d}", .{req.index});
@@ -767,7 +788,7 @@ pub const UI = struct {
                                 self.showSaveConfirmationDialog(pane, req.index);
                             } else {
                                 // Defer the closure to after the layout cycle
-                                self.pending_tab_closes.append(.{ .pane = pane, .index = req.index }) catch {};
+                                self.pending_tab_closes.append(self.allocator, .{ .pane = pane, .index = req.index }) catch {};
                             }
                         } else if (req.do_switch) {
                             leaf.tab_bar.setActive(req.index);
@@ -1034,10 +1055,10 @@ pub const UI = struct {
                 leaf.code_editor.save() catch |err| {
                     log.err("Failed to save during close: {}", .{err});
                 };
-                ui.pending_tab_closes.append(.{ .pane = p, .index = idx }) catch {};
+                ui.pending_tab_closes.append(ui.allocator, .{ .pane = p, .index = idx }) catch {};
             },
             .no => {
-                ui.pending_tab_closes.append(.{ .pane = p, .index = idx }) catch {};
+                ui.pending_tab_closes.append(ui.allocator, .{ .pane = p, .index = idx }) catch {};
             },
             .cancel => {},
         }
