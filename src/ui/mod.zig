@@ -850,7 +850,7 @@ pub const UI = struct {
                         }
                     }
 
-                    if (!special_active) {
+                    if (!special_active and tab_bar.tabs.items.len > 0) {
                         if (tab_bar.getActiveTab()) |tab| {
                             if (tab.kind == .text) {
                                 tab.modified = leaf.code_editor.is_modified;
