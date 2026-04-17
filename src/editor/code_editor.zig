@@ -156,6 +156,13 @@ pub const CodeEditor = struct {
     content_origin_y: f32 = 0,
     content_origin_x: f32 = 0,
 
+    /// Bounds des Editors für Cursor-Detection (gültig nach render)
+    editor_bounds_valid: bool = false,
+    editor_bounds_x: f32 = 0,
+    editor_bounds_y: f32 = 0,
+    editor_bounds_width: f32 = 0,
+    editor_bounds_height: f32 = 0,
+
     /// Text-Messung
     measure_fn: ?MeasureFn = null,
 
@@ -1561,6 +1568,7 @@ pub const CodeEditor = struct {
 
     pub fn render(self: *Self, arena: std.mem.Allocator, mouse_pressed: bool) void {
         self.desired_cursor = .arrow;
+        self.last_frame_hovered = false;  // Reset each frame
 
         const editor_id = clay.ElementId.IDI("code_editor", @truncate(@intFromPtr(self)));
 
@@ -1572,11 +1580,10 @@ pub const CodeEditor = struct {
             },
             .background_color = self.bg_color,
         })({
-            self.last_frame_hovered = clay.pointerOver(editor_id);
-            if (self.last_frame_hovered) {
+            // pointerOver must be called INSIDE clay.UI where Clay's internal state is valid
+            if (clay.pointerOver(editor_id)) {
+                self.last_frame_hovered = true;
                 self.desired_cursor = .text;
-            } else {
-                self.desired_cursor = .arrow;
             }
 
             // Phase 5: Progress Indicator
@@ -1889,6 +1896,18 @@ pub const CodeEditor = struct {
                 if (clay.hovered()) self.desired_cursor = .arrow;
             });
         });
+    }
+
+    pub fn isMouseOverScrollbar(self: *Self, x: f32, y: f32) bool {
+        const total = self.lineCount();
+        const visible = self.visibleLineCount();
+        if (total <= visible) return false;
+
+        if (x < self.scrollbar_track_x) return false;
+        if (x > self.scrollbar_track_x + self.scrollbar_width) return false;
+        if (y < self.scrollbar_track_y) return false;
+        if (y > self.scrollbar_track_y + self.height) return false;
+        return true;
     }
 
     fn handleScrollbarMouseDown(self: *Self, x: f32, y: f32) bool {

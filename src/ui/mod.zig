@@ -894,6 +894,12 @@ pub const UI = struct {
                     leaf.code_editor.content_origin_x = editor_data.bounding_box.x;
                     leaf.code_editor.height = editor_data.bounding_box.height;
                     leaf.code_editor.scrollbar_container_width = editor_data.bounding_box.width;
+                    // Store bounds for cursor detection
+                    leaf.code_editor.editor_bounds_x = editor_data.bounding_box.x;
+                    leaf.code_editor.editor_bounds_y = editor_data.bounding_box.y;
+                    leaf.code_editor.editor_bounds_width = editor_data.bounding_box.width;
+                    leaf.code_editor.editor_bounds_height = editor_data.bounding_box.height;
+                    leaf.code_editor.editor_bounds_valid = true;
                 }
             },
             .split => |*split| {
@@ -954,25 +960,42 @@ pub const UI = struct {
             return .size_ew;
         }
 
-        // Rekursiv das Pane unter der Maus finden — nicht das aktive Pane,
-        // denn bei Splits zeigt getActiveEditor() immer auf children[0].
-        var desired: wio.Cursor = .arrow;
-        self.findCursorRecursive(self.root_pane, &desired);
-        return desired;
+        // Mit Mausposition + Bounds prüfen ob wir über einem Editor sind
+        if (self.isMouseOverEditor()) {
+            return .text;
+        }
+
+        return .arrow;
     }
 
-    fn findCursorRecursive(self: *Self, pane: *pane_mod.Pane, desired: *wio.Cursor) void {
+    fn isMouseOverEditor(self: *Self) bool {
+        return self.checkEditorBounds(self.root_pane);
+    }
+
+    fn checkEditorBounds(self: *Self, pane: *pane_mod.Pane) bool {
         switch (pane.data) {
             .leaf => |*leaf| {
-                if (leaf.code_editor.last_frame_hovered and leaf.code_editor.desired_cursor == .text) {
-                    desired.* = .text;
+                if (leaf.code_editor.editor_bounds_valid) {
+                    const bx = leaf.code_editor.editor_bounds_x;
+                    const by = leaf.code_editor.editor_bounds_y;
+                    const bw = leaf.code_editor.editor_bounds_width;
+                    const bh = leaf.code_editor.editor_bounds_height;
+                    if (self.mouse_x >= bx and self.mouse_x < bx + bw and
+                        self.mouse_y >= by and self.mouse_y < by + bh) {
+                        // Über Editor, aber Scrollbalken ausschließen
+                        if (leaf.code_editor.isMouseOverScrollbar(self.mouse_x, self.mouse_y)) {
+                            return false;
+                        }
+                        return true;
+                    }
                 }
             },
             .split => |*split| {
-                self.findCursorRecursive(split.children[0], desired);
-                self.findCursorRecursive(split.children[1], desired);
+                if (self.checkEditorBounds(split.children[0])) return true;
+                if (self.checkEditorBounds(split.children[1])) return true;
             },
         }
+        return false;
     }
 
     pub fn getOrCreateBuffer(self: *Self, path: []const u8) !*@import("flow_core").Buffer {
