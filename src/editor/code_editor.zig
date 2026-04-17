@@ -1984,8 +1984,8 @@ pub const CodeEditor = struct {
 
                 clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(1) } }, .background_color = .{ 80, 80, 80, 255 } })({});
                 
-                self.renderContextMenuItem("Split Vertically", "Editor-Split-V", .SplitVertical, arena);
-                self.renderContextMenuItem("Split Horizontally", "Editor-Split-H", .SplitHorizontal, arena);
+                self.renderContextMenuItem("Split-Vertically", "Editor-Split-V", .SplitVertical, arena);
+                self.renderContextMenuItem("Split-Horizontally", "Editor-Split-H", .SplitHorizontal, arena);
             });
         });
     }
