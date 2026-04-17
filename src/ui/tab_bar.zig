@@ -396,28 +396,10 @@ pub fn renderTabBar(
             });
         });
 
-        // Bounding-Box Checks für dropdown items (nach clay.UI())
-        var file_hover = false;
-        var term_hover = false;
-        var dropdown_hover = false;
-
-        const dropdown_data = clay.getElementData(dropdown_id);
-        if (dropdown_data.found) {
-            const db = dropdown_data.bounding_box;
-            dropdown_hover = mouse_x >= db.x and mouse_x < db.x + db.width and mouse_y >= db.y and mouse_y < db.y + db.height;
-        }
-
-        const file_data = clay.getElementData(file_id);
-        if (file_data.found) {
-            const fb = file_data.bounding_box;
-            file_hover = mouse_x >= fb.x and mouse_x < fb.x + fb.width and mouse_y >= fb.y and mouse_y < fb.y + fb.height;
-        }
-
-        const term_data = clay.getElementData(term_id);
-        if (term_data.found) {
-            const tb = term_data.bounding_box;
-            term_hover = mouse_x >= tb.x and mouse_x < tb.x + tb.width and mouse_y >= tb.y and mouse_y < tb.y + tb.height;
-        }
+        // Hover-Checks für dropdown items (nach clay.UI())
+        const file_hover = clay.pointerOver(file_id);
+        const term_hover = clay.pointerOver(term_id);
+        const dropdown_hover = clay.pointerOver(dropdown_id);
 
         if (mouse_pressed) {
             if (file_hover) {
