@@ -1,0 +1,1 @@
+const std = @import("std"); pub fn main() !void { var list = std.ArrayListUnmanaged(u32).empty; var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator); const allocator = arena.allocator(); try list.append(allocator, 42); if (list.pop()) |x| { std.debug.print("pop: {d}\n", .{x}); } }

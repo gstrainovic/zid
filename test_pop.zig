@@ -1,0 +1,1 @@
+const std = @import("std"); pub fn main() !void { var list = std.ArrayListUnmanaged(u32).empty; if (list.pop()) |x| { std.debug.print("pop: {d}\n", .{x}); } else |err| { std.debug.print("err\n", .{}); } }
