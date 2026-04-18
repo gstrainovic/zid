@@ -2073,7 +2073,9 @@ pub const CodeEditor = struct {
 
 test "setText: CRLF wird zu LF normalisiert" {
     const allocator = std.testing.allocator;
-    var ed = CodeEditor.init(allocator, null);
+    var buffer = try flow_core.Buffer.create(allocator);
+    defer buffer.deinit();
+    var ed = CodeEditor.init(allocator, buffer);
     defer ed.deinit();
 
     ed.setText("line1\r\nline2\r\nline3");
@@ -2085,7 +2087,9 @@ test "setText: CRLF wird zu LF normalisiert" {
 
 test "setText: leerer String erzeugt eine leere Zeile" {
     const allocator = std.testing.allocator;
-    var ed = CodeEditor.init(allocator, null);
+    var buffer = try flow_core.Buffer.create(allocator);
+    defer buffer.deinit();
+    var ed = CodeEditor.init(allocator, buffer);
     defer ed.deinit();
 
     ed.setText("");
@@ -2097,7 +2101,9 @@ test "setText: leerer String erzeugt eine leere Zeile" {
 
 test "Enter mitten in der Zeile splittet korrekt" {
     const allocator = std.testing.allocator;
-    var ed = CodeEditor.init(allocator, null);
+    var buffer = try flow_core.Buffer.create(allocator);
+    defer buffer.deinit();
+    var ed = CodeEditor.init(allocator, buffer);
     defer ed.deinit();
 
     ed.setText("abcdef");
@@ -2114,7 +2120,9 @@ test "Enter mitten in der Zeile splittet korrekt" {
 
 test "Backspace am Zeilenanfang mergt mit vorheriger Zeile" {
     const allocator = std.testing.allocator;
-    var ed = CodeEditor.init(allocator, null);
+    var buffer = try flow_core.Buffer.create(allocator);
+    defer buffer.deinit();
+    var ed = CodeEditor.init(allocator, buffer);
     defer ed.deinit();
 
     ed.setText("abc\ndef");
@@ -2129,7 +2137,9 @@ test "Backspace am Zeilenanfang mergt mit vorheriger Zeile" {
 
 test "Delete am Zeilenende mergt mit nächster Zeile" {
     const allocator = std.testing.allocator;
-    var ed = CodeEditor.init(allocator, null);
+    var buffer = try flow_core.Buffer.create(allocator);
+    defer buffer.deinit();
+    var ed = CodeEditor.init(allocator, buffer);
     defer ed.deinit();
 
     ed.setText("abc\ndef");
@@ -2146,7 +2156,9 @@ test "Delete am Zeilenende mergt mit nächster Zeile" {
 
 test "Navigation: Left am Zeilenanfang springt ans Ende der vorherigen Zeile" {
     const allocator = std.testing.allocator;
-    var ed = CodeEditor.init(allocator, null);
+    var buffer = try flow_core.Buffer.create(allocator);
+    defer buffer.deinit();
+    var ed = CodeEditor.init(allocator, buffer);
     defer ed.deinit();
 
     ed.setText("abc\ndef");
@@ -2159,7 +2171,9 @@ test "Navigation: Left am Zeilenanfang springt ans Ende der vorherigen Zeile" {
 
 test "Navigation: Right bewegt Cursor um EINE Position weiter" {
     const allocator = std.testing.allocator;
-    var ed = CodeEditor.init(allocator, null);
+    var buffer = try flow_core.Buffer.create(allocator);
+    defer buffer.deinit();
+    var ed = CodeEditor.init(allocator, buffer);
     defer ed.deinit();
 
     ed.setText("abcdef");
@@ -2192,7 +2206,9 @@ test "Navigation: Right bewegt Cursor um EINE Position weiter" {
 
 test "Navigation: Right am Zeilenende springt an Anfang der nächsten Zeile" {
     const allocator = std.testing.allocator;
-    var ed = CodeEditor.init(allocator, null);
+    var buffer = try flow_core.Buffer.create(allocator);
+    defer buffer.deinit();
+    var ed = CodeEditor.init(allocator, buffer);
     defer ed.deinit();
 
     ed.setText("abc\ndef");
