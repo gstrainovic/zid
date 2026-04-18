@@ -21,6 +21,8 @@ pub const ResultTag = enum {
     file_changed,
     file_created,
     file_deleted,
+    ai_chat_reply,
+    ai_chat_error,
 };
 
 pub const TaskResult = struct {

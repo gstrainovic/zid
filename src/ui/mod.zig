@@ -21,7 +21,7 @@ const markdown_view_mod = @import("markdown_view.zig");
 const pane_mod = @import("pane.zig");
 const dialog_mod = @import("dialog.zig");
 const ai_chat_mod = @import("ai_chat.zig");
-const agent_mod = @import("../ai/agent.zig");
+const agent_mod = @import("agent");
 
 
 const log = std.log.scoped(.ui);
@@ -278,6 +278,18 @@ pub const UI = struct {
         self.pending_tab_closes.deinit(self.allocator);
 
         log.debug("UI.deinit: finished", .{});
+    }
+
+    pub fn setAIScheduler(self: *Self, sched: *@import("scheduler").Scheduler) void {
+        self.ai_chat.setScheduler(sched);
+    }
+
+    pub fn handleAIReply(self: *Self, payload: []const u8) void {
+        self.ai_chat.handleReply(payload);
+    }
+
+    pub fn handleAIError(self: *Self, payload: []const u8) void {
+        self.ai_chat.handleError(payload);
     }
 
     /// Clay initialisieren (nach Window Creation)
