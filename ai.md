@@ -25,7 +25,18 @@ Wie besprochen, fällt das große "Gemma 4 26B" (ca. 17 GB VRAM) für dich flach
 
 ---
 
-# Architektur-Plan: Gemma 4 Agent in vulkan-ed
+## Status der Integration
+- [x] **LlamaAgent Backend:** `std.process.Child` Management + HTTP Client.
+- [x] **GPU/NVIDIA Force:** `GGML_VULKAN_DEVICE=1` wird erzwungen.
+- [x] **UI Chat Sidebar:** Sidebar rechts, Shortcut `Strg + K`.
+- [x] **Modell-Download:** Inklusive Clay-Fortschrittsbalken.
+- [x] **Warmup-Logik:** Status-Lampe zeigt GPU-Bereitschaft an.
+- [x] **Click-to-Copy:** Visuelles Feedback und Clipboard-Integration.
+- [x] **Function Calling:** KI kann Dateien lesen und Text ersetzen.
+- [x] **VRAM Context Management:** Dynamische Context-Größe via `nvidia-smi`.
+- [ ] **Native C-Bindings:** Umstieg auf `llama.h` (geplant).
+
+## Architektur-Plan: Gemma 4 Agent in vulkan-ed
 
 Das Ziel ist es, **Gemma 4 E4B (GGUF 4-bit)** als intelligenten, selbstständig handelnden Agenten direkt in den Zig-Editor (`vulkan-ed`) zu integrieren. Da wir ein hartes Limit von **4GB VRAM** haben, nutzen wir die GPU (Vulkan) für maximale Geschwindigkeit.
 
