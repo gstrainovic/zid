@@ -84,7 +84,7 @@ pub fn main() !void {
         } else if (std.mem.eql(u8, args[i], "--headless")) {
             headless_mode = true;
             e2e_mode = true;
-            log.info("Headless mode enabled — no window, RPC server on port 9999", .{});
+            log.info("Headless mode enabled — no window, screenshots possible via RPC on port 9999", .{});
         } else if (std.mem.eql(u8, args[i], "--help") or std.mem.eql(u8, args[i], "-h")) {
             var buf: [4096]u8 = undefined;
             var stdout_f = std.fs.File.stdout();
