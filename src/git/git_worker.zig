@@ -48,7 +48,7 @@ pub fn taskGitBranch(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.Tas
 }
 
 /// Payload: "branch:<name>\n<code>:<path>\n..."
-///   Codes: + staged, ~ modified, - deleted, ? untracked
+///   Codes: A staged, M modified, ? untracked, C conflict, S submodule
 pub fn taskGitStatus(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.TaskResult {
     const params: *Params = @ptrCast(@alignCast(data.?));
     defer params.deinit();
@@ -73,10 +73,10 @@ pub fn taskGitStatus(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.Tas
             continue :outer;
         }
 
-        if (line[0] == '1' and line.len > 4) {
-            // "1 XY sub mH mI mW hH hI path" — fields separated by SPACE
+        if ((line[0] == '1' or line[0] == '2') and line.len > 4) {
+            // "1 XY sub mH mI mW hH hI path" or "2 XY sub mH mI mW hH hI SMMM HMMM path"
             var parts = std.mem.splitScalar(u8, line, ' ');
-            _ = parts.next() orelse continue; // "1"
+            _ = parts.next() orelse continue; // "1" or "2"
             const xy = parts.next() orelse continue; // XY
             // Skip 6 metadata fields (sub,mH,mI,mW,hH,hI)
             var i: usize = 0;
@@ -84,10 +84,18 @@ pub fn taskGitStatus(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.Tas
             const path = parts.next() orelse continue;
             if (path.len == 0) continue :outer;
 
-            // Priority: staged (index) wins over worktree
-            const code: u8 = if (xy[0] == 'M' or xy[0] == 'A' or xy[0] == 'D' or xy[0] == 'R') '+'
-            else if (xy[1] == 'M') '~'
-            else if (xy[1] == 'D') '-'
+            // Skip deleted in worktree (D in second col) — file gone from explorer
+            if (xy[1] == 'D') continue :outer;
+
+            // Submodule indicator
+            const is_submodule = line[0] == '2';
+            // Conflict: 'u' in either column
+            const is_conflict = xy[0] == 'u' or xy[1] == 'u';
+
+            const code: u8 = if (is_conflict) 'C'
+            else if (is_submodule) 'S'
+            else if (xy[0] == 'M' or xy[0] == 'A' or xy[0] == 'D' or xy[0] == 'R') 'A'
+            else if (xy[1] == 'M') 'M'
             else continue :outer;
             const entry = try std.fmt.allocPrint(alloc, "{c}:{s}\n", .{ code, path });
             defer alloc.free(entry);
