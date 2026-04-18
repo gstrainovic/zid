@@ -236,12 +236,14 @@ pub fn main() !void {
     const cwd = std.fs.cwd();
     var cwd_buf: [1024]u8 = undefined;
     const cwd_path = cwd.realpath(".", &cwd_buf) catch null;
+    var git_repo_path: ?[]u8 = null;
     if (cwd_path) |path| {
         ui_system.file_explorer.loadDirectory(path) catch |err| {
             log.warn("Failed to load directory '{s}': {}", .{ path, err });
         };
         // Speicher für current_directory duplizieren (owned)
         ui_system.current_directory = try allocator.dupe(u8, path);
+        git_repo_path = try allocator.dupe(u8, path);
 
         // Git-Branch und Git-Status asynchron abfragen
         if (git_worker.Params.init(allocator, path, "")) |params| {
@@ -344,6 +346,11 @@ pub fn main() !void {
                     .git_status => ui_system.updateGitStatus(result.payload),
                     .file_changed, .file_created, .file_deleted => {
                         log.debug("file event: {} for {s}", .{ result.tag, result.payload });
+                        if (git_repo_path) |path| {
+                            if (git_worker.Params.init(allocator, path, "")) |params| {
+                                _ = scheduler.submit(.{ .func = git_worker.taskGitStatus, .data = params });
+                            } else |_| {}
+                        }
                     },
                     else => {},
                 }
@@ -379,6 +386,12 @@ pub fn main() !void {
                     .git_status => ui_system.updateGitStatus(result.payload),
                     .file_changed, .file_created, .file_deleted => {
                         log.debug("file event: {} for {s}", .{ result.tag, result.payload });
+                        // File geändert → Git Status neu abfragen
+                        if (git_repo_path) |path| {
+                            if (git_worker.Params.init(allocator, path, "")) |params| {
+                                _ = scheduler.submit(.{ .func = git_worker.taskGitStatus, .data = params });
+                            } else |_| {}
+                        }
                     },
                     else => {},
                 }
