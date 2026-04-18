@@ -225,19 +225,31 @@ pub fn build(b: *std.Build) void {
     run_perf_tests.has_side_effects = true;
     perf_test_exe.root_module.addImport("highlight_perf_test.zig", perf_test_helper_mod);
 
-    const async_tests = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/async/scheduler.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
+    const scheduler_mod = b.createModule(.{
+        .root_source_file = b.path("src/async/scheduler.zig"),
+        .target = target,
+        .optimize = optimize,
     });
+
+    const async_tests = b.addTest(.{ .root_module = scheduler_mod });
+
+    const git_worker_mod = b.createModule(.{
+        .root_source_file = b.path("src/git/git_worker.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    git_worker_mod.addImport("scheduler", scheduler_mod);
+    const git_tests = b.addTest(.{ .root_module = git_worker_mod });
 
     const test_step = b.step("test", "Run tests");
 
     const run_async_tests = b.addRunArtifact(async_tests);
     run_async_tests.has_side_effects = true;
     test_step.dependOn(&run_async_tests.step);
+
+    const run_git_tests = b.addRunArtifact(git_tests);
+    run_git_tests.has_side_effects = true;
+    test_step.dependOn(&run_git_tests.step);
 
     const run_editor_tests = b.addRunArtifact(editor_tests);
     if (target.result.os.tag == .linux) {
