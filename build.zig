@@ -259,6 +259,15 @@ pub fn build(b: *std.Build) void {
     lsp_client_mod.addImport("scheduler", scheduler_mod);
     exe_mod.addImport("lsp_client", lsp_client_mod);
 
+    const ai_worker_mod = b.createModule(.{
+        .root_source_file = b.path("src/ai/ai_worker.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    ai_worker_mod.addImport("scheduler", scheduler_mod);
+    exe_mod.addImport("ai_worker", ai_worker_mod);
+    const ai_worker_tests = b.addTest(.{ .root_module = ai_worker_mod });
+
     const test_step = b.step("test", "Run tests");
 
     const run_async_tests = b.addRunArtifact(async_tests);
@@ -268,6 +277,10 @@ pub fn build(b: *std.Build) void {
     const run_git_tests = b.addRunArtifact(git_tests);
     run_git_tests.has_side_effects = true;
     test_step.dependOn(&run_git_tests.step);
+
+    const run_ai_worker_tests = b.addRunArtifact(ai_worker_tests);
+    run_ai_worker_tests.has_side_effects = true;
+    test_step.dependOn(&run_ai_worker_tests.step);
 
     const run_editor_tests = b.addRunArtifact(editor_tests);
     if (target.result.os.tag == .linux) {
