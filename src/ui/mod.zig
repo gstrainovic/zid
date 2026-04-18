@@ -20,6 +20,8 @@ const file_types = @import("file_types.zig");
 const markdown_view_mod = @import("markdown_view.zig");
 const pane_mod = @import("pane.zig");
 const dialog_mod = @import("dialog.zig");
+const ai_chat_mod = @import("ai_chat.zig");
+const agent_mod = @import("../ai/agent.zig");
 
 
 const log = std.log.scoped(.ui);
@@ -80,6 +82,10 @@ pub const UI = struct {
 
     file_explorer: file_explorer_mod.FileExplorerState,
     show_file_explorer: bool,
+
+    ai_chat: ai_chat_mod.AIChatState,
+    show_ai_chat: bool,
+
     current_directory: ?[]const u8,
     pending_tab_switch: ?[]const u8,
     pending_pdf_page_change: ?PdfPageChange,
@@ -100,6 +106,9 @@ pub const UI = struct {
     mouse_x: f32,
     mouse_y: f32,
     is_mouse_down: bool,
+    is_ctrl_down: bool,
+    is_shift_down: bool,
+    is_alt_down: bool,
 
     const Self = @This();
 
@@ -142,6 +151,24 @@ pub const UI = struct {
         const active_pane = root_pane;
         if (default_file_path) |path| active_pane.data.leaf.code_editor.setLanguageFromPath(path);
 
+        // AI Chat initialisieren
+        var ai_chat = ai_chat_mod.AIChatState.init(allocator);
+        const llama_server_path = std.process.getEnvVarOwned(allocator, "LLAMA_SERVER_PATH") catch |err| blk: {
+            if (err == error.EnvironmentVariableNotFound) break :blk try allocator.dupe(u8, "llama-server");
+            return err;
+        };
+        defer allocator.free(llama_server_path);
+        const model_path = std.process.getEnvVarOwned(allocator, "LLAMA_MODEL_PATH") catch |err| blk: {
+            if (err == error.EnvironmentVariableNotFound) break :blk try allocator.dupe(u8, "model.gguf");
+            return err;
+        };
+        defer allocator.free(model_path);
+
+        ai_chat.agent = agent_mod.LlamaAgent.init(allocator, llama_server_path, model_path, 8080) catch |err| blk: {
+            log.err("Failed to initialize AI Agent: {}. AI Chat will be disabled.", .{err});
+            break :blk null;
+        };
+
         return Self{
             .allocator = allocator,
             .config = config,
@@ -156,6 +183,8 @@ pub const UI = struct {
             .window = null,
             .file_explorer = file_explorer,
             .show_file_explorer = true,
+            .ai_chat = ai_chat,
+            .show_ai_chat = false,
             .current_directory = null,
             .pending_tab_switch = null,
             .pending_pdf_page_change = null,
@@ -172,6 +201,9 @@ pub const UI = struct {
             .mouse_x = 0.0,
             .mouse_y = 0.0,
             .is_mouse_down = false,
+            .is_ctrl_down = false,
+            .is_shift_down = false,
+            .is_alt_down = false,
         };
     }
 
@@ -198,6 +230,9 @@ pub const UI = struct {
 
         self.file_explorer.deinit();
         log.debug("UI.deinit: file_explorer done", .{});
+
+        self.ai_chat.deinit();
+        log.debug("UI.deinit: ai_chat done", .{});
 
         // Buffer aufräumen (Zentrales Ownership)
         var buf_iter = self.open_buffers.iterator();
@@ -287,6 +322,16 @@ pub const UI = struct {
 
     /// Keyboard Input verarbeiten
     pub fn handleKeyPress(self: *Self, key: @import("wio").Button) void {
+        // Toggle AI Chat: Ctrl + K (or L?) - Let's use Ctrl + K for now
+        if (self.is_ctrl_down and key == .k) {
+            self.show_ai_chat = !self.show_ai_chat;
+            return;
+        }
+
+        if (self.show_ai_chat) {
+            if (self.ai_chat.handleKeyPress(key)) return;
+        }
+
         // If a terminal tab is active, forward input to the terminal
         if (self.getActiveTerminal()) |term| {
             // Convert key to terminal input sequence
@@ -349,6 +394,11 @@ pub const UI = struct {
 
     /// Text Input verarbeiten
     pub fn handleChar(self: *Self, char_code: u21) void {
+        if (self.show_ai_chat) {
+            self.ai_chat.handleChar(char_code);
+            return;
+        }
+
         // Forward to terminal if active
         if (self.getActiveTerminal()) |term| {
             var buf: [4]u8 = undefined;
@@ -361,14 +411,17 @@ pub const UI = struct {
 
     /// Modifier-State aktualisieren
     pub fn setShiftState(self: *Self, pressed: bool) void {
+        self.is_shift_down = pressed;
         self.getActiveEditor().setShiftState(pressed);
     }
 
     pub fn setCtrlState(self: *Self, pressed: bool) void {
+        self.is_ctrl_down = pressed;
         self.getActiveEditor().setCtrlState(pressed);
     }
 
     pub fn setAltState(self: *Self, pressed: bool) void {
+        self.is_alt_down = pressed;
         self.getActiveEditor().setAltState(pressed);
     }
 
@@ -503,6 +556,11 @@ pub const UI = struct {
     pub fn handleScroll(self: *Self, delta: i32) void {
         if (self.show_file_explorer and clay.pointerOver(clay.ElementId.ID("file_explorer"))) {
             self.file_explorer.scrollLines(delta);
+            return;
+        }
+
+        if (self.show_ai_chat and clay.pointerOver(clay.ElementId.ID("ai_chat_viewport"))) {
+            self.ai_chat.scrollLines(delta);
             return;
         }
 
@@ -674,6 +732,15 @@ pub const UI = struct {
 
                 // Recursive Pane Rendering
                 self.renderPane(self.root_pane, t);
+
+                // AI Chat Sidebar (Rechts)
+                if (self.show_ai_chat) {
+                    ai_chat_mod.renderAIChat(
+                        self.frame_arena.allocator(),
+                        &self.ai_chat,
+                        t,
+                    );
+                }
             });
         });
 
