@@ -1,5 +1,5 @@
 const std = @import("std");
-const ghostty_vt = @import("reference/ghostty/src/lib_vt.zig");
+const ghostty_vt = @import("ghostty-vt");
 
 pub fn main() !void {
     var alloc = std.heap.page_allocator;

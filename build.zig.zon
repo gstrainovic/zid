@@ -32,7 +32,7 @@
             .path = "libs/zigdown",
         },
         .ghostty = .{
-            .path = "reference/ghostty",
+            .path = "libs/ghostty",
         },
     },
     .paths = .{
