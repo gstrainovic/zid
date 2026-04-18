@@ -67,6 +67,8 @@ pub const FileExplorerState = struct {
     width: f32 = 250.0,
     /// Wird gerade an der Sidebar gezogen?
     is_resizing: bool = false,
+    /// Git-Status pro absolutem Pfad: '+' staged, '~' modified, '-' deleted, '?' untracked
+    git_status: std.StringHashMap(u8),
 
     /// Scrolling state
     scroll_offset_y: f32 = 0,
@@ -93,6 +95,7 @@ pub const FileExplorerState = struct {
             .nodes = std.ArrayList(TreeNode).empty,
             .visible_entries = std.ArrayList(TreeEntry).empty,
             .expanded_nodes = std.AutoHashMap(u32, void).init(allocator),
+            .git_status = std.StringHashMap(u8).init(allocator),
             .width = 250.0,
             .is_resizing = false,
         };
@@ -106,6 +109,30 @@ pub const FileExplorerState = struct {
         self.nodes.deinit(self.allocator);
         self.visible_entries.deinit(self.allocator);
         self.expanded_nodes.deinit();
+        // Keys in git_status sind geliehene Slices (node.path) — kein free nötig
+        self.git_status.deinit();
+    }
+
+    /// Git-Status aus Payload-Format aktualisieren ("~:src/main.zig\n...")
+    /// repo_root: absoluter Pfad des Repo-Wurzelverzeichnisses
+    pub fn updateGitStatus(self: *Self, payload: []const u8, repo_root: []const u8) void {
+        // Alte Keys freigeben bevor wir die Map leeren
+        var it = self.git_status.keyIterator();
+        while (it.next()) |key| self.allocator.free(key.*);
+        self.git_status.clearRetainingCapacity();
+
+        var lines = std.mem.splitScalar(u8, payload, '\n');
+        while (lines.next()) |line| {
+            if (line.len < 3) continue;
+            const code = line[0];
+            if (code == 'b') continue; // "branch:..." überspringen
+            if (line[1] != ':') continue;
+            const rel = line[2..];
+            const abs = std.fs.path.join(self.allocator, &.{ repo_root, rel }) catch continue;
+            self.git_status.put(abs, code) catch {
+                self.allocator.free(abs);
+            };
+        }
     }
 
     /// Root-Ordner laden
@@ -556,6 +583,30 @@ fn renderTreeEntry(
             .font_size = 24,
             .color = if (is_selected) theme.text_on_primary else theme.text,
         });
+
+        // Git-Status Indikator
+        if (state.git_status.get(node.path)) |code| {
+            const indicator: []const u8 = switch (code) {
+                '+' => " +",
+                '~' => " ~",
+                '-' => " -",
+                '?' => " ?",
+                else => "",
+            };
+            if (indicator.len > 0) {
+                const git_color: [4]f32 = switch (code) {
+                    '+' => theme.success,
+                    '~' => theme.warning,
+                    '-' => theme.danger,
+                    '?' => theme.muted,
+                    else => theme.muted,
+                };
+                clay.text(indicator, .{
+                    .font_size = 20,
+                    .color = if (is_selected) theme.text_on_primary else git_color,
+                });
+            }
+        }
     });
 }
 

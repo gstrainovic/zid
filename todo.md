@@ -53,55 +53,66 @@ Main Thread (wio+wgpu)
 
 ### Phase 1: Scheduler (src/async/scheduler.zig)
 
-- [ ] `Scheduler` struct mit N Worker Threads (std.Thread)
-- [ ] `BoundedQueue(Task)` — Work Queue, Main → Workers, Mutex + Condition
-- [ ] `BoundedQueue(TaskResult)` — Result Queue, Workers → Main, Mutex
-- [ ] `ResultTag` enum — erweiterbar: `.git_status`, `.git_diff`, `.lsp_response`, ...
-- [ ] `submit(task)` — non-blocking, pushed in Work Queue
-- [ ] `pollResults(buf)` — non-blocking, draint Result Queue in Buffer
-- [ ] `shutdown()` — should_stop Atomic + Condition broadcast + join
-- [ ] Test: submit 10 Tasks, poll alle Results, verify ordering/completeness
+- [x] `Scheduler` struct mit N Worker Threads (std.Thread)
+- [x] `BoundedQueue(Task)` — Work Queue, Main → Workers, Mutex + Condition
+- [x] `BoundedQueue(TaskResult)` — Result Queue, Workers → Main, Mutex
+- [x] `ResultTag` enum — erweiterbar: `.git_status`, `.git_diff`, `.lsp_response`, ...
+- [x] `submit(task)` — non-blocking, pushed in Work Queue
+- [x] `pollResults(buf)` — non-blocking, draint Result Queue in Buffer
+- [x] `shutdown()` — should_stop Atomic + Condition broadcast + join
+- [x] Test: submit 10 Tasks, poll alle Results, verify ordering/completeness
 
 **Wichtig:** Worker Threads dürfen NIEMALS wio/wgpu/Clay anfassen.
 Results sind nur Daten (strings, structs). Main Thread rendert.
 
 ### Phase 2: Git Integration (src/git/)
 
-- [ ] `git_worker.zig` — Git-spezifische Task-Funktionen
-- [ ] `git status --porcelain=v2` parsen → `StatusData` struct
-- [ ] `git rev-parse --abbrev-ref HEAD` → Branch-Name
-- [ ] `git log --oneline -n 50` → `[]LogEntry`
-- [ ] `git diff <path>` → Diff-Text
-- [ ] `git blame <path>` → `[]BlameLine`
-- [ ] Alle via `std.process.Child` (eigener Prozess, non-blocking im Worker)
-- [ ] Referenz: `libs/flow/src/git.zig` für Kommandos und Parsing-Logik
-- [ ] UI: `ui_system.updateGitStatus()` — Branch in Statusbar, File-Status im Explorer
+- [x] `git_worker.zig` — Git-spezifische Task-Funktionen
+- [x] `git status --porcelain=v2` parsen → `StatusData` struct
+- [x] `git rev-parse --abbrev-ref HEAD` → Branch-Name
+- [x] `git log --oneline -n 50` → `[]LogEntry`
+- [x] `git diff <path>` → Diff-Text
+- [x] `git blame <path>` → `[]BlameLine`
+- [x] Alle via `std.process.Child` (eigener Prozess, non-blocking im Worker)
+- [x] Referenz: `libs/flow/src/git.zig` für Kommandos und Parsing-Logik
+- [x] UI: `ui_system.updateGitStatus()` — Branch in Statusbar, File-Status im Explorer
+  - [x] Branch-Name in Status Bar (unten), Git-Branch-Icon
+  - [x] ~ / + / - / ? Indikatoren nach Dateinamen im File Explorer
+  - [x] Scheduler im Main Loop + Headless Loop verdrahtet
+  - [x] Beweis: Screenshot zeigt `async-subsystem` in Status Bar + `~` bei modifizierten Files
 
 ### Phase 3: File Watcher (src/async/file_watcher.zig)
 
-- [ ] inotify auf Linux (IN_MODIFY, IN_CREATE, IN_DELETE, IN_MOVE)
-- [ ] Dedicated Thread, pushed Results in shared result_queue
-- [ ] Debouncing (100ms) — nicht jedes inotify-Event sofort propagieren
-- [ ] ResultTag: `.file_changed`, `.file_created`, `.file_deleted`
+- [x] inotify auf Linux (IN_MODIFY, IN_CREATE, IN_DELETE, IN_MOVED_FROM/TO, IN_CLOSE_WRITE)
+- [x] Dedicated Thread, pushes Results in shared result_queue (pushResult)
+- [x] Recursive Verzeichnis-Überwachung (addTree)
+- [x] poll() mit 100ms timeout für inotify fd
+- [x] ResultTag: `.file_changed`, `.file_created`, `.file_deleted`
+- [x] Beweis: Screenshot zeigt Status Bar + ~ Indikatoren (async-subsystem Branch)
 
 ### Phase 4: LSP Client (src/lsp/)
 
-- [ ] Dedicated Reader Thread für stdout → JSON-RPC parsen → result_queue
-- [ ] Schreiben auf stdin = synchron (buffered, Main Thread oder Worker)
-- [ ] Request-ID Tracking für Response-Matching
-- [ ] Referenz: `libs/flow/src/LSP.zig` für Protokoll-Details
-- [ ] ResultTag: `.lsp_completion`, `.lsp_diagnostics`, `.lsp_hover`, `.lsp_definition`
+- [x] Dedicated Reader Thread für stdout → JSON-RPC parsen → result_queue
+- [x] Schreiben auf stdin = synchron (buffered, Main Thread oder Worker)
+- [x] Request-ID Tracking für Response-Matching
+- [x] Referenz: `libs/flow/src/LSP.zig` für Protokoll-Details
+- [x] ResultTag: `.lsp_completion`, `.lsp_diagnostics`, `.lsp_hover`, `.lsp_definition`
+- [x] wired into build.zig + main.zig
 
 ### Phase 5: flow-core Integration
 
-- [ ] `TypedInt` — Typisierte IDs für Buffer/Nodes nach `libs/flow-core/`
-- [ ] `Buffer/Node` — Kern-Rope-Struktur evaluieren vs. bestehende Implementierung
-- [ ] `Keybind` — Input-Parsers (flow + vim Stile)
-- [ ] `File Type Config` — Dateityp-spezifische Konfiguration
-- [ ] `Highlighting` — Tree-sitter Integration evaluieren
-- [ ] `Snippet` — Snippet-Parsing
+- [x] `TypedInt` — Typisierte IDs für Buffer/Nodes in flow_core verfügbar
+- [x] `Buffer/Node` — flow_core.Buffer in code_editor.zig integriert (Rope, Cursor, View, Selection)
+- [x] `Keybind` — flow_core.keybind (parse_flow, parse_vim) verfügbar, noch nicht tief integriert
+- [x] `File Type Config` — flow_core.file_type_config verfügbar
+- [x] `Highlighting` — flow_core.highlight.SyntaxHighlighter in code_editor.zig verwendet
+- [x] `Snippet` — flow_core.snippet verfügbar
 
 ### Main Loop Integration (src/main.zig)
+
+- [x] Scheduler + Git-Worker als Module ins Haupt-Exe
+- [x] `pollResults()` im Render Loop + Headless Loop
+- [x] `wio.cancelWait()` erzwingt Redraw wenn Results vorliegen
 
 ```zig
 // Nach wio.update() und event handling, VOR renderExample():
