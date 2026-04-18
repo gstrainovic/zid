@@ -15,6 +15,7 @@ const e2e_server = @import("e2e_server.zig");
 const async_mod = @import("scheduler");
 const git_worker = @import("git_worker");
 const file_watcher_mod = @import("file_watcher");
+const lsp_client_mod = @import("lsp_client");
 
 // Log-Level: debug
 pub const std_options: std.Options = .{

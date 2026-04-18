@@ -81,11 +81,12 @@ Results sind nur Daten (strings, structs). Main Thread rendert.
 
 ### Phase 4: LSP Client (src/lsp/)
 
-- [ ] Dedicated Reader Thread für stdout → JSON-RPC parsen → result_queue
-- [ ] Schreiben auf stdin = synchron (buffered, Main Thread oder Worker)
-- [ ] Request-ID Tracking für Response-Matching
-- [ ] Referenz: `libs/flow/src/LSP.zig` für Protokoll-Details
-- [ ] ResultTag: `.lsp_completion`, `.lsp_diagnostics`, `.lsp_hover`, `.lsp_definition`
+- [x] Dedicated Reader Thread für stdout → JSON-RPC parsen → result_queue
+- [x] Schreiben auf stdin = synchron (buffered, Main Thread oder Worker)
+- [x] Request-ID Tracking für Response-Matching
+- [x] Referenz: `libs/flow/src/LSP.zig` für Protokoll-Details
+- [x] ResultTag: `.lsp_completion`, `.lsp_diagnostics`, `.lsp_hover`, `.lsp_definition`
+- [x] wired into build.zig + main.zig
 
 ### Phase 5: flow-core Integration
 
