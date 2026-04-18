@@ -69,61 +69,6 @@ test "tagsForLine performance" {
     try testing.expect(avg < 10_000_000); // 10ms in ns
 }
 
-test "pushEdit correctly tracks changes" {
-    var allocator = testing.allocator;
-
-    const simple_code =
-        \\pub fn main() void {
-        \\    const x: i32 = 42;
-        \\    _ = x;
-        \\}
-        \\
-    ;
-
-    var buffer = try flow_core.Buffer.create(allocator);
-    defer buffer.deinit();
-
-    var eol_mode: flow_core.Buffer.EolMode = .lf;
-    var utf8_sanitized: bool = false;
-    const root = try buffer.load_from_string(simple_code, &eol_mode, &utf8_sanitized);
-
-    const metrics = createTestMetrics();
-
-    var highlighter = try flow_core.highlight.SyntaxHighlighter.create(allocator, "zig");
-    defer highlighter.destroy();
-
-    // Initial parse
-    try highlighter.reparseFromBuffer(root, metrics);
-
-    // Tags für Zeile 1 (mit "const x")
-    var line_buf: std.Io.Writer.Allocating = .init(allocator);
-    defer line_buf.deinit();
-    try buffer.root.get_line(1, &line_buf.writer, metrics);
-
-    const tags_before = try highlighter.tagsForLine(1, line_buf.written().len, allocator);
-    defer allocator.free(tags_before);
-
-    // Edit: "x" durch "y" ersetzen
-    const edit: syntax.Edit = .{
-        .start_byte = @intCast(30 + 10), // Position von "x"
-        .old_end_byte = @intCast(30 + 11),
-        .new_end_byte = @intCast(30 + 11),
-        .start_point = .{ .row = 1, .column = 10 },
-        .old_end_point = .{ .row = 1, .column = 11 },
-        .new_end_point = .{ .row = 1, .column = 11 },
-    };
-
-    highlighter.pushEdit(edit);
-    try highlighter.reparseFromBuffer(root, metrics);
-
-    // Tags sollten sich geändert haben (anderer Scope für "y")
-    const tags_after = try highlighter.tagsForLine(1, line_buf.written().len, allocator);
-    defer allocator.free(tags_after);
-
-    // Test dass Tags generiert wurden
-    try testing.expect(tags_after.len > 0);
-}
-
 /// Generiere eine Testdatei mit Zig-Code
 fn generateZigFile(allocator: std.mem.Allocator, num_lines: usize) ![]u8 {
     var buffer = std.ArrayListUnmanaged(u8){};

@@ -98,7 +98,9 @@ pub fn measureTagsForLine(
     var line_buf: std.Io.Writer.Allocating = .init(allocator);
     defer line_buf.deinit();
 
-    try buffer.root.get_line(line_idx, &line_buf.writer, metrics);
+    const max_line = buffer.root.lines();
+    const safe_idx = @min(line_idx, if (max_line > 0) max_line - 1 else 0);
+    try buffer.root.get_line(safe_idx, &line_buf.writer, metrics);
     const line_len = line_buf.written().len;
 
     const start = std.time.nanoTimestamp();

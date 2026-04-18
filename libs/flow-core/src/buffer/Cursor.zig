@@ -166,7 +166,8 @@ pub fn move_buffer_begin(self: *Self) void {
 }
 
 pub fn move_buffer_end(self: *Self, root: Buffer.Root, metrics: Metrics) void {
-    self.row = root.lines() - 1;
+    const n = root.lines();
+    self.row = if (n == 0) 0 else n - 1;
     self.move_end(root, metrics);
     if (self.col == 0) self.target = 0;
 }
