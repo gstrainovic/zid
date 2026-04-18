@@ -1,5 +1,6 @@
 const std = @import("std");
 const clay = @import("clay");
+const wio = @import("wio");
 const Theme = @import("theme.zig").Theme;
 const agent = @import("../ai/agent.zig");
 
@@ -21,8 +22,10 @@ pub const AIChatState = struct {
 
     is_loading: bool = false,
     is_downloading: bool = false,
+    is_initializing: bool = false,
     download_progress: f32 = 0,
     model_exists: bool = false,
+    last_copy_time: i64 = 0,
     mutex: std.Thread.Mutex = .{},
     
     /// Scrolling state
@@ -49,6 +52,126 @@ pub const AIChatState = struct {
         };
     }
 
+    pub fn deinit(self: *Self) void {
+        for (self.messages.items) |msg| {
+            self.allocator.free(msg.content);
+            self.allocator.free(msg.role);
+        }
+        self.messages.deinit(self.allocator);
+        self.input_buffer.deinit(self.allocator);
+        if (self.agent) |a| {
+            a.deinit();
+        }
+        if (self.server_path) |p| self.allocator.free(p);
+        if (self.model_path) |p| self.allocator.free(p);
+    }
+
+    pub fn initAgent(self: *Self, server_path: []const u8, model_path: []const u8) !void {
+        // Old agent clean up if exists
+        if (self.agent) |a| {
+            a.deinit();
+            self.agent = null;
+        }
+        
+        // Store paths for potential restart
+        if (self.server_path) |p| self.allocator.free(p);
+        if (self.model_path) |p| self.allocator.free(p);
+        self.server_path = try self.allocator.dupe(u8, server_path);
+        self.model_path = try self.allocator.dupe(u8, model_path);
+
+        self.agent = agent.LlamaAgent.init(self.allocator, server_path, model_path, 8080) catch |err| {
+            log.err("Failed to initialize AI Agent: {}", .{err});
+            return err;
+        };
+
+        // Start warmup check
+        self.is_initializing = true;
+        _ = try std.Thread.spawn(.{}, warmupWorker, .{self});
+    }
+
+    fn warmupWorker(self: *Self) void {
+        const a = self.agent orelse return;
+        // Simple empty message to check if server is up
+        const ping_msg = &[_]agent.LlamaAgent.ChatMessage{
+            .{ .role = "user", .content = "ping" },
+        };
+        
+        var attempts: u32 = 0;
+        while (attempts < 30) : (attempts += 1) {
+            if (a.sendChatCompletion(ping_msg)) |resp| {
+                self.allocator.free(resp);
+                break;
+            } else |_| {
+                std.Thread.sleep(1 * std.time.ns_per_s);
+            }
+        }
+
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        self.is_initializing = false;
+        log.info("AI Agent is warm and ready.", .{});
+    }
+
+    pub fn addMessage(self: *Self, role: []const u8, content: []const u8) !void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        try self.messages.append(self.allocator, .{
+            .role = try self.allocator.dupe(u8, role),
+            .content = try self.allocator.dupe(u8, content),
+        });
+        // Scroll to bottom
+        self.scroll_offset_y = 999999; // Simple way to force scroll to end
+    }
+
+    pub fn sendMessage(self: *Self) !void {
+        if (self.input_buffer.items.len == 0 or self.is_loading or self.is_initializing) return;
+
+        const user_text = try self.allocator.dupe(u8, self.input_buffer.items);
+        try self.addMessage("user", user_text);
+        self.allocator.free(user_text);
+        
+        while (self.input_buffer.pop()) |_| {}
+
+        self.is_loading = true;
+
+        _ = try std.Thread.spawn(.{}, workerThread, .{self});
+    }
+
+    fn workerThread(self: *Self) void {
+        const response = self.getAIResponse() catch |err| {
+            log.err("AI Error: {}", .{err});
+            self.addMessage("assistant", "Error communicating with AI agent.") catch {};
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            self.is_loading = false;
+            return;
+        };
+        defer self.allocator.free(response);
+        
+        self.addMessage("assistant", response) catch {};
+        
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        self.is_loading = false;
+    }
+
+    fn getAIResponse(self: *Self) ![]const u8 {
+        const a = self.agent orelse return error.NoAgent;
+        
+        var api_messages = std.ArrayList(agent.LlamaAgent.ChatMessage).empty;
+        defer api_messages.deinit(self.allocator);
+
+        {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            for (self.messages.items) |m| {
+                try api_messages.append(self.allocator, .{ .role = m.role, .content = m.content });
+            }
+        }
+
+        return try a.sendChatCompletion(api_messages.items);
+    }
+
     pub fn triggerDownload(self: *Self) !void {
         if (self.is_downloading or self.model_exists) return;
         self.is_downloading = true;
@@ -64,7 +187,7 @@ pub const AIChatState = struct {
         };
 
         var child = std.process.Child.init(argv, self.allocator);
-        child.stderr_behavior = .Pipe; // Curl writes progress to stderr
+        child.stderr_behavior = .Pipe;
         child.spawn() catch |err| {
             log.err("Download failed to spawn: {}", .{err});
             self.mutex.lock();
@@ -133,99 +256,6 @@ pub const AIChatState = struct {
         log.info("Download complete: {s}", .{model_name});
     }
 
-    pub fn initAgent(self: *Self, server_path: []const u8, model_path: []const u8) !void {
-        // Old agent clean up if exists
-        if (self.agent) |a| {
-            a.deinit();
-            self.agent = null;
-        }
-        
-        // Store paths for potential restart
-        if (self.server_path) |p| self.allocator.free(p);
-        if (self.model_path) |p| self.allocator.free(p);
-        self.server_path = try self.allocator.dupe(u8, server_path);
-        self.model_path = try self.allocator.dupe(u8, model_path);
-
-        self.agent = agent.LlamaAgent.init(self.allocator, server_path, model_path, 8080) catch |err| {
-            log.err("Failed to initialize AI Agent: {}", .{err});
-            return err;
-        };
-    }
-
-    pub fn deinit(self: *Self) void {
-        for (self.messages.items) |msg| {
-            self.allocator.free(msg.content);
-            self.allocator.free(msg.role);
-        }
-        self.messages.deinit(self.allocator);
-        self.input_buffer.deinit(self.allocator);
-        if (self.agent) |a| {
-            a.deinit();
-        }
-        if (self.server_path) |p| self.allocator.free(p);
-        if (self.model_path) |p| self.allocator.free(p);
-    }
-
-    pub fn addMessage(self: *Self, role: []const u8, content: []const u8) !void {
-        self.mutex.lock();
-        defer self.mutex.unlock();
-        try self.messages.append(self.allocator, .{
-            .role = try self.allocator.dupe(u8, role),
-            .content = try self.allocator.dupe(u8, content),
-        });
-        // Scroll to bottom
-        self.scroll_offset_y = 999999; // Simple way to force scroll to end
-    }
-
-    pub fn sendMessage(self: *Self) !void {
-        if (self.input_buffer.items.len == 0 or self.is_loading) return;
-
-        const user_text = try self.allocator.dupe(u8, self.input_buffer.items);
-        try self.addMessage("user", user_text);
-        self.allocator.free(user_text);
-        
-        while (self.input_buffer.pop()) |_| {}
-
-        self.is_loading = true;
-
-        _ = try std.Thread.spawn(.{}, workerThread, .{self});
-    }
-
-    fn workerThread(self: *Self) void {
-        const response = self.getAIResponse() catch |err| {
-            log.err("AI Error: {}", .{err});
-            self.addMessage("assistant", "Error communicating with AI agent.") catch {};
-            self.mutex.lock();
-            defer self.mutex.unlock();
-            self.is_loading = false;
-            return;
-        };
-        defer self.allocator.free(response);
-        
-        self.addMessage("assistant", response) catch {};
-        
-        self.mutex.lock();
-        defer self.mutex.unlock();
-        self.is_loading = false;
-    }
-
-    fn getAIResponse(self: *Self) ![]const u8 {
-        const a = self.agent orelse return error.NoAgent;
-        
-        var api_messages = std.ArrayList(agent.LlamaAgent.ChatMessage).empty;
-        defer api_messages.deinit(self.allocator);
-
-        {
-            self.mutex.lock();
-            defer self.mutex.unlock();
-            for (self.messages.items) |m| {
-                try api_messages.append(self.allocator, .{ .role = m.role, .content = m.content });
-            }
-        }
-
-        return try a.sendChatCompletion(api_messages.items);
-    }
-
     pub fn handleKeyPress(self: *Self, key: @import("wio").Button) bool {
         switch (key) {
             .enter => {
@@ -262,6 +292,7 @@ pub fn renderAIChat(
     state: *AIChatState,
     theme: Theme,
     mouse_pressed: bool,
+    window: ?*wio.Window,
 ) void {
     _ = arena;
 
@@ -281,6 +312,18 @@ pub fn renderAIChat(
             .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .left_to_right, .child_gap = 8 },
         })({
             clay.text("Gemma 4 Agent", .{ .font_size = 20, .color = theme.primary });
+
+            // Status Lamp
+            const status_color: clay.Color = if (state.model_exists and !state.is_initializing) .{ 100, 255, 100, 255 } else .{ 255, 200, 100, 255 };
+            clay.UI()(.{
+                .layout = .{ .sizing = .{ .w = .fixed(10), .h = .fixed(10) } },
+                .background_color = status_color,
+                .corner_radius = .all(5),
+            })({});
+            
+            if (state.is_initializing) {
+                clay.text("Initializing GPU...", .{ .font_size = 12, .color = .{ 150, 150, 150, 255 } });
+            }
             
             if (!state.model_exists) {
                 const btn_id = clay.ElementId.ID("ai_download_btn");
@@ -332,18 +375,43 @@ pub fn renderAIChat(
             })({
                 state.mutex.lock();
                 defer state.mutex.unlock();
-                for (state.messages.items) |msg| {
+                for (state.messages.items, 0..) |msg, idx| {
                     const is_user = std.mem.eql(u8, msg.role, "user");
+                    
+                    var msg_id_buf: [32]u8 = undefined;
+                    const msg_id_str = std.fmt.bufPrint(&msg_id_buf, "ai_msg_{d}", .{idx}) catch "ai_msg_err";
+                    const msg_id = clay.ElementId.ID(msg_id_str);
+                    const hovered = clay.pointerOver(msg_id);
+
+                    if (hovered and mouse_pressed) {
+                        if (window) |win| {
+                            win.setClipboardText(msg.content);
+                            state.last_copy_time = std.time.milliTimestamp();
+                        }
+                    }
+
+                    const bg_color: clay.Color = if (is_user) 
+                        (if (hovered) .{ 60, 60, 100, 255 } else .{ 50, 50, 80, 255 })
+                    else 
+                        (if (hovered) .{ 50, 50, 55, 255 } else .{ 40, 40, 45, 255 });
+
                     clay.UI()(.{
+                        .id = msg_id,
                         .layout = .{
                             .sizing = .{ .w = .grow, .h = .fit },
                             .padding = .{ .left = 8, .right = 8, .top = 4, .bottom = 4 },
                             .direction = .top_to_bottom,
                         },
-                        .background_color = if (is_user) .{ 50, 50, 80, 255 } else .{ 40, 40, 45, 255 },
+                        .background_color = bg_color,
                         .corner_radius = .all(4),
                     })({
-                        clay.text(if (is_user) "You:" else "Gemma:", .{ .font_size = 14, .color = if (is_user) .{ 200, 200, 255, 255 } else .{ 200, 255, 200, 255 } });
+                        const now = std.time.milliTimestamp();
+                        const show_copied = !is_user and (now - state.last_copy_time < 2000);
+                        
+                        clay.text(if (is_user) "You:" else if (show_copied) "Gemma (Copied!)" else "Gemma (Click to copy):", .{ 
+                            .font_size = 14, 
+                            .color = if (is_user) .{ 200, 200, 255, 255 } else if (show_copied) theme.primary else .{ 200, 255, 200, 255 } 
+                        });
                         clay.text(msg.content, .{ .font_size = 16, .color = .{ 240, 240, 240, 255 } });
                     });
                 }
@@ -379,7 +447,9 @@ pub fn renderAIChat(
             .border = .{ .width = .all(1), .color = theme.border },
             .corner_radius = .all(4),
         })({
-            if (state.input_buffer.items.len == 0) {
+            if (state.is_downloading or state.is_initializing) {
+                clay.text("Model is initializing...", .{ .font_size = 16, .color = .{ 80, 80, 85, 255 } });
+            } else if (state.input_buffer.items.len == 0) {
                 clay.text("Ask something... (Ctrl+K to toggle)", .{ .font_size = 16, .color = .{ 100, 100, 100, 255 } });
             } else {
                 clay.text(state.input_buffer.items, .{ .font_size = 16, .color = .{ 255, 255, 255, 255 } });
