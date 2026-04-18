@@ -153,7 +153,13 @@ pub const FileWatcher = struct {
         }
     }
 
+    fn isExcludedPath(path: []const u8) bool {
+        return std.mem.endsWith(u8, path, ".gguf");
+    }
+
     fn handleEvent(self: *Self, parent_path: []const u8, filename: []const u8, mask: u32) void {
+        if (std.mem.endsWith(u8, filename, ".gguf")) return;
+
         const full_path = std.fs.path.join(self.allocator, &.{ parent_path, filename }) catch return;
         const owned_path = self.allocator.dupe(u8, full_path) catch {
             self.allocator.free(full_path);

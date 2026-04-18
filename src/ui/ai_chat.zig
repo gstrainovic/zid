@@ -41,10 +41,11 @@ pub const AIChatState = struct {
 
     const Self = @This();
 
+    const model_filename = "models/gemma-4-E2B-it-Q4_K_M.gguf";
+
     pub fn init(allocator: std.mem.Allocator) Self {
-        const model_name = "gemma-4-E2B-it-Q4_K_M.gguf";
         var exists = false;
-        if (std.fs.cwd().access(model_name, .{})) |_| {
+        if (std.fs.cwd().access(model_filename, .{})) |_| {
             exists = true;
         } else |_| {}
 
@@ -288,7 +289,6 @@ pub const AIChatState = struct {
         if (self.is_downloading or self.model_exists) return;
         const sched = self.scheduler orelse return error.NoScheduler;
 
-        const model_name = "gemma-4-E2B-it-Q4_K_M.gguf";
         const url = "https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-Q4_K_M.gguf";
 
         const sink: ai_worker.ProgressSink = .{
@@ -296,7 +296,7 @@ pub const AIChatState = struct {
             .mutex = &self.mutex,
             .stop_flag = &self.stop_flag,
         };
-        const params = try ai_worker.DownloadParams.init(self.allocator, url, model_name, sink);
+        const params = try ai_worker.DownloadParams.init(self.allocator, url, model_filename, sink);
         if (!sched.submit(.{ .func = ai_worker.taskDownload, .data = params })) {
             params.deinit();
             return error.SchedulerQueueFull;
@@ -308,6 +308,10 @@ pub const AIChatState = struct {
         self.mutex.lock();
         self.model_exists = true;
         self.is_downloading = false;
+
+        if (self.model_path) |p| self.allocator.free(p);
+        self.model_path = self.allocator.dupe(u8, model_filename) catch null;
+
         self.mutex.unlock();
 
         if (self.server_path != null and self.model_path != null) {
