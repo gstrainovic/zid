@@ -80,11 +80,16 @@ pub fn taskChatCompletion(alloc: std.mem.Allocator, data: ?*anyopaque) !schedule
 pub const WarmupParams = struct {
     alloc: std.mem.Allocator,
     agent: *agent_mod.LlamaAgent,
+    should_stop: ?*const std.atomic.Value(bool) = null,
     max_attempts: u32 = 30,
 
-    pub fn init(alloc: std.mem.Allocator, agent: *agent_mod.LlamaAgent) !*WarmupParams {
+    pub fn init(
+        alloc: std.mem.Allocator,
+        agent: *agent_mod.LlamaAgent,
+        should_stop: ?*const std.atomic.Value(bool),
+    ) !*WarmupParams {
         const self = try alloc.create(WarmupParams);
-        self.* = .{ .alloc = alloc, .agent = agent };
+        self.* = .{ .alloc = alloc, .agent = agent, .should_stop = should_stop };
         return self;
     }
 
@@ -103,6 +108,12 @@ pub fn taskWarmup(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.TaskRe
 
     var attempts: u32 = 0;
     while (attempts < params.max_attempts) : (attempts += 1) {
+        if (params.should_stop) |s| if (s.load(.acquire)) return .{
+            .tag = .ai_warmup_error,
+            .payload = try alloc.dupe(u8, "warmup cancelled"),
+            .allocator = alloc,
+        };
+
         if (params.agent.sendChatCompletion(ping_msg)) |resp| {
             alloc.free(resp);
             return .{
@@ -111,7 +122,16 @@ pub fn taskWarmup(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.TaskRe
                 .allocator = alloc,
             };
         } else |_| {
-            std.Thread.sleep(1 * std.time.ns_per_s);
+            // 1 Sekunde in 10×100ms aufgeteilt — macht shutdown responsive
+            var slept: u32 = 0;
+            while (slept < 10) : (slept += 1) {
+                if (params.should_stop) |s| if (s.load(.acquire)) return .{
+                    .tag = .ai_warmup_error,
+                    .payload = try alloc.dupe(u8, "warmup cancelled"),
+                    .allocator = alloc,
+                };
+                std.Thread.sleep(100 * std.time.ns_per_ms);
+            }
         }
     }
 

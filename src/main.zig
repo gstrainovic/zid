@@ -134,7 +134,12 @@ pub fn main() !void {
         .vsync = true,
         .clear_color = .{ 0.05, 0.05, 0.05, 1.0 },
     });
-    defer renderer.deinit();
+    // ACHTUNG: renderer.deinit() und plat.deinit() MÜSSEN in korrekter
+    // Reihenfolge laufen — Vulkan-Driver greift in Surface-Cleanup noch
+    // auf Wayland-Objekte zu. Erst renderer (WGPU/Vulkan), dann plat
+    // (Wayland). Wird am Ende der Funktion explizit gemacht.
+    var renderer_owned = true;
+    defer if (renderer_owned) renderer.deinit();
     rendering.Renderer.g_renderer_ptr = &renderer;
 
     // 2. Platform initialisieren (wio - NACH wgpu, vermeidet EGL-Konflikt)
@@ -149,10 +154,18 @@ pub fn main() !void {
     const viewport_width: u32 = if (headless_mode) 1200 else plat.getSize().width;
     const viewport_height: u32 = if (headless_mode) 800 else plat.getSize().height;
 
-    // defer cleanup
-    defer {
-        if (!headless_mode) plat.deinit();
-    }
+    // defer cleanup — gewrapped mit Flag, da Reihenfolge am Exit manuell
+    // nach renderer.deinit() erzwungen wird (Vulkan braucht Wayland-Surface
+    // noch beim device-destroy).
+    var plat_owned = true;
+    defer if (plat_owned and !headless_mode) plat.deinit();
+
+    // Alle GPU-Ressourcen in einem inneren Scope, damit ihre defers am
+    // Scope-Ende laufen — BEVOR wir renderer.deinit() und plat.deinit()
+    // in korrekter Reihenfolge manuell triggern. Ohne diesen Scope würden
+    // die defers in falscher Reihenfolge laufen und Vulkan/Wayland
+    // crashen (use-after-destroy der Wayland-Surface).
+    {
 
     // Window erstellen (NACH renderer) - Headless: kein Window nötig
     if (!headless_mode) {
@@ -239,6 +252,7 @@ pub fn main() !void {
     var cwd_buf: [1024]u8 = undefined;
     const cwd_path = cwd.realpath(".", &cwd_buf) catch null;
     var git_repo_path: ?[]u8 = null;
+    defer if (git_repo_path) |p| allocator.free(p);
     if (cwd_path) |path| {
         ui_system.file_explorer.loadDirectory(path) catch |err| {
             log.warn("Failed to load directory '{s}': {}", .{ path, err });
@@ -823,5 +837,16 @@ pub fn main() !void {
     }
 
     log.info("=== vulkan-ed exiting ===", .{});
+
+    } // Ende des inneren GPU-Scope → alle GPU-defers laufen hier
+
+    // Jetzt Renderer (WGPU/Vulkan) + Platform (Wayland) in korrekter
+    // Reihenfolge freigeben. Outer defers skippen via Flags.
+    if (!headless_mode) {
+        renderer.deinit();
+        renderer_owned = false;
+        plat.deinit();
+        plat_owned = false;
+    }
 }
 

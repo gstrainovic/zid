@@ -104,8 +104,16 @@ pub const Scheduler = struct {
     work_queue: BoundedQueue(Task, 64),
     result_queue: BoundedQueue(TaskResult, 256),
     should_stop: std.atomic.Value(bool),
+    workers_done: std.atomic.Value(usize),
+    // Wenn shutdown workers nicht in der Zeit einsammelt, werden sie detached
+    // statt joined. Dann dürfen workers und self NICHT freigegeben werden
+    // (noch-laufender Worker hält Referenzen).
+    detached: bool = false,
 
     const Self = @This();
+
+    /// Max. Zeit die shutdown() auf hängende Worker wartet, bevor detached wird.
+    const shutdown_timeout_ns: u64 = 2 * std.time.ns_per_s;
 
     pub fn init(allocator: std.mem.Allocator, n_workers: usize) !*Self {
         const self = try allocator.create(Self);
@@ -120,6 +128,7 @@ pub const Scheduler = struct {
             .work_queue = .{},
             .result_queue = .{},
             .should_stop = std.atomic.Value(bool).init(false),
+            .workers_done = std.atomic.Value(usize).init(0),
         };
 
         var spawned: usize = 0;
@@ -137,6 +146,12 @@ pub const Scheduler = struct {
 
     pub fn deinit(self: *Self) void {
         self.shutdown();
+        if (self.detached) {
+            // Ein oder mehrere Worker blockieren in unabbrechbaren Calls
+            // (HTTP fetch, long sleep) — wurden detached. Memory kontrolliert
+            // leaken, OS räumt beim Prozessende auf.
+            return;
+        }
         self.allocator.free(self.workers);
         self.allocator.destroy(self);
     }
@@ -172,12 +187,37 @@ pub const Scheduler = struct {
     pub fn shutdown(self: *Self) void {
         self.should_stop.store(true, .release);
         self.work_queue.wakeAll();
-        for (self.workers) |w| w.join();
-        // Nicht abgeholte Results freigeben
+
+        // Poll-basiert auf alle Worker warten. Wenn eine Task in einem
+        // unabbrechbaren Call hängt (HTTP fetch ohne Timeout, langer sleep),
+        // würde join() ewig blockieren und der Wayland-Compositor zeigt
+        // "App antwortet nicht". Deshalb: best-effort join mit Timeout,
+        // dann detach.
+        const deadline = std.time.nanoTimestamp() + @as(i128, @intCast(shutdown_timeout_ns));
+        while (std.time.nanoTimestamp() < deadline) {
+            if (self.workers_done.load(.acquire) == self.workers.len) break;
+            std.Thread.sleep(10 * std.time.ns_per_ms);
+        }
+
+        const done = self.workers_done.load(.acquire);
+        if (done == self.workers.len) {
+            for (self.workers) |w| w.join();
+        } else {
+            log.warn("shutdown timeout: {d}/{d} workers stuck — detaching", .{
+                self.workers.len - done,
+                self.workers.len,
+            });
+            for (self.workers) |w| w.detach();
+            self.detached = true;
+        }
+
+        // Nicht abgeholte Results freigeben (safe: kein Worker pushed mehr
+        // relevante Ergebnisse nach should_stop — Warmup/Chat returns vor push)
         while (self.result_queue.pop()) |r| r.deinit();
     }
 
     fn workerFn(self: *Self) void {
+        defer _ = self.workers_done.fetchAdd(1, .release);
         while (true) {
             const task = self.work_queue.popWait(&self.should_stop) orelse break;
             const result = task.func(self.allocator, task.data) catch |err| {
