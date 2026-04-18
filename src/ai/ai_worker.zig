@@ -196,7 +196,8 @@ pub fn taskDownload(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.Task
     const params: *DownloadParams = @ptrCast(@alignCast(data.?));
     defer params.deinit();
 
-    const argv = &[_][]const u8{ "curl", "-L", params.url, "-o", params.out_path };
+    // Use curl for reliable HTTP downloads with redirect (-L) and fail on error (-f)
+    const argv = &[_][]const u8{ "curl", "-L", "-f", params.url, "-o", params.out_path };
 
     var child = std.process.Child.init(argv, alloc);
     child.stderr_behavior = .Pipe;
@@ -208,6 +209,7 @@ pub fn taskDownload(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.Task
         };
     };
 
+    // Read stderr for progress (curl outputs % to stderr)
     if (child.stderr) |stderr| {
         var line_buf: [1024]u8 = undefined;
         while (true) {

@@ -162,7 +162,7 @@ pub const UI = struct {
         };
         defer allocator.free(llama_server_path);
         const model_path = std.process.getEnvVarOwned(allocator, "LLAMA_MODEL_PATH") catch |err| blk: {
-            if (err == error.EnvironmentVariableNotFound) break :blk try allocator.dupe(u8, "gemma-4-E2B-it-Q4_K_M.gguf");
+            if (err == error.EnvironmentVariableNotFound) break :blk try allocator.dupe(u8, "models/gemma-4-E2B-it-Q4_K_M.gguf");
             return err;
         };
         defer allocator.free(model_path);
