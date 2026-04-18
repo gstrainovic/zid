@@ -739,6 +739,7 @@ pub const UI = struct {
                         self.frame_arena.allocator(),
                         &self.ai_chat,
                         t,
+                        self.mouse_pressed_this_frame,
                     );
                 }
             });

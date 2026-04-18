@@ -16,6 +16,8 @@ pub const AIChatState = struct {
     input_buffer: std.ArrayList(u8),
     agent: ?*agent.LlamaAgent = null,
     is_loading: bool = false,
+    is_downloading: bool = false,
+    model_exists: bool = false,
     mutex: std.Thread.Mutex = .{},
     
     /// Scrolling state
@@ -28,11 +30,75 @@ pub const AIChatState = struct {
     const Self = @This();
 
     pub fn init(allocator: std.mem.Allocator) Self {
+        const model_name = "gemma-4-E2B-it-Q4_K_M.gguf";
+        var exists = false;
+        if (std.fs.cwd().access(model_name, .{})) |_| {
+            exists = true;
+        } else |_| {}
+
         return Self{
             .allocator = allocator,
             .messages = .empty,
             .input_buffer = .empty,
+            .model_exists = exists,
         };
+    }
+
+    pub fn triggerDownload(self: *Self) !void {
+        if (self.is_downloading or self.model_exists) return;
+        self.is_downloading = true;
+        _ = try std.Thread.spawn(.{}, downloadWorker, .{self});
+    }
+
+    fn downloadWorker(self: *Self) void {
+        const model_name = "gemma-4-E2B-it-Q4_K_M.gguf";
+        const url = "https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-Q4_K_M.gguf";
+        
+        const argv = &[_][]const u8{
+            "curl", "-L", url, "-o", model_name,
+        };
+
+        var child = std.process.Child.init(argv, self.allocator);
+        child.spawn() catch |err| {
+            log.err("Download failed to spawn: {}", .{err});
+            self.mutex.lock();
+            self.is_downloading = false;
+            self.mutex.unlock();
+            return;
+        };
+
+        const term = child.wait() catch |err| {
+            log.err("Download failed during wait: {}", .{err});
+            self.mutex.lock();
+            self.is_downloading = false;
+            self.mutex.unlock();
+            return;
+        };
+
+        switch (term) {
+            .Exited => |code| {
+                if (code != 0) {
+                    log.err("Download failed with exit code: {d}", .{code});
+                    self.mutex.lock();
+                    self.is_downloading = false;
+                    self.mutex.unlock();
+                    return;
+                }
+            },
+            else => {
+                log.err("Download failed with term: {}", .{term});
+                self.mutex.lock();
+                self.is_downloading = false;
+                self.mutex.unlock();
+                return;
+            },
+        }
+
+        self.mutex.lock();
+        self.model_exists = true;
+        self.is_downloading = false;
+        self.mutex.unlock();
+        log.info("Download complete: {s}", .{model_name});
     }
 
     pub fn deinit(self: *Self) void {
@@ -142,6 +208,7 @@ pub fn renderAIChat(
     arena: std.mem.Allocator,
     state: *AIChatState,
     theme: Theme,
+    mouse_pressed: bool,
 ) void {
     _ = arena;
 
@@ -158,9 +225,26 @@ pub fn renderAIChat(
     })({
         // Title
         clay.UI()(.{
-            .layout = .{ .sizing = .{ .w = .grow, .h = .fit } },
+            .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .left_to_right, .child_gap = 8 },
         })({
             clay.text("Gemma 4 Agent", .{ .font_size = 20, .color = theme.primary });
+            
+            if (!state.model_exists) {
+                const btn_id = clay.ElementId.ID("ai_download_btn");
+                const hovered = clay.pointerOver(btn_id);
+                if (hovered and mouse_pressed and !state.is_downloading) {
+                    state.triggerDownload() catch {};
+                }
+
+                clay.UI()(.{
+                    .id = btn_id,
+                    .layout = .{ .sizing = .{ .w = .fit, .h = .fit }, .padding = .{ .left = 8, .right = 8, .top = 4, .bottom = 4 } },
+                    .background_color = if (state.is_downloading) .{ 100, 100, 100, 255 } else if (hovered) theme.primary else theme.border,
+                    .corner_radius = .all(4),
+                })({
+                    clay.text(if (state.is_downloading) "Downloading..." else "Download Model (3GB)", .{ .font_size = 12, .color = .{ 255, 255, 255, 255 } });
+                });
+            }
         });
 
         // Chat History Viewport
