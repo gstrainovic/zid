@@ -6,7 +6,7 @@
 
 const std = @import("std");
 const scheduler = @import("scheduler");
-const agent_mod = @import("agent.zig");
+const agent_mod = @import("agent");
 
 const log = std.log.scoped(.ai_worker);
 
