@@ -15,11 +15,21 @@ pub const ChatParams = struct {
     agent: *agent_mod.LlamaAgent,
     messages: []agent_mod.LlamaAgent.ChatMessage,
     owned_strings: std.ArrayListUnmanaged([]u8),
+    should_stop: ?*const std.atomic.Value(bool) = null,
 
     pub fn init(
         alloc: std.mem.Allocator,
         agent: *agent_mod.LlamaAgent,
         messages: []const agent_mod.LlamaAgent.ChatMessage,
+    ) !*ChatParams {
+        return initWithStop(alloc, agent, messages, null);
+    }
+
+    pub fn initWithStop(
+        alloc: std.mem.Allocator,
+        agent: *agent_mod.LlamaAgent,
+        messages: []const agent_mod.LlamaAgent.ChatMessage,
+        should_stop: ?*const std.atomic.Value(bool),
     ) !*ChatParams {
         const self = try alloc.create(ChatParams);
         errdefer alloc.destroy(self);
@@ -46,6 +56,7 @@ pub const ChatParams = struct {
             .agent = agent,
             .messages = msg_copy,
             .owned_strings = owned,
+            .should_stop = should_stop,
         };
         return self;
     }
@@ -63,7 +74,7 @@ pub fn taskChatCompletion(alloc: std.mem.Allocator, data: ?*anyopaque) !schedule
     const params: *ChatParams = @ptrCast(@alignCast(data.?));
     defer params.deinit();
 
-    const reply = params.agent.sendChatCompletion(params.messages) catch |err| {
+    const reply = params.agent.sendChatCompletionWithStop(params.messages, params.should_stop) catch |err| {
         const msg = try std.fmt.allocPrint(alloc, "{s}", .{@errorName(err)});
         return .{ .tag = .ai_chat_error, .payload = msg, .allocator = alloc };
     };
@@ -114,7 +125,7 @@ pub fn taskWarmup(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.TaskRe
             .allocator = alloc,
         };
 
-        if (params.agent.sendChatCompletion(ping_msg)) |resp| {
+        if (params.agent.sendChatCompletionWithStop(ping_msg, params.should_stop)) |resp| {
             alloc.free(resp);
             return .{
                 .tag = .ai_warmup_done,
