@@ -90,12 +90,12 @@ Results sind nur Daten (strings, structs). Main Thread rendert.
 
 ### Phase 5: flow-core Integration
 
-- [ ] `TypedInt` — Typisierte IDs für Buffer/Nodes nach `libs/flow-core/`
-- [ ] `Buffer/Node` — Kern-Rope-Struktur evaluieren vs. bestehende Implementierung
-- [ ] `Keybind` — Input-Parsers (flow + vim Stile)
-- [ ] `File Type Config` — Dateityp-spezifische Konfiguration
-- [ ] `Highlighting` — Tree-sitter Integration evaluieren
-- [ ] `Snippet` — Snippet-Parsing
+- [x] `TypedInt` — Typisierte IDs für Buffer/Nodes in flow_core verfügbar
+- [x] `Buffer/Node` — flow_core.Buffer in code_editor.zig integriert (Rope, Cursor, View, Selection)
+- [x] `Keybind` — flow_core.keybind (parse_flow, parse_vim) verfügbar, noch nicht tief integriert
+- [x] `File Type Config` — flow_core.file_type_config verfügbar
+- [x] `Highlighting` — flow_core.highlight.SyntaxHighlighter in code_editor.zig verwendet
+- [x] `Snippet` — flow_core.snippet verfügbar
 
 ### Main Loop Integration (src/main.zig)
 
