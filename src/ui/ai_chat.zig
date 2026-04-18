@@ -73,10 +73,15 @@ pub const AIChatState = struct {
     }
 
     fn workerThread(self: *Self) void {
-        const response = self.getAIResponse() catch |err| blk: {
+        const response = self.getAIResponse() catch |err| {
             log.err("AI Error: {}", .{err});
-            break :blk "Error communicating with AI agent.";
+            self.addMessage("assistant", "Error communicating with AI agent.") catch {};
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            self.is_loading = false;
+            return;
         };
+        defer self.allocator.free(response);
         
         self.addMessage("assistant", response) catch {};
         
