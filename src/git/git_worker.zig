@@ -74,8 +74,8 @@ pub fn taskGitStatus(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.Tas
         }
 
         if (line[0] == '1' and line.len > 4) {
-            // "1 XY sub mH mI mW hH hI path\0" — split on NUL
-            var parts = std.mem.splitScalar(u8, line, 0);
+            // "1 XY sub mH mI mW hH hI path" — fields separated by SPACE
+            var parts = std.mem.splitScalar(u8, line, ' ');
             _ = parts.next() orelse continue; // "1"
             const xy = parts.next() orelse continue; // XY
             // Skip 6 metadata fields (sub,mH,mI,mW,hH,hI)
@@ -96,8 +96,8 @@ pub fn taskGitStatus(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.Tas
         }
 
         if (line[0] == '?') {
-            // "? <path>\0" — split on NUL
-            var parts = std.mem.splitScalar(u8, line, 0);
+            // "? <path>" — fields separated by SPACE
+            var parts = std.mem.splitScalar(u8, line, ' ');
             _ = parts.next() orelse continue; // "?"
             const path = parts.next() orelse continue;
             const entry = try std.fmt.allocPrint(alloc, "?:{s}\n", .{path});
@@ -272,3 +272,4 @@ test "git blame on known file" {
     try std.testing.expect(result.payload.len > 0);
     try std.testing.expect(result.tag == .git_blame);
 }
+// extra line Sa 18 Apr 2026 12:35:44 CEST
