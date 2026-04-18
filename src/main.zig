@@ -85,6 +85,19 @@ pub fn main() !void {
             headless_mode = true;
             e2e_mode = true;
             log.info("Headless mode enabled — no window, RPC server on port 9999", .{});
+        } else if (std.mem.eql(u8, args[i], "--help") or std.mem.eql(u8, args[i], "-h")) {
+            var buf: [4096]u8 = undefined;
+            var stdout_f = std.fs.File.stdout();
+            var stdout_writer = stdout_f.writer(&buf);
+            const w = &stdout_writer.interface;
+            try w.writeAll("Usage: vulkan-ed [OPTIONS] [FILE]\n\n");
+            try w.writeAll("Options:\n");
+            try w.writeAll("  --theme light|dark    Override theme\n");
+            try w.writeAll("  --e2e                 Enable E2E mode (RPC on port 9999)\n");
+            try w.writeAll("  --headless            Headless mode (no window, RPC on port 9999)\n");
+            try w.writeAll("  --help, -h            Show this help\n");
+            try w.flush();
+            return;
         } else if (default_file_path == null) {
             // Erstes nicht-Flag Argument = Dateipfad
             default_file_path = args[i];
