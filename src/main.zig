@@ -94,7 +94,7 @@ pub fn main() !void {
             try w.writeAll("Options:\n");
             try w.writeAll("  --theme light|dark    Override theme\n");
             try w.writeAll("  --e2e                 Enable E2E mode (RPC on port 9999)\n");
-            try w.writeAll("  --headless            Headless mode (no window, RPC on port 9999)\n");
+            try w.writeAll("  --headless            Headless mode (no window, screenshots via RPC on port 9999)\n");
             try w.writeAll("  --help, -h            Show this help\n");
             try w.flush();
             return;
