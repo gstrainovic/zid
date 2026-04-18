@@ -51,7 +51,18 @@ pub const Renderer = struct {
 
     const Self = @This();
 
-    /// Renderer initialisieren
+/// Globale Renderer-Zeiger für Headless-Screenshot
+pub var g_renderer_ptr: ?*Renderer = null;
+pub var g_clay_rdr: ?*@import("../clay_renderer/mod.zig").ClayRenderer = null;
+pub var g_text_gpu: ?*@import("../text/mod.zig").GPURenderer = null;
+pub var g_text_renderer: ?*@import("../text/mod.zig").TextRenderer = null;
+pub var g_image_rdr: ?*@import("../clay_renderer/image_renderer.zig").ImageRenderer = null;
+pub var g_svg_gpu: ?*@import("../svg/gpu_renderer.zig").SvgRendererGPU = null;
+pub var g_svg_atlas: ?*@import("../svg/mod.zig").SvgAtlas = null;
+pub var g_viewport_width: u32 = 1200;
+pub var g_viewport_height: u32 = 800;
+
+/// Renderer initialisieren
     pub fn init(allocator: std.mem.Allocator, config: RendererConfig) !Self {
         log.debug("Initializing renderer (WGPU backend, Vulkan forced via WGPU_BACKEND=vulkan)", .{});
 
@@ -477,5 +488,178 @@ pub const Renderer = struct {
         defer command_buffer.release();
 
         self.queue.?.submit(&[_]*wgpu.CommandBuffer{command_buffer});
+    }
+
+    /// Headless Screenshot: rendert in Offscreen-Textur, kopiert Pixel in Buffer, gibt PPM-Pfad zurück.
+    /// Kein Fenster, kein Surface — komplett unsichtbar.
+    pub fn headlessScreenshot(self: *Self, alloc: std.mem.Allocator, path: []const u8) !void {
+        const w = if (self.width == 0) g_viewport_width else self.width;
+        const h = if (self.height == 0) g_viewport_height else self.height;
+
+        const rgba = try self.headlessRenderToBuffer(alloc, w, h, null, null, null, null, null, null, null);
+        defer alloc.free(rgba);
+
+        // PPM schreiben (nur RGB, keine Alpha-Kanäle)
+        var file = try std.fs.createFileAbsolute(path, .{});
+        defer file.close();
+        var header: [256]u8 = undefined;
+        const header_slice = std.fmt.bufPrint(&header, "P6\n{d} {d}\n255\n", .{ w, h }) catch unreachable;
+        try file.writeAll(header_slice);
+        // PPM P6: 3 bytes per pixel (RGB) - RGBA hat 4 Bytes/Pixel
+        var src_idx: usize = 0;
+        var pixel_count: usize = 0;
+        while (pixel_count < w * h) : (pixel_count += 1) {
+            try file.writeAll(rgba[src_idx..src_idx + 3]); // R, G, B
+            src_idx += 4;
+        }
+    }
+
+    /// Rendert UI in Offscreen-Textur und gibt RGBA-Pixel zurück.
+    pub fn headlessRenderToBuffer(
+        self: *Self,
+        alloc: std.mem.Allocator,
+        w: u32,
+        h: u32,
+        clay_rdr: ?*@import("../clay_renderer/mod.zig").ClayRenderer,
+        text_gpu: ?*@import("../text/mod.zig").GPURenderer,
+        text_renderer: ?*@import("../text/mod.zig").TextRenderer,
+        image_rdr: ?*@import("../clay_renderer/image_renderer.zig").ImageRenderer,
+        svg_gpu: ?*@import("../svg/gpu_renderer.zig").SvgRendererGPU,
+        svg_atlas: ?*@import("../svg/mod.zig").SvgAtlas,
+        render_commands: ?[]clay.RenderCommand,
+    ) ![]u8 {
+        const bytes_per_pixel: u32 = 4;
+        const bytes_per_row = (w * bytes_per_pixel + 255) / 256 * 256; // 256-aligned
+        const buffer_size = bytes_per_row * h;
+
+        // Offscreen Textur erstellen
+        const tex_desc = wgpu.TextureDescriptor{
+            .usage = wgpu.TextureUsages.render_attachment | wgpu.TextureUsages.copy_src,
+            .dimension = .@"2d",
+            .size = .{ .width = w, .height = h, .depth_or_array_layers = 1 },
+            .format = .bgra8_unorm,
+            .mip_level_count = 1,
+            .sample_count = 1,
+        };
+        const offscreen_tex = self.device.?.createTexture(&tex_desc) orelse return error.TextureCreateFailed;
+        defer offscreen_tex.release();
+
+        const offscreen_view = offscreen_tex.createView(&.{}) orelse return error.ViewCreateFailed;
+        defer offscreen_view.release();
+
+        // Readback Buffer erstellen
+        const buf_desc = wgpu.BufferDescriptor{
+            .usage = wgpu.BufferUsages.map_read | wgpu.BufferUsages.copy_dst,
+            .size = buffer_size,
+            .mapped_at_creation = 0,
+        };
+        const readback_buf = self.device.?.createBuffer(&buf_desc) orelse return error.BufferCreateFailed;
+        defer readback_buf.release();
+
+        // CommandEncoder für Offscreen-Rendering
+        const enc = self.device.?.createCommandEncoder(&.{}) orelse return error.EncoderCreateFailed;
+        defer enc.release();
+
+        const color_attachments = [_]wgpu.ColorAttachment{.{
+            .view = offscreen_view,
+            .resolve_target = null,
+            .load_op = .clear,
+            .store_op = .store,
+            .clear_value = wgpu.Color{
+                .r = self.config.clear_color[0],
+                .g = self.config.clear_color[1],
+                .b = self.config.clear_color[2],
+                .a = self.config.clear_color[3],
+            },
+        }};
+
+        const render_pass_desc = wgpu.RenderPassDescriptor{
+            .color_attachment_count = color_attachments.len,
+            .color_attachments = &color_attachments,
+        };
+
+        const pass = enc.beginRenderPass(&render_pass_desc) orelse return error.PassCreateFailed;
+
+        // UI rendern wenn Commands vorhanden
+        if (render_commands) |commands| {
+            if (clay_rdr) |cr| {
+                if (text_gpu) |tg| {
+                    if (text_renderer) |tr| {
+                        cr.renderClayLayout(pass, tg, tr, image_rdr, svg_gpu, svg_atlas, commands) catch |err| {
+                            log.err("headless renderClayLayout failed: {}", .{err});
+                        };
+                    }
+                }
+            }
+        }
+
+        pass.end();
+        pass.release();
+
+        // Kopiere Textur in Buffer
+        const copy_src = wgpu.TexelCopyTextureInfo{
+            .origin = wgpu.Origin3D{},
+            .texture = offscreen_tex,
+        };
+        const copy_dst = wgpu.TexelCopyBufferInfo{
+            .layout = wgpu.TexelCopyBufferLayout{
+                .offset = 0,
+                .bytes_per_row = bytes_per_row,
+                .rows_per_image = h,
+            },
+            .buffer = readback_buf,
+        };
+        const output_extent = wgpu.Extent3D{
+            .width = w,
+            .height = h,
+            .depth_or_array_layers = 1,
+        };
+        enc.copyTextureToBuffer(&copy_src, &copy_dst, &output_extent);
+
+        const cmd = enc.finish(&.{}) orelse return error.CmdCmdBufferCreateFailed;
+        defer cmd.release();
+
+        self.queue.?.submit(&[_]*wgpu.CommandBuffer{cmd});
+        _ = self.device.?.poll(true, null);
+
+        // Buffer mappen und Pixel lesen
+        var pixel_data: []u8 = undefined;
+        var map_complete = false;
+        _ = readback_buf.mapAsync(wgpu.MapModes.read, 0, buffer_size, wgpu.BufferMapCallbackInfo{
+            .callback = struct {
+                fn callback(status: wgpu.MapAsyncStatus, _: wgpu.StringView, userdata1: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
+                    _ = status;
+                    const completed: *bool = @ptrCast(@alignCast(userdata1));
+                    completed.* = true;
+                }
+            }.callback,
+            .userdata1 = @ptrCast(&map_complete),
+        });
+        while (!map_complete) {
+            _ = self.device.?.poll(true, null);
+        }
+
+        const mapped: [*]u8 = @ptrCast(@alignCast(readback_buf.getMappedRange(0, buffer_size).?));
+        pixel_data = mapped[0..buffer_size];
+        readback_buf.unmap();
+
+        // BGRA → RGBA konvertieren (nur die effektiven Pixel, ohne Padding)
+        const rgba_size = w * h * 4;
+        var rgba = try alloc.alloc(u8, rgba_size);
+        var dst: usize = 0;
+        var row: usize = 0;
+        while (row < h) : (row += 1) {
+            var col: usize = 0;
+            while (col < w * 4) : (col += 4) {
+                const src = row * bytes_per_row + col;
+                rgba[dst + 0] = pixel_data[src + 2];
+                rgba[dst + 1] = pixel_data[src + 1];
+                rgba[dst + 2] = pixel_data[src + 0];
+                rgba[dst + 3] = pixel_data[src + 3];
+                dst += 4;
+            }
+        }
+
+        return rgba;
     }
 };
