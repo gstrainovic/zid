@@ -131,6 +131,33 @@ AUSGABE-REGELN (strikt):
 - Maximal 3 Eintraege in required_fixes, je max 200 Zeichen.
 - Erste Zeichen deiner Antwort: { — letzte Zeichen: }."
 
+# ---- Vor-Check 3: Manuelle Verifizierung ----
+MANUAL_VERIFY="n"
+REASON="Automatische Ausfuehrung ohne TTY"
+
+if [ -t 0 ]; then
+    read -p "Hast du den Screenshot selbst visuell verifiziert? (y/n): " MANUAL_VERIFY
+    if [[ "${MANUAL_VERIFY,,}" != "y" ]]; then
+        read -p "Grund, warum nicht selbst verifiziert wurde: " REASON
+    fi
+fi
+
+if [[ "${MANUAL_VERIFY,,}" != "y" ]]; then
+    if [[ "$REVIEWER" != "minimax" ]]; then
+        USER_PROMPT="$USER_PROMPT
+
+ACHTUNG: Der Entwickler hat den Screenshot NICHT selbst visuell verifiziert.
+Grund: $REASON
+Da du $REVIEWER bist, MUSST du den Screenshot zwingend selbst visuell und extrem sorgfaeltig pruefen!"
+    else
+        USER_PROMPT="$USER_PROMPT
+
+ACHTUNG: Der Entwickler hat den Screenshot NICHT selbst visuell verifiziert.
+Grund: $REASON
+Da du minimax bist, darfst du die visuelle Pruefung ueberspringen."
+    fi
+fi
+
 RESPONSE_FILE=$(mktemp)
 trap 'rm -f "$RESPONSE_FILE" "$RESPONSE_FILE.err"' EXIT
 
