@@ -31,11 +31,21 @@ pub const LlamaAgent = struct {
 
         self.process = try allocator.create(std.process.Child);
         self.process.* = std.process.Child.init(argv, allocator);
+        
+        // Force NVIDIA GPU (Index 1 according to logs)
+        var env_map = try std.process.getEnvMap(allocator);
+        // Note: We are using the arena or caller must ensure this stays valid if spawn() uses it later.
+        // Child.spawn() copies the env_map into its own structures in some versions, 
+        // but in Zig 0.15 it's safer to keep it valid until spawn() returns.
+        try env_map.put("GGML_VULKAN_DEVICE", "1");
+        self.process.env_map = &env_map;
+
         self.process.stdin_behavior = .Ignore;
         self.process.stdout_behavior = .Inherit;
         self.process.stderr_behavior = .Inherit;
 
         try self.process.spawn();
+        env_map.deinit();
 
         return self;
     }
