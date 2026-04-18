@@ -191,9 +191,17 @@ pub fn build(b: *std.Build) void {
     run_step.dependOn(&run_cmd.step);
 
     // Tests
+    const code_editor_mod = b.createModule(.{
+        .root_source_file = b.path("src/editor/code_editor.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    code_editor_mod.addImport("flow_core", flow_core_dep.module("flow-core"));
+    code_editor_mod.addImport("syntax", syntax_mod);
+
     const editor_tests = b.addTest(.{
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/editor/test_root.zig"),
+            .root_source_file = b.path("test/test_editor.zig"),
             .target = target,
             .optimize = optimize,
         }),
@@ -202,6 +210,7 @@ pub fn build(b: *std.Build) void {
     editor_tests.root_module.addImport("wio", wio_dep.module("wio"));
     editor_tests.root_module.addImport("flow_core", flow_core_dep.module("flow-core"));
     editor_tests.root_module.addImport("syntax", syntax_mod);
+    editor_tests.root_module.addImport("code_editor", code_editor_mod);
 
     const perf_test_mod = b.createModule(.{
         .root_source_file = b.path("src/editor/highlight_perf_tests.zig"),
@@ -306,26 +315,4 @@ pub fn build(b: *std.Build) void {
     run_editor_tests.has_side_effects = true;
     test_step.dependOn(&run_editor_tests.step);
     test_step.dependOn(&run_perf_tests.step);
-
-    // Performance Benchmark für Highlighting
-    const benchmark_mod = b.createModule(.{
-        .root_source_file = b.path("src/editor/highlight_benchmark.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    benchmark_mod.addImport("flow_core", flow_core_dep.module("flow-core"));
-    benchmark_mod.addImport("syntax", syntax_mod);
-
-    const benchmark_exe = b.addExecutable(.{
-        .name = "highlight-benchmark",
-        .root_module = benchmark_mod,
-    });
-
-    const run_benchmark = b.addRunArtifact(benchmark_exe);
-    if (b.args) |args| {
-        run_benchmark.addArgs(args);
-    }
-
-    const benchmark_step = b.step("benchmark", "Run highlight performance benchmark");
-    benchmark_step.dependOn(&run_benchmark.step);
 }
