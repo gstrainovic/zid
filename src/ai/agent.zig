@@ -5,18 +5,24 @@ pub const LlamaAgent = struct {
     process: *std.process.Child,
     model_path: []const u8,
     server_port: u16,
+    connect_timeout_ns: u64,
 
     const Self = @This();
 
     pub fn init(allocator: std.mem.Allocator, llama_server_path: []const u8, model_path: []const u8, port: u16) !*Self {
+        return initWithTimeout(allocator, llama_server_path, model_path, port, 5 * std.time.ns_per_s);
+    }
+
+    pub fn initWithTimeout(allocator: std.mem.Allocator, llama_server_path: []const u8, model_path: []const u8, port: u16, timeout_ns: u64) !*Self {
         var self = try allocator.create(Self);
         errdefer allocator.destroy(self);
         
         self.allocator = allocator;
         self.model_path = try allocator.dupe(u8, model_path);
         errdefer allocator.free(self.model_path);
-        
+
         self.server_port = port;
+        self.connect_timeout_ns = timeout_ns;
 
         var ctx_size: u32 = 8192;
         
@@ -91,7 +97,13 @@ pub const LlamaAgent = struct {
     };
 
     /// Sends a chat completion request to the local llama-server with retries
+    /// Returns error if should_stop is set OR connection fails after max_attempts.
     pub fn sendChatCompletion(self: *Self, messages: []const ChatMessage) ![]u8 {
+        return sendChatCompletionWithStop(self, messages, null);
+    }
+
+    /// Same as sendChatCompletion but checks should_stop during retry loop.
+    pub fn sendChatCompletionWithStop(self: *Self, messages: []const ChatMessage, should_stop: ?*const std.atomic.Value(bool)) ![]u8 {
         var client = std.http.Client{ .allocator = self.allocator };
         defer client.deinit();
 
@@ -109,6 +121,9 @@ pub const LlamaAgent = struct {
         var attempt: u32 = 0;
         const max_attempts = 10;
         while (attempt < max_attempts) : (attempt += 1) {
+            // Check cancellation before each attempt
+            if (should_stop) |s| if (s.load(.acquire)) return error.Cancelled;
+
             var alloc_writer = std.io.Writer.Allocating.init(self.allocator);
             defer alloc_writer.deinit();
 
@@ -122,7 +137,12 @@ pub const LlamaAgent = struct {
                 .response_writer = &alloc_writer.writer,
             }) catch |err| {
                 if (err == error.ConnectionRefused and attempt < max_attempts - 1) {
-                    std.Thread.sleep(1 * std.time.ns_per_s);
+                    // Split 1s sleep into 10x100ms for responsive shutdown
+                    var slept: u32 = 0;
+                    while (slept < 10) : (slept += 1) {
+                        if (should_stop) |s| if (s.load(.acquire)) return error.Cancelled;
+                        std.Thread.sleep(100 * std.time.ns_per_ms);
+                    }
                     continue;
                 }
                 return err;
@@ -143,7 +163,7 @@ pub const LlamaAgent = struct {
             const choices = parsed.value.object.get("choices") orelse return error.InvalidResponse;
             const msg_obj = choices.array.items[0].object.get("message") orelse return error.InvalidResponse;
             const content = msg_obj.object.get("content") orelse return error.InvalidResponse;
-            
+
             return self.allocator.dupe(u8, content.string);
         }
         return error.ConnectionRefused;

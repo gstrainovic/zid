@@ -185,7 +185,7 @@ pub const AIChatState = struct {
             }
         }
 
-        const params = try ai_worker.ChatParams.init(self.allocator, a, api_messages.items);
+        const params = try ai_worker.ChatParams.initWithStop(self.allocator, a, api_messages.items, &sched.should_stop);
         if (!sched.submit(.{ .func = ai_worker.taskChatCompletion, .data = params })) {
             params.deinit();
             self.is_loading = false;
