@@ -224,9 +224,11 @@ pub fn main() !void {
         ui_system.pending_tab_switch = ui_system.allocator.dupe(u8, "preview:///home/g/projects/vulkan-ed/AGENTS.md") catch null;
     }
 
-    // Scheduler für async Git/LSP/FileWatcher Tasks
+    // Scheduler für async Git/LSP/FileWatcher/AI Tasks
     var scheduler = try async_mod.Scheduler.init(allocator, 4);
     defer scheduler.deinit();
+
+    ui_system.setAIScheduler(scheduler);
 
     // File Watcher (inotify auf Linux)
     var watcher: ?*file_watcher_mod.FileWatcher = null;
@@ -344,6 +346,8 @@ pub fn main() !void {
                 switch (result.tag) {
                     .git_branch => ui_system.updateBranch(result.payload),
                     .git_status => ui_system.updateGitStatus(result.payload),
+                    .ai_chat_reply => ui_system.handleAIReply(result.payload),
+                    .ai_chat_error => ui_system.handleAIError(result.payload),
                     .file_changed, .file_created, .file_deleted => {
                         log.debug("file event: {} for {s}", .{ result.tag, result.payload });
                         if (git_repo_path) |path| {
@@ -384,6 +388,8 @@ pub fn main() !void {
                 switch (result.tag) {
                     .git_branch => ui_system.updateBranch(result.payload),
                     .git_status => ui_system.updateGitStatus(result.payload),
+                    .ai_chat_reply => ui_system.handleAIReply(result.payload),
+                    .ai_chat_error => ui_system.handleAIError(result.payload),
                     .file_changed, .file_created, .file_deleted => {
                         log.debug("file event: {} for {s}", .{ result.tag, result.payload });
                         // File geändert → Git Status neu abfragen
