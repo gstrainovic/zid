@@ -292,6 +292,22 @@ pub const UI = struct {
         self.ai_chat.handleError(payload);
     }
 
+    pub fn handleAIWarmupDone(self: *Self) void {
+        self.ai_chat.handleWarmupDone();
+    }
+
+    pub fn handleAIWarmupError(self: *Self, payload: []const u8) void {
+        self.ai_chat.handleWarmupError(payload);
+    }
+
+    pub fn handleAIDownloadDone(self: *Self) void {
+        self.ai_chat.handleDownloadDone();
+    }
+
+    pub fn handleAIDownloadError(self: *Self, payload: []const u8) void {
+        self.ai_chat.handleDownloadError(payload);
+    }
+
     /// Clay initialisieren (nach Window Creation)
     pub fn setupClay(self: *Self, window: ?*wio.Window, width: u32, height: u32, text_renderer: *@import("../text/mod.zig").TextRenderer) !void {
         log.debug("Setting up Clay layout: {}x{}", .{ width, height });

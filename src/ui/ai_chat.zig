@@ -33,9 +33,6 @@ pub const AIChatState = struct {
     mutex: std.Thread.Mutex = .{},
     stop_flag: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
 
-    // Handle für warmup / download (NICHT für chat completions — die laufen via scheduler).
-    active_thread: ?std.Thread = null,
-
     scroll_offset_y: f32 = 0,
     viewport_height: f32 = 0,
     content_height: f32 = 0,
@@ -61,15 +58,14 @@ pub const AIChatState = struct {
 
     pub fn setScheduler(self: *Self, sched: *scheduler_mod.Scheduler) void {
         self.scheduler = sched;
+        // Nachträglicher Warmup, falls initAgent vor setScheduler lief.
+        if (self.agent != null and self.is_initializing) {
+            self.submitWarmup() catch |err| log.err("deferred warmup submit failed: {}", .{err});
+        }
     }
 
     pub fn deinit(self: *Self) void {
         self.stop_flag.store(true, .seq_cst);
-
-        if (self.active_thread) |t| {
-            t.join();
-            self.active_thread = null;
-        }
 
         for (self.messages.items) |msg| {
             self.allocator.free(msg.content);
@@ -101,33 +97,37 @@ pub const AIChatState = struct {
         };
 
         self.is_initializing = true;
-        if (self.active_thread) |t| {
-            t.join();
-            self.active_thread = null;
-        }
-        self.active_thread = try std.Thread.spawn(.{}, warmupWorker, .{self});
+        // Scheduler kann noch null sein (UI.init läuft vor main.zig's setAIScheduler).
+        // setScheduler holt den Warmup dann nach.
+        self.submitWarmup() catch |err| switch (err) {
+            error.NoScheduler => {},
+            else => return err,
+        };
     }
 
-    fn warmupWorker(self: *Self) void {
-        const a = self.agent orelse return;
-        const ping_msg = &[_]agent.LlamaAgent.ChatMessage{
-            .{ .role = "user", .content = "ping" },
-        };
-
-        var attempts: u32 = 0;
-        while (attempts < 30 and !self.stop_flag.load(.seq_cst)) : (attempts += 1) {
-            if (a.sendChatCompletion(ping_msg)) |resp| {
-                self.allocator.free(resp);
-                break;
-            } else |_| {
-                std.Thread.sleep(1 * std.time.ns_per_s);
-            }
+    fn submitWarmup(self: *Self) !void {
+        const a = self.agent orelse return error.NoAgent;
+        const sched = self.scheduler orelse return error.NoScheduler;
+        const params = try ai_worker.WarmupParams.init(self.allocator, a);
+        if (!sched.submit(.{ .func = ai_worker.taskWarmup, .data = params })) {
+            params.deinit();
+            self.is_initializing = false;
+            return error.SchedulerQueueFull;
         }
+    }
 
+    pub fn handleWarmupDone(self: *Self) void {
         self.mutex.lock();
         defer self.mutex.unlock();
         self.is_initializing = false;
         log.info("AI Agent is warm and ready.", .{});
+    }
+
+    pub fn handleWarmupError(self: *Self, payload: []const u8) void {
+        log.err("AI warmup failed: {s}", .{payload});
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        self.is_initializing = false;
     }
 
     pub fn addMessage(self: *Self, role: []const u8, content: []const u8) !void {
@@ -286,88 +286,43 @@ pub const AIChatState = struct {
 
     pub fn triggerDownload(self: *Self) !void {
         if (self.is_downloading or self.model_exists) return;
-        self.is_downloading = true;
-        if (self.active_thread) |t| {
-            t.join();
-            self.active_thread = null;
-        }
-        self.active_thread = try std.Thread.spawn(.{}, downloadWorker, .{self});
-    }
+        const sched = self.scheduler orelse return error.NoScheduler;
 
-    fn downloadWorker(self: *Self) void {
         const model_name = "gemma-4-E2B-it-Q4_K_M.gguf";
         const url = "https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-Q4_K_M.gguf";
 
-        const argv = &[_][]const u8{
-            "curl", "-L", url, "-o", model_name,
+        const sink: ai_worker.ProgressSink = .{
+            .value = &self.download_progress,
+            .mutex = &self.mutex,
+            .stop_flag = &self.stop_flag,
         };
-
-        var child = std.process.Child.init(argv, self.allocator);
-        child.stderr_behavior = .Pipe;
-        child.spawn() catch |err| {
-            log.err("Download failed to spawn: {}", .{err});
-            self.mutex.lock();
-            self.is_downloading = false;
-            self.mutex.unlock();
-            return;
-        };
-
-        if (child.stderr) |stderr| {
-            var line_buf: [1024]u8 = undefined;
-            while (true) {
-                const n = stderr.read(&line_buf) catch break;
-                if (n == 0) break;
-                if (self.stop_flag.load(.seq_cst)) break;
-
-                const line = line_buf[0..n];
-                var it = std.mem.tokenizeAny(u8, line, " \r\n");
-                if (it.next()) |token| {
-                    if (std.fmt.parseFloat(f32, token)) |val| {
-                        self.mutex.lock();
-                        self.download_progress = val / 100.0;
-                        self.mutex.unlock();
-                    } else |_| {}
-                }
-            }
+        const params = try ai_worker.DownloadParams.init(self.allocator, url, model_name, sink);
+        if (!sched.submit(.{ .func = ai_worker.taskDownload, .data = params })) {
+            params.deinit();
+            return error.SchedulerQueueFull;
         }
+        self.is_downloading = true;
+    }
 
-        const term = child.wait() catch |err| {
-            log.err("Download failed during wait: {}", .{err});
-            self.mutex.lock();
-            self.is_downloading = false;
-            self.mutex.unlock();
-            return;
-        };
-
-        switch (term) {
-            .Exited => |code| {
-                if (code != 0) {
-                    log.err("Download failed with exit code: {d}", .{code});
-                    self.mutex.lock();
-                    self.is_downloading = false;
-                    self.mutex.unlock();
-                    return;
-                }
-            },
-            else => {
-                log.err("Download failed with term: {}", .{term});
-                self.mutex.lock();
-                self.is_downloading = false;
-                self.mutex.unlock();
-                return;
-            },
-        }
-
+    pub fn handleDownloadDone(self: *Self) void {
         self.mutex.lock();
         self.model_exists = true;
         self.is_downloading = false;
         self.mutex.unlock();
 
         if (self.server_path != null and self.model_path != null) {
-            self.initAgent(self.server_path.?, self.model_path.?) catch {};
+            self.initAgent(self.server_path.?, self.model_path.?) catch |err| {
+                log.err("initAgent after download failed: {}", .{err});
+            };
         }
+        log.info("Download complete.", .{});
+    }
 
-        log.info("Download complete: {s}", .{model_name});
+    pub fn handleDownloadError(self: *Self, payload: []const u8) void {
+        log.err("AI download failed: {s}", .{payload});
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        self.is_downloading = false;
     }
 
     pub fn handleKeyPress(self: *Self, key: @import("wio").Button) bool {
