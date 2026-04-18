@@ -23,6 +23,10 @@ pub const ResultTag = enum {
     file_deleted,
     ai_chat_reply,
     ai_chat_error,
+    ai_warmup_done,
+    ai_warmup_error,
+    ai_download_done,
+    ai_download_error,
 };
 
 pub const TaskResult = struct {

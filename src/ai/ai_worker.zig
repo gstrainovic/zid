@@ -75,6 +75,156 @@ pub fn taskChatCompletion(alloc: std.mem.Allocator, data: ?*anyopaque) !schedule
     };
 }
 
+// ─── Warmup ──────────────────────────────────────────────────────────────────
+
+pub const WarmupParams = struct {
+    alloc: std.mem.Allocator,
+    agent: *agent_mod.LlamaAgent,
+    max_attempts: u32 = 30,
+
+    pub fn init(alloc: std.mem.Allocator, agent: *agent_mod.LlamaAgent) !*WarmupParams {
+        const self = try alloc.create(WarmupParams);
+        self.* = .{ .alloc = alloc, .agent = agent };
+        return self;
+    }
+
+    pub fn deinit(self: *WarmupParams) void {
+        self.alloc.destroy(self);
+    }
+};
+
+pub fn taskWarmup(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.TaskResult {
+    const params: *WarmupParams = @ptrCast(@alignCast(data.?));
+    defer params.deinit();
+
+    const ping_msg = &[_]agent_mod.LlamaAgent.ChatMessage{
+        .{ .role = "user", .content = "ping" },
+    };
+
+    var attempts: u32 = 0;
+    while (attempts < params.max_attempts) : (attempts += 1) {
+        if (params.agent.sendChatCompletion(ping_msg)) |resp| {
+            alloc.free(resp);
+            return .{
+                .tag = .ai_warmup_done,
+                .payload = try alloc.alloc(u8, 0),
+                .allocator = alloc,
+            };
+        } else |_| {
+            std.Thread.sleep(1 * std.time.ns_per_s);
+        }
+    }
+
+    return .{
+        .tag = .ai_warmup_error,
+        .payload = try alloc.dupe(u8, "warmup timed out"),
+        .allocator = alloc,
+    };
+}
+
+// ─── Download ────────────────────────────────────────────────────────────────
+
+/// Progress-Sink: Download-Task schreibt Fortschritt (0..1) hierüber,
+/// Main-Thread liest ihn für UI-Progressbar. Mutex schützt den Schreibzugriff.
+pub const ProgressSink = struct {
+    value: *f32,
+    mutex: *std.Thread.Mutex,
+    stop_flag: *std.atomic.Value(bool),
+};
+
+pub const DownloadParams = struct {
+    alloc: std.mem.Allocator,
+    url: []u8,
+    out_path: []u8,
+    sink: ProgressSink,
+
+    pub fn init(
+        alloc: std.mem.Allocator,
+        url: []const u8,
+        out_path: []const u8,
+        sink: ProgressSink,
+    ) !*DownloadParams {
+        const self = try alloc.create(DownloadParams);
+        errdefer alloc.destroy(self);
+        self.url = try alloc.dupe(u8, url);
+        errdefer alloc.free(self.url);
+        self.out_path = try alloc.dupe(u8, out_path);
+        self.alloc = alloc;
+        self.sink = sink;
+        return self;
+    }
+
+    pub fn deinit(self: *DownloadParams) void {
+        self.alloc.free(self.url);
+        self.alloc.free(self.out_path);
+        self.alloc.destroy(self);
+    }
+};
+
+pub fn taskDownload(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.TaskResult {
+    const params: *DownloadParams = @ptrCast(@alignCast(data.?));
+    defer params.deinit();
+
+    const argv = &[_][]const u8{ "curl", "-L", params.url, "-o", params.out_path };
+
+    var child = std.process.Child.init(argv, alloc);
+    child.stderr_behavior = .Pipe;
+    child.spawn() catch |err| {
+        return .{
+            .tag = .ai_download_error,
+            .payload = try std.fmt.allocPrint(alloc, "spawn failed: {s}", .{@errorName(err)}),
+            .allocator = alloc,
+        };
+    };
+
+    if (child.stderr) |stderr| {
+        var line_buf: [1024]u8 = undefined;
+        while (true) {
+            const n = stderr.read(&line_buf) catch break;
+            if (n == 0) break;
+            if (params.sink.stop_flag.load(.seq_cst)) break;
+
+            var it = std.mem.tokenizeAny(u8, line_buf[0..n], " \r\n");
+            if (it.next()) |token| {
+                if (std.fmt.parseFloat(f32, token)) |val| {
+                    params.sink.mutex.lock();
+                    params.sink.value.* = val / 100.0;
+                    params.sink.mutex.unlock();
+                } else |_| {}
+            }
+        }
+    }
+
+    const term = child.wait() catch |err| {
+        return .{
+            .tag = .ai_download_error,
+            .payload = try std.fmt.allocPrint(alloc, "wait failed: {s}", .{@errorName(err)}),
+            .allocator = alloc,
+        };
+    };
+
+    switch (term) {
+        .Exited => |code| if (code != 0) {
+            return .{
+                .tag = .ai_download_error,
+                .payload = try std.fmt.allocPrint(alloc, "curl exit {d}", .{code}),
+                .allocator = alloc,
+            };
+        },
+        else => return .{
+            .tag = .ai_download_error,
+            .payload = try alloc.dupe(u8, "curl terminated abnormally"),
+            .allocator = alloc,
+        },
+    }
+
+    return .{
+        .tag = .ai_download_done,
+        .payload = try alloc.alloc(u8, 0),
+        .allocator = alloc,
+    };
+}
+
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 test "ChatParams init/deinit owns message strings (no leaks)" {
