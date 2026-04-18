@@ -66,7 +66,7 @@ pub const LlamaAgent = struct {
         content: []const u8,
     };
 
-    /// Sends a chat completion request to the local llama-server
+    /// Sends a chat completion request to the local llama-server with retries
     pub fn sendChatCompletion(self: *Self, messages: []const ChatMessage) ![]u8 {
         var client = std.http.Client{ .allocator = self.allocator };
         defer client.deinit();
@@ -81,32 +81,47 @@ pub const LlamaAgent = struct {
         }, .{});
         defer self.allocator.free(json_payload);
 
-        var alloc_writer = std.io.Writer.Allocating.init(self.allocator);
-        defer alloc_writer.deinit();
+        // Retry loop (Wait for server to be ready)
+        var attempt: u32 = 0;
+        const max_attempts = 10;
+        while (attempt < max_attempts) : (attempt += 1) {
+            var alloc_writer = std.io.Writer.Allocating.init(self.allocator);
+            defer alloc_writer.deinit();
 
-        const res = try client.fetch(.{
-            .location = .{ .url = uri_str },
-            .method = .POST,
-            .payload = json_payload,
-            .extra_headers = &[_]std.http.Header{
-                .{ .name = "Content-Type", .value = "application/json" },
-            },
-            .response_writer = &alloc_writer.writer,
-        });
+            const res = client.fetch(.{
+                .location = .{ .url = uri_str },
+                .method = .POST,
+                .payload = json_payload,
+                .extra_headers = &[_]std.http.Header{
+                    .{ .name = "Content-Type", .value = "application/json" },
+                },
+                .response_writer = &alloc_writer.writer,
+            }) catch |err| {
+                if (err == error.ConnectionRefused and attempt < max_attempts - 1) {
+                    std.time.sleep(1 * std.time.ns_per_s);
+                    continue;
+                }
+                return err;
+            };
 
-        if (res.status != .ok) {
-            std.log.err("Llama Server Error: {d}", .{res.status});
-            return error.LlamaServerError;
+            if (res.status != .ok) {
+                std.log.err("Llama Server Error: {d}", .{res.status});
+                return error.LlamaServerError;
+            }
+
+            var response_body = alloc_writer.toArrayList();
+            defer response_body.deinit(self.allocator);
+
+            // Parse response (OpenAI format): {"choices": [{"message": {"content": "..."}}]}
+            const parsed = try std.json.parseFromSlice(std.json.Value, self.allocator, response_body.items, .{ .ignore_unknown_fields = true });
+            defer parsed.deinit();
+
+            const choices = parsed.value.object.get("choices") orelse return error.InvalidResponse;
+            const msg_obj = choices.array.items[0].object.get("message") orelse return error.InvalidResponse;
+            const content = msg_obj.object.get("content") orelse return error.InvalidResponse;
+            
+            return self.allocator.dupe(u8, content.string);
         }
-
-        var response_body = alloc_writer.toArrayList();
-        defer response_body.deinit(self.allocator);
-
-        // Parse response (OpenAI format): {"choices": [{"message": {"content": "..."}}]}
-        const parsed = try std.json.parseFromSlice(std.json.Value, self.allocator, response_body.items, .{ .ignore_unknown_fields = true });
-        defer parsed.deinit();
-
-        const content = parsed.value.object.get("choices").?.array.items[0].object.get("message").?.object.get("content").?.string;
-        return self.allocator.dupe(u8, content);
+        return error.ConnectionRefused;
     }
 };

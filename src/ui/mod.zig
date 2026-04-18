@@ -164,9 +164,8 @@ pub const UI = struct {
         };
         defer allocator.free(model_path);
 
-        ai_chat.agent = agent_mod.LlamaAgent.init(allocator, llama_server_path, model_path, 8080) catch |err| blk: {
+        ai_chat.initAgent(llama_server_path, model_path) catch |err| {
             log.err("Failed to initialize AI Agent: {}. AI Chat will be disabled.", .{err});
-            break :blk null;
         };
 
         return Self{
