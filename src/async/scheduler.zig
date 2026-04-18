@@ -144,6 +144,15 @@ pub const Scheduler = struct {
         return true;
     }
 
+    /// Non-blocking Result von externem Producer (z.B. FileWatcher) einreihen.
+    pub fn pushResult(self: *Self, result: TaskResult) bool {
+        if (!self.result_queue.push(result)) {
+            log.warn("result queue full — result dropped", .{});
+            return false;
+        }
+        return true;
+    }
+
     /// Non-blocking drain der Result Queue in buf. Gibt gefüllte Slice zurück.
     pub fn pollResults(self: *Self, buf: []TaskResult) []TaskResult {
         var count: usize = 0;

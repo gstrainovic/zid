@@ -14,6 +14,7 @@ const editor = @import("editor/mod.zig");
 const e2e_server = @import("e2e_server.zig");
 const async_mod = @import("scheduler");
 const git_worker = @import("git_worker");
+const file_watcher_mod = @import("file_watcher");
 
 // Log-Level: debug
 pub const std_options: std.Options = .{
@@ -226,6 +227,10 @@ pub fn main() !void {
     var scheduler = try async_mod.Scheduler.init(allocator, 4);
     defer scheduler.deinit();
 
+    // File Watcher (inotify auf Linux)
+    var watcher: ?*file_watcher_mod.FileWatcher = null;
+    defer if (watcher) |w| w.deinit();
+
     // Phase 9: File Explorer mit aktuellem Verzeichnis initialisieren
     const cwd = std.fs.cwd();
     var cwd_buf: [1024]u8 = undefined;
@@ -247,6 +252,13 @@ pub fn main() !void {
             _ = scheduler.submit(.{ .func = git_worker.taskGitStatus, .data = params });
         } else |err| {
             log.warn("git_status submit failed: {}", .{err});
+        }
+
+        // File Watcher für dieses Verzeichnis starten
+        if (file_watcher_mod.FileWatcher.start(allocator, scheduler, path)) |w| {
+            watcher = w;
+        } else |err| {
+            log.warn("file_watcher start failed: {}", .{err});
         }
     }
 
@@ -329,6 +341,9 @@ pub fn main() !void {
                 switch (result.tag) {
                     .git_branch => ui_system.updateBranch(result.payload),
                     .git_status => ui_system.updateGitStatus(result.payload),
+                    .file_changed, .file_created, .file_deleted => {
+                        log.debug("file event: {} for {s}", .{ result.tag, result.payload });
+                    },
                     else => {},
                 }
             }
@@ -361,6 +376,9 @@ pub fn main() !void {
                 switch (result.tag) {
                     .git_branch => ui_system.updateBranch(result.payload),
                     .git_status => ui_system.updateGitStatus(result.payload),
+                    .file_changed, .file_created, .file_deleted => {
+                        log.debug("file event: {} for {s}", .{ result.tag, result.payload });
+                    },
                     else => {},
                 }
             }

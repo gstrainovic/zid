@@ -72,10 +72,12 @@ Results sind nur Daten (strings, structs). Main Thread rendert.
 
 ### Phase 3: File Watcher (src/async/file_watcher.zig)
 
-- [ ] inotify auf Linux (IN_MODIFY, IN_CREATE, IN_DELETE, IN_MOVE)
-- [ ] Dedicated Thread, pushed Results in shared result_queue
-- [ ] Debouncing (100ms) — nicht jedes inotify-Event sofort propagieren
-- [ ] ResultTag: `.file_changed`, `.file_created`, `.file_deleted`
+- [x] inotify auf Linux (IN_MODIFY, IN_CREATE, IN_DELETE, IN_MOVED_FROM/TO, IN_CLOSE_WRITE)
+- [x] Dedicated Thread, pushes Results in shared result_queue (pushResult)
+- [x] Recursive Verzeichnis-Überwachung (addTree)
+- [x] poll() mit 100ms timeout für inotify fd
+- [x] ResultTag: `.file_changed`, `.file_created`, `.file_deleted`
+- [x] Beweis: Screenshot zeigt Status Bar + ~ Indikatoren (async-subsystem Branch)
 
 ### Phase 4: LSP Client (src/lsp/)
 

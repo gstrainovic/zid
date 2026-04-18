@@ -243,6 +243,14 @@ pub fn build(b: *std.Build) void {
     exe_mod.addImport("git_worker", git_worker_mod);
     const git_tests = b.addTest(.{ .root_module = git_worker_mod });
 
+    const file_watcher_mod = b.createModule(.{
+        .root_source_file = b.path("src/async/file_watcher.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    file_watcher_mod.addImport("scheduler", scheduler_mod);
+    exe_mod.addImport("file_watcher", file_watcher_mod);
+
     const test_step = b.step("test", "Run tests");
 
     const run_async_tests = b.addRunArtifact(async_tests);
