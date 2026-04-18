@@ -158,6 +158,8 @@ pub const Scheduler = struct {
         self.should_stop.store(true, .release);
         self.work_queue.wakeAll();
         for (self.workers) |w| w.join();
+        // Nicht abgeholte Results freigeben
+        while (self.result_queue.pop()) |r| r.deinit();
     }
 
     fn workerFn(self: *Self) void {
