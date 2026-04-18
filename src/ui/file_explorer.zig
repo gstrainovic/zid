@@ -109,7 +109,9 @@ pub const FileExplorerState = struct {
         self.nodes.deinit(self.allocator);
         self.visible_entries.deinit(self.allocator);
         self.expanded_nodes.deinit();
-        // Keys in git_status sind geliehene Slices (node.path) — kein free nötig
+        // Keys in git_status sind owned (alloziert in updateGitStatus via path.join).
+        var it = self.git_status.keyIterator();
+        while (it.next()) |key| self.allocator.free(key.*);
         self.git_status.deinit();
     }
 
@@ -578,13 +580,7 @@ fn renderTreeEntry(
         const icon_path = if (node.is_folder) svg.Lucide.folder else fileIcon(node.name);
         svg.Svg(arena, icon_id, icon_path, 24, if (is_selected) theme.text_on_primary else theme.text);
 
-        // Dateiname
-        clay.text(node.name, .{
-            .font_size = 24,
-            .color = if (is_selected) theme.text_on_primary else theme.text,
-        });
-
-        // Git-Status Indikator (vorne, kein Suffix)
+        // Git-Status Indikator (vorne)
         if (state.git_status.get(node.path)) |code| {
             const git_color: [4]f32 = switch (code) {
                 'A' => theme.success,
@@ -603,6 +599,12 @@ fn renderTreeEntry(
                 .color = if (is_selected) theme.text_on_primary else theme.text,
             });
         }
+
+        // Dateiname
+        clay.text(node.name, .{
+            .font_size = 24,
+            .color = if (is_selected) theme.text_on_primary else theme.text,
+        });
     });
 }
 

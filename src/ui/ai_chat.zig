@@ -108,7 +108,7 @@ pub const AIChatState = struct {
     fn submitWarmup(self: *Self) !void {
         const a = self.agent orelse return error.NoAgent;
         const sched = self.scheduler orelse return error.NoScheduler;
-        const params = try ai_worker.WarmupParams.init(self.allocator, a);
+        const params = try ai_worker.WarmupParams.init(self.allocator, a, &sched.should_stop);
         if (!sched.submit(.{ .func = ai_worker.taskWarmup, .data = params })) {
             params.deinit();
             self.is_initializing = false;

@@ -204,8 +204,7 @@ pub const ClayRenderer = struct {
                 else => {},
             }
         }
-        log.debug("command counts: rect={d} text={d} image={d}", .{ rect_count, text_count, image_count });
-
+        
         // Vertices für Rechtecke sammeln
         var rect_vertices = std.ArrayListUnmanaged(RectangleVertex){};
         defer rect_vertices.deinit(self.allocator);

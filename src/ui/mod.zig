@@ -227,7 +227,7 @@ pub const UI = struct {
         log.debug("UI.deinit: frame_arena done", .{});
         self.allocator.free(self.clay_memory);
         log.debug("UI.deinit: clay_memory freed", .{});
-        
+
         self.root_pane.deinit();
         log.debug("UI.deinit: root_pane done", .{});
 
@@ -238,6 +238,7 @@ pub const UI = struct {
         log.debug("UI.deinit: ai_chat done", .{});
 
         // Buffer aufräumen (Zentrales Ownership)
+        log.debug("UI.deinit: cleaning buffers", .{});
         var buf_iter = self.open_buffers.iterator();
         while (buf_iter.next()) |entry| {
             entry.value_ptr.*.deinit();
