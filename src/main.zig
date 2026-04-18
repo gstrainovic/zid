@@ -348,6 +348,10 @@ pub fn main() !void {
                     .git_status => ui_system.updateGitStatus(result.payload),
                     .ai_chat_reply => ui_system.handleAIReply(result.payload),
                     .ai_chat_error => ui_system.handleAIError(result.payload),
+                    .ai_warmup_done => ui_system.handleAIWarmupDone(),
+                    .ai_warmup_error => ui_system.handleAIWarmupError(result.payload),
+                    .ai_download_done => ui_system.handleAIDownloadDone(),
+                    .ai_download_error => ui_system.handleAIDownloadError(result.payload),
                     .file_changed, .file_created, .file_deleted => {
                         log.debug("file event: {} for {s}", .{ result.tag, result.payload });
                         if (git_repo_path) |path| {
@@ -390,6 +394,10 @@ pub fn main() !void {
                     .git_status => ui_system.updateGitStatus(result.payload),
                     .ai_chat_reply => ui_system.handleAIReply(result.payload),
                     .ai_chat_error => ui_system.handleAIError(result.payload),
+                    .ai_warmup_done => ui_system.handleAIWarmupDone(),
+                    .ai_warmup_error => ui_system.handleAIWarmupError(result.payload),
+                    .ai_download_done => ui_system.handleAIDownloadDone(),
+                    .ai_download_error => ui_system.handleAIDownloadError(result.payload),
                     .file_changed, .file_created, .file_deleted => {
                         log.debug("file event: {} for {s}", .{ result.tag, result.payload });
                         // File geändert → Git Status neu abfragen
