@@ -13,5 +13,5 @@ comptime {
 
 // Re-export all tests from code_editor
 test {
-    _ = @import("code_editor.zig");
+    _ = @import("code_editor");
 }
