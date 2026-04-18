@@ -318,10 +318,20 @@ pub fn main() !void {
         e2e_thread = try e2e_server.start(&e2e_ctx.?);
     }
 
-    // In headless mode: just wait for E2E shutdown (no rendering loop)
+    // In headless mode: poll async results + wait for E2E shutdown (no rendering loop)
     if (headless_mode) {
         log.info("=== vulkan-ed headless ready — waiting for RPC requests ===", .{});
         while (e2e_ctx == null or !e2e_ctx.?.shutdown_flag.load(.seq_cst)) {
+            var result_buf: [32]async_mod.TaskResult = undefined;
+            const results = scheduler.pollResults(&result_buf);
+            for (results) |result| {
+                defer result.deinit();
+                switch (result.tag) {
+                    .git_branch => ui_system.updateBranch(result.payload),
+                    .git_status => ui_system.updateGitStatus(result.payload),
+                    else => {},
+                }
+            }
             std.Thread.sleep(std.time.ns_per_ms * 100);
         }
         log.info("Headless mode shutdown requested", .{});
