@@ -20,7 +20,7 @@ OWN_SUBMODULES=("libs/gooey" "libs/wgpu_native_zig" "libs/wio" "libs/zigdown")
 # Referenz-Repos: Inspiration/Lesequelle, kein Build-Input.
 # Format: "<relativer Pfad>|<git-URL>"
 REFERENCES=(
-    "reference/ghostty|https://github.com/ghostty-org/ghostty.git"
+    "libs/ghostty|https://github.com/ghostty-org/ghostty.git"
     "reference/lite-xl|https://github.com/lite-xl/lite-xl.git"
     "reference/sev|https://github.com/dylancobb/sev.git"
 )
