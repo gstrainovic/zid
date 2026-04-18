@@ -138,17 +138,99 @@ pub const AIChatState = struct {
     }
 
     fn workerThread(self: *Self) void {
-        const response = self.getAIResponse() catch |err| {
-            log.err("AI Error: {}", .{err});
-            self.addMessage("assistant", "Error communicating with AI agent.") catch {};
-            self.mutex.lock();
-            defer self.mutex.unlock();
-            self.is_loading = false;
-            return;
-        };
-        defer self.allocator.free(response);
+        var current_response: ?[]const u8 = null;
         
-        self.addMessage("assistant", response) catch {};
+        while (true) {
+            const response = self.getAIResponse() catch |err| {
+                log.err("AI Error: {}", .{err});
+                self.addMessage("assistant", "Error communicating with AI agent.") catch {};
+                break;
+            };
+            current_response = response;
+            
+            // Log response for debugging
+            log.debug("AI Response: {s}", .{response});
+            
+            var tool_executed = false;
+            
+            // Check for JSON tool call
+            if (std.mem.indexOf(u8, response, "{") != null and std.mem.indexOf(u8, response, "\"tool\"") != null) {
+                // Find the first { and last } to extract JSON
+                const start_idx = std.mem.indexOf(u8, response, "{").?;
+                const end_idx = std.mem.lastIndexOf(u8, response, "}");
+                
+                if (end_idx != null and end_idx.? > start_idx) {
+                    const json_str = response[start_idx .. end_idx.? + 1];
+                    var parsed = std.json.parseFromSlice(std.json.Value, self.allocator, json_str, .{ .ignore_unknown_fields = true }) catch null;
+                    if (parsed) |*p| {
+                        defer p.deinit();
+                        if (p.value == .object) {
+                            if (p.value.object.get("tool")) |tool_val| {
+                                if (std.mem.eql(u8, tool_val.string, "read_file")) {
+                                    if (p.value.object.get("path")) |path_val| {
+                                        const path = path_val.string;
+                                        self.addMessage("assistant", response) catch {};
+                                        
+                                        if (std.fs.cwd().readFileAlloc(self.allocator, path, 10 * 1024 * 1024)) |content| {
+                                            defer self.allocator.free(content);
+                                            var sys_msg = std.ArrayList(u8).empty;
+                                            defer sys_msg.deinit(self.allocator);
+                                            std.fmt.format(sys_msg.writer(self.allocator), "Tool read_file result for '{s}':\n{s}", .{path, content}) catch {};
+                                            self.addMessage("system", sys_msg.items) catch {};
+                                        } else |_| {
+                                            self.addMessage("system", "Tool error: File not found or cannot be read.") catch {};
+                                        }
+                                        tool_executed = true;
+                                    }
+                                } else if (std.mem.eql(u8, tool_val.string, "replace_text")) {
+                                    if (p.value.object.get("path")) |path_val| {
+                                        if (p.value.object.get("old")) |old_val| {
+                                            if (p.value.object.get("new")) |new_val| {
+                                                const path = path_val.string;
+                                                const old_str = old_val.string;
+                                                const new_str = new_val.string;
+                                                
+                                                self.addMessage("assistant", response) catch {};
+                                                
+                                                // Basic file replace logic
+                                                if (std.fs.cwd().readFileAlloc(self.allocator, path, 10 * 1024 * 1024)) |content| {
+                                                    defer self.allocator.free(content);
+                                                    if (std.mem.indexOf(u8, content, old_str)) |replace_idx| {
+                                                        var new_content = std.ArrayList(u8).empty;
+                                                        defer new_content.deinit(self.allocator);
+                                                        new_content.appendSlice(self.allocator, content[0..replace_idx]) catch {};
+                                                        new_content.appendSlice(self.allocator, new_str) catch {};
+                                                        new_content.appendSlice(self.allocator, content[replace_idx + old_str.len..]) catch {};
+                                                        
+                                                        std.fs.cwd().writeFile(.{ .sub_path = path, .data = new_content.items }) catch {};
+                                                        self.addMessage("system", "Tool replace_text success.") catch {};
+                                                    } else {
+                                                        self.addMessage("system", "Tool error: Old text not found in file.") catch {};
+                                                    }
+                                                } else |_| {
+                                                    self.addMessage("system", "Tool error: File not found.") catch {};
+                                                }
+                                                tool_executed = true;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            if (!tool_executed) {
+                self.addMessage("assistant", response) catch {};
+                self.allocator.free(response);
+                break;
+            } else {
+                self.allocator.free(response);
+                // Tool was executed and system message added, so we let the loop run again
+                // to get the AI's follow-up response based on the new system message.
+            }
+        }
         
         self.mutex.lock();
         defer self.mutex.unlock();
@@ -160,6 +242,15 @@ pub const AIChatState = struct {
         
         var api_messages = std.ArrayList(agent.LlamaAgent.ChatMessage).empty;
         defer api_messages.deinit(self.allocator);
+
+        // System prompt with tool instructions
+        try api_messages.append(self.allocator, .{ 
+            .role = "system", 
+            .content = "You are Gemma 4, an intelligent coding assistant in vulkan-ed. You can use tools by outputting a JSON block. " ++
+                       "To read a file, output exactly: {\"tool\": \"read_file\", \"path\": \"<file_path>\"}. " ++
+                       "To replace text in a file, output: {\"tool\": \"replace_text\", \"path\": \"<file_path>\", \"old\": \"<exact_old_text>\", \"new\": \"<new_text>\"}. " ++
+                       "Only output the JSON block when using a tool. Otherwise, chat normally." 
+        });
 
         {
             self.mutex.lock();

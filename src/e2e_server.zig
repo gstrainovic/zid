@@ -48,6 +48,7 @@ pub fn createDispatcher(alloc: std.mem.Allocator, ctx: *E2EContext) !*zigjr.RpcD
     try rpc_dispatcher.addWithCtx("click", ctx, click);
     try rpc_dispatcher.addWithCtx("move_mouse", ctx, moveMouse);
     try rpc_dispatcher.addWithCtx("type_text", ctx, typeText);
+    try rpc_dispatcher.addWithCtx("key_press", ctx, keyPress);
     try rpc_dispatcher.addWithCtx("open_terminal", ctx, openTerminalRpc);
     try rpc_dispatcher.addWithCtx("save_file", ctx, saveFile);
     try rpc_dispatcher.addWithCtx("get_state", ctx, getState);
@@ -252,6 +253,27 @@ fn moveMouse(ctx: *E2EContext, dc: *zigjr.DispatchCtx, x: f64, y: f64) ![]const 
     wio.cancelWait();
 
     return dc.arena().dupe(u8, "ok") catch "error: out of memory";
+}
+
+fn keyPress(ctx: *E2EContext, dc: *zigjr.DispatchCtx, key_name: []const u8, is_ctrl: bool) ![]const u8 {
+    log.info("RPC: key_press('{s}', ctrl={})", .{ key_name, is_ctrl });
+    
+    ctx.ui_system.is_ctrl_down = is_ctrl;
+
+    var btn: ?@import("wio").Button = null;
+    if (std.mem.eql(u8, key_name, "enter")) btn = .enter
+    else if (std.mem.eql(u8, key_name, "backspace")) btn = .backspace
+    else if (std.mem.eql(u8, key_name, "k")) btn = .k
+    else if (std.mem.eql(u8, key_name, "y")) btn = .y
+    else if (std.mem.eql(u8, key_name, "n")) btn = .n;
+
+    if (btn) |b| {
+        ctx.ui_system.handleKeyPress(b);
+        @import("wio").cancelWait();
+        return dc.arena().dupe(u8, "ok") catch "error: out of memory";
+    }
+    
+    return dc.arena().dupe(u8, "error: unknown key") catch "error: out of memory";
 }
 
 /// Text eintippen (simuliert)

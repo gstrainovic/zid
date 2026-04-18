@@ -6,11 +6,12 @@
 
 ## AI Agent & LLM Tasks
 
-- [ ] **Modell-Download Button:** Implementiere eine UI-Funktion (oder Button in der Sidebar), die das empfohlene Gemma 4 Modell automatisch via HTTP/curl herunterlädt.
-- [ ] **Function Calling (Tools):** Implementiere die JSON-Schnittstelle im System-Prompt, damit der Agent Befehle wie `read_file` und `replace_text` ausführen kann.
-- [ ] **VRAM Context Management:** Dynamische Anpassung der `--ctx-size` basierend auf dem verfügbaren VRAM.
+- [x] **Modell-Download Button:** Implementiere eine UI-Funktion (oder Button in der Sidebar), die das empfohlene Gemma 4 Modell automatisch via HTTP/curl herunterlädt.
+- [x] **Function Calling (Tools):** Implementiere die JSON-Schnittstelle im System-Prompt, damit der Agent Befehle wie `read_file` und `replace_text` ausführen kann.
+- [x] **VRAM Context Management:** Dynamische Anpassung der `--ctx-size` basierend auf dem verfügbaren VRAM.
 - [ ] **Native C-Bindings:** Migration von HTTP (`llama-server`) auf native C-Integration (`llama.h`) für geringere Latenz.
-- [ ] **Memory Leak Fix:** In `src/ui/ai_chat.zig` (workerThread) muss das Ergebnis von `getAIResponse()` ordnungsgemäß freigegeben werden.
+- [x] **Memory Leak Fix:** In `src/ui/ai_chat.zig` (workerThread) muss das Ergebnis von `getAIResponse()` ordnungsgemäß freigegeben werden.
+- [x] **Copy to Clipboard:** Erlaube das Kopieren von KI-Antworten (z.B. durch Klick auf die Nachricht), da `clay.text` keine native Text-Selektion unterstützt.
 
 ---
 
