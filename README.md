@@ -35,6 +35,25 @@ sudo apt install libmupdf-dev \
                  libfreetype-dev libharfbuzz-dev libpng-dev
 ```
 
+### KI & Automatisierung (Abhängigkeiten)
+
+*   **Zig 0.15.x:** Erforderlich für den Build des Editors.
+*   **Vulkan SDK / Headers:** Für GPU-beschleunigtes Rendering und KI-Inferenz.
+*   **llama.cpp (llama-server):** Erforderlich für den KI-Agenten. Muss mit Vulkan-Support kompiliert sein.
+*   **Python 3:** Für RPC-Skripte und Automatisierung.
+
+### KI-Setup
+
+Der Editor benötigt ein GGUF-Modell (empfohlen: **Gemma 4 E2B Instruct**).
+Setze vor dem Start folgende Umgebungsvariablen:
+
+```bash
+export LLAMA_SERVER_PATH=/pfad/zu/llama-server
+export LLAMA_MODEL_PATH=/pfad/zu/gemma-4-E2B-it-Q4_K_M.gguf
+# Optional: NVIDIA GPU erzwingen (Index 1)
+export GGML_VULKAN_DEVICE=1
+```
+
 ### Windows
 
 MuPDF wird statisch aus `libs/fancy-cat/deps/mupdf` gebaut (bundled Header +
