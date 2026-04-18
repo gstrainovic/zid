@@ -251,6 +251,14 @@ pub fn build(b: *std.Build) void {
     file_watcher_mod.addImport("scheduler", scheduler_mod);
     exe_mod.addImport("file_watcher", file_watcher_mod);
 
+    const lsp_client_mod = b.createModule(.{
+        .root_source_file = b.path("src/lsp/lsp_client.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    lsp_client_mod.addImport("scheduler", scheduler_mod);
+    exe_mod.addImport("lsp_client", lsp_client_mod);
+
     const test_step = b.step("test", "Run tests");
 
     const run_async_tests = b.addRunArtifact(async_tests);
