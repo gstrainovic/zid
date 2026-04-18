@@ -64,7 +64,11 @@ Results sind nur Daten (strings, structs). Main Thread rendert.
 - [x] `git blame <path>` → `[]BlameLine`
 - [x] Alle via `std.process.Child` (eigener Prozess, non-blocking im Worker)
 - [x] Referenz: `libs/flow/src/git.zig` für Kommandos und Parsing-Logik
-- [ ] UI: `ui_system.updateGitStatus()` — Branch in Statusbar, File-Status im Explorer
+- [x] UI: `ui_system.updateGitStatus()` — Branch in Statusbar, File-Status im Explorer
+  - [x] Branch-Name in Status Bar (unten), Git-Branch-Icon
+  - [x] ~ / + / - / ? Indikatoren nach Dateinamen im File Explorer
+  - [x] Scheduler im Main Loop + Headless Loop verdrahtet
+  - [x] Beweis: Screenshot zeigt `async-subsystem` in Status Bar + `~` bei modifizierten Files
 
 ### Phase 3: File Watcher (src/async/file_watcher.zig)
 
@@ -91,6 +95,10 @@ Results sind nur Daten (strings, structs). Main Thread rendert.
 - [ ] `Snippet` — Snippet-Parsing
 
 ### Main Loop Integration (src/main.zig)
+
+- [x] Scheduler + Git-Worker als Module ins Haupt-Exe
+- [x] `pollResults()` im Render Loop + Headless Loop
+- [x] `wio.cancelWait()` erzwingt Redraw wenn Results vorliegen
 
 ```zig
 // Nach wio.update() und event handling, VOR renderExample():
