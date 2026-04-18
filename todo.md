@@ -42,14 +42,14 @@ Main Thread (wio+wgpu)
 
 ### Phase 1: Scheduler (src/async/scheduler.zig)
 
-- [ ] `Scheduler` struct mit N Worker Threads (std.Thread)
-- [ ] `BoundedQueue(Task)` — Work Queue, Main → Workers, Mutex + Condition
-- [ ] `BoundedQueue(TaskResult)` — Result Queue, Workers → Main, Mutex
-- [ ] `ResultTag` enum — erweiterbar: `.git_status`, `.git_diff`, `.lsp_response`, ...
-- [ ] `submit(task)` — non-blocking, pushed in Work Queue
-- [ ] `pollResults(buf)` — non-blocking, draint Result Queue in Buffer
-- [ ] `shutdown()` — should_stop Atomic + Condition broadcast + join
-- [ ] Test: submit 10 Tasks, poll alle Results, verify ordering/completeness
+- [x] `Scheduler` struct mit N Worker Threads (std.Thread)
+- [x] `BoundedQueue(Task)` — Work Queue, Main → Workers, Mutex + Condition
+- [x] `BoundedQueue(TaskResult)` — Result Queue, Workers → Main, Mutex
+- [x] `ResultTag` enum — erweiterbar: `.git_status`, `.git_diff`, `.lsp_response`, ...
+- [x] `submit(task)` — non-blocking, pushed in Work Queue
+- [x] `pollResults(buf)` — non-blocking, draint Result Queue in Buffer
+- [x] `shutdown()` — should_stop Atomic + Condition broadcast + join
+- [x] Test: submit 10 Tasks, poll alle Results, verify ordering/completeness
 
 **Wichtig:** Worker Threads dürfen NIEMALS wio/wgpu/Clay anfassen.
 Results sind nur Daten (strings, structs). Main Thread rendert.
