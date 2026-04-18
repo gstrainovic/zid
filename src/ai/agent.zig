@@ -10,16 +10,17 @@ pub const LlamaAgent = struct {
 
     pub fn init(allocator: std.mem.Allocator, llama_server_path: []const u8, model_path: []const u8, port: u16) !*Self {
         var self = try allocator.create(Self);
+        errdefer allocator.destroy(self);
+        
         self.allocator = allocator;
         self.model_path = try allocator.dupe(u8, model_path);
+        errdefer allocator.free(self.model_path);
+        
         self.server_port = port;
 
-        var port_str_buf: [16]u8 = undefined;
-        const port_str = try std.fmt.bufPrint(&port_str_buf, "{d}", .{port});
-
-        var ctx_size: u32 = 8192; // Default context size
+        var ctx_size: u32 = 8192;
         
-        // Dynamisch den VRAM auslesen für Context Management
+        // VRAM Check
         if (std.process.Child.run(.{
             .allocator = allocator,
             .argv = &[_][]const u8{ "nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits" },
@@ -28,19 +29,13 @@ pub const LlamaAgent = struct {
             defer allocator.free(res.stderr);
             if (res.term == .Exited and res.term.Exited == 0) {
                 const trimmed = std.mem.trim(u8, res.stdout, " \r\n");
-                // Bei mehreren GPUs nimmt er hier den ersten Wert
                 var lines = std.mem.tokenizeAny(u8, trimmed, "\r\n");
                 if (lines.next()) |first_line| {
                     if (std.fmt.parseInt(u32, std.mem.trim(u8, first_line, " "), 10)) |free_mb| {
-                        // Gemma 4 E2B Q4_K_M benötigt ca. 1.6 GB. 
-                        // Wir nehmen 2048 MB als sicheren Puffer für Modell und OS an.
                         if (free_mb > 2048) {
-                            const avail_mb = free_mb - 2048;
-                            // Konservative Schätzung: 1 MB reicht für ca. 10-20 Tokens (KV Cache)
-                            // Wir nutzen avail_mb * 10 und deckeln bei 16384.
-                            ctx_size = @min(16384, avail_mb * 10);
+                            ctx_size = @min(16384, (free_mb - 2048) * 10);
                         } else {
-                            ctx_size = 2048; // Minimaler Fallback bei wenig VRAM
+                            ctx_size = 2048;
                         }
                         std.log.info("Dynamic Context Size: {d} (Free VRAM: {d} MB)", .{ctx_size, free_mb});
                     } else |_| {}
@@ -48,8 +43,10 @@ pub const LlamaAgent = struct {
             }
         } else |_| {}
 
-        var ctx_str_buf: [16]u8 = undefined;
-        const ctx_str = try std.fmt.bufPrint(&ctx_str_buf, "{d}", .{ctx_size});
+        const port_str = try std.fmt.allocPrint(allocator, "{d}", .{port});
+        defer allocator.free(port_str);
+        const ctx_str = try std.fmt.allocPrint(allocator, "{d}", .{ctx_size});
+        defer allocator.free(ctx_str);
 
         const argv = &[_][]const u8{
             llama_server_path,
@@ -60,15 +57,14 @@ pub const LlamaAgent = struct {
             "-c",
             ctx_str,
             "-ngl",
-            "99", // Offload all layers to GPU
+            "99",
         };
 
         self.process = try allocator.create(std.process.Child);
-        self.process.* = std.process.Child.init(argv, allocator);
+        errdefer allocator.destroy(self.process);
         
-        // Inherit current environment (respects GGML_VULKAN_DEVICE export)
+        self.process.* = std.process.Child.init(argv, allocator);
         self.process.env_map = null;
-
         self.process.stdin_behavior = .Ignore;
         self.process.stdout_behavior = .Inherit;
         self.process.stderr_behavior = .Inherit;
@@ -79,10 +75,10 @@ pub const LlamaAgent = struct {
     }
 
     pub fn deinit(self: *Self) void {
-        if (self.process.kill()) |term| {
-            _ = term;
-        } else |_| {}
+        // Kill only if process is still running
+        _ = self.process.kill() catch {};
         _ = self.process.wait() catch {};
+        
         self.allocator.destroy(self.process);
         self.allocator.free(self.model_path);
         self.allocator.destroy(self);

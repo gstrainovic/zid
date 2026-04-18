@@ -26,7 +26,12 @@ pub const AIChatState = struct {
     download_progress: f32 = 0,
     model_exists: bool = false,
     last_copy_time: i64 = 0,
+    
     mutex: std.Thread.Mutex = .{},
+    stop_flag: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+    
+    // Handles for cleanup
+    active_thread: ?std.Thread = null,
     
     /// Scrolling state
     scroll_offset_y: f32 = 0,
@@ -53,6 +58,15 @@ pub const AIChatState = struct {
     }
 
     pub fn deinit(self: *Self) void {
+        // Signal threads to stop
+        self.stop_flag.store(true, .seq_cst);
+        
+        // Wait for active thread if any
+        if (self.active_thread) |t| {
+            t.join();
+            self.active_thread = null;
+        }
+
         for (self.messages.items) |msg| {
             self.allocator.free(msg.content);
             self.allocator.free(msg.role);
@@ -86,18 +100,21 @@ pub const AIChatState = struct {
 
         // Start warmup check
         self.is_initializing = true;
-        _ = try std.Thread.spawn(.{}, warmupWorker, .{self});
+        if (self.active_thread) |t| {
+            t.join();
+            self.active_thread = null;
+        }
+        self.active_thread = try std.Thread.spawn(.{}, warmupWorker, .{self});
     }
 
     fn warmupWorker(self: *Self) void {
         const a = self.agent orelse return;
-        // Simple empty message to check if server is up
         const ping_msg = &[_]agent.LlamaAgent.ChatMessage{
             .{ .role = "user", .content = "ping" },
         };
         
         var attempts: u32 = 0;
-        while (attempts < 30) : (attempts += 1) {
+        while (attempts < 30 and !self.stop_flag.load(.seq_cst)) : (attempts += 1) {
             if (a.sendChatCompletion(ping_msg)) |resp| {
                 self.allocator.free(resp);
                 break;
@@ -113,49 +130,52 @@ pub const AIChatState = struct {
     }
 
     pub fn addMessage(self: *Self, role: []const u8, content: []const u8) !void {
+        const dupe_role = try self.allocator.dupe(u8, role);
+        errdefer self.allocator.free(dupe_role);
+        const dupe_content = try self.allocator.dupe(u8, content);
+        errdefer self.allocator.free(dupe_content);
+
         self.mutex.lock();
         defer self.mutex.unlock();
+        
         try self.messages.append(self.allocator, .{
-            .role = try self.allocator.dupe(u8, role),
-            .content = try self.allocator.dupe(u8, content),
+            .role = dupe_role,
+            .content = dupe_content,
         });
         // Scroll to bottom
-        self.scroll_offset_y = 999999; // Simple way to force scroll to end
+        self.scroll_offset_y = 999999; 
     }
 
     pub fn sendMessage(self: *Self) !void {
         if (self.input_buffer.items.len == 0 or self.is_loading or self.is_initializing) return;
 
         const user_text = try self.allocator.dupe(u8, self.input_buffer.items);
+        defer self.allocator.free(user_text);
         try self.addMessage("user", user_text);
-        self.allocator.free(user_text);
         
         while (self.input_buffer.pop()) |_| {}
 
         self.is_loading = true;
 
-        _ = try std.Thread.spawn(.{}, workerThread, .{self});
+        if (self.active_thread) |t| {
+            t.join();
+            self.active_thread = null;
+        }
+        self.active_thread = try std.Thread.spawn(.{}, workerThread, .{self});
     }
 
     fn workerThread(self: *Self) void {
-        var current_response: ?[]const u8 = null;
-        
-        while (true) {
+        while (!self.stop_flag.load(.seq_cst)) {
             const response = self.getAIResponse() catch |err| {
                 log.err("AI Error: {}", .{err});
                 self.addMessage("assistant", "Error communicating with AI agent.") catch {};
                 break;
             };
-            current_response = response;
-            
-            // Log response for debugging
-            log.debug("AI Response: {s}", .{response});
             
             var tool_executed = false;
             
             // Check for JSON tool call
             if (std.mem.indexOf(u8, response, "{") != null and std.mem.indexOf(u8, response, "\"tool\"") != null) {
-                // Find the first { and last } to extract JSON
                 const start_idx = std.mem.indexOf(u8, response, "{").?;
                 const end_idx = std.mem.lastIndexOf(u8, response, "}");
                 
@@ -192,7 +212,6 @@ pub const AIChatState = struct {
                                                 
                                                 self.addMessage("assistant", response) catch {};
                                                 
-                                                // Basic file replace logic
                                                 if (std.fs.cwd().readFileAlloc(self.allocator, path, 10 * 1024 * 1024)) |content| {
                                                     defer self.allocator.free(content);
                                                     if (std.mem.indexOf(u8, content, old_str)) |replace_idx| {
@@ -227,8 +246,6 @@ pub const AIChatState = struct {
                 break;
             } else {
                 self.allocator.free(response);
-                // Tool was executed and system message added, so we let the loop run again
-                // to get the AI's follow-up response based on the new system message.
             }
         }
         
@@ -243,7 +260,6 @@ pub const AIChatState = struct {
         var api_messages = std.ArrayList(agent.LlamaAgent.ChatMessage).empty;
         defer api_messages.deinit(self.allocator);
 
-        // System prompt with tool instructions
         try api_messages.append(self.allocator, .{ 
             .role = "system", 
             .content = "You are Gemma 4, an intelligent coding assistant in vulkan-ed. You can use tools by outputting a JSON block. " ++
@@ -266,7 +282,11 @@ pub const AIChatState = struct {
     pub fn triggerDownload(self: *Self) !void {
         if (self.is_downloading or self.model_exists) return;
         self.is_downloading = true;
-        _ = try std.Thread.spawn(.{}, downloadWorker, .{self});
+        if (self.active_thread) |t| {
+            t.join();
+            self.active_thread = null;
+        }
+        self.active_thread = try std.Thread.spawn(.{}, downloadWorker, .{self});
     }
 
     fn downloadWorker(self: *Self) void {
@@ -287,14 +307,13 @@ pub const AIChatState = struct {
             return;
         };
 
-        // Parse progress from curl stderr
         if (child.stderr) |stderr| {
             var line_buf: [1024]u8 = undefined;
             while (true) {
                 const n = stderr.read(&line_buf) catch break;
                 if (n == 0) break;
+                if (self.stop_flag.load(.seq_cst)) break;
                 
-                // Curl output looks like: " 13 2962M   13  395M..."
                 const line = line_buf[0..n];
                 var it = std.mem.tokenizeAny(u8, line, " \r\n");
                 if (it.next()) |token| {
@@ -337,13 +356,12 @@ pub const AIChatState = struct {
         self.mutex.lock();
         self.model_exists = true;
         self.is_downloading = false;
+        self.mutex.unlock();
         
-        // Try to start agent now that model is here
         if (self.server_path != null and self.model_path != null) {
             self.initAgent(self.server_path.?, self.model_path.?) catch {};
         }
         
-        self.mutex.unlock();
         log.info("Download complete: {s}", .{model_name});
     }
 
@@ -385,8 +403,6 @@ pub fn renderAIChat(
     mouse_pressed: bool,
     window: ?*wio.Window,
 ) void {
-    _ = arena;
-
     clay.UI()(.{
         .id = clay.ElementId.ID("ai_chat_sidebar"),
         .layout = .{
@@ -469,8 +485,7 @@ pub fn renderAIChat(
                 for (state.messages.items, 0..) |msg, idx| {
                     const is_user = std.mem.eql(u8, msg.role, "user");
                     
-                    var msg_id_buf: [32]u8 = undefined;
-                    const msg_id_str = std.fmt.bufPrint(&msg_id_buf, "ai_msg_{d}", .{idx}) catch "ai_msg_err";
+                    const msg_id_str = std.fmt.allocPrint(arena, "ai_msg_{d}", .{idx}) catch "ai_msg_err";
                     const msg_id = clay.ElementId.ID(msg_id_str);
                     const hovered = clay.pointerOver(msg_id);
 
