@@ -67,7 +67,7 @@ pub const FileExplorerState = struct {
     width: f32 = 250.0,
     /// Wird gerade an der Sidebar gezogen?
     is_resizing: bool = false,
-    /// Git-Status pro absolutem Pfad: '+' staged, '~' modified, '-' deleted, '?' untracked
+    /// Git-Status pro absolutem Pfad: 'A' staged, 'M' modified, '?' untracked, 'C' conflict, 'S' submodule
     git_status: std.StringHashMap(u8),
 
     /// Scrolling state
@@ -584,28 +584,24 @@ fn renderTreeEntry(
             .color = if (is_selected) theme.text_on_primary else theme.text,
         });
 
-        // Git-Status Indikator
+        // Git-Status Indikator (vorne, kein Suffix)
         if (state.git_status.get(node.path)) |code| {
-            const indicator: []const u8 = switch (code) {
-                '+' => " +",
-                '~' => " ~",
-                '-' => " -",
-                '?' => " ?",
-                else => "",
+            const git_color: [4]f32 = switch (code) {
+                'A' => theme.success,
+                'M' => theme.warning,
+                'C' => theme.danger,
+                '?' => theme.muted,
+                'S' => theme.muted,
+                else => theme.muted,
             };
-            if (indicator.len > 0) {
-                const git_color: [4]f32 = switch (code) {
-                    '+' => theme.success,
-                    '~' => theme.warning,
-                    '-' => theme.danger,
-                    '?' => theme.muted,
-                    else => theme.muted,
-                };
-                clay.text(indicator, .{
-                    .font_size = 20,
-                    .color = if (is_selected) theme.text_on_primary else git_color,
-                });
-            }
+            clay.text(&.{code}, .{
+                .font_size = 20,
+                .color = if (is_selected) theme.text_on_primary else git_color,
+            });
+            clay.text(" ", .{
+                .font_size = 20,
+                .color = if (is_selected) theme.text_on_primary else theme.text,
+            });
         }
     });
 }
