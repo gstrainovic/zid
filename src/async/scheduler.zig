@@ -34,8 +34,8 @@ pub const TaskResult = struct {
 };
 
 pub const Task = struct {
-    func: *const fn (allocator: std.mem.Allocator, data: ?*const anyopaque) anyerror!TaskResult,
-    data: ?*const anyopaque = null,
+    func: *const fn (allocator: std.mem.Allocator, data: ?*anyopaque) anyerror!TaskResult,
+    data: ?*anyopaque = null,
 };
 
 fn BoundedQueue(comptime T: type, comptime cap: usize) type {
@@ -199,7 +199,7 @@ test "submit 10 tasks, poll all results" {
     try std.testing.expectEqual(@as(usize, 10), total);
 }
 
-fn testTask(allocator: std.mem.Allocator, data: ?*const anyopaque) !TaskResult {
+fn testTask(allocator: std.mem.Allocator, data: ?*anyopaque) !TaskResult {
     const idx: usize = @intFromPtr(data);
     return .{
         .tag = .git_status,

@@ -56,14 +56,14 @@ Results sind nur Daten (strings, structs). Main Thread rendert.
 
 ### Phase 2: Git Integration (src/git/)
 
-- [ ] `git_worker.zig` — Git-spezifische Task-Funktionen
-- [ ] `git status --porcelain=v2` parsen → `StatusData` struct
-- [ ] `git rev-parse --abbrev-ref HEAD` → Branch-Name
-- [ ] `git log --oneline -n 50` → `[]LogEntry`
-- [ ] `git diff <path>` → Diff-Text
-- [ ] `git blame <path>` → `[]BlameLine`
-- [ ] Alle via `std.process.Child` (eigener Prozess, non-blocking im Worker)
-- [ ] Referenz: `libs/flow/src/git.zig` für Kommandos und Parsing-Logik
+- [x] `git_worker.zig` — Git-spezifische Task-Funktionen
+- [x] `git status --porcelain=v2` parsen → `StatusData` struct
+- [x] `git rev-parse --abbrev-ref HEAD` → Branch-Name
+- [x] `git log --oneline -n 50` → `[]LogEntry`
+- [x] `git diff <path>` → Diff-Text
+- [x] `git blame <path>` → `[]BlameLine`
+- [x] Alle via `std.process.Child` (eigener Prozess, non-blocking im Worker)
+- [x] Referenz: `libs/flow/src/git.zig` für Kommandos und Parsing-Logik
 - [ ] UI: `ui_system.updateGitStatus()` — Branch in Statusbar, File-Status im Explorer
 
 ### Phase 3: File Watcher (src/async/file_watcher.zig)
