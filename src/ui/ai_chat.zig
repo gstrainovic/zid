@@ -15,8 +15,13 @@ pub const AIChatState = struct {
     messages: std.ArrayList(ChatMessage),
     input_buffer: std.ArrayList(u8),
     agent: ?*agent.LlamaAgent = null,
+    
+    server_path: ?[]const u8 = null,
+    model_path: ?[]const u8 = null,
+
     is_loading: bool = false,
     is_downloading: bool = false,
+    download_progress: f32 = 0,
     model_exists: bool = false,
     mutex: std.Thread.Mutex = .{},
     
@@ -59,6 +64,7 @@ pub const AIChatState = struct {
         };
 
         var child = std.process.Child.init(argv, self.allocator);
+        child.stderr_behavior = .Pipe; // Curl writes progress to stderr
         child.spawn() catch |err| {
             log.err("Download failed to spawn: {}", .{err});
             self.mutex.lock();
@@ -66,6 +72,26 @@ pub const AIChatState = struct {
             self.mutex.unlock();
             return;
         };
+
+        // Parse progress from curl stderr
+        if (child.stderr) |stderr| {
+            var line_buf: [1024]u8 = undefined;
+            while (true) {
+                const n = stderr.read(&line_buf) catch break;
+                if (n == 0) break;
+                
+                // Curl output looks like: " 13 2962M   13  395M..."
+                const line = line_buf[0..n];
+                var it = std.mem.tokenizeAny(u8, line, " \r\n");
+                if (it.next()) |token| {
+                    if (std.fmt.parseFloat(f32, token)) |val| {
+                        self.mutex.lock();
+                        self.download_progress = val / 100.0;
+                        self.mutex.unlock();
+                    } else |_| {}
+                }
+            }
+        }
 
         const term = child.wait() catch |err| {
             log.err("Download failed during wait: {}", .{err});
@@ -97,8 +123,33 @@ pub const AIChatState = struct {
         self.mutex.lock();
         self.model_exists = true;
         self.is_downloading = false;
+        
+        // Try to start agent now that model is here
+        if (self.server_path != null and self.model_path != null) {
+            self.initAgent(self.server_path.?, self.model_path.?) catch {};
+        }
+        
         self.mutex.unlock();
         log.info("Download complete: {s}", .{model_name});
+    }
+
+    pub fn initAgent(self: *Self, server_path: []const u8, model_path: []const u8) !void {
+        // Old agent clean up if exists
+        if (self.agent) |a| {
+            a.deinit();
+            self.agent = null;
+        }
+        
+        // Store paths for potential restart
+        if (self.server_path) |p| self.allocator.free(p);
+        if (self.model_path) |p| self.allocator.free(p);
+        self.server_path = try self.allocator.dupe(u8, server_path);
+        self.model_path = try self.allocator.dupe(u8, model_path);
+
+        self.agent = agent.LlamaAgent.init(self.allocator, server_path, model_path, 8080) catch |err| {
+            log.err("Failed to initialize AI Agent: {}", .{err});
+            return err;
+        };
     }
 
     pub fn deinit(self: *Self) void {
@@ -111,6 +162,8 @@ pub const AIChatState = struct {
         if (self.agent) |a| {
             a.deinit();
         }
+        if (self.server_path) |p| self.allocator.free(p);
+        if (self.model_path) |p| self.allocator.free(p);
     }
 
     pub fn addMessage(self: *Self, role: []const u8, content: []const u8) !void {
@@ -246,6 +299,22 @@ pub fn renderAIChat(
                 });
             }
         });
+
+        if (state.is_downloading) {
+            clay.UI()(.{
+                .id = clay.ElementId.ID("ai_download_progress_track"),
+                .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(6) } },
+                .background_color = .{ 40, 40, 45, 255 },
+                .corner_radius = .all(3),
+            })({
+                clay.UI()(.{
+                    .id = clay.ElementId.ID("ai_download_progress_bar"),
+                    .layout = .{ .sizing = .{ .w = .percent(state.download_progress), .h = .grow } },
+                    .background_color = theme.primary,
+                    .corner_radius = .all(3),
+                })({});
+            });
+        }
 
         // Chat History Viewport
         clay.UI()(.{
