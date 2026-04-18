@@ -1029,26 +1029,15 @@ pub const CodeEditor = struct {
             .DeleteBack => {
                 if (!self.deleteSelection()) {
                     if (self.cursor.col == 0 and self.cursor.row > 0) {
-                        // Join with previous line
                         const prev_row = self.cursor.row - 1;
                         const prev_len = self.lineWidth(prev_row);
-                        // Insert current line content at end of prev line — dupe
-                        // into buffer arena because insert_chars stores the slice
-                        // directly in a Leaf (no copy).
-                        const cur_text = self.buffer.allocator.dupe(u8, self.getLine(self.cursor.row)) catch return;
-                        // pushEdit: Delete EOL am Ende von prev_row (old_text="\n", new_text="")
                         self.pushEditForChange(prev_row, prev_len, "\n", "");
-                        const result = self.buffer.root.insert_chars(
-                            prev_row, prev_len, cur_text, self.buffer.allocator, m,
-                        ) catch return;
-                        self.buffer.root = result[2];
-                        // Delete current line
                         const sel: flow_core.Selection = .{
-                            .begin = .{ .row = self.cursor.row, .col = 0 },
-                            .end = .{ .row = self.cursor.row, .col = self.lineWidth(self.cursor.row) + 1 },
+                            .begin = .{ .row = prev_row, .col = prev_len },
+                            .end = .{ .row = self.cursor.row, .col = 0 },
                         };
-                        const result2 = self.buffer.root.delete_range(sel, self.buffer.allocator, null, m) catch return;
-                        self.buffer.root = result2;
+                        const result = self.buffer.root.delete_range(sel, self.buffer.allocator, null, m) catch return;
+                        self.buffer.root = result;
                         self.cursor.row = prev_row;
                         self.cursor.col = prev_len;
                     } else if (self.cursor.col > 0) {
@@ -1089,22 +1078,13 @@ pub const CodeEditor = struct {
                         const result2 = self.buffer.root.delete_range(sel, self.buffer.allocator, null, m) catch return;
                         self.buffer.root = result2;
                     } else if (self.cursor.row + 1 < line_count) {
-                        // Join with next line — dupe into buffer arena (Leaf.new
-                        // stores the slice without copying).
-                        const next_text = self.buffer.allocator.dupe(u8, self.getLine(self.cursor.row + 1)) catch return;
-                        // pushEdit: Delete EOL am Ende von cursor.row (old_text="\n", new_text="")
                         self.pushEditForChange(self.cursor.row, self.cursor.col, "\n", "");
-                        const result = self.buffer.root.insert_chars(
-                            self.cursor.row, self.cursor.col, next_text, self.buffer.allocator, m,
-                        ) catch return;
-                        self.buffer.root = result[2];
-                        // Delete next line
                         const sel: flow_core.Selection = .{
-                            .begin = .{ .row = self.cursor.row + 1, .col = 0 },
-                            .end = .{ .row = self.cursor.row + 1, .col = self.lineWidth(self.cursor.row + 1) + 1 },
+                            .begin = self.cursor,
+                            .end = .{ .row = self.cursor.row + 1, .col = 0 },
                         };
-                        const result2 = self.buffer.root.delete_range(sel, self.buffer.allocator, null, m) catch return;
-                        self.buffer.root = result2;
+                        const result = self.buffer.root.delete_range(sel, self.buffer.allocator, null, m) catch return;
+                        self.buffer.root = result;
                     }
                 }
             },
