@@ -12,6 +12,8 @@ const svg = @import("svg/mod.zig");
 const svg_gpu_mod = @import("svg/gpu_renderer.zig");
 const editor = @import("editor/mod.zig");
 const e2e_server = @import("e2e_server.zig");
+const async_mod = @import("scheduler");
+const git_worker = @import("git_worker");
 
 // Log-Level: debug
 pub const std_options: std.Options = .{
@@ -220,6 +222,10 @@ pub fn main() !void {
         ui_system.pending_tab_switch = ui_system.allocator.dupe(u8, "preview:///home/g/projects/vulkan-ed/AGENTS.md") catch null;
     }
 
+    // Scheduler für async Git/LSP/FileWatcher Tasks
+    var scheduler = try async_mod.Scheduler.init(allocator, 4);
+    defer scheduler.deinit();
+
     // Phase 9: File Explorer mit aktuellem Verzeichnis initialisieren
     const cwd = std.fs.cwd();
     var cwd_buf: [1024]u8 = undefined;
@@ -230,6 +236,18 @@ pub fn main() !void {
         };
         // Speicher für current_directory duplizieren (owned)
         ui_system.current_directory = try allocator.dupe(u8, path);
+
+        // Git-Branch und Git-Status asynchron abfragen
+        if (git_worker.Params.init(allocator, path, "")) |params| {
+            _ = scheduler.submit(.{ .func = git_worker.taskGitBranch, .data = params });
+        } else |err| {
+            log.warn("git_branch submit failed: {}", .{err});
+        }
+        if (git_worker.Params.init(allocator, path, "")) |params| {
+            _ = scheduler.submit(.{ .func = git_worker.taskGitStatus, .data = params });
+        } else |err| {
+            log.warn("git_status submit failed: {}", .{err});
+        }
     }
 
     // Phase 9: Aktuelle Datei als Tab öffnen (falls geladen)
@@ -323,6 +341,21 @@ pub fn main() !void {
         const delta_time_ms: f32 = 16.0;
 
         wio.update();
+
+        // Async Results verarbeiten (non-blocking)
+        {
+            var result_buf: [32]async_mod.TaskResult = undefined;
+            const results = scheduler.pollResults(&result_buf);
+            for (results) |result| {
+                defer result.deinit();
+                switch (result.tag) {
+                    .git_branch => ui_system.updateBranch(result.payload),
+                    .git_status => ui_system.updateGitStatus(result.payload),
+                    else => {},
+                }
+            }
+            if (results.len > 0) wio.cancelWait();
+        }
 
         // UI updaten (Animationen)
         ui_system.update(delta_time_ms);

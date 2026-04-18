@@ -101,6 +101,9 @@ pub const UI = struct {
     mouse_y: f32,
     is_mouse_down: bool,
 
+    /// Git-Branch Name (leer = unbekannt)
+    git_branch: []const u8,
+
     const Self = @This();
 
     /// UI initialisieren
@@ -172,6 +175,7 @@ pub const UI = struct {
             .mouse_x = 0.0,
             .mouse_y = 0.0,
             .is_mouse_down = false,
+            .git_branch = "",
         };
     }
 
@@ -236,6 +240,7 @@ pub const UI = struct {
         self.open_markdown_views.deinit();
 
         if (self.current_directory) |dir| self.allocator.free(dir);
+        if (self.git_branch.len > 0) self.allocator.free(self.git_branch);
         self.pending_tab_closes.deinit(self.allocator);
 
         log.debug("UI.deinit: finished", .{});
@@ -603,6 +608,26 @@ pub const UI = struct {
                 }
 
                 clay.text("VULKAN-ED", .{ .font_size = 24, .color = t.text });
+            });
+
+            // Status Bar (Git Branch + Info)
+            clay.UI()(.{
+                .id = clay.ElementId.ID("StatusBar"),
+                .layout = .{
+                    .sizing = .{ .w = .grow, .h = .fixed(28) },
+                    .direction = .left_to_right,
+                    .child_alignment = .{ .x = .left, .y = .center },
+                    .padding = .{ .left = 12, .right = 12 },
+                    .child_gap = 16,
+                },
+                .background_color = t.overlay,
+                .border = .{ .width = .{ .top = 1 }, .color = t.border },
+            })({
+                const svg = @import("components/svg.zig");
+                const arena = self.frame_arena.allocator();
+                svg.Svg(arena, "status_git_icon", svg.Lucide.git_branch, 18, t.success);
+                const branch_text = if (self.git_branch.len > 0) self.git_branch else "—";
+                clay.text(branch_text, .{ .font_size = 18, .color = t.subtext });
             });
 
             // Main Content Area (Sidebar + Editor)
@@ -1111,6 +1136,18 @@ pub const UI = struct {
             },
             .cancel => {},
         }
+    }
+
+    /// Branch-Name aus git_branch TaskResult übernehmen
+    pub fn updateBranch(self: *Self, payload: []const u8) void {
+        if (self.git_branch.len > 0) self.allocator.free(self.git_branch);
+        self.git_branch = self.allocator.dupe(u8, payload) catch "";
+    }
+
+    /// Git-Status aus git_status TaskResult an den File Explorer weitergeben
+    pub fn updateGitStatus(self: *Self, payload: []const u8) void {
+        const repo_root = self.current_directory orelse return;
+        self.file_explorer.updateGitStatus(payload, repo_root);
     }
 
     pub fn getActiveTerminal(self: *Self) ?*@import("../terminal/terminal_instance.zig").TerminalInstance {

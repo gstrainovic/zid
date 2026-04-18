@@ -230,6 +230,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    exe_mod.addImport("scheduler", scheduler_mod);
 
     const async_tests = b.addTest(.{ .root_module = scheduler_mod });
 
@@ -239,6 +240,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     git_worker_mod.addImport("scheduler", scheduler_mod);
+    exe_mod.addImport("git_worker", git_worker_mod);
     const git_tests = b.addTest(.{ .root_module = git_worker_mod });
 
     const test_step = b.step("test", "Run tests");
