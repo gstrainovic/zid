@@ -259,12 +259,20 @@ pub fn build(b: *std.Build) void {
     lsp_client_mod.addImport("scheduler", scheduler_mod);
     exe_mod.addImport("lsp_client", lsp_client_mod);
 
+    const agent_mod = b.createModule(.{
+        .root_source_file = b.path("src/ai/agent.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    exe_mod.addImport("agent", agent_mod);
+
     const ai_worker_mod = b.createModule(.{
         .root_source_file = b.path("src/ai/ai_worker.zig"),
         .target = target,
         .optimize = optimize,
     });
     ai_worker_mod.addImport("scheduler", scheduler_mod);
+    ai_worker_mod.addImport("agent", agent_mod);
     exe_mod.addImport("ai_worker", ai_worker_mod);
     const ai_worker_tests = b.addTest(.{ .root_module = ai_worker_mod });
 
