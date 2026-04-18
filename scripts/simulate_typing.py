@@ -14,14 +14,44 @@ def send_rpc(method, params=[]):
             s.connect(("127.0.0.1", 9999))
             s.sendall((json.dumps(payload) + "\n").encode())
             return s.recv(4096)
-    except: return None
+    except Exception as e:
+        print(f"Error: {e}")
+        return None
 
-# Erst warten bis App bereit
-time.sleep(2)
+# Wait for app to be ready if it was just started
+# In our tests, we start vulkan-ed and wait in the bash script, so maybe we don't need a long delay here.
+# But let's keep a small delay just in case.
+time.sleep(0.5)
 
-text = "pub fn main() {\n    return 0;\n}"
-print(f"Typing {len(text)} chars...")
-for char in text:
-    send_rpc("type_text", [char])
-    time.sleep(0.05)
+args = sys.argv[1:]
+
+if not args:
+    text = "pub fn main() {\n    return 0;\n}"
+    print(f"Typing default {len(text)} chars...")
+    send_rpc("type_text", [text])
+    print("Done.")
+    sys.exit(0)
+
+i = 0
+while i < len(args):
+    arg = args[i]
+    if arg == "--ctrl":
+        key = args[i+1]
+        print(f"Sending Ctrl+{key}...")
+        send_rpc("key_press", [key, True])
+        i += 2
+    elif arg == "--enter":
+        print("Sending Enter...")
+        send_rpc("key_press", ["enter", False])
+        i += 1
+    elif arg == "--backspace":
+        print("Sending Backspace...")
+        send_rpc("key_press", ["backspace", False])
+        i += 1
+    else:
+        text = arg
+        print(f"Typing '{text}'...")
+        send_rpc("type_text", [text])
+        i += 1
+
 print("Done.")

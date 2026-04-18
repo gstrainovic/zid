@@ -17,6 +17,40 @@ pub const LlamaAgent = struct {
         var port_str_buf: [16]u8 = undefined;
         const port_str = try std.fmt.bufPrint(&port_str_buf, "{d}", .{port});
 
+        var ctx_size: u32 = 8192; // Default context size
+        
+        // Dynamisch den VRAM auslesen für Context Management
+        if (std.process.Child.run(.{
+            .allocator = allocator,
+            .argv = &[_][]const u8{ "nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits" },
+        })) |res| {
+            defer allocator.free(res.stdout);
+            defer allocator.free(res.stderr);
+            if (res.term == .Exited and res.term.Exited == 0) {
+                const trimmed = std.mem.trim(u8, res.stdout, " \r\n");
+                // Bei mehreren GPUs nimmt er hier den ersten Wert
+                var lines = std.mem.tokenizeAny(u8, trimmed, "\r\n");
+                if (lines.next()) |first_line| {
+                    if (std.fmt.parseInt(u32, std.mem.trim(u8, first_line, " "), 10)) |free_mb| {
+                        // Gemma 4 E2B Q4_K_M benötigt ca. 1.6 GB. 
+                        // Wir nehmen 2048 MB als sicheren Puffer für Modell und OS an.
+                        if (free_mb > 2048) {
+                            const avail_mb = free_mb - 2048;
+                            // Konservative Schätzung: 1 MB reicht für ca. 10-20 Tokens (KV Cache)
+                            // Wir nutzen avail_mb * 10 und deckeln bei 16384.
+                            ctx_size = @min(16384, avail_mb * 10);
+                        } else {
+                            ctx_size = 2048; // Minimaler Fallback bei wenig VRAM
+                        }
+                        std.log.info("Dynamic Context Size: {d} (Free VRAM: {d} MB)", .{ctx_size, free_mb});
+                    } else |_| {}
+                }
+            }
+        } else |_| {}
+
+        var ctx_str_buf: [16]u8 = undefined;
+        const ctx_str = try std.fmt.bufPrint(&ctx_str_buf, "{d}", .{ctx_size});
+
         const argv = &[_][]const u8{
             llama_server_path,
             "-m",
@@ -24,7 +58,7 @@ pub const LlamaAgent = struct {
             "--port",
             port_str,
             "-c",
-            "8192",
+            ctx_str,
             "-ngl",
             "99", // Offload all layers to GPU
         };

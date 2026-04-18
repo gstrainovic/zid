@@ -11,9 +11,29 @@
 set -euo pipefail
 shopt -s nullglob
 
-PHASE="${1:-}"
+PHASE=""
+REVIEWER=""
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --reviewer)
+      REVIEWER="$2"
+      shift 2
+      ;;
+    *)
+      if [[ -z "$PHASE" ]]; then
+          PHASE="$1"
+      else
+          echo "Unknown argument: $1" >&2
+          exit 2
+      fi
+      shift
+      ;;
+  esac
+done
+
 if [[ -z "$PHASE" ]]; then
-    echo "Usage: $0 <phase-number>" >&2
+    echo "Usage: $0 [--reviewer gemini|claude] <phase-number>" >&2
     exit 2
 fi
 
@@ -78,6 +98,15 @@ if [[ "$CLAUDE_AVAIL" == "false" && "$GEMINI_AVAIL" == "false" ]]; then
     exit 2
 fi
 
+TRY_GEMINI=true
+TRY_CLAUDE=true
+
+if [[ "$REVIEWER" == "gemini" ]]; then
+    TRY_CLAUDE=false
+elif [[ "$REVIEWER" == "claude" ]]; then
+    TRY_GEMINI=false
+fi
+
 SCHEMA='{"type":"object","required":["verdict","reasons"],"additionalProperties":false,"properties":{"verdict":{"enum":["ACCEPT","REJECT"]},"reasons":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":5},"required_fixes":{"type":"array","items":{"type":"string"},"maxItems":5}}}'
 
 SYSTEM_PROMPT=$(cat "$PROMPT_FILE")
@@ -108,7 +137,7 @@ trap 'rm -f "$RESPONSE_FILE" "$RESPONSE_FILE.err"' EXIT
 SUCCESS=false
 
 # ---- PRIMAER: Gemini ----
-if [[ "$GEMINI_AVAIL" == "true" ]]; then
+if [[ "$GEMINI_AVAIL" == "true" && "$TRY_GEMINI" == "true" ]]; then
     GEMINI_PROMPT="SYSTEM_PROMPT:
 $SYSTEM_PROMPT
 
@@ -133,7 +162,7 @@ $USER_PROMPT"
 fi
 
 # ---- FALLBACK: Claude ----
-if [[ "$SUCCESS" == "false" && "$CLAUDE_AVAIL" == "true" ]]; then
+if [[ "$SUCCESS" == "false" && "$CLAUDE_AVAIL" == "true" && "$TRY_CLAUDE" == "true" ]]; then
     set +e
     claude -p "$USER_PROMPT" \
         --model sonnet \
