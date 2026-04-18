@@ -74,28 +74,33 @@ pub fn taskGitStatus(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.Tas
         }
 
         if (line[0] == '1' and line.len > 4) {
-            // "1 XY sub mH mI mW hH hI path"
-            const xy = line[2..4];
-            var fields = std.mem.splitScalar(u8, line, ' ');
-            var idx: usize = 0;
-            var path: []const u8 = "";
-            while (fields.next()) |f| : (idx += 1) {
-                if (idx == 8) { path = f; break; }
-            }
+            // "1 XY sub mH mI mW hH hI path\0" — split on NUL
+            var parts = std.mem.splitScalar(u8, line, 0);
+            _ = parts.next() orelse continue; // "1"
+            const xy = parts.next() orelse continue; // XY
+            // Skip 6 metadata fields (sub,mH,mI,mW,hH,hI)
+            var i: usize = 0;
+            while (i < 6) : (i += 1) { _ = parts.next() orelse continue :outer; }
+            const path = parts.next() orelse continue;
             if (path.len == 0) continue :outer;
 
-            const staged = xy[0] != '.' and xy[0] != ' ';
-            const code: u8 = if (staged) '+' else if (xy[1] == 'M') '~' else if (xy[1] == 'D') '-' else {
-                continue :outer;
-            };
+            // Priority: staged (index) wins over worktree
+            const code: u8 = if (xy[0] == 'M' or xy[0] == 'A' or xy[0] == 'D' or xy[0] == 'R') '+'
+            else if (xy[1] == 'M') '~'
+            else if (xy[1] == 'D') '-'
+            else continue :outer;
             const entry = try std.fmt.allocPrint(alloc, "{c}:{s}\n", .{ code, path });
             defer alloc.free(entry);
             try buf.appendSlice(alloc, entry);
             continue :outer;
         }
 
-        if (line[0] == '?' and line.len > 2) {
-            const entry = try std.fmt.allocPrint(alloc, "?:{s}\n", .{line[2..]});
+        if (line[0] == '?') {
+            // "? <path>\0" — split on NUL
+            var parts = std.mem.splitScalar(u8, line, 0);
+            _ = parts.next() orelse continue; // "?"
+            const path = parts.next() orelse continue;
+            const entry = try std.fmt.allocPrint(alloc, "?:{s}\n", .{path});
             defer alloc.free(entry);
             try buf.appendSlice(alloc, entry);
             continue :outer;
