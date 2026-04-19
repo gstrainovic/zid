@@ -10,6 +10,58 @@ pub const LlamaAgent = struct {
 
     const Self = @This();
 
+    fn isOllamaInstalled(allocator: std.mem.Allocator) !bool {
+        const result = std.process.Child.run(.{
+            .allocator = allocator,
+            .argv = &[_][]const u8{ "ollama", "--version" },
+        }) catch return false;
+        defer allocator.free(result.stdout);
+        defer allocator.free(result.stderr);
+        return result.term == .Exited and result.term.Exited == 0;
+    }
+
+    fn isOllamaDaemonRunning(allocator: std.mem.Allocator) !bool {
+        var client = std.http.Client{ .allocator = allocator };
+        defer client.deinit();
+        const uri = try std.Uri.parse("http://127.0.0.1:11434/api/tags");
+        _ = client.fetch(.{
+            .location = .{ .uri = uri },
+            .method = .GET,
+        }) catch return false;
+        return true;
+    }
+
+    fn isModelInstalled(allocator: std.mem.Allocator, model_name: []const u8) !bool {
+        const result = try std.process.Child.run(.{
+            .allocator = allocator,
+            .argv = &[_][]const u8{ "ollama", "list" },
+        });
+        defer allocator.free(result.stdout);
+        defer allocator.free(result.stderr);
+
+        if (result.term != .Exited or result.term.Exited != 0) return false;
+
+        var lines = std.mem.tokenizeAny(u8, result.stdout, "\n");
+        _ = lines.next();
+        while (lines.next()) |line| {
+            const trimmed = std.mem.trim(u8, line, " \r\n");
+            if (std.mem.startsWith(u8, trimmed, model_name)) return true;
+        }
+        return false;
+    }
+
+    fn pullModel(allocator: std.mem.Allocator, model_name: []const u8) !void {
+        const result = try std.process.Child.run(.{
+            .allocator = allocator,
+            .argv = &[_][]const u8{ "ollama", "pull", model_name },
+        });
+        defer allocator.free(result.stdout);
+        defer allocator.free(result.stderr);
+        if (result.term != .Exited or result.term.Exited != 0) {
+            return error.OllamaPullFailed;
+        }
+    }
+
     pub fn init(allocator: std.mem.Allocator, llama_server_path: []const u8, model_path: []const u8, port: u16) !*Self {
         return initWithTimeout(allocator, llama_server_path, model_path, port, 5 * std.time.ns_per_s);
     }
@@ -28,9 +80,8 @@ pub const LlamaAgent = struct {
         const is_ollama = std.mem.eql(u8, llama_server_path, "ollama");
         self.is_ollama = is_ollama;
 
-        var ctx_size: u32 = 8192;
-
         if (!is_ollama) {
+            var ctx_size: u32 = 8192;
             // VRAM Check
             if (std.process.Child.run(.{
                 .allocator = allocator,
@@ -83,10 +134,45 @@ pub const LlamaAgent = struct {
             try proc.spawn();
             self.process = proc;
         } else {
-            // Ollama runs as daemon - no child process to spawn
+            // Ollama auto-start logic
             self.server_port = 11434;
             self.process = null;
-            std.log.info("Using Ollama daemon on port 11434", .{});
+
+            if (!try isOllamaInstalled(allocator)) {
+                return error.OllamaNotInstalled;
+            }
+
+            if (!try isOllamaDaemonRunning(allocator)) {
+                std.log.info("Ollama daemon not running, starting...", .{});
+                const argv = &[_][]const u8{ "ollama", "serve" };
+                var proc = std.process.Child.init(argv, allocator);
+                proc.stdin_behavior = .Ignore;
+                proc.stdout_behavior = .Inherit;
+                proc.stderr_behavior = .Inherit;
+                try proc.spawn();
+
+                const p = try allocator.create(std.process.Child);
+                p.* = proc;
+                self.process = p;
+
+                var waited: u64 = 0;
+                while (waited < timeout_ns) : (waited += 100 * std.time.ns_per_ms) {
+                    std.Thread.sleep(100 * std.time.ns_per_ms);
+                    if (try isOllamaDaemonRunning(allocator)) break;
+                }
+                if (!try isOllamaDaemonRunning(allocator)) {
+                    return error.OllamaFailedToStart;
+                }
+                std.log.info("Ollama daemon started", .{});
+            }
+
+            if (!try isModelInstalled(allocator, self.model_path)) {
+                std.log.info("Model {s} not installed, pulling...", .{self.model_path});
+                try pullModel(allocator, self.model_path);
+                std.log.info("Model {s} pulled successfully", .{self.model_path});
+            }
+
+            std.log.info("Using Ollama with model {s} on port 11434", .{self.model_path});
         }
 
         return self;
