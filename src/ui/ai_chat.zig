@@ -92,7 +92,7 @@ pub const AIChatState = struct {
         self.server_path = try self.allocator.dupe(u8, server_path);
         self.model_path = try self.allocator.dupe(u8, model_path);
 
-        self.agent = agent.LlamaAgent.init(self.allocator, server_path, model_path, 8080) catch |err| {
+        self.agent = agent.LlamaAgent.init(self.allocator, server_path, model_path, 11434) catch |err| {
             log.err("Failed to initialize AI Agent: {}", .{err});
             return err;
         };
