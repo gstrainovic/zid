@@ -377,13 +377,12 @@ pub fn renderAIChat(
     clay.UI()(.{
         .id = clay.ElementId.ID("ai_chat_sidebar"),
         .layout = .{
-            .sizing = .{ .w = .fixed(state.width), .h = .grow },
+            .sizing = .grow,
             .direction = .top_to_bottom,
             .padding = .{ .left = 12, .right = 12, .top = 12, .bottom = 12 },
             .child_gap = 12,
         },
         .background_color = theme.surface,
-        .border = .{ .width = .{ .left = 1 }, .color = theme.border },
     })({
         clay.UI()(.{
             .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .left_to_right, .child_gap = 8 },
