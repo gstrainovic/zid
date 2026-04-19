@@ -2,10 +2,11 @@ const std = @import("std");
 
 pub const LlamaAgent = struct {
     allocator: std.mem.Allocator,
-    process: *std.process.Child,
+    process: ?*std.process.Child,
     model_path: []const u8,
     server_port: u16,
     connect_timeout_ns: u64,
+    is_ollama: bool,
 
     const Self = @This();
 
@@ -16,7 +17,7 @@ pub const LlamaAgent = struct {
     pub fn initWithTimeout(allocator: std.mem.Allocator, llama_server_path: []const u8, model_path: []const u8, port: u16, timeout_ns: u64) !*Self {
         var self = try allocator.create(Self);
         errdefer allocator.destroy(self);
-        
+
         self.allocator = allocator;
         self.model_path = try allocator.dupe(u8, model_path);
         errdefer allocator.free(self.model_path);
@@ -24,68 +25,79 @@ pub const LlamaAgent = struct {
         self.server_port = port;
         self.connect_timeout_ns = timeout_ns;
 
+        const is_ollama = std.mem.eql(u8, llama_server_path, "ollama");
+        self.is_ollama = is_ollama;
+
         var ctx_size: u32 = 8192;
-        
-        // VRAM Check
-        if (std.process.Child.run(.{
-            .allocator = allocator,
-            .argv = &[_][]const u8{ "nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits" },
-        })) |res| {
-            defer allocator.free(res.stdout);
-            defer allocator.free(res.stderr);
-            if (res.term == .Exited and res.term.Exited == 0) {
-                const trimmed = std.mem.trim(u8, res.stdout, " \r\n");
-                var lines = std.mem.tokenizeAny(u8, trimmed, "\r\n");
-                if (lines.next()) |first_line| {
-                    if (std.fmt.parseInt(u32, std.mem.trim(u8, first_line, " "), 10)) |free_mb| {
-                        if (free_mb > 2048) {
-                            ctx_size = @min(16384, (free_mb - 2048) * 10);
-                        } else {
-                            ctx_size = 2048;
-                        }
-                        std.log.info("Dynamic Context Size: {d} (Free VRAM: {d} MB)", .{ctx_size, free_mb});
-                    } else |_| {}
+
+        if (!is_ollama) {
+            // VRAM Check
+            if (std.process.Child.run(.{
+                .allocator = allocator,
+                .argv = &[_][]const u8{ "nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits" },
+            })) |res| {
+                defer allocator.free(res.stdout);
+                defer allocator.free(res.stderr);
+                if (res.term == .Exited and res.term.Exited == 0) {
+                    const trimmed = std.mem.trim(u8, res.stdout, " \r\n");
+                    var lines = std.mem.tokenizeAny(u8, trimmed, "\r\n");
+                    if (lines.next()) |first_line| {
+                        if (std.fmt.parseInt(u32, std.mem.trim(u8, first_line, " "), 10)) |free_mb| {
+                            if (free_mb > 2048) {
+                                ctx_size = @min(16384, (free_mb - 2048) * 10);
+                            } else {
+                                ctx_size = 2048;
+                            }
+                            std.log.info("Dynamic Context Size: {d} (Free VRAM: {d} MB)", .{ctx_size, free_mb});
+                        } else |_| {}
+                    }
                 }
-            }
-        } else |_| {}
+            } else |_| {}
 
-        const port_str = try std.fmt.allocPrint(allocator, "{d}", .{port});
-        defer allocator.free(port_str);
-        const ctx_str = try std.fmt.allocPrint(allocator, "{d}", .{ctx_size});
-        defer allocator.free(ctx_str);
+            const port_str = try std.fmt.allocPrint(allocator, "{d}", .{port});
+            defer allocator.free(port_str);
+            const ctx_str = try std.fmt.allocPrint(allocator, "{d}", .{ctx_size});
+            defer allocator.free(ctx_str);
 
-        const argv = &[_][]const u8{
-            llama_server_path,
-            "-m",
-            self.model_path,
-            "--port",
-            port_str,
-            "-c",
-            ctx_str,
-            "-ngl",
-            "99",
-        };
+            const argv = &[_][]const u8{
+                llama_server_path,
+                "-m",
+                self.model_path,
+                "--port",
+                port_str,
+                "-c",
+                ctx_str,
+                "-ngl",
+                "99",
+            };
 
-        self.process = try allocator.create(std.process.Child);
-        errdefer allocator.destroy(self.process);
-        
-        self.process.* = std.process.Child.init(argv, allocator);
-        self.process.env_map = null;
-        self.process.stdin_behavior = .Ignore;
-        self.process.stdout_behavior = .Inherit;
-        self.process.stderr_behavior = .Inherit;
+            const proc = try allocator.create(std.process.Child);
+            errdefer allocator.destroy(proc);
 
-        try self.process.spawn();
+            proc.* = std.process.Child.init(argv, allocator);
+            proc.env_map = null;
+            proc.stdin_behavior = .Ignore;
+            proc.stdout_behavior = .Inherit;
+            proc.stderr_behavior = .Inherit;
+
+            try proc.spawn();
+            self.process = proc;
+        } else {
+            // Ollama runs as daemon - no child process to spawn
+            self.server_port = 11434;
+            self.process = null;
+            std.log.info("Using Ollama daemon on port 11434", .{});
+        }
 
         return self;
     }
 
     pub fn deinit(self: *Self) void {
-        // Kill only if process is still running
-        _ = self.process.kill() catch {};
-        _ = self.process.wait() catch {};
-        
-        self.allocator.destroy(self.process);
+        if (self.process) |proc| {
+            _ = proc.kill() catch {};
+            _ = proc.wait() catch {};
+            self.allocator.destroy(proc);
+        }
         self.allocator.free(self.model_path);
         self.allocator.destroy(self);
     }
@@ -112,6 +124,7 @@ pub const LlamaAgent = struct {
 
         // Prepare JSON payload
         const json_payload = try std.json.Stringify.valueAlloc(self.allocator, .{
+            .model = self.model_path,
             .messages = messages,
             .temperature = 0.7,
         }, .{});
@@ -160,6 +173,7 @@ pub const LlamaAgent = struct {
             const parsed = try std.json.parseFromSlice(std.json.Value, self.allocator, response_body.items, .{ .ignore_unknown_fields = true });
             defer parsed.deinit();
 
+            // Ollama uses "message.content", standard OpenAI also uses "message.content"
             const choices = parsed.value.object.get("choices") orelse return error.InvalidResponse;
             const msg_obj = choices.array.items[0].object.get("message") orelse return error.InvalidResponse;
             const content = msg_obj.object.get("content") orelse return error.InvalidResponse;

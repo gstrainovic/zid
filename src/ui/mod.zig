@@ -158,16 +158,18 @@ pub const UI = struct {
         // AI Chat initialisieren (falls nicht deaktiviert)
         var ai_chat = ai_chat_mod.AIChatState.init(allocator);
         if (!config.ai_disabled) {
+            // Use Ollama for Vision support (default on port 11434)
             const llama_server_path = std.process.getEnvVarOwned(allocator, "LLAMA_SERVER_PATH") catch |err| blk: {
                 if (err == error.EnvironmentVariableNotFound) {
-                    break :blk try allocator.dupe(u8, "/home/g/llama.cpp/build/bin/llama-server");
+                    break :blk try allocator.dupe(u8, "ollama");
                 }
                 return err;
             };
             defer allocator.free(llama_server_path);
             const model_path = std.process.getEnvVarOwned(allocator, "LLAMA_MODEL_PATH") catch |err| blk: {
                 if (err == error.EnvironmentVariableNotFound) {
-                    break :blk try allocator.dupe(u8, "models/gemma-4-E2B-it-Q4_K_M.gguf");
+                    // Ollama model name, not file path
+                    break :blk try allocator.dupe(u8, "gemma4:e2b");
                 }
                 return err;
             };
