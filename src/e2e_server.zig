@@ -372,7 +372,7 @@ fn screenshot(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     const renderer = renderer_ptr;
     const mod = @import("rendering/mod.zig").Renderer;
 
-    const path = "/tmp/vulkan-screenshot.ppm";
+    const path = "./tmp/vulkan-screenshot.ppm";
 
     // Headless: UI rendern mit Clay
     const commands = ctx.ui_system.renderExample(null);
@@ -414,7 +414,7 @@ fn screenshot(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     defer ctx.allocator.free(rgba);
 
     // Write PPM
-    var file = try std.fs.createFileAbsolute(path, .{});
+    var file = try std.fs.cwd().createFile(path, .{});
     defer file.close();
     var header: [256]u8 = undefined;
     const header_slice = std.fmt.bufPrint(&header, "P6\n{d} {d}\n255\n", .{ w, h }) catch unreachable;
