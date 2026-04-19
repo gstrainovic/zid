@@ -45,7 +45,28 @@ pub const MarkdownView = struct {
     pending_split_v: bool = false,
     pending_split_h: bool = false,
 
+    /// Selection State (byte offsets in raw text)
+    selection_anchor: ?usize = null,
+    cursor_byte_offset: usize = 0,
+
+    /// Code block highlighter
+    code_highlighter: ?*flow_core.highlight.SyntaxHighlighter = null,
+
     const Self = @This();
+
+    fn colorFromTag(fg: u32) clay.Color {
+        return .{
+            @floatFromInt((fg >> 16) & 0xff),
+            @floatFromInt((fg >> 8) & 0xff),
+            @floatFromInt(fg & 0xff),
+            1.0,
+        };
+    }
+
+    fn lessThanTag(_: void, a: flow_core.highlight.ColorTag, b: flow_core.highlight.ColorTag) bool {
+        if (a.start != b.start) return a.start < b.start;
+        return a.end > b.end;
+    }
 
     pub fn init(allocator: std.mem.Allocator, text: []const u8, base_path: []const u8) Self {
         return .{
@@ -57,6 +78,9 @@ pub const MarkdownView = struct {
     }
 
     pub fn deinit(self: *Self) void {
+        if (self.code_highlighter) |hl| {
+            hl.destroy();
+        }
         if (self.text.len > 0 and self.text.ptr != "".ptr) {
             self.allocator.free(self.text);
         }
@@ -331,6 +355,66 @@ pub const MarkdownView = struct {
         });
     }
 
+    fn renderCodeBlock(self: *Self, code: []const u8, lang_tag: ?[]const u8, arena: std.mem.Allocator, theme: Theme) void {
+        // Determine language for highlighter
+        const lang_name = lang_tag orelse "";
+
+        // Create or reuse highlighter for this language
+        if (self.code_highlighter == null and lang_name.len > 0) {
+            self.code_highlighter = flow_core.highlight.SyntaxHighlighter.create(self.allocator, lang_name) catch null;
+        }
+
+        const hl = self.code_highlighter;
+
+        // Split code into lines manually
+        var start: usize = 0;
+        var line_idx: usize = 0;
+
+        clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .top_to_bottom } })({
+            while (start < code.len) {
+                const remaining = code[start..];
+                const end_offset = std.mem.indexOfScalar(u8, remaining, '\n') orelse remaining.len;
+                const end = start + end_offset;
+                if (end > code.len) break;
+                const line = code[start..end];
+                const line_len = line.len;
+
+                if (hl) |highlighter| {
+                    // Get colored spans for this line
+                    const tags = highlighter.tagsForLine(line_idx, line_len, arena) catch null;
+                    if (tags) |t| {
+                        std.sort.insertion(flow_core.highlight.ColorTag, t, {}, lessThanTag);
+                        var pos: usize = 0;
+                        for (t) |tag| {
+                            if (tag.end > line_len) continue;
+                            if (tag.start >= tag.end) continue;
+                            const actual_start = @max(tag.start, pos);
+                            if (actual_start >= tag.end) continue;
+                            if (actual_start > pos) {
+                                const seg = arena.dupe(u8, line[pos..actual_start]) catch "";
+                                clay.text(seg, .{ .font_size = self.font_size - 2, .color = theme.text, .wrap_mode = .none });
+                            }
+                            const seg = arena.dupe(u8, line[actual_start..tag.end]) catch "";
+                            clay.text(seg, .{ .font_size = self.font_size - 2, .color = colorFromTag(tag.fg), .wrap_mode = .none });
+                            pos = tag.end;
+                        }
+                        if (pos < line_len) {
+                            const seg = arena.dupe(u8, line[pos..]) catch "";
+                            clay.text(seg, .{ .font_size = self.font_size - 2, .color = theme.text, .wrap_mode = .none });
+                        }
+                    } else {
+                        clay.text(line, .{ .font_size = self.font_size - 2, .color = theme.text, .wrap_mode = .none });
+                    }
+                } else {
+                    clay.text(line, .{ .font_size = self.font_size - 2, .color = theme.text, .wrap_mode = .none });
+                }
+
+                start = end + 1;
+                line_idx += 1;
+            }
+        });
+    }
+
     fn renderBlock(self: *Self, block: *Block, arena: std.mem.Allocator, theme: Theme, ui_ptr: *ui_mod.UI) void {
         switch (block.*) {
             .Container => |*container| {
@@ -377,7 +461,7 @@ pub const MarkdownView = struct {
                     },
                     .Code => |c| {
                         clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .padding = .all(16) }, .background_color = theme.surface, .corner_radius = .all(4) })({
-                            clay.text(c.text orelse "", .{ .font_size = self.font_size - 2, .color = theme.text });
+                            self.renderCodeBlock(c.text orelse "", c.tag, arena, theme);
                         });
                     },
                     .Alert => |a| {
