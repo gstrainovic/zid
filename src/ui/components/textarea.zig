@@ -1237,10 +1237,11 @@ pub const TextAreaState = struct {
         return true;
     }
 
-    /// Snapshot for undo (simplified - uses flow_core's built-in undo)
+    /// Snapshot for undo - saves current buffer state before edits
     fn snapshotForUndo(self: *Self) void {
-        // flow_core handles its own undo/redo
-        _ = self;
+        self.buffer.store_undo("edit") catch {
+            std.log.err("Failed to store undo snapshot", .{});
+        };
     }
 
     pub fn handleKeyPress(self: *Self, key: wio.Button) void {
