@@ -326,8 +326,8 @@ pub const UI = struct {
         self.window = window;
         self.getActiveEditor().window = window;
         self.ai_chat.setWindow(window);
-        self.ai_chat.input_editor.measure_fn = cMeasureText;
-        g_font_size = @floatFromInt(self.ai_chat.input_editor.font_size);
+        self.ai_chat.input_textarea.measure_fn = cMeasureText;
+        g_font_size = @floatFromInt(self.ai_chat.input_textarea.font_size);
 
         // Globalen Measure-Context setzen (für Maus→Spalte)
         g_text_renderer = text_renderer;
@@ -1194,7 +1194,7 @@ pub const UI = struct {
             if (self.mouse_x >= c.input_bounds_x and self.mouse_x < c.input_bounds_x + c.input_bounds_w and
                 self.mouse_y >= c.input_bounds_y and self.mouse_y < c.input_bounds_y + c.input_bounds_h)
             {
-                return c.input_editor.desired_cursor;
+                return c.input_textarea.desired_cursor;
             }
         }
 
