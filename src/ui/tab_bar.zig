@@ -9,6 +9,9 @@ const ui = @import("../ui/mod.zig");
 const Theme = ui.Theme;
 const terminal_mod = @import("../terminal/terminal_instance.zig");
 const TerminalInstance = terminal_mod.TerminalInstance;
+const textarea_mod = @import("components/textarea.zig");
+const TextAreaState = textarea_mod.TextAreaState;
+const flow_core = @import("flow_core");
 
 const log = std.log.scoped(.tab_bar);
 
@@ -44,6 +47,8 @@ pub const TabBarState = struct {
     show_new_menu: bool = false,
     /// Active terminal instances (keyed by tab path like "Terminal 1")
     terminal_instances: std.StringHashMap(*TerminalInstance),
+    /// Active textarea instances (keyed by tab path like "TextArea 1")
+    textarea_instances: std.StringHashMap(*TextAreaState),
     /// Counter for terminal tab naming
     terminal_counter: u32 = 0,
 
@@ -54,6 +59,7 @@ pub const TabBarState = struct {
             .allocator = allocator,
             .tabs = .empty,
             .terminal_instances = std.StringHashMap(*TerminalInstance).init(allocator),
+            .textarea_instances = std.StringHashMap(*TextAreaState).init(allocator),
         };
     }
 
@@ -68,6 +74,16 @@ pub const TabBarState = struct {
         }
         self.terminal_instances.deinit();
         log.debug("TabBarState.deinit: terminal_instances hashmap done", .{});
+
+        // Cleanup all textarea instances
+        var textarea_iter = self.textarea_instances.iterator();
+        while (textarea_iter.next()) |entry| {
+            log.debug("TabBarState.deinit: cleaning up textarea {s}", .{entry.key_ptr.*});
+            entry.value_ptr.*.deinit();
+            self.allocator.destroy(entry.value_ptr.*);
+        }
+        self.textarea_instances.deinit();
+        log.debug("TabBarState.deinit: textarea_instances hashmap done", .{});
 
         for (self.tabs.items, 0..) |*tab, i| {
             log.debug("TabBarState.deinit: cleaning up tab {d}: {s}", .{ i, tab.path });
@@ -233,6 +249,65 @@ pub const TabBarState = struct {
         log.info("Chat tab opened: {s}", .{name});
     }
 
+    pub fn openTextArea(self: *Self) void {
+        self.terminal_counter += 1;
+        const name = std.fmt.allocPrint(self.allocator, "TextArea {d}", .{self.terminal_counter}) catch return;
+        const path_copy = self.allocator.dupe(u8, name) catch {
+            self.allocator.free(name);
+            return;
+        };
+
+        // Create textarea state instance
+        const textarea = self.allocator.create(TextAreaState) catch {
+            self.allocator.free(name);
+            self.allocator.free(path_copy);
+            return;
+        };
+        // Create a buffer for the textarea
+        const buffer = flow_core.Buffer.create(self.allocator) catch {
+            self.allocator.destroy(textarea);
+            self.allocator.free(name);
+            self.allocator.free(path_copy);
+            return;
+        };
+        buffer.root = buffer.load_from_string("", &buffer.file_eol_mode, &buffer.file_utf8_sanitized) catch {
+            buffer.deinit();
+            self.allocator.destroy(textarea);
+            self.allocator.free(name);
+            self.allocator.free(path_copy);
+            return;
+        };
+        textarea.* = TextAreaState.init(self.allocator, buffer);
+        textarea.is_textarea = true;
+
+        // Store in instances map
+        self.textarea_instances.put(path_copy, textarea) catch {
+            textarea.deinit();
+            self.allocator.destroy(textarea);
+            self.allocator.free(name);
+            self.allocator.free(path_copy);
+            return;
+        };
+
+        self.tabs.append(self.allocator, .{
+            .path = path_copy,
+            .display_name = name,
+            .modified = false,
+            .is_active = false,
+            .kind = .textarea,
+        }) catch {
+            _ = self.textarea_instances.remove(path_copy);
+            textarea.deinit();
+            self.allocator.destroy(textarea);
+            self.allocator.free(name);
+            self.allocator.free(path_copy);
+            return;
+        };
+
+        self.setActive(self.tabs.items.len - 1);
+        log.info("TextArea tab opened: {s}", .{name});
+    }
+
     /// Tab schließen (nach Index)
     pub fn closeTab(self: *Self, index: usize) void {
         if (index >= self.tabs.items.len) return;
@@ -245,6 +320,14 @@ pub const TabBarState = struct {
         if (tab.kind == .terminal) {
             if (self.terminal_instances.fetchRemove(tab.path)) |kv| {
                 kv.value.deinit();
+            }
+        }
+
+        // Cleanup textarea instance if this was a textarea tab
+        if (tab.kind == .textarea) {
+            if (self.textarea_instances.fetchRemove(tab.path)) |kv| {
+                kv.value.deinit();
+                self.allocator.destroy(kv.value);
             }
         }
 
@@ -369,12 +452,14 @@ pub fn renderTabBar(
     var create_new_file = false;
     var create_new_term = false;
     var create_new_chat = false;
+    var create_new_text_area = false;
 
     if (state.show_new_menu) {
         const dropdown_id = clay.ElementId.IDI("add_tab_dropdown", @truncate(@intFromPtr(state)));
         const file_id = clay.ElementId.IDI("menu_new_file", @truncate(@intFromPtr(state)));
         const term_id = clay.ElementId.IDI("menu_new_term", @truncate(@intFromPtr(state)));
         const chat_id = clay.ElementId.IDI("menu_new_chat", @truncate(@intFromPtr(state)));
+        const textarea_id = clay.ElementId.IDI("menu_new_textarea", @truncate(@intFromPtr(state)));
 
         clay.UI()(.{
             .id = dropdown_id,
@@ -436,12 +521,27 @@ pub fn renderTabBar(
             })({
                 clay.text("New Chat", .{ .font_size = 18, .color = theme.text, .wrap_mode = .none });
             });
+
+            const textarea_hover = clay.pointerOver(textarea_id);
+            clay.UI()(.{
+                .id = textarea_id,
+                .layout = .{
+                    .sizing = .{ .w = .grow, .h = .fixed(32) },
+                    .padding = .{ .left = 8, .right = 8 },
+                    .child_alignment = .{ .x = .left, .y = .center },
+                },
+                .background_color = if (textarea_hover) .{ 80, 80, 100, 255 } else theme.surface,
+                .corner_radius = .all(2),
+            })({
+                clay.text("New TextArea", .{ .font_size = 18, .color = theme.text, .wrap_mode = .none });
+            });
         });
 
         const dropdown_hover = clay.pointerOver(dropdown_id);
         const file_hover = clay.pointerOver(file_id);
         const term_hover = clay.pointerOver(term_id);
         const chat_hover = clay.pointerOver(chat_id);
+        const textarea_hover = clay.pointerOver(textarea_id);
 
         if (mouse_pressed) {
             if (file_hover) {
@@ -452,6 +552,9 @@ pub fn renderTabBar(
                 state.show_new_menu = false;
             } else if (chat_hover) {
                 create_new_chat = true;
+                state.show_new_menu = false;
+            } else if (textarea_hover) {
+                create_new_text_area = true;
                 state.show_new_menu = false;
             } else if (!dropdown_hover and !add_btn_hover) {
                 state.show_new_menu = false;
@@ -467,6 +570,9 @@ pub fn renderTabBar(
     }
     if (create_new_chat) {
         state.openChat();
+    }
+    if (create_new_text_area) {
+        state.openTextArea();
     }
 
     if (tab_to_close) |idx| return .{ .index = idx, .close = true };
