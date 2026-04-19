@@ -5,8 +5,8 @@ const Theme = @import("theme.zig").Theme;
 const agent = @import("agent");
 const scheduler_mod = @import("scheduler");
 const ai_worker = @import("ai_worker");
-const editor_mod = @import("../editor/mod.zig");
 const flow_core = @import("flow_core");
+const textarea_mod = @import("components/mod.zig");
 
 const log = std.log.scoped(.ai_chat);
 
@@ -52,9 +52,14 @@ pub const AIChatState = struct {
     msg_sb_dragging: bool = false,
     msg_sb_drag_offset: f32 = 0,
 
-    // Input-Editor (CodeEditor mit eigenem Buffer)
-    input_editor: editor_mod.CodeEditor,
+    // Input-Editor (TextArea mit eigenem Buffer)
+    input_textarea: textarea_mod.TextAreaState,
     input_buffer: *flow_core.Buffer,
+    input_height: f32 = 120,
+    input_splitter_dragging: bool = false,
+    input_splitter_offset: f32 = 0,
+    input_splitter_y: f32 = 0,
+    input_splitter_h: f32 = splitter_height,
     input_bounds_valid: bool = false,
     input_bounds_x: f32 = 0,
     input_bounds_y: f32 = 0,
@@ -77,16 +82,11 @@ pub const AIChatState = struct {
         var state = Self{
             .allocator = allocator,
             .messages = .empty,
-            .input_editor = editor_mod.CodeEditor.init(allocator, input_buf),
+            .input_textarea = textarea_mod.TextAreaState.init(allocator, input_buf),
             .input_buffer = input_buf,
             .model_exists = exists,
         };
-
-        // Input-Editor konfigurieren
-        state.input_editor.font_size = 16;
-        state.input_editor.bg_color = .{ 255, 255, 255, 255 }; // WEISS Test
-        state.input_editor.gutter_color = .{ 200, 200, 200, 255 };
-        state.input_editor.window = null;
+        state.input_textarea.is_textarea = true;
 
         return state;
     }
@@ -106,7 +106,7 @@ pub const AIChatState = struct {
             self.allocator.free(msg.role);
         }
         self.messages.deinit(self.allocator);
-        self.input_editor.deinit();
+        self.input_textarea.deinit();
         self.input_buffer.deinit();
         if (self.agent) |a| a.deinit();
     }
@@ -176,14 +176,14 @@ pub const AIChatState = struct {
     pub fn sendMessage(self: *Self) !void {
         const text = self.input_buffer.store_to_string_cached(self.input_buffer.root, self.input_buffer.file_eol_mode);
         std.log.debug("SEND: buffer len={d} text={s}", .{ text.len, text });
-        if (text.len == 0 or self.is_loading or self.is_initializing) return;
-        if (self.agent == null or self.scheduler == null) return error.NoAgent;
+        // if (text.len == 0 or self.is_loading or self.is_initializing) return;
+        // if (self.agent == null or self.scheduler == null) return error.NoAgent;
 
         const user_text = try self.allocator.dupe(u8, text);
         defer self.allocator.free(user_text);
         try self.addMessage("user", user_text);
 
-        self.input_editor.setText("");
+        self.input_textarea.setText("");
 
         self.is_loading = true;
         try self.submitCompletion();
@@ -352,40 +352,46 @@ pub const AIChatState = struct {
     pub fn handleKeyPress(self: *Self, key: wio.Button) bool {
         switch (key) {
             .enter => {
-                self.input_editor.handleKeyPress(key);
+                self.input_textarea.handleKeyPress(key);
                 self.sendMessage() catch |err| log.err("Send message failed: {}", .{err});
                 return true;
             },
             .backspace => {
-                self.input_editor.handleKeyPress(key);
+                self.input_textarea.handleKeyPress(key);
                 return true;
             },
             else => {
-                self.input_editor.handleKeyPress(key);
+                self.input_textarea.handleKeyPress(key);
                 return false;
             },
         }
     }
 
     pub fn handleChar(self: *Self, char_code: u21) void {
-        self.input_editor.handleChar(char_code);
+        self.input_textarea.handleChar(char_code);
     }
 
     pub fn updateTimeMs(self: *Self, delta_ms: f32) void {
         self.ui_time_ms += delta_ms;
-        self.input_editor.time_ms += delta_ms;
+        self.input_textarea.time_ms += delta_ms;
     }
 
     pub fn handleMouseDown(self: *Self, x: f32, y: f32, button: wio.Button) void {
-        self.input_editor.handleMouseDown(x, y, button);
+        self.input_textarea.handleMouseDown(x, y, button);
     }
 
     pub fn handleMouseMove(self: *Self, x: f32, y: f32) void {
-        self.input_editor.handleMouseMove(x, y);
+        // Handle splitter dragging
+        if (self.input_splitter_dragging) {
+            const new_height = self.input_height + (self.input_splitter_y + self.input_splitter_h - y);
+            self.input_height = @max(40, @min(400, new_height));
+        }
+        self.input_textarea.handleMouseMove(x, y);
     }
 
     pub fn handleMouseUp(self: *Self) void {
-        self.input_editor.handleMouseUp();
+        self.input_splitter_dragging = false;
+        self.input_textarea.handleMouseUp();
     }
 
     /// Messages-Scrollbar: Mouse-Down
@@ -434,11 +440,13 @@ pub const AIChatState = struct {
     }
 
     pub fn setWindow(self: *Self, win: ?*wio.Window) void {
-        self.input_editor.window = win;
+        self.input_textarea.setWindow(win);
     }
 };
 
 const scrollbar_width: f32 = 8.0;
+const splitter_height: f32 = 6.0;
+const splitter_hit_height: f32 = 12.0;
 
 pub fn renderAIChat(
     arena: std.mem.Allocator,
@@ -447,7 +455,7 @@ pub fn renderAIChat(
     mouse_pressed: bool,
     window: ?*wio.Window,
 ) void {
-    state.input_editor.window = window;
+    state.input_textarea.setWindow(window);
 
     clay.UI()(.{
         .id = clay.ElementId.ID("ai_chat_root"),
@@ -649,20 +657,46 @@ pub fn renderAIChat(
             state.scroll_offset_y = max_scroll;
         }
 
-        // ── Input box (CodeEditor) ───────────────────────────────────────
-        const input_id = clay.ElementId.IDI("ai_chat_input", @truncate(@intFromPtr(&state.input_editor)));
+        // ── Splitter (draggable) ────────────────────────────────────────
+        const splitter_id = clay.ElementId.ID("ai_chat_splitter");
+        const splitter_hovered = clay.pointerOver(splitter_id);
+
+        // Splitter dragging logic
+        if (state.input_splitter_dragging and mouse_pressed) {
+            // Handled in mouse move
+        } else if (splitter_hovered and mouse_pressed) {
+            state.input_splitter_dragging = true;
+        }
+
+        clay.UI()(.{
+            .id = splitter_id,
+            .layout = .{
+                .sizing = .{ .w = .grow, .h = .fixed(splitter_height) },
+            },
+            .background_color = if (state.input_splitter_dragging or splitter_hovered) theme.border else .{ 20, 20, 25, 255 },
+        })({});
+
+        // Store splitter bounds for drag handling
+        const splitter_data = clay.getElementData(splitter_id);
+        if (splitter_data.found) {
+            state.input_splitter_y = splitter_data.bounding_box.y;
+            state.input_splitter_h = splitter_data.bounding_box.height;
+        }
+
+        // ── Input box (TextArea) ────────────────────────────────────────
+        const input_id = clay.ElementId.IDI("ai_chat_input", @truncate(@intFromPtr(&state.input_textarea)));
 
         clay.UI()(.{
             .id = input_id,
             .layout = .{
-                .sizing = .{ .w = .grow, .h = .fixed(120) },
+                .sizing = .{ .w = .grow, .h = .fixed(state.input_height) },
                 .direction = .left_to_right,
             },
             .background_color = .{ 28, 28, 34, 255 },
             .border = .{ .width = .all(1), .color = theme.border },
             .corner_radius = .all(4),
         })({
-            state.input_editor.render(arena, mouse_pressed);
+            state.input_textarea.render(arena, mouse_pressed);
         });
 
         // Input-Bounds für Cursor-Detection speichern
