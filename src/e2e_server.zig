@@ -432,11 +432,12 @@ fn screenshot(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     var image = try zigimg.Image.fromRawPixels(ctx.allocator, @intCast(w), @intCast(h), rgba_conv, .rgba32);
     defer image.deinit(ctx.allocator);
 
-    var pixel_buffer: [1024 * 1024]u8 = undefined; // 1MB buffer
-    image.writeToFilePath(ctx.allocator, path, &pixel_buffer, .{ .png = .{} }) catch |err| {
-        log.err("writeToFilePath failed: {}", .{err});
-        return try ctx.allocator.dupe(u8, path);
-    };
+    // Write PNG directly to file
+    var file = try std.fs.cwd().createFile(path, .{});
+    defer file.close();
+    var file_buffer: [1024 * 1024]u8 = undefined;
+    try image.writeToFile(ctx.allocator, file, &file_buffer, .{ .png = .{} });
+    try file.sync();
     log.info("screenshot: wrote PNG to {s}", .{path});
 
     return try ctx.allocator.dupe(u8, path);
