@@ -364,13 +364,8 @@ pub const UI = struct {
 
     /// Keyboard Input verarbeiten
     pub fn handleKeyPress(self: *Self, key: @import("wio").Button) void {
-        // Toggle AI Chat: Ctrl + K (or L?) - Let's use Ctrl + K for now
-        if (self.is_ctrl_down and key == .k) {
-            self.show_ai_chat = !self.show_ai_chat;
-            return;
-        }
-
-        if (self.show_ai_chat) {
+        // If a chat tab is active, handle chat input
+        if (self.isChatTabActive()) {
             if (self.ai_chat.handleKeyPress(key)) return;
         }
 
@@ -436,7 +431,8 @@ pub const UI = struct {
 
     /// Text Input verarbeiten
     pub fn handleChar(self: *Self, char_code: u21) void {
-        if (self.show_ai_chat) {
+        // Forward to chat tab if active
+        if (self.isChatTabActive()) {
             self.ai_chat.handleChar(char_code);
             return;
         }
@@ -601,7 +597,7 @@ pub const UI = struct {
             return;
         }
 
-        if (self.show_ai_chat and clay.pointerOver(clay.ElementId.ID("ai_chat_viewport"))) {
+        if (self.isChatTabActive() and clay.pointerOver(clay.ElementId.ID("ai_chat_viewport"))) {
             self.ai_chat.scrollLines(delta);
             return;
         }
@@ -796,16 +792,6 @@ pub const UI = struct {
                 // Recursive Pane Rendering
                 self.renderPane(self.root_pane, t);
 
-                // AI Chat Sidebar (Rechts)
-                if (self.show_ai_chat) {
-                    ai_chat_mod.renderAIChat(
-                        self.frame_arena.allocator(),
-                        &self.ai_chat,
-                        t,
-                        self.mouse_pressed_this_frame,
-                        self.window,
-                    );
-                }
             });
         });
 
@@ -978,6 +964,15 @@ pub const UI = struct {
                                  special_active = true;
                             } else if (tab.kind == .terminal) {
                                 self.renderTerminalContentInPane(pane, tab.path, t);
+                                special_active = true;
+                            } else if (tab.kind == .chat) {
+                                ai_chat_mod.renderAIChat(
+                                    allocator,
+                                    &self.ai_chat,
+                                    t,
+                                    self.mouse_pressed_this_frame,
+                                    self.window,
+                                );
                                 special_active = true;
                             } else if (tab.kind == .markdown_preview) {
                                 var md_view = self.open_markdown_views.get(tab.path);
@@ -1302,6 +1297,16 @@ pub const UI = struct {
         return null;
     }
 
+    pub fn isChatTabActive(self: *Self) bool {
+        const tab_bar = self.getActiveTabBar();
+        if (tab_bar.active_index) |idx| {
+            if (idx < tab_bar.tabs.items.len) {
+                return tab_bar.tabs.items[idx].kind == .chat;
+            }
+        }
+        return false;
+    }
+
     fn renderTerminalContentInPane(self: *Self, pane: *pane_mod.Pane, path: []const u8, t: Theme) void {
         _ = t;
         const leaf = &pane.data.leaf;
@@ -1434,5 +1439,133 @@ pub const UI = struct {
             }
         });
         term_instance.renderContextMenu();
+    }
+
+    fn renderChatContentInPane(self: *Self, pane: *pane_mod.Pane, t: Theme) void {
+        const chat = &self.ai_chat;
+        const line_height: f32 = 24.0;
+        const input_height: f32 = 80.0;
+        const padding: f32 = 12.0;
+
+        // Messages viewport
+        const viewport_id = clay.ElementId.IDI("chat_viewport", @truncate(@intFromPtr(pane)));
+        const clip_id = clay.ElementId.IDI("chat_clip", @truncate(@intFromPtr(pane)));
+
+        clay.UI()(.{
+            .id = clay.ElementId.IDI("chat_outer", @truncate(@intFromPtr(pane))),
+            .layout = .{
+                .sizing = .grow,
+                .direction = .top_to_bottom,
+                .padding = .{ .left = padding, .right = padding, .top = padding, .bottom = 0 },
+            },
+            .background_color = t.surface,
+        })({
+            // Header
+            clay.UI()(.{
+                .layout = .{
+                    .sizing = .{ .w = .grow, .h = .fixed(40) },
+                    .direction = .left_to_right,
+                    .child_alignment = .{ .y = .center },
+                    .child_gap = 8,
+                },
+            })({
+                clay.text("Chat", .{ .font_size = 18, .color = t.text });
+                if (chat.is_loading) {
+                    clay.text("...", .{ .font_size = 14, .color = t.muted });
+                }
+            });
+
+            // Messages area
+            clay.UI()(.{
+                .id = viewport_id,
+                .layout = .{ .sizing = .{ .w = .grow, .h = .grow } },
+                .clip = .{ .vertical = true },
+            })({
+                clay.UI()(.{
+                    .id = clip_id,
+                    .layout = .{
+                        .sizing = .{ .w = .grow, .h = .fit },
+                        .direction = .top_to_bottom,
+                        .child_gap = 8,
+                    },
+                }({
+                    chat.mutex.lock();
+                    defer chat.mutex.unlock();
+                    for (chat.messages.items, 0..) |msg, idx| {
+                        const is_user = std.mem.eql(u8, msg.role, "user");
+                        const msg_id = clay.ElementId.IDI("chat_msg", @truncate(idx ^ @intFromPtr(pane)));
+
+                        const role_label = if (is_user) "You:" else "Gemma:";
+                        const role_color: clay.Color = if (is_user) .{ 200, 200, 255, 255 } else .{ 200, 255, 200, 255 };
+
+                        clay.UI()(.{
+                            .id = msg_id,
+                            .layout = .{
+                                .sizing = .{ .w = .grow, .h = .fit },
+                                .padding = .{ .left = 8, .right = 8, .top = 4, .bottom = 4 },
+                                .direction = .top_to_bottom,
+                            },
+                            .background_color = if (is_user) .{ 40, 40, 60, 255 } else .{ 35, 35, 45, 255 },
+                            .corner_radius = .all(4),
+                        })({
+                            clay.text(role_label, .{ .font_size = 12, .color = role_color });
+                            clay.text(msg.content, .{ .font_size = 14, .color = t.text });
+                        });
+                    }
+                    if (chat.is_loading) {
+                        clay.text("Thinking...", .{ .font_size = 14, .color = t.muted });
+                    }
+                }));
+            });
+
+            // Update viewport heights for scrolling
+            const vp_data = clay.getElementData(viewport_id);
+            const content_data = clay.getElementData(clip_id);
+            if (vp_data.found) chat.viewport_height = vp_data.bounding_box.height;
+            if (content_data.found) chat.content_height = content_data.bounding_box.height;
+            const max_scroll = @max(0, chat.content_height - chat.viewport_height);
+            if (chat.scroll_offset_y > max_scroll) chat.scroll_offset_y = max_scroll;
+
+            // Input area at bottom
+            clay.UI()(.{
+                .layout = .{
+                    .sizing = .{ .w = .grow, .h = .fixed(input_height) },
+                    .direction = .top_to_bottom,
+                    .padding = .{ .left = 8, .right = 8, .top = 8, .bottom = 8 },
+                },
+                .background_color = .{ 25, 25, 30, 255 },
+                .border = .{ .width = .{ .top = 1 }, .color = t.border },
+            })({
+                const input_text = if (chat.input_buffer.items.len == 0) "> " else chat.input_buffer.items;
+                clay.text(input_text, .{ .font_size = 16, .color = t.text });
+
+                // Blinking cursor
+                {
+                    const blink_ms: f32 = 530.0;
+                    const visible = @mod(chat.ui_time_ms, blink_ms * 2.0) < blink_ms;
+                    if (visible) {
+                        const char_w: f32 = 9.0;
+                        const text_w = @as(f32, @floatFromInt(chat.input_buffer.items.len)) * char_w;
+                        clay.UI()(.{
+                            .layout = .{ .sizing = .{ .w = .fixed(10), .h = .fixed(line_height) } },
+                            .floating = .{
+                                .attach_to = .to_parent,
+                                .attach_points = .{ .element = .left_top, .parent = .left_top },
+                                .offset = .{ .x = text_w + 8, .y = 8 },
+                            },
+                            .background_color = .{ 200, 200, 200, 255 },
+                        })({});
+                    }
+                }
+            });
+        });
+
+        // Handle scroll
+        if (self.active_tab_bar) |tab_bar| {
+            if (tab_bar.getActiveTab()) |tab| {
+                _ = tab;
+                // Scroll handled by scroll wheel events
+            }
+        }
     }
 };

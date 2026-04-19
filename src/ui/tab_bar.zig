@@ -209,6 +209,30 @@ pub const TabBarState = struct {
         log.info("Terminal tab opened: {s}", .{name});
     }
 
+    pub fn openChat(self: *Self) void {
+        self.terminal_counter += 1;
+        const name = std.fmt.allocPrint(self.allocator, "Chat {d}", .{self.terminal_counter}) catch return;
+        const path_copy = self.allocator.dupe(u8, name) catch {
+            self.allocator.free(name);
+            return;
+        };
+
+        self.tabs.append(self.allocator, .{
+            .path = path_copy,
+            .display_name = name,
+            .modified = false,
+            .is_active = false,
+            .kind = .chat,
+        }) catch {
+            self.allocator.free(name);
+            self.allocator.free(path_copy);
+            return;
+        };
+
+        self.setActive(self.tabs.items.len - 1);
+        log.info("Chat tab opened: {s}", .{name});
+    }
+
     /// Tab schließen (nach Index)
     pub fn closeTab(self: *Self, index: usize) void {
         if (index >= self.tabs.items.len) return;
@@ -344,11 +368,13 @@ pub fn renderTabBar(
 
     var create_new_file = false;
     var create_new_term = false;
+    var create_new_chat = false;
 
     if (state.show_new_menu) {
         const dropdown_id = clay.ElementId.IDI("add_tab_dropdown", @truncate(@intFromPtr(state)));
         const file_id = clay.ElementId.IDI("menu_new_file", @truncate(@intFromPtr(state)));
         const term_id = clay.ElementId.IDI("menu_new_term", @truncate(@intFromPtr(state)));
+        const chat_id = clay.ElementId.IDI("menu_new_chat", @truncate(@intFromPtr(state)));
 
         clay.UI()(.{
             .id = dropdown_id,
@@ -396,11 +422,26 @@ pub fn renderTabBar(
             })({
                 clay.text("New Terminal", .{ .font_size = 18, .color = theme.text, .wrap_mode = .none });
             });
+
+            const chat_hover = clay.pointerOver(chat_id);
+            clay.UI()(.{
+                .id = chat_id,
+                .layout = .{
+                    .sizing = .{ .w = .grow, .h = .fixed(32) },
+                    .padding = .{ .left = 8, .right = 8 },
+                    .child_alignment = .{ .x = .left, .y = .center },
+                },
+                .background_color = if (chat_hover) .{ 80, 80, 100, 255 } else theme.surface,
+                .corner_radius = .all(2),
+            })({
+                clay.text("New Chat", .{ .font_size = 18, .color = theme.text, .wrap_mode = .none });
+            });
         });
 
         const dropdown_hover = clay.pointerOver(dropdown_id);
         const file_hover = clay.pointerOver(file_id);
         const term_hover = clay.pointerOver(term_id);
+        const chat_hover = clay.pointerOver(chat_id);
 
         if (mouse_pressed) {
             if (file_hover) {
@@ -408,6 +449,9 @@ pub fn renderTabBar(
                 state.show_new_menu = false;
             } else if (term_hover) {
                 create_new_term = true;
+                state.show_new_menu = false;
+            } else if (chat_hover) {
+                create_new_chat = true;
                 state.show_new_menu = false;
             } else if (!dropdown_hover and !add_btn_hover) {
                 state.show_new_menu = false;
@@ -420,6 +464,9 @@ pub fn renderTabBar(
     }
     if (create_new_term) {
         state.openTerminal();
+    }
+    if (create_new_chat) {
+        state.openChat();
     }
 
     if (tab_to_close) |idx| return .{ .index = idx, .close = true };

@@ -6,6 +6,7 @@ pub const FileKind = enum {
     pdf,
     terminal,
     markdown_preview,
+    chat,
 };
 
 pub fn getFileKind(path: []const u8) FileKind {
