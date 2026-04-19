@@ -11,6 +11,7 @@
 
 const std = @import("std");
 const zigjr = @import("zigjr");
+const zigimg = @import("zigimg");
 const ui_mod = @import("ui/mod.zig");
 
 const log = std.log.scoped(.e2e_server);
@@ -372,7 +373,7 @@ fn screenshot(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     const renderer = renderer_ptr;
     const mod = @import("rendering/mod.zig").Renderer;
 
-    const path = "./tmp/vulkan-screenshot.ppm";
+    const path = "./tmp/vulkan-screenshot.png";
 
     // Headless: UI rendern mit Clay
     const commands = ctx.ui_system.renderExample(null);
@@ -413,24 +414,30 @@ fn screenshot(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     };
     defer ctx.allocator.free(rgba);
 
-    // Write PPM
-    var file = try std.fs.cwd().createFile(path, .{});
-    defer file.close();
-    var header: [256]u8 = undefined;
-    const header_slice = std.fmt.bufPrint(&header, "P6\n{d} {d}\n255\n", .{ w, h }) catch unreachable;
-    try file.writeAll(header_slice);
-
-    // Textur ist bgra8_unorm → Bytes sind B,G,R,A → PPM braucht R,G,B
+    // Write PNG via zigimg
+    // Textur ist bgra8_unorm → Bytes sind B,G,R,A → in RGBA konvertieren
+    const rgba_input = rgba;
+    var rgba_conv = try ctx.allocator.alloc(u8, w * h * 4);
+    defer ctx.allocator.free(rgba_conv);
     var src_idx: usize = 0;
-    var pixel_count: usize = 0;
-    var rgb_pixel: [3]u8 = undefined;
-    while (pixel_count < w * h) : (pixel_count += 1) {
-        rgb_pixel[0] = rgba[src_idx + 2]; // R = BGRA[2]
-        rgb_pixel[1] = rgba[src_idx + 1]; // G = BGRA[1]
-        rgb_pixel[2] = rgba[src_idx + 0]; // B = BGRA[0]
-        try file.writeAll(&rgb_pixel);
+    var dst_idx: usize = 0;
+    while (dst_idx < w * h * 4) : (dst_idx += 4) {
+        rgba_conv[dst_idx + 0] = rgba_input[src_idx + 2]; // R
+        rgba_conv[dst_idx + 1] = rgba_input[src_idx + 1]; // G
+        rgba_conv[dst_idx + 2] = rgba_input[src_idx + 0]; // B
+        rgba_conv[dst_idx + 3] = rgba_input[src_idx + 3]; // A
         src_idx += 4;
     }
+
+    var image = try zigimg.Image.fromRawPixels(ctx.allocator, @intCast(w), @intCast(h), rgba_conv, .rgba32);
+    defer image.deinit(ctx.allocator);
+
+    var pixel_buffer: [1024 * 1024]u8 = undefined; // 1MB buffer
+    image.writeToFilePath(ctx.allocator, path, &pixel_buffer, .{ .png = .{} }) catch |err| {
+        log.err("writeToFilePath failed: {}", .{err});
+        return try ctx.allocator.dupe(u8, path);
+    };
+    log.info("screenshot: wrote PNG to {s}", .{path});
 
     return try ctx.allocator.dupe(u8, path);
 }
