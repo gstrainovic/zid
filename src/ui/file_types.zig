@@ -8,6 +8,7 @@ pub const FileKind = enum {
     markdown_preview,
     chat,
     textarea,
+    chat2,
 };
 
 pub fn getFileKind(path: []const u8) FileKind {

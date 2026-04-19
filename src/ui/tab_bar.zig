@@ -308,6 +308,66 @@ pub const TabBarState = struct {
         log.info("TextArea tab opened: {s}", .{name});
     }
 
+    /// Chat2: Split mit Markdown Preview oben und TextArea unten
+    pub fn openChat2(self: *Self) void {
+        self.terminal_counter += 1;
+        const name = std.fmt.allocPrint(self.allocator, "Chat2 {d}", .{self.terminal_counter}) catch return;
+        const path_copy = self.allocator.dupe(u8, name) catch {
+            self.allocator.free(name);
+            return;
+        };
+
+        // Create textarea state instance
+        const textarea = self.allocator.create(TextAreaState) catch {
+            self.allocator.free(name);
+            self.allocator.free(path_copy);
+            return;
+        };
+        // Create a buffer for the textarea
+        const buffer = flow_core.Buffer.create(self.allocator) catch {
+            self.allocator.destroy(textarea);
+            self.allocator.free(name);
+            self.allocator.free(path_copy);
+            return;
+        };
+        buffer.root = buffer.load_from_string("", &buffer.file_eol_mode, &buffer.file_utf8_sanitized) catch {
+            buffer.deinit();
+            self.allocator.destroy(textarea);
+            self.allocator.free(name);
+            self.allocator.free(path_copy);
+            return;
+        };
+        textarea.* = TextAreaState.init(self.allocator, buffer);
+        textarea.is_textarea = true;
+
+        // Store in instances map
+        self.textarea_instances.put(path_copy, textarea) catch {
+            textarea.deinit();
+            self.allocator.destroy(textarea);
+            self.allocator.free(name);
+            self.allocator.free(path_copy);
+            return;
+        };
+
+        self.tabs.append(self.allocator, .{
+            .path = path_copy,
+            .display_name = name,
+            .modified = false,
+            .is_active = false,
+            .kind = .chat2,
+        }) catch {
+            _ = self.textarea_instances.remove(path_copy);
+            textarea.deinit();
+            self.allocator.destroy(textarea);
+            self.allocator.free(name);
+            self.allocator.free(path_copy);
+            return;
+        };
+
+        self.setActive(self.tabs.items.len - 1);
+        log.info("Chat2 tab opened: {s}", .{name});
+    }
+
     /// Tab schließen (nach Index)
     pub fn closeTab(self: *Self, index: usize) void {
         if (index >= self.tabs.items.len) return;
@@ -453,6 +513,7 @@ pub fn renderTabBar(
     var create_new_term = false;
     var create_new_chat = false;
     var create_new_text_area = false;
+    var create_new_chat2 = false;
 
     if (state.show_new_menu) {
         const dropdown_id = clay.ElementId.IDI("add_tab_dropdown", @truncate(@intFromPtr(state)));
@@ -460,6 +521,7 @@ pub fn renderTabBar(
         const term_id = clay.ElementId.IDI("menu_new_term", @truncate(@intFromPtr(state)));
         const chat_id = clay.ElementId.IDI("menu_new_chat", @truncate(@intFromPtr(state)));
         const textarea_id = clay.ElementId.IDI("menu_new_textarea", @truncate(@intFromPtr(state)));
+        const chat2_id = clay.ElementId.IDI("menu_new_chat2", @truncate(@intFromPtr(state)));
 
         clay.UI()(.{
             .id = dropdown_id,
@@ -535,6 +597,20 @@ pub fn renderTabBar(
             })({
                 clay.text("New TextArea", .{ .font_size = 18, .color = theme.text, .wrap_mode = .none });
             });
+
+            const chat2_hover = clay.pointerOver(chat2_id);
+            clay.UI()(.{
+                .id = chat2_id,
+                .layout = .{
+                    .sizing = .{ .w = .grow, .h = .fixed(32) },
+                    .padding = .{ .left = 8, .right = 8 },
+                    .child_alignment = .{ .x = .left, .y = .center },
+                },
+                .background_color = if (chat2_hover) .{ 80, 80, 100, 255 } else theme.surface,
+                .corner_radius = .all(2),
+            })({
+                clay.text("New Chat2 (Split)", .{ .font_size = 18, .color = theme.text, .wrap_mode = .none });
+            });
         });
 
         const dropdown_hover = clay.pointerOver(dropdown_id);
@@ -542,6 +618,7 @@ pub fn renderTabBar(
         const term_hover = clay.pointerOver(term_id);
         const chat_hover = clay.pointerOver(chat_id);
         const textarea_hover = clay.pointerOver(textarea_id);
+        const chat2_hover = clay.pointerOver(chat2_id);
 
         if (mouse_pressed) {
             if (file_hover) {
@@ -555,6 +632,9 @@ pub fn renderTabBar(
                 state.show_new_menu = false;
             } else if (textarea_hover) {
                 create_new_text_area = true;
+                state.show_new_menu = false;
+            } else if (chat2_hover) {
+                create_new_chat2 = true;
                 state.show_new_menu = false;
             } else if (!dropdown_hover and !add_btn_hover) {
                 state.show_new_menu = false;
@@ -573,6 +653,9 @@ pub fn renderTabBar(
     }
     if (create_new_text_area) {
         state.openTextArea();
+    }
+    if (create_new_chat2) {
+        state.openChat2();
     }
 
     if (tab_to_close) |idx| return .{ .index = idx, .close = true };

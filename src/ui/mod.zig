@@ -1056,6 +1056,50 @@ pub const UI = struct {
                                     textarea.render(allocator, self.mouse_pressed_this_frame);
                                     special_active = true;
                                 }
+                            } else if (tab.kind == .chat2) {
+                                // Chat2: Vertical split with markdown preview on top, textarea on bottom
+                                if (leaf.tab_bar.textarea_instances.get(tab.path)) |textarea| {
+                                    textarea.setWindow(self.window);
+
+                                    // Top: Markdown preview (show placeholder content for now)
+                                    const chat2_content_id = clay.ElementId.IDI("chat2_content", @truncate(@intFromPtr(tab.path.ptr)));
+                                    clay.UI()(.{
+                                        .id = chat2_content_id,
+                                        .layout = .{
+                                            .sizing = .{ .w = .grow, .h = .percent(60) },
+                                            .direction = .top_to_bottom,
+                                        },
+                                        .background_color = t.surface,
+                                    })({
+                                        // Render markdown preview placeholder
+                                        var md_view = self.open_markdown_views.get(tab.path);
+                                        if (md_view == null) {
+                                            const placeholder = self.allocator.dupe(u8, "# Chat2\n\nChat history will appear here...") catch "# Chat2";
+                                            const new_v = self.allocator.create(markdown_view_mod.MarkdownView) catch unreachable;
+                                            new_v.* = markdown_view_mod.MarkdownView.init(self.allocator, placeholder, tab.path);
+                                            self.open_markdown_views.put(self.allocator.dupe(u8, tab.path) catch tab.path, new_v) catch {};
+                                            md_view = new_v;
+                                        }
+                                        if (md_view) |v| {
+                                            v.window = self.window;
+                                            v.render(allocator, t, self);
+                                        }
+                                    });
+
+                                    // Bottom: Textarea input
+                                    clay.UI()(.{
+                                        .layout = .{
+                                            .sizing = .{ .w = .grow, .h = .percent(40) },
+                                        },
+                                        .background_color = .{ 28, 28, 34, 255 },
+                                        .border = .{ .width = .all(1), .color = t.border },
+                                        .corner_radius = .all(4),
+                                    })({
+                                        textarea.render(allocator, self.mouse_pressed_this_frame);
+                                    });
+
+                                    special_active = true;
+                                }
                             } else if (tab.kind == .markdown_preview) {
                                 var md_view = self.open_markdown_views.get(tab.path);
                                 if (md_view == null) {
