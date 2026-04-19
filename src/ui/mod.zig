@@ -22,6 +22,8 @@ const pane_mod = @import("pane.zig");
 const dialog_mod = @import("dialog.zig");
 const ai_chat_mod = @import("ai_chat.zig");
 const agent_mod = @import("agent");
+const textarea_mod = @import("components/textarea.zig");
+const TextAreaState = textarea_mod.TextAreaState;
 
 
 const log = std.log.scoped(.ui);
@@ -156,29 +158,28 @@ pub const UI = struct {
         if (default_file_path) |path| active_pane.data.leaf.code_editor.setLanguageFromPath(path);
 
         // AI Chat initialisieren (falls nicht deaktiviert)
-        var ai_chat = ai_chat_mod.AIChatState.init(allocator);
-        if (!config.ai_disabled) {
-            // Use Ollama for Vision support (default on port 11434)
-            const llama_server_path = std.process.getEnvVarOwned(allocator, "LLAMA_SERVER_PATH") catch |err| blk: {
-                if (err == error.EnvironmentVariableNotFound) {
-                    break :blk try allocator.dupe(u8, "ollama");
-                }
-                return err;
-            };
-            defer allocator.free(llama_server_path);
-            const model_path = std.process.getEnvVarOwned(allocator, "LLAMA_MODEL_PATH") catch |err| blk: {
-                if (err == error.EnvironmentVariableNotFound) {
-                    // Ollama model name, not file path
-                    break :blk try allocator.dupe(u8, "gemma4:e2b");
-                }
-                return err;
-            };
-            defer allocator.free(model_path);
-
-            ai_chat.initAgent(llama_server_path, model_path) catch |err| {
-                log.err("Failed to initialize AI Agent: {}. AI Chat will be disabled.", .{err});
-            };
-        }
+        const ai_chat = ai_chat_mod.AIChatState.init(allocator) catch |err| @panic(@errorName(err));
+        // AI:暂时禁用，快速测试文本输入
+        // if (!config.ai_disabled) {
+        //     const llama_server_path = std.process.getEnvVarOwned(allocator, "LLAMA_SERVER_PATH") catch |err| blk: {
+        //         if (err == error.EnvironmentVariableNotFound) {
+        //             break :blk try allocator.dupe(u8, "ollama");
+        //         }
+        //         return err;
+        //     };
+        //     defer allocator.free(llama_server_path);
+        //     const model_path = std.process.getEnvVarOwned(allocator, "LLAMA_MODEL_PATH") catch |err| blk: {
+        //         if (err == error.EnvironmentVariableNotFound) {
+        //             break :blk try allocator.dupe(u8, "gemma4:e2b");
+        //         }
+        //         return err;
+        //     };
+        //     defer allocator.free(model_path);
+        //
+        //     ai_chat.initAgent(llama_server_path, model_path) catch |err| {
+        //         log.err("Failed to initialize AI Agent: {}. AI Chat will be disabled.", .{err});
+        //     };
+        // }
 
         return Self{
             .allocator = allocator,
@@ -324,6 +325,9 @@ pub const UI = struct {
         self.text_renderer = text_renderer;
         self.window = window;
         self.getActiveEditor().window = window;
+        self.ai_chat.setWindow(window);
+        self.ai_chat.input_editor.measure_fn = cMeasureText;
+        g_font_size = @floatFromInt(self.ai_chat.input_editor.font_size);
 
         // Globalen Measure-Context setzen (für Maus→Spalte)
         g_text_renderer = text_renderer;
@@ -367,6 +371,14 @@ pub const UI = struct {
         // If a chat tab is active, handle chat input
         if (self.isChatTabActive()) {
             if (self.ai_chat.handleKeyPress(key)) return;
+        }
+
+        // If a textarea tab is active, handle textarea input
+        if (self.isTextAreaTabActive()) {
+            if (self.getActiveTextArea()) |textarea| {
+                textarea.handleKeyPress(key);
+                return;
+            }
         }
 
         // If a terminal tab is active, forward input to the terminal
@@ -437,6 +449,14 @@ pub const UI = struct {
             return;
         }
 
+        // Forward to textarea tab if active
+        if (self.isTextAreaTabActive()) {
+            if (self.getActiveTextArea()) |textarea| {
+                textarea.handleChar(char_code);
+            }
+            return;
+        }
+
         // Forward to terminal if active
         if (self.getActiveTerminal()) |term| {
             var buf: [4]u8 = undefined;
@@ -450,17 +470,35 @@ pub const UI = struct {
     /// Modifier-State aktualisieren
     pub fn setShiftState(self: *Self, pressed: bool) void {
         self.is_shift_down = pressed;
-        self.getActiveEditor().setShiftState(pressed);
+        if (self.isTextAreaTabActive()) {
+            if (self.getActiveTextArea()) |textarea| {
+                textarea.setShiftState(pressed);
+            }
+        } else {
+            self.getActiveEditor().setShiftState(pressed);
+        }
     }
 
     pub fn setCtrlState(self: *Self, pressed: bool) void {
         self.is_ctrl_down = pressed;
-        self.getActiveEditor().setCtrlState(pressed);
+        if (self.isTextAreaTabActive()) {
+            if (self.getActiveTextArea()) |textarea| {
+                textarea.setCtrlState(pressed);
+            }
+        } else {
+            self.getActiveEditor().setCtrlState(pressed);
+        }
     }
 
     pub fn setAltState(self: *Self, pressed: bool) void {
         self.is_alt_down = pressed;
-        self.getActiveEditor().setAltState(pressed);
+        if (self.isTextAreaTabActive()) {
+            if (self.getActiveTextArea()) |textarea| {
+                textarea.setAltState(pressed);
+            }
+        } else {
+            self.getActiveEditor().setAltState(pressed);
+        }
     }
 
     fn findPaneAt(self: *Self, pane: *pane_mod.Pane, x: f32, y: f32) ?*pane_mod.Pane {
@@ -525,6 +563,20 @@ pub const UI = struct {
                     _ = v.handleMouseDown(x, y);
                 }
                 return;
+            } else if (tab.kind == .chat) {
+                self.ai_chat.handleMouseDown(x, y, button);
+                return;
+            } else if (tab.kind == .textarea) {
+                if (self.getActiveTextArea()) |textarea| {
+                    if (button == .mouse_right) {
+                        textarea.show_context_menu = true;
+                        textarea.context_menu_x = x;
+                        textarea.context_menu_y = y;
+                        return;
+                    }
+                    textarea.handleMouseDown(x, y, button);
+                    return;
+                }
             }
         }
 
@@ -561,6 +613,14 @@ pub const UI = struct {
                     v.handleScrollbarMouseMove(x, y);
                 }
                 return;
+            } else if (tab.kind == .chat) {
+                self.ai_chat.handleMouseMove(x, y);
+                return;
+            } else if (tab.kind == .textarea) {
+                if (self.getActiveTextArea()) |textarea| {
+                    textarea.handleMouseMove(x, y);
+                }
+                return;
             }
         }
         self.getActiveEditor().handleMouseMove(x, y);
@@ -585,6 +645,14 @@ pub const UI = struct {
                     v.handleMouseUp();
                 }
                 return;
+            } else if (tab.kind == .chat) {
+                self.ai_chat.handleMouseUp();
+                return;
+            } else if (tab.kind == .textarea) {
+                if (self.getActiveTextArea()) |textarea| {
+                    textarea.handleMouseUp();
+                }
+                return;
             }
         }
         self.getActiveEditor().handleMouseUp();
@@ -597,12 +665,17 @@ pub const UI = struct {
             return;
         }
 
-        if (self.isChatTabActive() and clay.pointerOver(clay.ElementId.ID("ai_chat_viewport"))) {
-            self.ai_chat.scrollLines(delta);
-            return;
-        }
-
         if (self.getActiveTabBar().getActiveTab()) |tab| {
+            if (tab.kind == .chat) {
+                self.ai_chat.scrollLines(delta);
+                return;
+            }
+            if (tab.kind == .textarea) {
+                if (self.getActiveTextArea()) |textarea| {
+                    textarea.scrollLines(delta);
+                }
+                return;
+            }
             if (tab.kind == .terminal) {
                 if (self.getActiveTabBar().terminal_instances.get(tab.path)) |term| {
                     term.scrollLines(delta);
@@ -974,6 +1047,12 @@ pub const UI = struct {
                                     self.window,
                                 );
                                 special_active = true;
+                            } else if (tab.kind == .textarea) {
+                                if (leaf.tab_bar.textarea_instances.get(tab.path)) |textarea| {
+                                    textarea.setWindow(self.window);
+                                    textarea.render(allocator, self.mouse_pressed_this_frame);
+                                    special_active = true;
+                                }
                             } else if (tab.kind == .markdown_preview) {
                                 var md_view = self.open_markdown_views.get(tab.path);
                                 if (md_view == null) {
@@ -1104,6 +1183,16 @@ pub const UI = struct {
     pub fn getDesiredCursor(self: *Self) wio.Cursor {
         if (self.file_explorer.is_resizing or clay.pointerOver(clay.ElementId.ID("ExplorerSplitter"))) {
             return .size_ew;
+        }
+
+        // Chat-Input → I-Beam (Bounds-Check wie Editor, nicht clay.pointerOver)
+        if (self.isChatTabActive() and self.ai_chat.input_bounds_valid) {
+            const c = &self.ai_chat;
+            if (self.mouse_x >= c.input_bounds_x and self.mouse_x < c.input_bounds_x + c.input_bounds_w and
+                self.mouse_y >= c.input_bounds_y and self.mouse_y < c.input_bounds_y + c.input_bounds_h)
+            {
+                return c.input_editor.desired_cursor;
+            }
         }
 
         // Mit Mausposition + Bounds prüfen ob wir über einem Editor sind
@@ -1305,6 +1394,29 @@ pub const UI = struct {
             }
         }
         return false;
+    }
+
+    pub fn isTextAreaTabActive(self: *Self) bool {
+        const tab_bar = self.getActiveTabBar();
+        if (tab_bar.active_index) |idx| {
+            if (idx < tab_bar.tabs.items.len) {
+                return tab_bar.tabs.items[idx].kind == .textarea;
+            }
+        }
+        return false;
+    }
+
+    fn getActiveTextArea(self: *Self) ?*TextAreaState {
+        const tab_bar = self.getActiveTabBar();
+        if (tab_bar.active_index) |idx| {
+            if (idx < tab_bar.tabs.items.len) {
+                const tab = tab_bar.tabs.items[idx];
+                if (tab.kind == .textarea) {
+                    return tab_bar.textarea_instances.get(tab.path);
+                }
+            }
+        }
+        return null;
     }
 
     fn renderTerminalContentInPane(self: *Self, pane: *pane_mod.Pane, path: []const u8, t: Theme) void {
