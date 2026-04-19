@@ -37,6 +37,7 @@ pub const AIChatState = struct {
     viewport_height: f32 = 0,
     content_height: f32 = 0,
     last_input_time_ms: i64 = 0,
+    ui_time_ms: f32 = 0,
 
     width: f32 = 350.0,
 
@@ -351,6 +352,10 @@ pub const AIChatState = struct {
         self.last_input_time_ms = std.time.milliTimestamp();
     }
 
+    pub fn updateTimeMs(self: *Self, delta_ms: f32) void {
+        self.ui_time_ms += delta_ms;
+    }
+
     pub fn scrollLines(self: *Self, delta: i32) void {
         const scroll_speed: f32 = 40.0;
         if (delta > 0) {
@@ -524,10 +529,9 @@ pub fn renderAIChat(
             {
                 const blink_ms: f32 = 500.0;
                 const blink_delay_ms: f32 = 400.0;
-                const now = std.time.milliTimestamp();
-                const time_since_input = now - state.last_input_time_ms;
+                const time_since_input = state.ui_time_ms - @as(f32, @floatFromInt(state.last_input_time_ms));
                 const is_moving = time_since_input < blink_delay_ms;
-                const visible = is_moving or (@mod(@as(f32, @floatFromInt(now)), blink_ms * 2.0) < blink_ms);
+                const visible = is_moving or (@mod(state.ui_time_ms, blink_ms * 2.0) < blink_ms);
                 if (visible) {
                     // Approximate monospace: 9px per char at font_size 16
                     const char_w: f32 = 9.0;
