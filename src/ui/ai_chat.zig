@@ -36,6 +36,7 @@ pub const AIChatState = struct {
     scroll_offset_y: f32 = 0,
     viewport_height: f32 = 0,
     content_height: f32 = 0,
+    last_input_time_ms: i64 = 0,
 
     width: f32 = 350.0,
 
@@ -347,6 +348,7 @@ pub const AIChatState = struct {
         var buf: [4]u8 = undefined;
         const len = std.unicode.utf8Encode(char_code, &buf) catch return;
         self.input_buffer.appendSlice(self.allocator, buf[0..len]) catch {};
+        self.last_input_time_ms = std.time.milliTimestamp();
     }
 
     pub fn scrollLines(self: *Self, delta: i32) void {
@@ -517,6 +519,35 @@ pub fn renderAIChat(
                 clay.text("Ask something... (Ctrl+K to toggle)", .{ .font_size = 16, .color = .{ 100, 100, 100, 255 } });
             } else {
                 clay.text(state.input_buffer.items, .{ .font_size = 16, .color = .{ 255, 255, 255, 255 } });
+            }
+            // Blinking cursor
+            {
+                const blink_ms: f32 = 500.0;
+                const blink_delay_ms: f32 = 400.0;
+                const now = std.time.milliTimestamp();
+                const time_since_input = now - state.last_input_time_ms;
+                const is_moving = time_since_input < blink_delay_ms;
+                const visible = is_moving or (@mod(@as(f32, @floatFromInt(now)), blink_ms * 2.0) < blink_ms);
+                if (visible) {
+                    clay.UI()(.{
+                        .layout = .{ .sizing = .{ .w = .fixed(0), .h = .fixed(@floatFromInt(32)) } },
+                        .floating = .{
+                            .attach_to = .to_parent,
+                            .attach_points = .{ .element = .left_top, .parent = .left_top },
+                            .offset = .{ .x = 0, .y = 0 },
+                        },
+                    })({
+                        clay.UI()(.{
+                            .layout = .{ .sizing = .{ .w = .fit, .h = .grow }, .direction = .left_to_right },
+                        })({
+                            clay.text(state.input_buffer.items, .{ .font_size = 16, .color = .{ 0, 0, 0, 0 } });
+                            clay.UI()(.{
+                                .layout = .{ .sizing = .{ .w = .fixed(2), .h = .grow } },
+                                .background_color = .{ 249, 226, 175, 255 },
+                            })({});
+                        });
+                    });
+                }
             }
         });
     });
