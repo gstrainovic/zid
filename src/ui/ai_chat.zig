@@ -520,7 +520,7 @@ pub fn renderAIChat(
             } else {
                 clay.text(state.input_buffer.items, .{ .font_size = 16, .color = .{ 255, 255, 255, 255 } });
             }
-            // Blinking cursor
+            // Blinking cursor - positioned after input text using monospace approximation
             {
                 const blink_ms: f32 = 500.0;
                 const blink_delay_ms: f32 = 400.0;
@@ -529,24 +529,20 @@ pub fn renderAIChat(
                 const is_moving = time_since_input < blink_delay_ms;
                 const visible = is_moving or (@mod(@as(f32, @floatFromInt(now)), blink_ms * 2.0) < blink_ms);
                 if (visible) {
+                    // Approximate monospace: 9px per char at font_size 16
+                    const char_w: f32 = 9.0;
+                    const line_height: f32 = 24.0;
+                    const text_width = @as(f32, @floatFromInt(state.input_buffer.items.len)) * char_w;
+                    const exact_x = text_width + 8; // +8 for padding
                     clay.UI()(.{
-                        .layout = .{ .sizing = .{ .w = .fixed(0), .h = .fixed(@floatFromInt(32)) } },
+                        .layout = .{ .sizing = .{ .w = .fixed(char_w), .h = .fixed(line_height) } },
                         .floating = .{
                             .attach_to = .to_parent,
                             .attach_points = .{ .element = .left_top, .parent = .left_top },
-                            .offset = .{ .x = 0, .y = 0 },
+                            .offset = .{ .x = exact_x, .y = 8 },
                         },
-                    })({
-                        clay.UI()(.{
-                            .layout = .{ .sizing = .{ .w = .fit, .h = .grow }, .direction = .left_to_right },
-                        })({
-                            clay.text(state.input_buffer.items, .{ .font_size = 16, .color = .{ 0, 0, 0, 0 } });
-                            clay.UI()(.{
-                                .layout = .{ .sizing = .{ .w = .fixed(2), .h = .grow } },
-                                .background_color = .{ 249, 226, 175, 255 },
-                            })({});
-                        });
-                    });
+                        .background_color = .{ 249, 226, 175, 255 },
+                    })({});
                 }
             }
         });
