@@ -51,6 +51,9 @@ pub fn createDispatcher(alloc: std.mem.Allocator, ctx: *E2EContext) !*zigjr.RpcD
     try rpc_dispatcher.addWithCtx("type_text", ctx, typeText);
     try rpc_dispatcher.addWithCtx("key_press", ctx, keyPress);
     try rpc_dispatcher.addWithCtx("open_terminal", ctx, openTerminalRpc);
+    try rpc_dispatcher.addWithCtx("open_chat", ctx, openChatRpc);
+    try rpc_dispatcher.addWithCtx("get_chat_input", ctx, getChatInput);
+    try rpc_dispatcher.addWithCtx("get_active_tab", ctx, getActiveTabDebug);
     try rpc_dispatcher.addWithCtx("save_file", ctx, saveFile);
     try rpc_dispatcher.addWithCtx("get_state", ctx, getState);
     try rpc_dispatcher.addWithCtx("benchmark_open_file", ctx, benchmarkOpenFile);
@@ -259,12 +262,16 @@ fn moveMouse(ctx: *E2EContext, dc: *zigjr.DispatchCtx, x: f64, y: f64) ![]const 
 
 fn keyPress(ctx: *E2EContext, dc: *zigjr.DispatchCtx, key_name: []const u8, is_ctrl: bool) ![]const u8 {
     log.info("RPC: key_press('{s}', ctrl={})", .{ key_name, is_ctrl });
-    
-    ctx.ui_system.is_ctrl_down = is_ctrl;
+
+    ctx.ui_system.setCtrlState(is_ctrl);
 
     var btn: ?@import("wio").Button = null;
     if (std.mem.eql(u8, key_name, "enter")) btn = .enter
     else if (std.mem.eql(u8, key_name, "backspace")) btn = .backspace
+    else if (std.mem.eql(u8, key_name, "a")) btn = .a
+    else if (std.mem.eql(u8, key_name, "c")) btn = .c
+    else if (std.mem.eql(u8, key_name, "v")) btn = .v
+    else if (std.mem.eql(u8, key_name, "x")) btn = .x
     else if (std.mem.eql(u8, key_name, "k")) btn = .k
     else if (std.mem.eql(u8, key_name, "y")) btn = .y
     else if (std.mem.eql(u8, key_name, "n")) btn = .n;
@@ -274,11 +281,10 @@ fn keyPress(ctx: *E2EContext, dc: *zigjr.DispatchCtx, key_name: []const u8, is_c
         @import("wio").cancelWait();
         return dc.arena().dupe(u8, "ok") catch "error: out of memory";
     }
-    
+
     return dc.arena().dupe(u8, "error: unknown key") catch "error: out of memory";
 }
 
-/// Text eintippen (simuliert)
 fn typeText(ctx: *E2EContext, dc: *zigjr.DispatchCtx, text: []const u8) ![]const u8 {
     log.info("RPC: type_text('{s}')", .{text});
 
@@ -299,12 +305,58 @@ fn typeText(ctx: *E2EContext, dc: *zigjr.DispatchCtx, text: []const u8) ![]const
 fn openTerminalRpc(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     log.info("RPC: open_terminal", .{});
     ctx.ui_system.getActiveTabBar().openTerminal();
-    
+
     // Event Loop aufwecken
     const wio = @import("wio");
     wio.cancelWait();
 
     return dc.arena().dupe(u8, "ok") catch "error: out of memory";
+}
+
+/// AI Chat öffnen
+fn openChatRpc(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
+    log.info("RPC: open_chat", .{});
+    ctx.ui_system.getActiveTabBar().openChat();
+
+    // Event Loop aufwecken
+    const wio = @import("wio");
+    wio.cancelWait();
+
+    return dc.arena().dupe(u8, "ok") catch "error: out of memory";
+}
+
+/// Chat Input Content abfragen
+fn getChatInput(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
+    log.info("RPC: get_chat_input", .{});
+    const buf = ctx.ui_system.ai_chat.input_buffer;
+    const text = buf.store_to_string_cached(buf.root, buf.file_eol_mode);
+    return dc.arena().dupe(u8, text) catch "error: out of memory";
+}
+
+/// Debug: Active Tab Info
+fn getActiveTabDebug(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
+    const tab_bar = ctx.ui_system.getActiveTabBar();
+    var buf = std.Io.Writer.Allocating.init(dc.arena());
+    const active_idx = if (tab_bar.active_index) |i| @as(i64, @intCast(i)) else -1;
+    try buf.writer.print(
+        \\{{"active_index": {},
+        \\"tab_count": {},
+        \\"is_chat_active": {},
+        \\"tabs": [
+    , .{
+        active_idx,
+        tab_bar.tabs.items.len,
+        ctx.ui_system.isChatTabActive(),
+    });
+
+    for (tab_bar.tabs.items, 0..) |tab, i| {
+        if (i > 0) try buf.writer.writeAll(", ");
+        try buf.writer.print(
+            \\{{"index": {d}, "kind": "{s}", "name": "{s}", "is_active": {}}}
+        , .{ i, @tagName(tab.kind), tab.display_name, tab.is_active });
+    }
+    try buf.writer.writeAll("]}");
+    return buf.written();
 }
 
 /// App-State zurückgeben (JSON)

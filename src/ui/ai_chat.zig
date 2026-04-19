@@ -5,6 +5,8 @@ const Theme = @import("theme.zig").Theme;
 const agent = @import("agent");
 const scheduler_mod = @import("scheduler");
 const ai_worker = @import("ai_worker");
+const editor_mod = @import("../editor/mod.zig");
+const flow_core = @import("flow_core");
 
 const log = std.log.scoped(.ai_chat);
 
@@ -16,12 +18,11 @@ pub const ChatMessage = struct {
 pub const AIChatState = struct {
     allocator: std.mem.Allocator,
     messages: std.ArrayList(ChatMessage),
-    input_buffer: std.ArrayList(u8),
     agent: ?*agent.LlamaAgent = null,
     scheduler: ?*scheduler_mod.Scheduler = null,
 
-    server_path: ?[]const u8 = null,
-    model_path: ?[]const u8 = null,
+    server_path: []const u8 = "",
+    model_path: []const u8 = "",
 
     is_loading: bool = false,
     is_downloading: bool = false,
@@ -41,27 +42,57 @@ pub const AIChatState = struct {
 
     width: f32 = 350.0,
 
+    // Messages-Scrollbar Bounds (im render aus bounding_box gefüllt)
+    msg_sb_track_x: f32 = 0,
+    msg_sb_track_y: f32 = 0,
+    msg_sb_track_h: f32 = 0,
+    msg_sb_thumb_y: f32 = 0,
+    msg_sb_thumb_h: f32 = 0,
+    msg_sb_visible: bool = false,
+    msg_sb_dragging: bool = false,
+    msg_sb_drag_offset: f32 = 0,
+
+    // Input-Editor (CodeEditor mit eigenem Buffer)
+    input_editor: editor_mod.CodeEditor,
+    input_buffer: *flow_core.Buffer,
+    input_bounds_valid: bool = false,
+    input_bounds_x: f32 = 0,
+    input_bounds_y: f32 = 0,
+    input_bounds_w: f32 = 0,
+    input_bounds_h: f32 = 0,
+
     const Self = @This();
 
     const model_filename = "models/gemma-4-E2B-it-Q4_K_M.gguf";
 
-    pub fn init(allocator: std.mem.Allocator) Self {
+    pub fn init(allocator: std.mem.Allocator) !Self {
         var exists = false;
         if (std.fs.cwd().access(model_filename, .{})) |_| {
             exists = true;
         } else |_| {}
 
-        return Self{
+        const input_buf = try flow_core.Buffer.create(allocator);
+        errdefer input_buf.deinit();
+
+        var state = Self{
             .allocator = allocator,
             .messages = .empty,
-            .input_buffer = .empty,
+            .input_editor = editor_mod.CodeEditor.init(allocator, input_buf),
+            .input_buffer = input_buf,
             .model_exists = exists,
         };
+
+        // Input-Editor konfigurieren
+        state.input_editor.font_size = 16;
+        state.input_editor.bg_color = .{ 255, 255, 255, 255 }; // WEISS Test
+        state.input_editor.gutter_color = .{ 200, 200, 200, 255 };
+        state.input_editor.window = null;
+
+        return state;
     }
 
     pub fn setScheduler(self: *Self, sched: *scheduler_mod.Scheduler) void {
         self.scheduler = sched;
-        // Nachträglicher Warmup, falls initAgent vor setScheduler lief.
         if (self.agent != null and self.is_initializing) {
             self.submitWarmup() catch |err| log.err("deferred warmup submit failed: {}", .{err});
         }
@@ -75,12 +106,9 @@ pub const AIChatState = struct {
             self.allocator.free(msg.role);
         }
         self.messages.deinit(self.allocator);
-        self.input_buffer.deinit(self.allocator);
-        if (self.agent) |a| {
-            a.deinit();
-        }
-        if (self.server_path) |p| self.allocator.free(p);
-        if (self.model_path) |p| self.allocator.free(p);
+        self.input_editor.deinit();
+        self.input_buffer.deinit();
+        if (self.agent) |a| a.deinit();
     }
 
     pub fn initAgent(self: *Self, server_path: []const u8, model_path: []const u8) !void {
@@ -89,10 +117,8 @@ pub const AIChatState = struct {
             self.agent = null;
         }
 
-        if (self.server_path) |p| self.allocator.free(p);
-        if (self.model_path) |p| self.allocator.free(p);
-        self.server_path = try self.allocator.dupe(u8, server_path);
-        self.model_path = try self.allocator.dupe(u8, model_path);
+        self.server_path = server_path;
+        self.model_path = model_path;
 
         self.agent = agent.LlamaAgent.init(self.allocator, server_path, model_path, 11434) catch |err| {
             log.err("Failed to initialize AI Agent: {}", .{err});
@@ -100,8 +126,6 @@ pub const AIChatState = struct {
         };
 
         self.is_initializing = true;
-        // Scheduler kann noch null sein (UI.init läuft vor main.zig's setAIScheduler).
-        // setScheduler holt den Warmup dann nach.
         self.submitWarmup() catch |err| switch (err) {
             error.NoScheduler => {},
             else => return err,
@@ -150,21 +174,21 @@ pub const AIChatState = struct {
     }
 
     pub fn sendMessage(self: *Self) !void {
-        if (self.input_buffer.items.len == 0 or self.is_loading or self.is_initializing) return;
+        const text = self.input_buffer.store_to_string_cached(self.input_buffer.root, self.input_buffer.file_eol_mode);
+        std.log.debug("SEND: buffer len={d} text={s}", .{ text.len, text });
+        if (text.len == 0 or self.is_loading or self.is_initializing) return;
         if (self.agent == null or self.scheduler == null) return error.NoAgent;
 
-        const user_text = try self.allocator.dupe(u8, self.input_buffer.items);
+        const user_text = try self.allocator.dupe(u8, text);
         defer self.allocator.free(user_text);
         try self.addMessage("user", user_text);
 
-        while (self.input_buffer.pop()) |_| {}
+        self.input_editor.setText("");
 
         self.is_loading = true;
         try self.submitCompletion();
     }
 
-    /// Builds system+history snapshot and submits a chat-completion task to the scheduler.
-    /// Call with is_loading already set true.
     fn submitCompletion(self: *Self) !void {
         const a = self.agent orelse return error.NoAgent;
         const sched = self.scheduler orelse return error.NoScheduler;
@@ -196,8 +220,6 @@ pub const AIChatState = struct {
         }
     }
 
-    /// Wird vom Main-Poll-Loop aufgerufen, wenn ein Reply-Payload ankommt.
-    /// Tool-Call-Erkennung passiert hier; bei Tool wird neuer Completion-Task submittet.
     pub fn handleReply(self: *Self, payload: []const u8) void {
         const tool_executed = self.tryExecuteToolCall(payload);
         if (tool_executed) {
@@ -218,7 +240,6 @@ pub const AIChatState = struct {
         self.is_loading = false;
     }
 
-    /// Returns true if payload contained a recognized tool call that was executed (incl. system message appended).
     fn tryExecuteToolCall(self: *Self, response: []const u8) bool {
         if (std.mem.indexOf(u8, response, "{") == null) return false;
         if (std.mem.indexOf(u8, response, "\"tool\"") == null) return false;
@@ -311,13 +332,10 @@ pub const AIChatState = struct {
         self.model_exists = true;
         self.is_downloading = false;
 
-        if (self.model_path) |p| self.allocator.free(p);
-        self.model_path = self.allocator.dupe(u8, model_filename) catch null;
-
         self.mutex.unlock();
 
-        if (self.server_path != null and self.model_path != null) {
-            self.initAgent(self.server_path.?, self.model_path.?) catch |err| {
+        if (self.server_path.len > 0 and self.model_path.len > 0) {
+            self.initAgent(self.server_path, self.model_path) catch |err| {
                 log.err("initAgent after download failed: {}", .{err});
             };
         }
@@ -331,29 +349,78 @@ pub const AIChatState = struct {
         self.is_downloading = false;
     }
 
-    pub fn handleKeyPress(self: *Self, key: @import("wio").Button) bool {
+    pub fn handleKeyPress(self: *Self, key: wio.Button) bool {
         switch (key) {
             .enter => {
+                self.input_editor.handleKeyPress(key);
                 self.sendMessage() catch |err| log.err("Send message failed: {}", .{err});
                 return true;
             },
             .backspace => {
-                _ = self.input_buffer.pop();
+                self.input_editor.handleKeyPress(key);
                 return true;
             },
-            else => return false,
+            else => {
+                self.input_editor.handleKeyPress(key);
+                return false;
+            },
         }
     }
 
     pub fn handleChar(self: *Self, char_code: u21) void {
-        var buf: [4]u8 = undefined;
-        const len = std.unicode.utf8Encode(char_code, &buf) catch return;
-        self.input_buffer.appendSlice(self.allocator, buf[0..len]) catch {};
-        self.last_input_time_ms = std.time.milliTimestamp();
+        self.input_editor.handleChar(char_code);
     }
 
     pub fn updateTimeMs(self: *Self, delta_ms: f32) void {
         self.ui_time_ms += delta_ms;
+        self.input_editor.time_ms += delta_ms;
+    }
+
+    pub fn handleMouseDown(self: *Self, x: f32, y: f32, button: wio.Button) void {
+        self.input_editor.handleMouseDown(x, y, button);
+    }
+
+    pub fn handleMouseMove(self: *Self, x: f32, y: f32) void {
+        self.input_editor.handleMouseMove(x, y);
+    }
+
+    pub fn handleMouseUp(self: *Self) void {
+        self.input_editor.handleMouseUp();
+    }
+
+    /// Messages-Scrollbar: Mouse-Down
+    pub fn handleMsgSbMouseDown(self: *Self, x: f32, y: f32) bool {
+        if (!self.msg_sb_visible) return false;
+        const in_track_x = x >= self.msg_sb_track_x and x <= self.msg_sb_track_x + 8.0;
+        const in_track_y = y >= self.msg_sb_track_y and y <= self.msg_sb_track_y + self.msg_sb_track_h;
+        if (!(in_track_x and in_track_y)) return false;
+
+        if (y >= self.msg_sb_thumb_y and y <= self.msg_sb_thumb_y + self.msg_sb_thumb_h) {
+            self.msg_sb_dragging = true;
+            self.msg_sb_drag_offset = y - self.msg_sb_thumb_y;
+        } else {
+            self.msg_sb_drag_offset = self.msg_sb_thumb_h / 2.0;
+            self.msg_sb_dragging = true;
+            self.scrollMsgToFraction((y - self.msg_sb_drag_offset - self.msg_sb_track_y) / @max(1.0, self.msg_sb_track_h - self.msg_sb_thumb_h));
+        }
+        return true;
+    }
+
+    pub fn handleMsgSbMouseMove(self: *Self, _: f32, y: f32) void {
+        if (!self.msg_sb_dragging) return;
+        const usable = @max(1.0, self.msg_sb_track_h - self.msg_sb_thumb_h);
+        const frac = (y - self.msg_sb_drag_offset - self.msg_sb_track_y) / usable;
+        self.scrollMsgToFraction(frac);
+    }
+
+    pub fn handleMsgSbMouseUp(self: *Self) void {
+        self.msg_sb_dragging = false;
+    }
+
+    fn scrollMsgToFraction(self: *Self, frac: f32) void {
+        const max_scroll = @max(0.0, self.content_height - self.viewport_height);
+        const clamped = std.math.clamp(frac, 0.0, 1.0);
+        self.scroll_offset_y = clamped * max_scroll;
     }
 
     pub fn scrollLines(self: *Self, delta: i32) void {
@@ -365,7 +432,13 @@ pub const AIChatState = struct {
             self.scroll_offset_y = @min(max_scroll, self.scroll_offset_y + @as(f32, @floatFromInt(-delta)) * scroll_speed);
         }
     }
+
+    pub fn setWindow(self: *Self, win: ?*wio.Window) void {
+        self.input_editor.window = win;
+    }
 };
+
+const scrollbar_width: f32 = 8.0;
 
 pub fn renderAIChat(
     arena: std.mem.Allocator,
@@ -374,22 +447,33 @@ pub fn renderAIChat(
     mouse_pressed: bool,
     window: ?*wio.Window,
 ) void {
+    state.input_editor.window = window;
+
     clay.UI()(.{
-        .id = clay.ElementId.ID("ai_chat_sidebar"),
+        .id = clay.ElementId.ID("ai_chat_root"),
         .layout = .{
             .sizing = .grow,
             .direction = .top_to_bottom,
             .padding = .{ .left = 12, .right = 12, .top = 12, .bottom = 12 },
-            .child_gap = 12,
+            .child_gap = 8,
         },
         .background_color = theme.surface,
     })({
+        // ── Header ──────────────────────────────────────────────────────
         clay.UI()(.{
-            .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .left_to_right, .child_gap = 8 },
+            .layout = .{
+                .sizing = .{ .w = .grow, .h = .fit },
+                .direction = .left_to_right,
+                .child_gap = 8,
+                .child_alignment = .{ .y = .center },
+            },
         })({
             clay.text("Gemma 4 Agent", .{ .font_size = 20, .color = theme.primary });
 
-            const status_color: clay.Color = if (state.model_exists and !state.is_initializing) .{ 100, 255, 100, 255 } else .{ 255, 200, 100, 255 };
+            const status_color: clay.Color = if (state.model_exists and !state.is_initializing)
+                .{ 100, 255, 100, 255 }
+            else
+                .{ 255, 200, 100, 255 };
             clay.UI()(.{
                 .layout = .{ .sizing = .{ .w = .fixed(10), .h = .fixed(10) } },
                 .background_color = status_color,
@@ -397,36 +481,40 @@ pub fn renderAIChat(
             })({});
 
             if (state.is_initializing) {
-                clay.text("Initializing GPU...", .{ .font_size = 12, .color = .{ 150, 150, 150, 255 } });
-            }
-
-            if (!state.model_exists) {
-                const btn_id = clay.ElementId.ID("ai_download_btn");
-                const hovered = clay.pointerOver(btn_id);
-                if (hovered and mouse_pressed and !state.is_downloading) {
-                    state.triggerDownload() catch {};
-                }
-
-                clay.UI()(.{
-                    .id = btn_id,
-                    .layout = .{ .sizing = .{ .w = .fit, .h = .fit }, .padding = .{ .left = 8, .right = 8, .top = 4, .bottom = 4 } },
-                    .background_color = if (state.is_downloading) .{ 100, 100, 100, 255 } else if (hovered) theme.primary else theme.border,
-                    .corner_radius = .all(4),
-                })({
-                    clay.text(if (state.is_downloading) "Downloading..." else "Download Model (3GB)", .{ .font_size = 12, .color = .{ 255, 255, 255, 255 } });
-                });
+                clay.text("Initializing...", .{ .font_size = 12, .color = .{ 150, 150, 150, 255 } });
             }
         });
 
+        // ── Download button / progress ───────────────────────────────────
+        if (!state.model_exists) {
+            const btn_id = clay.ElementId.ID("ai_download_btn");
+            const hovered = clay.pointerOver(btn_id);
+            if (hovered and mouse_pressed and !state.is_downloading) {
+                state.triggerDownload() catch {};
+            }
+            clay.UI()(.{
+                .id = btn_id,
+                .layout = .{
+                    .sizing = .{ .w = .fit, .h = .fit },
+                    .padding = .{ .left = 8, .right = 8, .top = 4, .bottom = 4 },
+                },
+                .background_color = if (state.is_downloading) .{ 100, 100, 100, 255 } else if (hovered) theme.primary else theme.border,
+                .corner_radius = .all(4),
+            })({
+                clay.text(
+                    if (state.is_downloading) "Downloading..." else "Download Model (3GB)",
+                    .{ .font_size = 12, .color = .{ 255, 255, 255, 255 } },
+                );
+            });
+        }
+
         if (state.is_downloading) {
             clay.UI()(.{
-                .id = clay.ElementId.ID("ai_download_progress_track"),
                 .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(6) } },
                 .background_color = .{ 40, 40, 45, 255 },
                 .corner_radius = .all(3),
             })({
                 clay.UI()(.{
-                    .id = clay.ElementId.ID("ai_download_progress_bar"),
                     .layout = .{ .sizing = .{ .w = .percent(state.download_progress), .h = .grow } },
                     .background_color = theme.primary,
                     .corner_radius = .all(3),
@@ -434,120 +522,157 @@ pub fn renderAIChat(
             });
         }
 
+        // ── Messages area (clip + scrollbar) ────────────────────────────
+        const viewport_id = clay.ElementId.ID("ai_chat_viewport");
+        const content_id = clay.ElementId.ID("ai_chat_content");
+
         clay.UI()(.{
-            .id = clay.ElementId.ID("ai_chat_viewport"),
-            .layout = .{ .sizing = .{ .w = .grow, .h = .grow } },
-            .clip = .{ .vertical = true, .child_offset = .{ .x = 0, .y = -state.scroll_offset_y } },
+            .id = clay.ElementId.ID("ai_messages_row"),
+            .layout = .{
+                .sizing = .{ .w = .grow, .h = .grow },
+                .direction = .left_to_right,
+            },
         })({
+            // Clipped scroll area
             clay.UI()(.{
-                .id = clay.ElementId.ID("ai_chat_content"),
-                .layout = .{
-                    .sizing = .{ .w = .grow, .h = .fit },
-                    .direction = .top_to_bottom,
-                    .child_gap = 8,
-                },
+                .id = viewport_id,
+                .layout = .{ .sizing = .grow },
+                .clip = .{ .vertical = true, .child_offset = .{ .x = 0, .y = -state.scroll_offset_y } },
             })({
-                state.mutex.lock();
-                defer state.mutex.unlock();
-                for (state.messages.items, 0..) |msg, idx| {
-                    const is_user = std.mem.eql(u8, msg.role, "user");
+                clay.UI()(.{
+                    .id = content_id,
+                    .layout = .{
+                        .sizing = .{ .w = .grow, .h = .fit },
+                        .direction = .top_to_bottom,
+                        .child_gap = 6,
+                    },
+                })({
+                    state.mutex.lock();
+                    defer state.mutex.unlock();
+                    for (state.messages.items, 0..) |msg, idx| {
+                        const is_user = std.mem.eql(u8, msg.role, "user");
+                        const msg_id = clay.ElementId.ID(std.fmt.allocPrint(arena, "ai_msg_{d}", .{idx}) catch "ai_msg_x");
+                        const hovered = clay.pointerOver(msg_id);
 
-                    const msg_id_str = std.fmt.allocPrint(arena, "ai_msg_{d}", .{idx}) catch "ai_msg_err";
-                    const msg_id = clay.ElementId.ID(msg_id_str);
-                    const hovered = clay.pointerOver(msg_id);
-
-                    if (hovered and mouse_pressed) {
-                        if (window) |win| {
-                            win.setClipboardText(msg.content);
-                            state.last_copy_time = std.time.milliTimestamp();
+                        if (hovered and mouse_pressed) {
+                            if (window) |win| {
+                                win.setClipboardText(msg.content);
+                                state.last_copy_time = std.time.milliTimestamp();
+                            }
                         }
-                    }
 
-                    const bg_color: clay.Color = if (is_user)
-                        (if (hovered) .{ 60, 60, 100, 255 } else .{ 50, 50, 80, 255 })
-                    else
-                        (if (hovered) .{ 50, 50, 55, 255 } else .{ 40, 40, 45, 255 });
-
-                    clay.UI()(.{
-                        .id = msg_id,
-                        .layout = .{
-                            .sizing = .{ .w = .grow, .h = .fit },
-                            .padding = .{ .left = 8, .right = 8, .top = 4, .bottom = 4 },
-                            .direction = .top_to_bottom,
-                        },
-                        .background_color = bg_color,
-                        .corner_radius = .all(4),
-                    })({
                         const now = std.time.milliTimestamp();
                         const show_copied = !is_user and (now - state.last_copy_time < 2000);
 
-                        clay.text(if (is_user) "You:" else if (show_copied) "Gemma (Copied!)" else "Gemma (Click to copy):", .{
-                            .font_size = 14,
-                            .color = if (is_user) .{ 200, 200, 255, 255 } else if (show_copied) theme.primary else .{ 200, 255, 200, 255 },
-                        });
-                        clay.text(msg.content, .{ .font_size = 16, .color = .{ 240, 240, 240, 255 } });
-                    });
-                }
+                        const bg: clay.Color = if (is_user)
+                            (if (hovered) .{ 60, 60, 105, 255 } else .{ 50, 50, 85, 255 })
+                        else
+                            (if (hovered) .{ 50, 50, 58, 255 } else .{ 40, 40, 48, 255 });
 
-                if (state.is_loading) {
-                    clay.text("Gemma is thinking...", .{ .font_size = 14, .color = .{ 150, 150, 150, 255 } });
+                        clay.UI()(.{
+                            .id = msg_id,
+                            .layout = .{
+                                .sizing = .{ .w = .grow, .h = .fit },
+                                .direction = .top_to_bottom,
+                                .padding = .{ .left = 8, .right = 8, .top = 6, .bottom = 6 },
+                            },
+                            .background_color = bg,
+                            .corner_radius = .all(4),
+                        })({
+                            clay.text(
+                                if (is_user) "You:" else if (show_copied) "Gemma (Copied!):" else "Gemma:",
+                                .{ .font_size = 12, .color = if (is_user) .{ 180, 180, 255, 255 } else if (show_copied) theme.primary else .{ 150, 230, 150, 255 } },
+                            );
+                            clay.text(msg.content, .{ .font_size = 16, .color = .{ 240, 240, 240, 255 }, .wrap_mode = .words });
+                        });
+                    }
+
+                    if (state.is_loading) {
+                        clay.text("Gemma is thinking...", .{ .font_size = 14, .color = .{ 150, 150, 150, 255 } });
+                    }
+                });
+            });
+
+            // Scrollbar track + thumb (only when content overflows)
+            const track_id = clay.ElementId.ID("ai_chat_scrollbar_track");
+            const overflow = state.content_height > state.viewport_height and state.viewport_height > 0;
+            state.msg_sb_visible = overflow;
+            clay.UI()(.{
+                .id = track_id,
+                .layout = .{
+                    .sizing = .{ .w = .fixed(scrollbar_width), .h = .grow },
+                },
+                .background_color = if (overflow) .{ 35, 35, 42, 255 } else .{ 0, 0, 0, 0 },
+                .corner_radius = .all(3),
+            })({
+                if (overflow) {
+                    const track_data = clay.getElementData(track_id);
+                    if (track_data.found) {
+                        const track_h = track_data.bounding_box.height;
+                        const thumb_ratio = state.viewport_height / state.content_height;
+                        const thumb_h = @max(20.0, track_h * thumb_ratio);
+                        const max_scroll = state.content_height - state.viewport_height;
+                        const scroll_frac = if (max_scroll > 0) state.scroll_offset_y / max_scroll else 0.0;
+                        const thumb_y = scroll_frac * (track_h - thumb_h);
+
+                        state.msg_sb_track_x = track_data.bounding_box.x;
+                        state.msg_sb_track_y = track_data.bounding_box.y;
+                        state.msg_sb_track_h = track_h;
+                        state.msg_sb_thumb_y = track_data.bounding_box.y + thumb_y;
+                        state.msg_sb_thumb_h = thumb_h;
+
+                        clay.UI()(.{
+                            .floating = .{
+                                .attach_to = .to_parent,
+                                .attach_points = .{ .element = .left_top, .parent = .left_top },
+                                .offset = .{ .x = 0, .y = thumb_y },
+                                .z_index = 10,
+                            },
+                            .layout = .{ .sizing = .{ .w = .fixed(scrollbar_width), .h = .fixed(thumb_h) } },
+                            .background_color = if (state.msg_sb_dragging) .{ 130, 130, 170, 230 } else .{ 90, 90, 120, 210 },
+                            .corner_radius = .all(3),
+                        })({});
+                    }
                 }
             });
         });
 
-        const viewport_data = clay.getElementData(clay.ElementId.ID("ai_chat_viewport"));
-        const content_data = clay.getElementData(clay.ElementId.ID("ai_chat_content"));
-        if (viewport_data.found) state.viewport_height = viewport_data.bounding_box.height;
-        if (content_data.found) state.content_height = content_data.bounding_box.height;
-
-        const max_scroll = @max(0, state.content_height - state.viewport_height);
-        if (state.scroll_offset_y > max_scroll and state.scroll_offset_y != 999999) {
+        // Update scroll bounds
+        const vp_data = clay.getElementData(viewport_id);
+        const ct_data = clay.getElementData(content_id);
+        if (vp_data.found) state.viewport_height = vp_data.bounding_box.height;
+        if (ct_data.found) state.content_height = ct_data.bounding_box.height;
+        const max_scroll = @max(0.0, state.content_height - state.viewport_height);
+        if (state.scroll_offset_y == 999999.0) {
             state.scroll_offset_y = max_scroll;
-        } else if (state.scroll_offset_y == 999999) {
+        } else if (state.scroll_offset_y > max_scroll) {
             state.scroll_offset_y = max_scroll;
         }
 
+        // ── Input box (CodeEditor) ───────────────────────────────────────
+        const input_id = clay.ElementId.IDI("ai_chat_input", @truncate(@intFromPtr(&state.input_editor)));
+
         clay.UI()(.{
+            .id = input_id,
             .layout = .{
-                .sizing = .{ .w = .grow, .h = .fixed(100) },
-                .direction = .top_to_bottom,
-                .padding = .{ .left = 8, .right = 8, .top = 8, .bottom = 8 },
+                .sizing = .{ .w = .grow, .h = .fixed(120) },
+                .direction = .left_to_right,
             },
-            .background_color = .{ 30, 30, 35, 255 },
+            .background_color = .{ 28, 28, 34, 255 },
             .border = .{ .width = .all(1), .color = theme.border },
             .corner_radius = .all(4),
         })({
-            if (state.is_downloading or state.is_initializing) {
-                clay.text("Model is initializing...", .{ .font_size = 16, .color = .{ 80, 80, 85, 255 } });
-            } else if (state.input_buffer.items.len == 0) {
-                clay.text("Ask something... (Ctrl+K to toggle)", .{ .font_size = 16, .color = .{ 100, 100, 100, 255 } });
-            } else {
-                clay.text(state.input_buffer.items, .{ .font_size = 16, .color = .{ 255, 255, 255, 255 } });
-            }
-            // Blinking cursor - positioned after input text using monospace approximation
-            {
-                const blink_ms: f32 = 500.0;
-                const blink_delay_ms: f32 = 400.0;
-                const time_since_input = state.ui_time_ms - @as(f32, @floatFromInt(state.last_input_time_ms));
-                const is_moving = time_since_input < blink_delay_ms;
-                const visible = is_moving or (@mod(state.ui_time_ms, blink_ms * 2.0) < blink_ms);
-                if (visible) {
-                    // Approximate monospace: 9px per char at font_size 16
-                    const char_w: f32 = 9.0;
-                    const line_height: f32 = 24.0;
-                    const text_width = @as(f32, @floatFromInt(state.input_buffer.items.len)) * char_w;
-                    const exact_x = text_width + 8; // +8 for padding
-                    clay.UI()(.{
-                        .layout = .{ .sizing = .{ .w = .fixed(char_w), .h = .fixed(line_height) } },
-                        .floating = .{
-                            .attach_to = .to_parent,
-                            .attach_points = .{ .element = .left_top, .parent = .left_top },
-                            .offset = .{ .x = exact_x, .y = 8 },
-                        },
-                        .background_color = .{ 249, 226, 175, 255 },
-                    })({});
-                }
-            }
+            state.input_editor.render(arena, mouse_pressed);
         });
+
+        // Input-Bounds für Cursor-Detection speichern
+        const input_box_data = clay.getElementData(input_id);
+        if (input_box_data.found) {
+            state.input_bounds_x = input_box_data.bounding_box.x;
+            state.input_bounds_y = input_box_data.bounding_box.y;
+            state.input_bounds_w = input_box_data.bounding_box.width;
+            state.input_bounds_h = input_box_data.bounding_box.height;
+            state.input_bounds_valid = true;
+        }
     });
 }

@@ -1218,6 +1218,7 @@ pub const CodeEditor = struct {
                 }
             },
             .Paste => {
+                // Try window clipboard first
                 if (self.window) |win| {
                     if (win.getClipboardText(self.allocator)) |text| {
                         defer self.allocator.free(text);
@@ -1289,7 +1290,6 @@ pub const CodeEditor = struct {
     }
 
     pub fn handleKeyPress(self: *Self, key: wio.Button) void {
-        std.log.scoped(.editor).info("handleKeyPress: {any}", .{key});
         if (self.keymap) |km| {
             if (km.lookup(key, self.mods)) |action| {
                 self.dispatchAction(action);
@@ -1533,9 +1533,14 @@ pub const CodeEditor = struct {
         self.pushEditForChange(ins_row, ins_col, "", buf[0..len]);
 
         const m = self.metrics();
+        std.log.debug("INSERT: row={} col={} char=U+{X}", .{ self.cursor.row, self.cursor.col, char_code });
         const result = self.buffer.root.insert_chars(
             self.cursor.row, self.cursor.col, buf[0..len], self.buffer.allocator, m,
-        ) catch return;
+        ) catch |err| {
+            std.log.err("INSERT FAILED: {} row={} col={} err={}", .{ char_code, self.cursor.row, self.cursor.col, err });
+            return;
+        };
+        std.log.debug("INSERT OK: row={} col={}", .{ self.cursor.row, self.cursor.col });
         self.buffer.root = result[2];
         self.cursor.col += @as(usize, @intCast(len));
         self.cursor.target = self.cursor.col;
