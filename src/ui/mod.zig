@@ -626,6 +626,7 @@ pub const UI = struct {
     pub fn update(self: *Self, delta_ms: f32) void {
         self.anim_manager.update(delta_ms);
         self.getActiveEditor().time_ms += delta_ms;
+        self.ai_chat.updateTimeMs(delta_ms);
     }
 
     /// Layout beginnen
