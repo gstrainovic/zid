@@ -363,7 +363,7 @@ fn closeActiveTabRpc(ctx: *E2EContext, dc: *zigjr.DispatchCtx) !void {
     @import("wio").cancelWait();
 }
 
-/// Screenshot: rendert aktuellen Frame und speichert als PPM nach /tmp/vulkan-screenshot.ppm
+/// Screenshot: rendert aktuellen Frame und speichert als PPM nach ./tmp/vulkan-screenshot.ppm
 fn screenshot(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     _ = dc;
     log.info("=== SCREENSHOT RPC CALLED ===", .{});
