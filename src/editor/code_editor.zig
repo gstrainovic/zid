@@ -1234,8 +1234,12 @@ pub const CodeEditor = struct {
                 self.context_menu_y = self.mouse_y;
             },
             .Undo => {
-                const meta = self.buffer.undo() catch return;
-                _ = meta;
+                std.log.info("Undo: attempting buffer.undo()", .{});
+                const meta = self.buffer.undo() catch |err| {
+                    std.log.err("Undo failed: {}", .{err});
+                    return;
+                };
+                std.log.info("Undo: success, meta len={}", .{meta.len});
                 self.cursor = .{};
                 self.selection_anchor = null;
                 return;
@@ -1283,15 +1287,19 @@ pub const CodeEditor = struct {
         return true;
     }
 
-    /// Snapshot for undo (simplified - uses flow_core's built-in undo)
+    /// Snapshot for undo - saves current buffer state before edits
     fn snapshotForUndo(self: *Self) void {
-        // flow_core handles its own undo/redo
-        _ = self;
+        self.buffer.store_undo("edit") catch {
+            std.log.err("Failed to store undo snapshot", .{});
+        };
     }
 
     pub fn handleKeyPress(self: *Self, key: wio.Button) void {
+        std.log.info(">>> handleKeyPress ENTRY: key={} self.mods={}", .{key, self.mods});
         if (self.keymap) |km| {
+            std.log.info("    keymap present, doing lookup key={} mods={}", .{key, self.mods});
             if (km.lookup(key, self.mods)) |action| {
+                std.log.info("    FOUND action={}", .{action});
                 self.dispatchAction(action);
                 return;
             }
