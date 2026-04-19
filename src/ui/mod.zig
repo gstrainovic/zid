@@ -375,11 +375,14 @@ pub const UI = struct {
 
         // If a textarea tab is active, handle textarea input
         if (self.isTextAreaTabActive()) {
+            log.debug("handleKeyPress: routing to textarea, key={}", .{key});
             if (self.getActiveTextArea()) |textarea| {
                 textarea.handleKeyPress(key);
                 return;
             }
         }
+
+        log.debug("handleKeyPress: key={} isTerminalActive={}", .{ key, self.isTerminalActive() });
 
         // If a terminal tab is active, forward input to the terminal
         if (self.getActiveTerminal()) |term| {

@@ -241,7 +241,7 @@ pub fn main() !void {
     }, resolved_file_path);
     defer ui_system.deinit();
 
-    try ui_system.setupClay(null, viewport_width, viewport_height, &text_renderer);
+    try ui_system.setupClay(plat.window_ptr, viewport_width, viewport_height, &text_renderer);
 
     const force_gui_test = if (std.process.getEnvVarOwned(allocator, "FORCE_GUI_TEST")) |val| blk: {
         allocator.free(val);

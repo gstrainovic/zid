@@ -45,6 +45,7 @@ pub const EventCallback = *const fn (event: WindowEvent, user_data: ?*anyopaque)
 pub const Platform = struct {
     allocator: std.mem.Allocator,
     window: ?wio.Window = null,
+    window_ptr: ?*wio.Window = null,
     config: PlatformConfig,
     running: bool = true,
     user_data: ?*anyopaque = null,
@@ -102,6 +103,9 @@ pub const Platform = struct {
                 .height = @intCast(self.config.height),
             },
         });
+
+        // Pointer auf das Window setzen (für UI die Pointer braucht)
+        self.window_ptr = &self.window.?;
 
         // Initiale Größe speichern
         self.current_width = self.config.width;
