@@ -49,6 +49,7 @@ pub const UIConfig = struct {
     font_size: f32 = 24.0,
     padding: f32 = 12.0,
     gap: f32 = 8.0,
+    ai_disabled: bool = false,
 };
 
 /// UI Hauptstruktur
@@ -154,22 +155,28 @@ pub const UI = struct {
         const active_pane = root_pane;
         if (default_file_path) |path| active_pane.data.leaf.code_editor.setLanguageFromPath(path);
 
-        // AI Chat initialisieren
+        // AI Chat initialisieren (falls nicht deaktiviert)
         var ai_chat = ai_chat_mod.AIChatState.init(allocator);
-        const llama_server_path = std.process.getEnvVarOwned(allocator, "LLAMA_SERVER_PATH") catch |err| blk: {
-            if (err == error.EnvironmentVariableNotFound) break :blk try allocator.dupe(u8, "llama-server");
-            return err;
-        };
-        defer allocator.free(llama_server_path);
-        const model_path = std.process.getEnvVarOwned(allocator, "LLAMA_MODEL_PATH") catch |err| blk: {
-            if (err == error.EnvironmentVariableNotFound) break :blk try allocator.dupe(u8, "models/gemma-4-E2B-it-Q4_K_M.gguf");
-            return err;
-        };
-        defer allocator.free(model_path);
+        if (!config.ai_disabled) {
+            const llama_server_path = std.process.getEnvVarOwned(allocator, "LLAMA_SERVER_PATH") catch |err| blk: {
+                if (err == error.EnvironmentVariableNotFound) {
+                    break :blk try allocator.dupe(u8, "/home/g/llama.cpp/build/bin/llama-server");
+                }
+                return err;
+            };
+            defer allocator.free(llama_server_path);
+            const model_path = std.process.getEnvVarOwned(allocator, "LLAMA_MODEL_PATH") catch |err| blk: {
+                if (err == error.EnvironmentVariableNotFound) {
+                    break :blk try allocator.dupe(u8, "models/gemma-4-E2B-it-Q4_K_M.gguf");
+                }
+                return err;
+            };
+            defer allocator.free(model_path);
 
-        ai_chat.initAgent(llama_server_path, model_path) catch |err| {
-            log.err("Failed to initialize AI Agent: {}. AI Chat will be disabled.", .{err});
-        };
+            ai_chat.initAgent(llama_server_path, model_path) catch |err| {
+                log.err("Failed to initialize AI Agent: {}. AI Chat will be disabled.", .{err});
+            };
+        }
 
         return Self{
             .allocator = allocator,
