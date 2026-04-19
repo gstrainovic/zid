@@ -62,6 +62,7 @@ pub fn main() !void {
     var default_file_path: ?[]const u8 = null;
     var e2e_mode = false;
     var headless_mode = false;
+    var ai_disabled = false;
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
 
@@ -85,6 +86,9 @@ pub fn main() !void {
             headless_mode = true;
             e2e_mode = true;
             log.info("Headless mode enabled — no window, screenshots possible via RPC on port 9999", .{});
+        } else if (std.mem.eql(u8, args[i], "--ai=off")) {
+            ai_disabled = true;
+            log.info("AI disabled via --ai=off", .{});
         } else if (std.mem.eql(u8, args[i], "--help") or std.mem.eql(u8, args[i], "-h")) {
             var buf: [4096]u8 = undefined;
             var stdout_f = std.fs.File.stdout();
@@ -95,6 +99,7 @@ pub fn main() !void {
             try w.writeAll("  --theme light|dark    Override theme\n");
             try w.writeAll("  --e2e                 Enable E2E mode (RPC on port 9999)\n");
             try w.writeAll("  --headless            Headless mode (no window, screenshots via RPC on port 9999)\n");
+            try w.writeAll("  --ai=off              Disable AI chat (llama-server)\n");
             try w.writeAll("  --help, -h            Show this help\n");
             try w.flush();
             return;
@@ -232,6 +237,7 @@ pub fn main() !void {
     // 5. UI System initialisieren (Clay)
     var ui_system = try ui.UI.init(allocator, .{
         .font_size = 24.0,
+        .ai_disabled = ai_disabled,
     }, resolved_file_path);
     defer ui_system.deinit();
 
