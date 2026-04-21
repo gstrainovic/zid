@@ -473,14 +473,14 @@ fn screenshot(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     const header_slice = std.fmt.bufPrint(&header, "P6\n{d} {d}\n255\n", .{ w, h }) catch unreachable;
     try file.writeAll(header_slice);
 
-    // Textur ist bgra8_unorm → Bytes sind B,G,R,A → PPM braucht R,G,B
+    // WGPU liefert RGBA -> PPM braucht R,G,B
     var src_idx: usize = 0;
     var pixel_count: usize = 0;
     var rgb_pixel: [3]u8 = undefined;
     while (pixel_count < w * h) : (pixel_count += 1) {
-        rgb_pixel[0] = rgba[src_idx + 2]; // R = BGRA[2]
-        rgb_pixel[1] = rgba[src_idx + 1]; // G = BGRA[1]
-        rgb_pixel[2] = rgba[src_idx + 0]; // B = BGRA[0]
+        rgb_pixel[0] = rgba[src_idx + 0]; // R
+        rgb_pixel[1] = rgba[src_idx + 1]; // G
+        rgb_pixel[2] = rgba[src_idx + 2]; // B
         try file.writeAll(&rgb_pixel);
         src_idx += 4;
     }

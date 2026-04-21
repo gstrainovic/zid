@@ -341,7 +341,42 @@ pub const MarkdownView = struct {
         }
 
         const hl = self.code_highlighter;
-        if (hl) |_| {
+        if (hl) |highlighter| {
+            const Ctx = struct {
+                fn egc_length(_: flow_core.Buffer.Metrics, egcs: []const u8, colcount: *usize, _: usize) usize {
+                    if (egcs.len == 0) return 0;
+                    if (egcs[0] == '\n') { colcount.* = 1; return 1; }
+                    if (egcs[0] == '\t') { colcount.* = 4; return 1; }
+                    colcount.* = 1;
+                    return 1;
+                }
+                fn egc_chunk_width(_: flow_core.Buffer.Metrics, chunk_: []const u8, _: usize) usize {
+                    if (chunk_.len == 0) return 0;
+                    if (chunk_[0] == '\n') return 1;
+                    if (chunk_[0] == '\t') return 4;
+                    return 1;
+                }
+                fn egc_last(_: flow_core.Buffer.Metrics, egcs: []const u8) []const u8 {
+                    return egcs;
+                }
+            };
+            const m = flow_core.Buffer.Metrics{
+                .ctx = undefined,
+                .egc_length = Ctx.egc_length,
+                .egc_chunk_width = Ctx.egc_chunk_width,
+                .egc_last = Ctx.egc_last,
+                .tab_width = 4,
+            };
+
+            if (flow_core.Buffer.create(arena)) |buf| {
+                defer buf.deinit();
+                var eol_mode: flow_core.Buffer.EolMode = .lf;
+                var utf8_sanitized: bool = false;
+                if (buf.load_from_string(code, &eol_mode, &utf8_sanitized)) |root| {
+                    highlighter.reparseFromBuffer(root, m) catch {};
+                } else |_| {}
+            } else |_| {}
+
             const line_count = std.mem.count(u8, code, "\n") + 1;
             std.log.debug("md_preview: highlighter ready, rendering {d} lines", .{line_count});
         } else {
