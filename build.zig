@@ -252,8 +252,13 @@ pub fn build(b: *std.Build) void {
     exe_mod.addImport("git_worker", git_worker_mod);
     const git_tests = b.addTest(.{ .root_module = git_worker_mod });
 
+    const file_watcher_path = if (target.result.os.tag == .windows)
+        b.path("src/async/file_watcher_win.zig")
+    else
+        b.path("src/async/file_watcher_linux.zig");
+
     const file_watcher_mod = b.createModule(.{
-        .root_source_file = b.path("src/async/file_watcher.zig"),
+        .root_source_file = file_watcher_path,
         .target = target,
         .optimize = optimize,
     });
