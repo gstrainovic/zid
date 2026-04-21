@@ -1,4 +1,4 @@
-# vulkan-ed
+# vulkan-ed3
 
 Editor mit Vulkan/WGPU-Rendering, wio-Platform-Layer und Clay-UI. Unterstützt
 Code-Editing, eingebettete Terminals (ghostty-vt + PTY/ConPTY), Bild- und

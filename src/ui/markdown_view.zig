@@ -45,10 +45,6 @@ pub const MarkdownView = struct {
     pending_split_v: bool = false,
     pending_split_h: bool = false,
 
-    /// Selection State (byte offsets in raw text)
-    selection_anchor: ?usize = null,
-    cursor_byte_offset: usize = 0,
-
     /// Code block highlighter
     code_highlighter: ?*flow_core.highlight.SyntaxHighlighter = null,
 
@@ -105,11 +101,6 @@ pub const MarkdownView = struct {
         if (self.show_context_menu) {
             if (clay.pointerOver(clay.getElementId("MDCopy"))) {
                 self.copySelection() catch {};
-                self.show_context_menu = false;
-                return true;
-            }
-            if (clay.pointerOver(clay.getElementId("MDSelectAll"))) {
-                self.selectAll();
                 self.show_context_menu = false;
                 return true;
             }
@@ -191,13 +182,7 @@ pub const MarkdownView = struct {
 
     pub fn copySelection(self: *Self) !void {
         const w = self.window orelse return;
-        // Vorerst den gesamten Text kopieren da noch keine Selektion implementiert ist
         w.setClipboardText(self.text);
-    }
-
-    pub fn selectAll(self: *Self) void {
-        // Noch nicht implementiert
-        _ = self;
     }
 
     fn renderContextMenu(self: *Self) void {
@@ -228,7 +213,6 @@ pub const MarkdownView = struct {
                 .corner_radius = .all(4),
             })({
                 self.renderContextMenuItem("Copy", "MDCopy", font_size_f);
-                self.renderContextMenuItem("Select All", "MDSelectAll", font_size_f);
 
                 clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(1) } }, .background_color = .{ 80, 80, 80, 255 } })({});
 
