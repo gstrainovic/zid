@@ -16,6 +16,7 @@ Examples:
     python3 vscreenshot.py --interactive
 """
 
+import json
 import socket
 import subprocess
 import sys
@@ -47,23 +48,38 @@ def rpc_call(method: str, params: list = None) -> dict:
     }
 
     try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.settimeout(10)
-            s.connect((HOST, PORT))
-            s.sendall((str(payload) + "\n").encode())
-            response = b""
-            while True:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(30)  # Increased timeout for screenshot
+        s.connect((HOST, PORT))
+        s.sendall((json.dumps(payload) + "\n").encode())
+        # Wait for response with retry logic
+        response = b""
+        start = time.time()
+        while time.time() - start < 30:
+            try:
                 chunk = s.recv(4096)
                 if not chunk:
                     break
                 response += chunk
-                # Try to parse partial JSON
                 try:
-                    resp_str = response.decode()
-                    import json
-                    return json.loads(resp_str)
+                    return json.loads(response.decode())
                 except json.JSONDecodeError:
                     continue
+            except socket.timeout:
+                # Check if we got anything
+                if response:
+                    try:
+                        return json.loads(response.decode())
+                    except:
+                        pass
+                time.sleep(0.1)
+        # If we still have partial response, try to parse it
+        if response:
+            try:
+                return json.loads(response.decode())
+            except json.JSONDecodeError:
+                return {"error": "incomplete JSON", "raw": response.decode(errors="replace")}
+        return {"error": "no response received"}
     except Exception as e:
         return {"error": str(e)}
 
@@ -81,12 +97,16 @@ def wait_for_server(timeout: int = 15) -> bool:
     return False
 
 # === Screenshot ===
-def take_screenshot() -> tuple[bool, Path]:
-    """Take screenshot via RPC, return (success, ppm_path)."""
-    response = rpc_call("screenshot")
-    if "result" in response:
-        ppm_path = REPO_ROOT / response["result"]
-        return True, ppm_path
+def take_screenshot(timeout: float = 10.0) -> tuple[bool, Path]:
+    """Take screenshot via RPC, retry until success or timeout."""
+    start = time.time()
+    while time.time() - start < timeout:
+        response = rpc_call("screenshot")
+        if response and "result" in response:
+            ppm_path = REPO_ROOT / response["result"]
+            if ppm_path.exists() and ppm_path.stat().st_size > 0:
+                return True, ppm_path
+        time.sleep(0.2)
     return False, None
 
 def convert_ppm_to_png(ppm_path: Path) -> Path | None:
@@ -270,6 +290,9 @@ def oneshot_mode(question: str):
         return 1
 
     print("[+] RPC server ready!")
+
+    # Small delay to ensure server is truly ready for RPC
+    time.sleep(0.5)
 
     print("[*] Taking screenshot...")
     success, ppm_path = take_screenshot()
