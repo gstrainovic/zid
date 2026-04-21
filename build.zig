@@ -103,6 +103,8 @@ pub fn build(b: *std.Build) void {
     // Test-Daten installieren (app.log wird standardmäßig im Editor geladen)
     const app_log_install = b.addInstallFileWithDir(b.path("test_data/app.log"), .{ .custom = "share" }, "app.log");
     b.getInstallStep().dependOn(&app_log_install.step);
+    const syntax_test_install = b.addInstallFileWithDir(b.path("test_data/syntax_test.md"), .{ .custom = "share" }, "syntax_test.md");
+    b.getInstallStep().dependOn(&syntax_test_install.step);
 
     const exe = b.addExecutable(.{
         .name = "vulkan-ed",
