@@ -332,21 +332,20 @@ pub const MarkdownView = struct {
         // Create or reuse highlighter for this language
         if (self.code_highlighter == null and lang_name.len > 0) {
             std.log.debug("md_preview: creating highlighter for lang='{s}'", .{lang_name});
-            self.code_highlighter = flow_core.highlight.SyntaxHighlighter.create(self.allocator, lang_name) catch {
-                std.log.err("md_preview: highlighter create failed for '{s}'", .{lang_name});
+            const created = flow_core.highlight.SyntaxHighlighter.create(self.allocator, lang_name) catch |err| {
+                std.log.err("md_preview: highlighter create failed for '{s}': {s}", .{ lang_name, @errorName(err) });
                 return;
             };
-            if (self.code_highlighter == null) {
-                std.log.debug("md_preview: highlighter creation returned null", .{});
-            }
+            self.code_highlighter = created;
+            std.log.info("md_preview: highlighter created successfully for '{s}'", .{lang_name});
         }
 
         const hl = self.code_highlighter;
-        if (hl) |highlighter| {
-            _ = highlighter;
-            std.log.debug("md_preview: highlighter ready, tagsForLine will be called per line", .{});
+        if (hl) |_| {
+            const line_count = std.mem.count(u8, code, "\n") + 1;
+            std.log.debug("md_preview: highlighter ready, rendering {d} lines", .{line_count});
         } else {
-            std.log.debug("md_preview: no highlighter available, rendering plain text", .{});
+            std.log.debug("md_preview: no highlighter, plain text rendering", .{});
         }
 
         // Split code into lines manually
