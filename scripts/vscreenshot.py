@@ -99,14 +99,21 @@ def wait_for_server(timeout: int = 15) -> bool:
 # === Screenshot ===
 def take_screenshot(timeout: float = 10.0) -> tuple[bool, Path]:
     """Take screenshot via RPC, retry until success or timeout."""
+    ppm_path = REPO_ROOT / "tmp" / "vulkan-screenshot.ppm"
     start = time.time()
+
+    # First: trigger screenshot by calling RPC (fire and check file)
     while time.time() - start < timeout:
+        # Try to get response - even if it times out, file should be created
         response = rpc_call("screenshot")
-        if response and "result" in response:
-            ppm_path = REPO_ROOT / response["result"]
-            if ppm_path.exists() and ppm_path.stat().st_size > 0:
-                return True, ppm_path
+        if ppm_path.exists() and ppm_path.stat().st_size >= 1000:
+            return True, ppm_path
         time.sleep(0.2)
+
+    # Final check even if RPC failed
+    if ppm_path.exists() and ppm_path.stat().st_size >= 1000:
+        return True, ppm_path
+
     return False, None
 
 def convert_ppm_to_png(ppm_path: Path) -> Path | None:
@@ -291,8 +298,8 @@ def oneshot_mode(question: str):
 
     print("[+] RPC server ready!")
 
-    # Small delay to ensure server is truly ready for RPC
-    time.sleep(0.5)
+    # Wait for server to be truly ready for RPC (it just bound the port but may not have started accepting connections yet)
+    time.sleep(2.0)
 
     print("[*] Taking screenshot...")
     success, ppm_path = take_screenshot()
