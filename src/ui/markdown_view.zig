@@ -327,13 +327,23 @@ pub const MarkdownView = struct {
     fn renderCodeBlock(self: *Self, code: []const u8, lang_tag: ?[]const u8, arena: std.mem.Allocator, theme: Theme) void {
         // Determine language for highlighter
         const lang_name = lang_tag orelse "";
+        std.log.debug("md_preview: renderCodeBlock lang='{s}' code_len={d}", .{ lang_name, code.len });
 
         // Create or reuse highlighter for this language
         if (self.code_highlighter == null and lang_name.len > 0) {
-            self.code_highlighter = flow_core.highlight.SyntaxHighlighter.create(self.allocator, lang_name) catch null;
+            std.log.debug("md_preview: creating highlighter for lang='{s}'", .{lang_name});
+            self.code_highlighter = flow_core.highlight.SyntaxHighlighter.create(self.allocator, lang_name) catch |err| {
+                std.log.err("md_preview: highlighter create failed for '{s}': {s}", .{ lang_name, @errorName(err) });
+                self.code_highlighter = null;
+            };
         }
 
         const hl = self.code_highlighter;
+        if (hl) |highlighter| {
+            std.log.debug("md_preview: highlighter ready, tagsForLine will be called per line", .{});
+        } else {
+            std.log.debug("md_preview: no highlighter available, rendering plain text", .{});
+        }
 
         // Split code into lines manually
         var start: usize = 0;
@@ -350,8 +360,12 @@ pub const MarkdownView = struct {
 
                 if (hl) |highlighter| {
                     // Get colored spans for this line
-                    const tags = highlighter.tagsForLine(line_idx, line_len, arena) catch null;
+                    const tags = highlighter.tagsForLine(line_idx, line_len, arena) catch |err| {
+                        std.log.err("md_preview: tagsForLine({d}) failed: {s}", .{ line_idx, @errorName(err) });
+                        break;
+                    };
                     if (tags) |t| {
+                        std.log.debug("md_preview: line {d} got {d} tags", .{ line_idx, t.len });
                         std.sort.insertion(flow_core.highlight.ColorTag, t, {}, lessThanTag);
                         var pos: usize = 0;
                         for (t) |tag| {
