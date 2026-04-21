@@ -1081,7 +1081,6 @@ pub const UI = struct {
                                             md_view = new_v;
                                         }
                                         if (md_view) |v| {
-                                            v.window = self.window;
                                             v.render(allocator, t, self);
                                         }
                                     });
@@ -1115,7 +1114,6 @@ pub const UI = struct {
                                     md_view = new_v;
                                 }
                                 if (md_view) |v| {
-                                    v.window = self.window;
                                     v.render(allocator, t, self);
                                     if (v.pending_split_v) {
                                         v.pending_split_v = false;
