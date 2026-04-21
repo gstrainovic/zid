@@ -4,9 +4,17 @@ RPC & Automatisierung (.py)
    * scripts/simulate_typing.py: Sendet Tasteneingaben via RPC (gut für Demos/Tests).
 
   Screenshots (.sh & .ps1)
-   * scripts/gui-screenshot.sh: Erstellt Screenshot vom GUI (Linux).
-   * scripts/screenshot-image.sh: Exportiert Renderer-Buffer als Bilddatei.
-   * scripts/screenshot.ps1 / screenshot_active.ps1: Windows PowerShell Varianten für Screenshots.
+   ## Screenshots & Visual Debugging
+
+### vscreenshot.py (AI Agent Visual Debugging)
+```
+python3 scripts/vscreenshot.py "Frage an Gemini"
+python3 scripts/vscreenshot.py --interactive
+```
+RPC-basiert für headless vulkan-ed. Erstellt Screenshot, konvertiert PPM→PNG via ImageMagick, und fragt Gemini. Commands: `s <frage>` (Screenshot+Analyse), `r <method> [args]` (RPC call), `q` (Quit).
+
+### Screenshots (.sh & .ps1)
+* scripts/gui-screenshot.sh: Erstellt Screenshot vom GUI (Linux).
 
   Benchmarks & Sync (.sh & .zig)
    * scripts/benchmark-rpc.zig: Misst Performance der RPC Schnittstelle.
