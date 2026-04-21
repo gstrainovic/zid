@@ -34,9 +34,6 @@ pub const MarkdownView = struct {
     viewport_height: f32 = 0,
     content_height: f32 = 0,
 
-    /// Optional window for clipboard access
-    window: ?*@import("wio").Window = null,
-
     /// Context Menu State
     show_context_menu: bool = false,
     context_menu_x: f32 = 0,
@@ -99,11 +96,6 @@ pub const MarkdownView = struct {
 
     pub fn handleMouseDown(self: *Self, x: f32, y: f32) bool {
         if (self.show_context_menu) {
-            if (clay.pointerOver(clay.getElementId("MDCopy"))) {
-                self.copySelection() catch {};
-                self.show_context_menu = false;
-                return true;
-            }
             if (clay.pointerOver(clay.getElementId("MDSplitV"))) {
                 self.pending_split_v = true;
                 self.show_context_menu = false;
@@ -180,11 +172,6 @@ pub const MarkdownView = struct {
         self.context_menu_y = y;
     }
 
-    pub fn copySelection(self: *Self) !void {
-        const w = self.window orelse return;
-        w.setClipboardText(self.text);
-    }
-
     fn renderContextMenu(self: *Self) void {
         if (!self.show_context_menu) return;
 
@@ -212,8 +199,6 @@ pub const MarkdownView = struct {
                 .border = .{ .width = .all(1), .color = .{ 100, 100, 120, 255 } },
                 .corner_radius = .all(4),
             })({
-                self.renderContextMenuItem("Copy", "MDCopy", font_size_f);
-
                 clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(1) } }, .background_color = .{ 80, 80, 80, 255 } })({});
 
                 self.renderContextMenuItem("Split-Vertically", "MDSplitV", font_size_f);
