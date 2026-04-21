@@ -144,7 +144,7 @@ Antworte auf Deutsch. Beschreibe detailliert was du siehst, besonders:
 
     try:
         result = subprocess.run(
-            ["gemini", "-p", prompt, "--yolo"],
+            ["gemini", "-m", "gemini-2.5-flash", "-p", prompt, "--yolo"],
             capture_output=True,
             text=True,
             timeout=60
