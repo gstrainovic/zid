@@ -17,7 +17,7 @@ const WATCH_FLAGS = FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_FILE_NAME
 
 pub const FileWatcher = struct {
     allocator: std.mem.Allocator,
-    watch_handle: ?*c.HANDLE,
+    watch_handle: ?*anyopaque,
     watch_path: []const u8,
     should_stop: std.atomic.Value(bool),
     scheduler: *scheduler_mod.Scheduler,
@@ -78,8 +78,8 @@ pub const FileWatcher = struct {
         while (!self.should_stop.load(.acquire)) {
             const result = c.WaitForSingleObject(self.watch_handle.?, 100);
 
-            if (result == @intFromEnum(c.WAIT_TIMEOUT)) continue;
-            if (result != @intFromEnum(c.WAIT_OBJECT_0)) continue;
+            if (result == c.WAIT_TIMEOUT) continue;
+            if (result != c.WAIT_OBJECT_0) continue;
 
             _ = c.FindNextChangeNotification(self.watch_handle.?);
         }

@@ -12,8 +12,6 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 REPO_ROOT="$(pwd)"
 
-echo "Building vulkan-ed..."
-zig build
 
 OWN_SUBMODULES=("libs/gooey" "libs/wgpu_native_zig" "libs/wio" "libs/zigdown")
 
@@ -157,7 +155,7 @@ cmd_references() {
         local REF_URL="${ENTRY##*|}"
         local ABS_PATH="$REPO_ROOT/$REF_PATH"
 
-        if [[ -d "$ABS_PATH/.git" ]]; then
+        if [[ -e "$ABS_PATH/.git" ]]; then
             if git -C "$ABS_PATH" diff-index --quiet HEAD -- 2>/dev/null; then
                 git -C "$ABS_PATH" fetch --quiet origin 2>/dev/null || { warn "$REF_PATH: fetch failed"; continue; }
                 local DEF
