@@ -383,6 +383,10 @@ pub const MarkdownView = struct {
                 .tab_width = 4,
             };
 
+            // Reset cached state so tags from a previous block don't leak.
+            highlighter.resetTree();
+            highlighter.invalidateAllLines();
+
             if (flow_core.Buffer.create(arena)) |buf| {
                 defer buf.deinit();
                 var eol_mode: flow_core.Buffer.EolMode = .lf;
