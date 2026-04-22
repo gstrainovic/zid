@@ -52,7 +52,7 @@ pub const MarkdownView = struct {
             @floatFromInt((fg >> 16) & 0xff),
             @floatFromInt((fg >> 8) & 0xff),
             @floatFromInt(fg & 0xff),
-            1.0,
+            255,
         };
     }
 
@@ -396,35 +396,36 @@ pub const MarkdownView = struct {
                 const line = code[start..end];
                 const line_len = line.len;
 
-                if (hl) |highlighter| {
-                    // Get colored spans for this line
-                    const tags = highlighter.tagsForLine(line_idx, line_len, arena) catch {
-                        std.log.err("md_preview: tagsForLine({d}) failed", .{ line_idx });
-                        break;
-                    };
-                    std.log.debug("md_preview: line {d} got {d} tags", .{ line_idx, tags.len });
-                    std.sort.insertion(flow_core.highlight.ColorTag, tags, {}, lessThanTag);
-                    var pos: usize = 0;
-                    for (tags) |tag| {
-                        if (tag.end > line_len) continue;
-                        if (tag.start >= tag.end) continue;
-                        const actual_start = @max(tag.start, pos);
-                        if (actual_start >= tag.end) continue;
-                        if (actual_start > pos) {
-                            const seg = arena.dupe(u8, line[pos..actual_start]) catch "";
+                const tags_opt: ?[]flow_core.highlight.ColorTag = if (hl) |highlighter|
+                    (highlighter.tagsForLine(line_idx, line_len, arena) catch null)
+                else
+                    null;
+
+                clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .left_to_right, .child_gap = 0 } })({
+                    if (tags_opt) |tags| {
+                        std.sort.insertion(flow_core.highlight.ColorTag, tags, {}, lessThanTag);
+                        var pos: usize = 0;
+                        for (tags) |tag| {
+                            if (tag.end > line_len) continue;
+                            if (tag.start >= tag.end) continue;
+                            const actual_start = @max(tag.start, pos);
+                            if (actual_start >= tag.end) continue;
+                            if (actual_start > pos) {
+                                const seg = arena.dupe(u8, line[pos..actual_start]) catch "";
+                                clay.text(seg, .{ .font_size = self.font_size - 2, .color = theme.text, .wrap_mode = .none });
+                            }
+                            const seg = arena.dupe(u8, line[actual_start..tag.end]) catch "";
+                            clay.text(seg, .{ .font_size = self.font_size - 2, .color = colorFromTag(tag.fg), .wrap_mode = .none });
+                            pos = tag.end;
+                        }
+                        if (pos < line_len) {
+                            const seg = arena.dupe(u8, line[pos..]) catch "";
                             clay.text(seg, .{ .font_size = self.font_size - 2, .color = theme.text, .wrap_mode = .none });
                         }
-                        const seg = arena.dupe(u8, line[actual_start..tag.end]) catch "";
-                        clay.text(seg, .{ .font_size = self.font_size - 2, .color = colorFromTag(tag.fg), .wrap_mode = .none });
-                        pos = tag.end;
+                    } else {
+                        clay.text(line, .{ .font_size = self.font_size - 2, .color = theme.text, .wrap_mode = .none });
                     }
-                    if (pos < line_len) {
-                        const seg = arena.dupe(u8, line[pos..]) catch "";
-                        clay.text(seg, .{ .font_size = self.font_size - 2, .color = theme.text, .wrap_mode = .none });
-                    }
-                } else {
-                    clay.text(line, .{ .font_size = self.font_size - 2, .color = theme.text, .wrap_mode = .none });
-                }
+                });
 
                 start = end + 1;
                 line_idx += 1;
