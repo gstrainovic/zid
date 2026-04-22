@@ -42,8 +42,9 @@ pub const MarkdownView = struct {
     pending_split_v: bool = false,
     pending_split_h: bool = false,
 
-    /// Code block highlighter
+    /// Code block highlighter (cached per language)
     code_highlighter: ?*flow_core.highlight.SyntaxHighlighter = null,
+    code_highlighter_lang: []const u8 = "",
 
     const Self = @This();
 
@@ -73,6 +74,10 @@ pub const MarkdownView = struct {
     pub fn deinit(self: *Self) void {
         if (self.code_highlighter) |hl| {
             hl.destroy();
+        }
+        if (self.code_highlighter_lang.len > 0) {
+            self.allocator.free(self.code_highlighter_lang);
+            self.code_highlighter_lang = "";
         }
         if (self.text.len > 0 and self.text.ptr != "".ptr) {
             self.allocator.free(self.text);
@@ -329,14 +334,24 @@ pub const MarkdownView = struct {
         const lang_name = lang_tag orelse "";
         std.log.debug("md_preview: renderCodeBlock lang='{s}' code_len={d}", .{ lang_name, code.len });
 
-        // Create or reuse highlighter for this language
-        if (self.code_highlighter == null and lang_name.len > 0) {
+        // Create or reuse highlighter for this language — rebuild if language changed
+        const lang_changed = !std.mem.eql(u8, self.code_highlighter_lang, lang_name);
+        if (lang_changed and lang_name.len > 0) {
+            if (self.code_highlighter) |old_hl| {
+                old_hl.destroy();
+                self.code_highlighter = null;
+            }
+            if (self.code_highlighter_lang.len > 0) {
+                self.allocator.free(self.code_highlighter_lang);
+                self.code_highlighter_lang = "";
+            }
             std.log.debug("md_preview: creating highlighter for lang='{s}'", .{lang_name});
             const created = flow_core.highlight.SyntaxHighlighter.create(self.allocator, lang_name) catch |err| {
                 std.log.err("md_preview: highlighter create failed for '{s}': {s}", .{ lang_name, @errorName(err) });
                 return;
             };
             self.code_highlighter = created;
+            self.code_highlighter_lang = self.allocator.dupe(u8, lang_name) catch "";
             std.log.info("md_preview: highlighter created successfully for '{s}'", .{lang_name});
         }
 
