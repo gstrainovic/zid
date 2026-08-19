@@ -1,0 +1,4 @@
+# Auf Linux ausgefuehrt: CRLF wuerde "bad interpreter: /usr/bin/env bash^M" geben.
+* text=auto eol=lf
+*.ps1 text eol=crlf
+*.patch -text
