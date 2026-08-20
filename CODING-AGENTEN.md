@@ -112,6 +112,29 @@ Spielwiese: `~/projects/pi-lokal-test` — eigenes Git-Repo, damit jeder
 Agentenpatzer per `git restore` rückholbar ist. Neue Experimente immer nur
 in Repos mit Git-Historie.
 
+## Härtegrad 2: Mehrdatei-Aufgabe — beide gescheitert (20.08.2026)
+
+Gleiches Setup, härtere Aufgabe: zwei Fehler in zwei Dateien (`rabatt.py`
+mit `>` statt `>=`, `warenkorb.py` gibt den Rabattbetrag statt der
+rabattierten Summe zurück), vier fehlschlagende Tests, Testdatei tabu.
+
+| Modell | Ausgang | Verhalten |
+|---|---|---|
+| Qwen3-4B (P1000) | **gescheitert, sauber** | 3.5 min analysiert, dann kapituliert: erklärt die *Tests* für fehlerhaft — gestützt auf eine halluzinierte Rechnung (40+10 = „14"). Respektiert das Testdatei-Verbot, **ändert nichts**. |
+| Llama-3.2-3B (P1000) | **gescheitert, destruktiv** | Überschreibt nach 3 min `warenkorb.py` mit einer Kopie des Testcodes — Klasse zerstört, Import-Zirkel. `git restore` nötig. |
+
+Die Lehre präzisiert den Benchmark: **10/10 Werkzeugwahl ist notwendig,
+aber nicht hinreichend.** Der Ein-Datei-Fix-Zyklus gelingt (Härtegrad 1);
+sobald die Ursache über einen Import hinweg liegt, kippt die 3–4B-Klasse —
+nicht am Werkzeuggebrauch, sondern am Schlussfolgern und Rechnen über
+Dateigrenzen. Qwen3 scheitert dabei wenigstens gefahrlos (Analyse statt
+Aktion), Llama zerstörend — die 9/10 gegen 10/10 aus dem Benchmark haben
+sich als echter Verhaltensunterschied materialisiert. Deshalb: Experimente
+nur in Git-Repos, und Mehrdatei-Aufgaben dieser Modellklasse nicht
+anvertrauen. Weitere Engine-/Geräte-Kombinationen zu testen ist unnötig:
+`temperature=0` macht das Verhalten geräteunabhängig, die Grenze liegt in
+der Modellklasse.
+
 ## Erwartungshaltung
 
 19 tok/s Generierung heisst: ein typischer Agentenschritt (Antwort mit
