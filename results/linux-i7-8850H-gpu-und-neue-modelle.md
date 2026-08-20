@@ -157,6 +157,34 @@ befolgt, Inhalt falsch, exakt das Fehlerbild von BitNet mit Override aus
 Runde 1. Die Rechenaufgabe lösen erstmals alle Kandidaten einer Runde; Qwen3
 rechnet über 105/3, Phi und Gemma über 7×5.
 
+## Nachtrag: xLAM-2-1B — der Tool-Calling-Spezialist enttäuscht
+
+Nachgemessen am 20.08. abends (TODO aus dem Agenten-Experiment): Salesforce
+xLAM-2-1b-fc-r, ein eigens auf Function-Calling trainiertes Kleinmodell.
+Basis laut Engine-Erkennung: Qwen2.5-1.5B (1.54 B Parameter).
+
+```
+Datei   xLAM-2-1B-fc-r-Q4_K_M.gguf
+sha256  61eeb070aaae78ff1cbb16fecd14e35a624d792cb3592a6116a82dba92285aa3
+Bytes   986048192      Quelle: Salesforce/xLAM-2-1b-fc-r-gguf
+```
+
+| | CPU (t8) | P1000 |
+|---|---|---|
+| pp128 | 132.29 ± 0.21 | 233.35 ± 0.00 |
+| tg64 | 28.98 ± 0.01 | **45.33 ± 0.00** |
+
+Mit Abstand das schnellste Modell des Projekts — und trotzdem keine
+Empfehlung: **Werkzeugwahl 8/10** (eine leere Antwort, eine Verweigerung
+mit der falschen Behauptung, kein Werkzeug passe), also schlechter als die
+Generalisten BitNet/Llama (9/10) und Qwen3/Phi (10/10). Die Stichproben
+sind deutlich: Formatvorgabe missachtet (`Bern` statt `BERN`), die
+Rechenaufgabe grotesk falsch (rechnet 21 × 5 = 105 Franken für 21 Stifte,
+verheddert sich in negativem Wechselgeld), Mehrschritt-Plan bricht nach
+einem Schritt ab. Die Function-Calling-Spezialisierung ersetzt die
+fehlende Allgemeinfähigkeit der 1.5B-Klasse nicht — für Agentenarbeit
+zählt beides.
+
 ## Keine Perplexity in dieser Runde
 
 Absichtlich. Das Korpus-Perplexity-Verfahren vergleicht nur bei identischer

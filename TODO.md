@@ -8,20 +8,22 @@
   Engine-/Geräte-Kombinationen unnötig: temperature=0 macht das Verhalten
   geräteunabhängig, die Grenze ist die Modellklasse.
 
-- [ ] **xLAM durch den Werkzeugwahl-Test jagen.** `xlam-2-1b` liegt im
-  Ollama-Bestand — ein auf Tool-Calling spezialisiertes 1B-Modell
-  (Salesforce xLAM), genau die Lücke im Testfeld. GGUF beschaffen (Hugging
-  Face oder aus dem Ollama-Blob), dann `agent_eval.py` + `probe.py` auf
-  Engine b10524, CPU und P1000.
-- [ ] **Ollama-Modelle (~42 GB) und HF-Cache aufräumen** — Platte ist 88 %
-  voll, und `llama-server` hat Ollama hier ersetzt. Reihenfolge: **erst
-  Liste erstellen** (Modelle, Grössen, was als Inspiration fürs
-  llama.cpp-Setup taugt — Kandidaten: `phi4-mini-16k` als 16k-Kontext-Idee,
-  `qwen3-vl:2b/4b` für Vision, `xlam-2-1b` siehe oben), **dann löschen**.
-  HF-Cache enthält zudem die frühen 1.58-Bit-Experimente
-  (`1bitLLM/bitnet_b1_58-*`, `brunopio/Llama3-8B-1.58`).
-- [ ] **Die drei verstreuten März-Dokumente zusammenführen:**
-  `~/agents/readme.md` (ausführlichstes, mit Qwen3-4B-Pi-Test),
-  `~/projects/agents/PI-PROVIDER-REFERENCE.md` und
-  `PROVIDER-SETUP-COMPLETE.md` → ein Dokument, der Rest wird archiviert.
-  Zielort: `~/projects/agents/`.
+- [x] **xLAM durch den Werkzeugwahl-Test jagen** — 20.08. erledigt:
+  **8/10, keine Empfehlung.** Schnellstes Modell des Projekts (45 tok/s auf
+  der P1000), aber schwächere Werkzeugwahl als die Generalisten und grobe
+  Ausfälle bei Rechnen/Anweisungen. Details im Nachtrag von
+  `results/linux-i7-8850H-gpu-und-neue-modelle.md`.
+- [ ] **Qwen3.5-4B und Qwen3.5-2B testen** (liegen in `~/.lmstudio/models/`,
+  neuer als der Benchmark-Sieger) — bevor LM Studio (23 GB, mit ~11 GB
+  Duplikaten) aufgeräumt wird.
+- [x] **Ollama-Modelle und HF-Cache aufgeräumt** — 20.08. erledigt: 17
+  Ollama-Modelle plus HF-Hub gelöscht, Platte von 91 % auf **79 % (53 GB
+  frei)**. Inventar mit allen Namen und Inspirations-Notizen:
+  `~/projects/agents/modell-inventar-2026-08-20.md`. Nicht angerührt (war
+  nicht im Umfang): `~/.lmstudio/models` mit 23 GB — grösster
+  verbliebener Posten, enthält aber die Qwen3.5-Testkandidaten (siehe
+  unten).
+- [x] **März-Dokumente zusammengeführt** — 20.08. erledigt:
+  `~/projects/agents/lokale-llm-provider-maerz-2026.md` konsolidiert alle
+  drei; Originale und `pi-start` in `~/projects/agents/archiv/`, das
+  Streuverzeichnis `~/agents/` ist aufgelöst.
