@@ -13,7 +13,9 @@ taugen — also Werkzeuge zuverlässig auswählen — denn dort entscheidet sich
 so etwas lokal einen Nutzen hat.
 
 Der Referenzlauf steht in [`results/windows-i5-13500T.md`](results/windows-i5-13500T.md),
-der zweite Lauf in [`results/linux-i7-8850H.md`](results/linux-i7-8850H.md).
+der zweite Lauf in [`results/linux-i7-8850H.md`](results/linux-i7-8850H.md),
+die zweite Runde auf dem Laptop (GPU und aktuelle Q4-Modelle) in
+[`results/linux-i7-8850H-gpu-und-neue-modelle.md`](results/linux-i7-8850H-gpu-und-neue-modelle.md).
 **Das Projekt ist abgeschlossen** (20.08.2026); weitere Läufe sind nicht
 geplant.
 
@@ -30,6 +32,23 @@ BitNet ist schnell **und** für Werkzeugwahl brauchbar — gleichauf mit dem
 sauber gebaut und rechnet korrekt, aber die grossen Modelle, für die es
 existiert, passen auf solche Maschinen nicht auf die Platte (GLM-5.2 int4:
 372 GB); mit einem 7-B-Modell greift sein Streaming-Konzept gar nicht.
+
+## Zweite Runde: GPU und aktuelle Q4-Modelle (nur i7-8850H)
+
+Der Laptop hat eine Quadro P1000 (4 GB, Vulkan) — und die dreht das Ergebnis:
+
+| Modell | Gerät | tg64 | richtiges Werkzeug |
+|---|---|---|---|
+| Llama-3.2-3B Q4_K_M | **P1000** | **24.1 tok/s** | 9/10 |
+| BitNet-b1.58-2B-4T i2_s | CPU | 22.4 tok/s | 9/10 |
+| Qwen3-4B-2507 Q4_K_M | **P1000** | 19.3 tok/s | **10/10** |
+| Qwen3-4B-2507 / Phi-4-mini / Gemma-3-4B | CPU | 9.6–10.0 tok/s | 10 / 10 / 8 von 10 |
+
+Mit brauchbarer diskreter GPU ist BitNet nicht mehr die schnellste Option;
+auf reinen CPU-Maschinen bleibt es unangefochten. Qwen3-4B holt als erstes
+Modell 10/10 Werkzeugwahl. Die iGPU (UHD 630) ist mit 4.2–4.6 tok/s
+unbrauchbar. Details und Engine-Kennungen in
+[`results/linux-i7-8850H-gpu-und-neue-modelle.md`](results/linux-i7-8850H-gpu-und-neue-modelle.md).
 
 > **Zwei Dinge sind nicht optional, sonst misst man Unsinn.**
 >
@@ -57,7 +76,7 @@ bench/
   windows/         die PowerShell-Fassungen des ersten Laufs
 patches/           ein nötiger Fix an BitNet, mit Begründung
 setup/linux.sh     baut beides, pinnt die Engine, prüft Modell und Engine
-results/           je Maschine eine Datei
+results/           je Lauf eine Datei
 CLAUDE.md          Betriebswissen und getroffene Entscheidungen
 ```
 

@@ -2,9 +2,12 @@
 
 ## Projektstand: abgeschlossen (20.08.2026)
 
-Zwei Läufe, beide vollständig in `results/`: Windows i5-13500T (Referenz) und
-Linux i7-8850H. Die Fragen des Projekts — wie schnell und wie brauchbar sind
-BitNet und colibri auf kleiner CPU-Hardware — sind beantwortet. **Es sind keine
+Drei Läufe, alle vollständig in `results/`: Windows i5-13500T (Referenz),
+Linux i7-8850H (CPU-Runde) und die zweite Laptop-Runde (GPU via Vulkan plus
+Qwen3-4B, Phi-4-mini, Gemma-3-4B). Die Fragen des Projekts sind beantwortet;
+Kernbefund der zweiten Runde: mit der Quadro P1000 des Laptops ist Llama-Q4
+auf der GPU (24.1 tok/s) schneller als BitNet auf der CPU (22.4), und
+Qwen3-4B erreicht als erstes Modell 10/10 Werkzeugwahl. **Es sind keine
 weiteren Läufe geplant.** Dieses Dokument ersetzt das frühere `HANDOFF.md`; es
 enthält das Betriebswissen für den Fall, dass doch noch einmal gemessen wird,
 und die Entscheidungen, die nicht erneut aufgerollt werden.
@@ -62,6 +65,21 @@ Perplexity nur mit `bench/ppl-corpus.txt` (sha256
 `e38278b03fa41f75d843cea8125ab5819ff685304ab13b6feb62a1abc848f2f5`, 115031
 Bytes) bei `-c 512` — sonst nicht vergleichbar.
 
+### Zwei Engines, feste Zuordnung
+
+Seit der zweiten Laptop-Runde gibt es eine zweite Engine: llama.cpp Tag
+`b10524` (Commit `9ee9fc04c136ef2ae729bfc60d18961b23c13ddf`), Build mit
+`GGML_VULKAN=ON` unter `~/ki/llama.cpp-vulkan/`. Sie existiert, weil die
+gepinnte b3962 die Architekturen von Qwen3, Phi-4 und Gemma-3 nicht kennt
+und kein taugliches Vulkan hat. Die Zuordnung ist fest:
+
+- **BitNet i2_s → nur die gepinnte BitNet-Engine** (`~/ki/BitNet`). Auf der
+  neuen Engine ist i2_s kaputt (der `Q1_0`-Defekt aus Abschnitt oben).
+- **Qwen3/Phi-4/Gemma-3 → nur b10524**, CPU wie GPU.
+- **Llama-3.2-3B läuft auf beiden** und dient als Brücke: tg64 13.64 (b3962)
+  gegen 12.22 (b10524), pp128 36.73 gegen 49.30 — Zahlen über die
+  Engine-Grenze hinweg nie ohne diese Verschiebung vergleichen.
+
 ## Ausserhalb des Rahmens — Entscheidungen des Projektinhabers (20.08.2026)
 
 - **Keine Fehlerberichte an fremde Projekte.** Die zwei belegten Defekte der
@@ -71,9 +89,13 @@ Bytes) bei `-c 512` — sonst nicht vergleichbar.
   colibri und jedes andere fremde Repo — bitte nicht erneut vorschlagen.
 - **Keine Läufe auf weiterer Hardware.** Der Wunsch nach einem dritten Lauf auf
   einer AVX512-Maschine ist gestrichen; es bleibt bei den zwei vorhandenen
-  Maschinen. Damit es auch niemand mit einer GPU versucht: **eine NVIDIA-GPU
-  nützt hier nichts.** Die i2_s-Kernel in diesem Build sind CPU-only; BitNets
-  `gpu/`-Pfad ist ein eigenes Projekt (eigene Konvertierung, `compute_80`) und
+  Maschinen. Die GPUs des Laptops sind inzwischen gemessen (siehe
+  `results/linux-i7-8850H-gpu-und-neue-modelle.md`): die Quadro P1000 lohnt
+  sich für Q4-Modelle via Vulkan, die UHD 630 ist unbrauchbar und wird nicht
+  erneut angefasst. Unverändert gilt: **für BitNet und colibri nützt eine GPU
+  nichts** — die i2_s-Kernel sind CPU-only, BitNets `gpu/`-Pfad ist ein
+  eigenes Projekt (eigene Konvertierung, `compute_80`; die P1000 ist
+  `compute_61`, das CUDA-13-Toolkit kann Pascal ohnehin nicht mehr) und
   colibris CUDA-Backend lädt laut `docs/cuda.md` nur residente Tensoren.
 - **Kein weiterer Windows-Lauf.** Die dort fehlende Perplexity-Messung entfällt
   bewusst: Perplexity misst Modell und Engine, nicht die Hardware. Bei
