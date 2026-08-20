@@ -1,353 +1,185 @@
-# Handoff — Linux-Lauf auf i7-8850H (Fedora 43)
+# Handoff — Stand 20.08.2026
 
-Stand: 19.08.2026. Geschrieben zur Übergabe an den nächsten Agenten.
+Gerichtet an den nächsten Lauf, gleich auf welcher Maschine. Ersetzt den
+Handoff vom 19.08., der zur Übergabe des ersten Linux-Laufs geschrieben wurde
+und inzwischen überholt ist; sein Inhalt steckt in `results/linux-i7-8850H.md`
+und in den unten genannten Korrekturen.
 
-Der Lauf ist **nicht abgeschlossen**. Er hat aber einen Befund ergeben, der
-wichtiger ist als die Zahlen: `setup/linux.sh` baut in seiner jetzigen Fassung
-eine Engine, die BitNet-Gewichte falsch liest. Wer die Messung fortsetzt, muss
-das zuerst verstehen, sonst misst er Unsinn.
-
----
-
-## 1. Kernbefund: die Engine ist nicht gepinnt, und der aktuelle Stand ist kaputt
-
-`setup/linux.sh` klont `microsoft/BitNet` ohne Revisionsangabe. Heute liefert das
-einen anderen Stand als zur Zeit des Windows-Referenzlaufs:
-
-| | Windows-Referenz (laut `patches/README.md`) | heutiger Klon |
-|---|---|---|
-| BitNet-Commit | `01eb415` (10.03.2026) | `0b341e5` (27.07.2026) |
-| llama.cpp-Submodul | `1f86f058` (b3639) | `390c3077` (b9918) |
-| Submodul-Branch | — | `release-bitnet-embedding-0.6b-270m` |
-
-Der Submodul-Zeiger steht heute auf einem Fork-Branch, der nach einem **anderen
-Modell** benannt ist (0.6B-Embedding).
-
-### Der Beweis
-
-Entscheidend ist das **Verhalten**, gemessen mit derselben Modelldatei, demselben
-Testgeschirr, auf derselben Maschine:
-
-| | Engine `390c3077` (heute) | Engine `1f86f058` (Referenz) |
-|---|---|---|
-| „What is the capital of France?" | korrekte Antwort, dann **Endlosschleife**, `finish: length` | `'The capital of France is Paris.'`, `finish: stop` |
-| Korrekturen nötig? | Template **und** Pre-Tokenizer überschrieben — half nicht | **keine**, unverändertes GGUF |
-| `agent_eval.py` | 1/10 JSON, 0/10 Werkzeug | 9/10 JSON, 4/10 Werkzeug |
-
-Bei `temperature=0` ist Dekodierung deterministisch; `-t 1`, `-t 2` und `-t 4`
-liefern auf derselben Engine zeichengleiche Ausgabe. Ein Hardware-Einfluss auf
-die *Qualität* ist damit ausgeschlossen. Bleibt die Engine.
-
-**Ein schwächeres Indiz**, das nicht überstrapaziert werden sollte: `llama-bench`
-beschriftet den Tensortyp je nach Engine verschieden — `I2_S - 2 bpw ternary` auf
-`1f86f058`, `Q1_0` auf `390c3077`. Die dort ebenfalls abweichenden Größen- und
-Parameterangaben (1.71 GiB / 2.74 B gegen 1.10 GiB / 2.41 B) sind allerdings
-**kein** Beleg für falsch gelesene Gewichte: `llama-server` und
-`llama-perplexity` melden auf *beiden* Engines übereinstimmend 1.10 GiB / 2.41 B.
-Die Abweichung ist ein Anzeigefehler von `llama-bench`, nicht des Modells.
-Die genaue Ursache im Ladepfad ist **nicht ermittelt** — das ist offene Arbeit.
-
-### Was das für die Messwerte bedeutet
-
-| Messung | Engine `390c3077` (heute) | Engine `1f86f058` (Referenz) | Windows-Referenz |
-|---|---|---|---|
-| gültiges JSON | 1 / 10 | **9 / 10** | 9 / 10 |
-| richtiges Werkzeug | 0 / 10 | **4 / 10** | 4 / 10 |
-| Perplexity (eigenes Korpus) | 41.75 ± 1.26 | *läuft noch, s. u.* | — |
-
-Auf der Referenz-Engine reproduziert dieser Laptop den Windows-Lauf **exakt** —
-nicht nur die Zahlen, sondern die Fehlerbilder: `read__file`, `write_ file`, der
-wörtlich übernommene Platzhalter `<one of the five names above>`. Genau die
-Beispiele aus `results/windows-i5-13500T.md`.
-
-**Schlussfolgerung: Die Hardware ist in Ordnung. Der Laptop ist schneller als die
-Referenzmaschine. Kaputt ist allein die heute geklonte Engine.**
+Zwei Läufe sind abgeschlossen und liegen in `results/`. Der Branch des
+Linux-Laufs ist nach `main` gemerged, seine Befunde sind auf Windows
+nachgeprüft. Was jetzt noch offen ist, steht unter „Offene Punkte".
 
 ---
 
-## 2. Was gemessen ist
+## 1. Was du wissen musst, bevor du irgendetwas misst
 
-### Maschine
+Beide Punkte haben je einen halben Messtag gekostet. Sie sind in
+`setup/linux.sh` automatisiert, aber wer von Hand baut, muss sie kennen.
 
-| | |
-|---|---|
-| CPU | Intel Core i7-8850H — 6 Kerne / 12 Threads, 2.6 GHz Basis, 4.3 GHz Turbo, Coffee Lake |
-| Befehlssätze | AVX2, FMA, F16C — **kein** AVX-VNNI, **kein** AVX512 |
-| RAM | 46 GB |
-| GPU | Intel UHD 630 + NVIDIA Quadro P1000 Mobile — **ungenutzt**, alles auf der CPU |
-| Platte | 246 GB, davon beim Start 43 GB frei (nach Setup + Referenz-Build: 31 GB) |
-| OS | Fedora 43, Kernel 7.1.8-100.fc43.x86_64 |
-| Toolchain | clang 21.1.8, cmake 3.31.11, ninja 1.13.1, Python 3.14.3 |
-
-### Durchsatz BitNet-b1.58-2B-4T i2_s
-
-`llama-bench -p 128 -n 64 -r 2`, ohne `--no-mmap` (auf Linux nicht nötig).
-
-Auf der **Referenz-Engine** `1f86f058` — das sind die gültigen Zahlen:
-
-| Threads | pp128 | tg64 |
-|---|---|---|
-| 4 | 133.04 ± 0.72 | **22.44 ± 0.02** |
-| 8 | 147.60 ± 1.05 | 22.09 ± 0.19 |
-| 12 | **175.38 ± 1.17** | 22.25 ± 0.01 |
-
-Zum Vergleich Windows i5-13500T: bestes tg64 **8.93**, bestes pp128 **95.5**.
-Also rund **2.5× schnellere Generierung** und **1.8× schnellerer Prompt** auf
-diesem Laptop.
-
-Bemerkenswert gegenüber der Windows-Beobachtung: Auf dieser CPU **schadet mehr
-Threads der Generierung nicht** — tg64 bleibt von 4 bis 12 Threads flach bei
-~22 tok/s. Der Windows-Bericht sah einen Einbruch von einem Drittel. Plausible
-Erklärung: Der i5-13500T ist eine Hybrid-CPU (P- und E-Cores), der i7-8850H hat
-sechs gleichartige Kerne. Das ist ein echter Hardware-Unterschied und gehört so
-ins Ergebnis.
-
-Auf der kaputten Engine `390c3077` gemessen (**nicht verwenden**, nur zur
-Dokumentation): tg64 21.74 / 23.72 / 22.59 / 13.34 bei 4 / 8 / 12 / 16 Threads,
-pp128 110.40 / 108.01 / 141.17 / 76.80. Die Zahlen sehen plausibel aus — das ist
-die Falle: Der Durchsatz wirkt normal, obwohl das Modell Unsinn erzeugt.
-
-### Perplexity
-
-Eigenes Korpus, kein wikitext: 115 KB englische Fließtexte aus den `.md`-Dateien
-von llama.cpp und BitNet, Markdown-Zeilen entfernt. Datei liegt unter
-`$SCRATCH/ppl-corpus.txt` (s. Abschnitt 5) und **muss für Vergleichbarkeit
-identisch wiederverwendet werden** — absolute Zahlen sind nicht mit
-veröffentlichten wikitext-Werten vergleichbar, nur untereinander.
-
-`-c 512`, 61 Chunks, `-t 8`:
-
-| Modell | Engine | Chunks | PPL |
-|---|---|---|---|
-| Llama-3.2-3B-Instruct Q4_K_M | `390c3077` | 61 | **8.86 ± 0.21** |
-| BitNet-b1.58-2B-4T i2_s | `390c3077` (kaputt), mit Pre-Tokenizer-Override | 61 | 41.75 ± 1.26 |
-| BitNet-b1.58-2B-4T i2_s | `1f86f058` (Referenz), ohne Override | 74 | **offen — Lauf war beim Feierabend aktiv** |
-
-> **Diese drei Zahlen sind nicht direkt vergleichbar.** Die Chunk-Zahl
-> unterscheidet sich (61 gegen 74), weil verschieden tokenisiert wurde — mit
-> beziehungsweise ohne `--override-kv tokenizer.ggml.pre=str:llama-bpe`. Andere
-> Tokenisierung heisst anderes Chunking heisst andere Perplexity. Wer die Zahlen
-> ernsthaft nebeneinanderstellen will, muss **alle** Läufe mit identischer
-> Tokenizer-Einstellung wiederholen. Bis dahin taugen sie nur als grobe
-> Grössenordnung.
-
-Zwischenstand des offenen Laufs bei Chunk 12: 41.4 — die kaputte Engine stand an
-derselben Stelle bei 86.9, also etwa doppelt so hoch. Endwert in
-`$SCRATCH/ppl-bitnet-refengine.log` nachlesen.
-
-Llama lief auf der neuen Engine. Vermutlich unbedenklich, weil der Defekt die
-i2_s-Tensoren betrifft und nicht Q4_K_M — **geprüft ist das nicht**. Für einen
-sauberen Bericht gehört Llama auf dieselbe Engine wie BitNet.
-
-### Werkzeugwahl
-
-Volles Protokoll beider Läufe: `$SCRATCH/bitnet-agent-refengine.log` (Referenz-Engine,
-9/10 und 4/10) und `$SCRATCH/bitnet-agent-fixed.log` (neue Engine, 1/10 und 0/10).
-
----
-
-## 3. Was noch komplett fehlt
-
-1. **colibri / OLMoE — gar nicht gemessen.** Weder `bench/olmoe_eval.py` noch
-   `bench/olmoe_speed.py` lief. Das ist ein Drittel des Benchmarks. Das Setup ist
-   fertig: `~/ki/colibri/c/olmoe` gebaut, `~/ki/colibri/olmoe_merged` konvertiert
-   (7.2 GB, fünf Shards).
-2. **`bench/probe.py`** — für kein Modell gelaufen.
-3. **`agent_eval.py` für Llama-3.2-3B** — nicht gelaufen. Windows-Referenz: 9/10.
-4. **BitNet-Perplexity auf der Referenz-Engine** — s. o.
-5. **`results/linux-i7-8850H.md`** — noch nicht geschrieben. Erst schreiben, wenn
-   die Zahlen von der *richtigen* Engine stammen.
-6. **`--compact-system`-Gegenprobe** (die Leerzeilen-Empfindlichkeit aus dem
-   Windows-Bericht) — nicht nachgestellt.
-
----
-
-## 4. Defekte, die unabhängig vom Engine-Problem gefunden wurden
-
-Diese vier sind real und gehören ins Ergebnis, auch wenn sie nicht die Ursache
-der Degeneration waren.
-
-### 4.1 `setup/linux.sh` baut die Programme nicht
-
-Nach `./setup/linux.sh ~/ki` existierten in `build/bin/` nur die Bibliotheken —
-kein `llama-cli`, kein `llama-server`, kein `llama-bench`. Die aktuelle llama.cpp
-setzt `LLAMA_BUILD_TOOLS`, `LLAMA_BUILD_EXAMPLES` und `LLAMA_BUILD_COMMON` auf
-`${LLAMA_STANDALONE}`, also **OFF**, wenn sie als Submodul gebaut wird. BitNets
-`CMakeLists.txt` erzwingt nur `LLAMA_BUILD_SERVER`.
-
-Behelf (so wurde hier gebaut):
-
-```bash
-cmake -B build -DLLAMA_BUILD_COMMON=ON -DLLAMA_BUILD_TOOLS=ON -DLLAMA_BUILD_EXAMPLES=ON
-cmake --build build -j "$(nproc)"
-```
-
-Auf der Referenz-Engine `1f86f058` tritt das Problem nicht auf — dort war die
-Vorgabe noch anders. Es ist also eine Folge desselben ungepinnten Klons.
-
-### 4.2 Das GGUF trägt ein kaputtes Chat-Template
-
-Das in `ggml-model-i2_s.gguf` eingebackene Template weicht von Microsofts eigenem
-`tokenizer_config.json` ab:
-
-| Quelle | Format |
-|---|---|
-| offiziell (`microsoft/bitnet-b1.58-2B-4T`) | `System: …<\|eot_id\|>User: …<\|eot_id\|>Assistant: ` |
-| im GGUF | `Human: …\n\nBITNETAssistant: <\|end_of_text\|>` |
-
-Falsche Rollennamen, falscher Separator — und ein EOS-Token genau an der Stelle,
-wo die Antwort beginnen soll. Über `/apply-template` nachprüfbar.
-
-Das korrigierte Template liegt als `$SCRATCH/bitnet-official.jinja`; anwenden mit
-`--jinja --chat-template-file <datei>`.
-
-**Wichtig:** Auf der Referenz-Engine `1f86f058` spielt das keine Rolle — die ist
-älter als llama.cpps Jinja-Pfad und benutzt ihre eingebaute Behandlung. Sie
-liefert mit dem **unveränderten** GGUF und **ohne** jeden Override sauberes
-`finish: stop`. Das Template ist also ein echter Defekt der GGUF-Auslieferung,
-aber für den Referenzlauf ohne Folgen.
-
-### 4.3 Dem GGUF fehlt die Pre-Tokenizer-Angabe
-
-Beim Laden: `missing pre-tokenizer type, using: 'default'`. Für einen
-Llama-3-BPE-Tokenizer ist `default` falsch. Auswirkung, nachgemessen:
-
-| | `read_file` zerlegt zu |
-|---|---|
-| ohne Korrektur | `read` + `_` + `file` — 3 Token `[888, 62, 1213]` |
-| mit `--override-kv tokenizer.ggml.pre=str:llama-bpe` | `read` + `_file` — 2 Token `[888, 2517]` |
-
-Das ist die wahrscheinliche Ursache der zerfallenen Werkzeugnamen (`read__file`,
-`write_ file`), die schon der Windows-Bericht beschreibt. **Die Vermutung ist
-nicht bewiesen** — auf der Referenz-Engine wurde die Korrektur nicht gegengetestet.
-Das wäre ein lohnendes Experiment: Referenz-Engine **plus**
-`--override-kv tokenizer.ggml.pre=str:llama-bpe`, dann `agent_eval.py`. Steigt
-die Werkzeugquote über 4/10, ist ein Teil dessen, was der Windows-Bericht dem
-Modell zuschreibt, in Wahrheit ein Metadaten-Defekt der GGUF-Datei.
-
-### 4.4 BitNets CMake kompiliert seinen eigenen Kernel nicht
-
-`src/CMakeLists.txt`, Zeilen 2–3:
-
-```cmake
-set(GGML_SOURCES_BITNET ggml-bitnet-mad.cpp)
-set(GGML_SOURCES_BITNET ggml-bitnet-lut.cpp)   # überschreibt, statt anzuhängen
-```
-
-Das zweite `set` ersetzt das erste. `ggml-bitnet-mad.cpp` landet in keinem
-Build — bestätigt über `compile_commands.json`. Der Fehler steckt in `01eb415`
-**und** in `0b341e5`, ist also alt und nicht die Ursache des Problems.
-
-Nebenfolge: Der Patch `patches/bitnet-mad-const-y_col.patch` korrigiert eine
-Datei, die gar nicht übersetzt wird. Er wurde von `setup/linux.sh` sauber
-angewendet, aber die Begründung in `patches/README.md` — ohne ihn breche die
-Übersetzung ab — trifft für diese Konfiguration (`BITNET_X86_TL2=OFF`) nicht zu.
-Sollte nachgeprüft und im Text richtiggestellt werden.
-
-### 4.5 Nebenbefund: der Kernel-Header wird nicht mehr erzeugt
-
-`include/bitnet-lut-kernels.h` ist seit `3b04140` im Repo eingecheckt (1171
-Zeilen). `setup/linux.sh` erzeugt ihn nur, `if [ ! -f ... ]` — der Codegen-Schritt
-wird also stillschweigend übersprungen und der eingecheckte Header verwendet.
-Hier folgenlos, weil der gesamte Header in `#if defined(GGML_BITNET_X86_TL2)`
-steht und mit `-DBITNET_X86_TL2=OFF` inert ist. Bei einem TL2-Build wäre das eine
-Falle.
-
----
-
-## 5. Wo alles liegt
-
-Alles Wichtige wurde aus dem flüchtigen `/tmp` gerettet nach:
+### Die Engine ist gepinnt, und das ist keine Vorsicht
 
 ```
-~/ki/bench-artifacts/
+BitNet             01eb415772c342d9f20dc42772f1583ae1e5b102
+llama.cpp-Submodul 1f86f058de0c3f4098dedae2ae8653c335c868a1   (b3962)
 ```
 
-Dort liegen Korpus, Template, Build-Skript und sämtliche Protokolle. Im Text
-unten steht `$SCRATCH` für dieses Verzeichnis.
+Der heutige Stand von `microsoft/BitNet` zeigt mit seinem Submodul auf einen
+Fork-Branch (`release-bitnet-embedding-0.6b-270m`), benannt nach einem anderen
+Modell. Damit ist BitNet-b1.58-2B-4T unbenutzbar: korrekte Antwort, dann
+Endlosschleife, Perplexity ×3.7, Werkzeugwahl 0/10.
 
-Besonders wichtig: `ppl-corpus.txt` — ohne exakt diese Datei sind die
-Perplexity-Zahlen nicht mehr vergleichbar; und `bitnet-official.jinja`, das
-korrigierte Chat-Template.
-
-| Datei | Inhalt |
-|---|---|
-| `ppl-corpus.txt` | Perplexity-Korpus, 115 KB — **aufheben** |
-| `bitnet-official.jinja` | korrigiertes Chat-Template — **aufheben** |
-| `bitnet-agent-refengine.log` | 9/10, 4/10 auf Referenz-Engine |
-| `bitnet-agent-fixed.log` | 1/10, 0/10 auf neuer Engine |
-| `bitnet-agent.log` | 0/10, 0/10 — neue Engine, ohne Korrekturen |
-| `bench-refengine.log` | llama-bench, Referenz-Engine |
-| `bitnet-bench.log` | llama-bench, neue Engine |
-| `ppl-bitnet-refengine.log` | BitNet-PPL auf Referenz-Engine (Lauf war aktiv) |
-| `build-ref.sh` / `build-ref.log` | Skript und Protokoll des Referenz-Builds |
-| `setup.log` | Protokoll von `setup/linux.sh` |
-
-Builds:
-
-| Pfad | Stand |
-|---|---|
-| `~/ki/BitNet` | `0b341e5` + Submodul `390c3077` — **kaputt für i2_s** |
-| `~/ki/BitNet-ref` | `01eb415` + Submodul `1f86f058` — **die brauchbare Engine** |
-| `~/ki/colibri` | gebaut, `olmoe_merged` konvertiert, ungemessen |
-
-Modelle liegen nur unter `~/ki/BitNet/models/` und werden von `~/ki/BitNet-ref`
-über absolute Pfade mitbenutzt.
-
-Die Modelldatei ist geprüft und echt:
-
-```
-sha256  4221b252fdd5fd25e15847adfeb5ee88886506ba50b8a34548374492884c2162
-size    1187801280
-```
-
-identisch mit dem, was die HF-API für `microsoft/BitNet-b1.58-2B-4T-gguf`
-ausweist. **Das Modell ist als Fehlerquelle ausgeschlossen.**
-
----
-
-## 6. Empfohlene nächste Schritte
-
-1. **BitNet-PPL auf der Referenz-Engine** abschließen (`$SCRATCH/ppl-bitnet-refengine.log`).
-2. **colibri/OLMoE messen** — `olmoe_eval.py` und `olmoe_speed.py`. Fehlt bislang
-   vollständig.
-3. **Llama-3.2-3B** auf der Referenz-Engine: `agent_eval.py`, `probe.py`,
-   `llama-bench`, Perplexity. Damit stehen alle Zahlen auf einer Engine.
-4. **`probe.py`** für alle drei Modelle.
-5. **Gegenprobe aus 4.3:** Referenz-Engine plus Pre-Tokenizer-Override. Könnte
-   einen Teil von BitNets „Syntaxschwäche" als GGUF-Metadatenfehler entlarven.
-6. **`results/linux-i7-8850H.md` schreiben** — mit der ausdrücklichen Angabe,
-   welche Engine benutzt wurde, weil das hier den Ausschlag gibt.
-7. **`setup/linux.sh` reparieren:** Commit **und** Submodul pinnen
-   (`01eb415` / `1f86f058`), die drei `LLAMA_BUILD_*`-Optionen ergänzen. Ohne Pin
-   ist das Repo nicht reproduzierbar — der Kern dieses Handoffs.
-8. **`README.md` und `patches/README.md` nachziehen**, sobald 4.4 geklärt ist.
-
-### Reproduktion des Referenz-Setups
-
-```bash
-# Engine, die BitNet korrekt lädt
-git clone --recursive https://github.com/microsoft/BitNet.git ~/ki/BitNet-ref
-cd ~/ki/BitNet-ref
-git checkout 01eb415
-git submodule update --init --recursive     # holt llama.cpp 1f86f058
-git apply ~/projects/bitnet-colibri-bench/patches/bitnet-mad-const-y_col.patch
-python3 utils/codegen_tl2.py --model bitnet_b1_58-3B \
-    --BM 160,320,320 --BK 96,96,96 --bm 32,32,32
-cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBITNET_X86_TL2=OFF \
-    -DLLAMA_CURL=OFF -DLLAMA_BUILD_COMMON=ON -DLLAMA_BUILD_TOOLS=ON \
-    -DLLAMA_BUILD_EXAMPLES=ON -DLLAMA_BUILD_SERVER=ON
-cmake --build build -j 6
-```
-
-Fertiges Skript: `$SCRATCH/build-ref.sh`.
-
-**Prüfung, ob die Engine taugt** — vor jeder Messung:
+**Der Durchsatz bleibt dabei unauffällig** — 21–24 tok/s, plausible Zahlen. Wer
+nur Geschwindigkeit misst, merkt nichts. Deshalb vor jeder Messung:
 
 ```bash
 ./build/bin/llama-bench -m <i2_s.gguf> -p 8 -n 8 -r 1
 ```
 
-Steht in der Modellspalte `I2_S - 2 bpw ternary` mit **1.71 GiB / 2.74 B**, ist
-alles richtig. Steht dort `Q1_0` mit **1.10 GiB / 2.41 B**, liest die Engine die
-Gewichte falsch und jede weitere Zahl ist wertlos.
+`I2_S - 2 bpw ternary` in der Modellspalte heisst brauchbar. `Q1_0` heisst: nicht
+messen. (Die dort ebenfalls abweichenden Grössenangaben sind ein Anzeigefehler
+von `llama-bench`, kein Defekt — `llama-server` meldet auf beiden Engines
+übereinstimmend 1.10 GiB / 2.41 B.)
+
+### BitNet braucht den Pre-Tokenizer-Override
+
+```
+--override-kv tokenizer.ggml.pre=str:llama-bpe
+```
+
+Dem ausgelieferten GGUF fehlt das Feld. llama.cpp nimmt `default`, richtig wäre
+`llama-bpe`. Ohne den Override zerfällt `read_file` in `read`+`_`+`file`, das
+Modell setzt Werkzeugnamen aus Bruchstücken zusammen und verschreibt sich. Die
+Trefferquote fällt von 8–9/10 auf 4/10, die Perplexity steigt.
+
+Das gilt **nur für BitNet**. Llama-3.2-3B ist nicht betroffen.
+
+---
+
+## 2. Was gemessen ist
+
+| | Windows i5-13500T | Linux i7-8850H |
+|---|---|---|
+| BitNet tg64 / pp128 | 8.93 / 95.5 | 22.44 / 175.4 |
+| Llama-3B tg64 / pp128 | 6.68 / 28.4 | 13.64 / 36.7 |
+| OLMoE (colibri) | 4.21 | 11.94 |
+| BitNet Werkzeug (mit Override) | 8/10 | 9/10 |
+| Llama-3B Werkzeug | 9/10 | 9/10 |
+| OLMoE Werkzeug | 4/10 | 4/10 |
+| Perplexity (eigenes Korpus) | — | BitNet 11.19, Llama 8.86 |
+| Stichproben `probe.py` | alle drei | alle drei |
+
+Beide Läufe benutzen nachweislich dieselbe Modelldatei:
+
+```
+sha256 4221b252fdd5fd25e15847adfeb5ee88886506ba50b8a34548374492884c2162
+size   1187801280
+```
+
+---
+
+## 3. Offene Punkte
+
+Nach Nutzen sortiert.
+
+### 3.1 Zwei Fehlerberichte an microsoft/BitNet
+
+Beides ist reproduzierbar belegt und betrifft alle Nutzer der veröffentlichten
+Dateien. Noch nicht gemeldet.
+
+- **Fehlendes `tokenizer.ggml.pre` im GGUF.** Entwertet die Datei für
+  Werkzeugaufgaben; die Korrektur ist ein einzelnes Metadatenfeld. Belege:
+  `results/linux-i7-8850H.md` und `results/windows-i5-13500T.md`, jeweils
+  Abschnitt zur Werkzeugwahl.
+- **Kaputtes Chat-Template im GGUF.** Eingebacken ist
+  `Human: …\n\nBITNETAssistant: <|end_of_text|>`, Microsofts eigenes
+  `tokenizer_config.json` definiert
+  `System: …<|eot_id|>User: …<|eot_id|>Assistant: `. Falsche Rollennamen,
+  falscher Separator, EOS-Token genau dort, wo die Antwort beginnt. Auf der
+  gepinnten Engine folgenlos (sie ist älter als llama.cpps Jinja-Pfad), auf
+  neueren Engines schlägt es voll durch.
+
+### 3.2 Warum die neue Engine i2_s zerlegt
+
+Der Ladepfad ist nicht untersucht. Für einen brauchbaren Fehlerbericht nötig,
+und die interessanteste technische Frage im ganzen Projekt: irgendwo zwischen
+b3962 und b9918 hat sich das Lesen der ternären Tensoren geändert.
+
+### 3.3 Perplexity auf Windows
+
+Fehlt komplett. Der Linux-Lauf hat ein eigenes Korpus gebaut (115 KB
+englischer Fliesstext aus `.md`-Dateien von llama.cpp und BitNet, 61 Chunks bei
+`-c 512`), das unter `~/ki/bench-artifacts/ppl-corpus.txt` auf dem Laptop liegt.
+
+**Ohne exakt diese Datei sind die Zahlen nicht vergleichbar.** Sie gehört ins
+Repo, sonst ist der Vergleich beim nächsten Lauf verloren — 115 KB sind
+vertretbar. Wer das erledigt: Datei nach `bench/ppl-corpus.txt` legen, in
+`.gitignore` ausnehmen und in beiden `results/`-Dateien den Pfad nachziehen.
+
+### 3.4 Die ±1-Abweichung bei der Werkzeugwahl
+
+Windows 8/10 gegen Linux 9/10, gleiche Engine, bytegleiches Modell, dieselbe
+Zusatzaufgabe (Nr. 4). Zwei Erklärungen wurden geprüft und **beide scheiden
+aus**: der Prompttext (nachgerechnet zeichengleich, durch
+`bench/test_prompts.py` gesichert) und AVX-VNNI (eigens eine Engine mit
+`-mno-avxvnni` gebaut, `AVX_VNNI = 0` bestätigt, Ergebnis unverändert 8/10).
+
+Übrig als Kandidaten: verschiedene Compiler (clang 22.1.7 MinGW gegen clang
+21.1.8 Fedora), Optimierung, Mathematikbibliothek. Praktisch belanglos — eine
+Aufgabe an einem knappen Logit — aber als Warnung notiert: Werkzeugquoten können
+zwischen Maschinen um ±1 schwanken, auch bei identischem Modell und identischer
+Engine. Wer es weiterverfolgen will, vergleicht die Logits der betroffenen
+Aufgabe direkt statt der Endergebnisse.
+
+### 3.5 Ein dritter Lauf wäre aussagekräftig
+
+Beide bisherigen CPUs haben AVX2, aber **kein AVX512**. Eine Maschine mit
+AVX512 (Zen 4/5, Xeon, Ice Lake und neuer) würde zeigen, ob BitNets Vorsprung
+gegen Q4 mit breiteren Vektoren wächst oder schrumpft. Das ist die grösste
+offene Wissenslücke.
+
+Ebenfalls unbeantwortet: **eine NVIDIA-GPU nützt hier nichts.** Die i2_s-Kernel
+in diesem Build sind CPU-only; BitNets `gpu/`-Pfad ist ein eigenes Projekt
+(eigene Konvertierung, `compute_80`, also Ampere aufwärts) und colibris
+CUDA-Backend lädt laut `docs/cuda.md` nur residente Tensoren, nicht die
+gestreamten Experten. Wer eine GPU testen will, misst damit llama.cpp mit
+Q4-Modellen — nicht BitNet.
+
+---
+
+## 4. Was nicht mehr offen ist
+
+Damit es niemand erneut aufrollt:
+
+- **`ggml-bitnet-mad.cpp` wird übersetzt.** Der Linux-Lauf hatte das bestritten
+  (doppeltes `set()` in `src/CMakeLists.txt` überschreibe die Quellenliste) und
+  daraus geschlossen, `patches/bitnet-mad-const-y_col.patch` korrigiere eine
+  tote Datei. Für den gepinnten Stand stimmt das nicht: ggmls eigenes
+  `CMakeLists.txt` zieht beide Quelldateien mit festem Pfad ein, die Objektdatei
+  ist 9941 Bytes gross, und der Build ist ohne den Patch genau an dieser Datei
+  gescheitert. Details in `patches/README.md`.
+- **Die Leerzeilen-Empfindlichkeit** aus dem Windows-Bericht war ein Symptom des
+  fehlenden Pre-Tokenizers, kein Modellverhalten. Mit Override 9/10 in beiden
+  Promptfassungen.
+- **`setup/linux.sh` baute nur Bibliotheken.** Ursache: llama.cpp setzt
+  `LLAMA_BUILD_COMMON/TOOLS/EXAMPLES` als Submodul auf OFF. Die drei Optionen
+  sind jetzt im Skript, mit anschliessender Existenzprüfung der Programme.
+- **Die Prompt-Glättung im OLMoE-Läufer** hat zwei von zehn Aufgaben gekostet
+  (Werkzeugliste lief ohne Trennzeichen zu Fliesstext zusammen). Behoben durch
+  `TOOL_SYSTEM_ONELINE`, abgesichert durch `bench/test_prompts.py`.
+
+---
+
+## 5. Arbeitsregeln, die sich bewährt haben
+
+- **Jede Zahl braucht Engine-Commit, Submodul-Commit und Modell-sha256.** Der
+  erste Linux-Lauf ist genau daran gescheitert: Die Windows-Ergebnisse nannten
+  die Engine nicht, also wurde gegen eine andere gemessen und der Unterschied
+  zunächst der Hardware zugeschrieben. Jede Datei in `results/` führt die drei
+  Angaben inzwischen im Kopf.
+- **Prompttext gehört in `tasks.py`, nicht in den Läufer.** Zweimal ist beim
+  Portieren genau daran etwas verrutscht — einmal eine Leerzeile, einmal die
+  Trennzeichen der Werkzeugliste. Beide Male sah es nach Modellverhalten aus.
+- **Fremde Befunde nachmessen, nicht übernehmen.** Der Tokenizer-Befund hat
+  sich bestätigt, der CMake-Befund nicht. Beide kamen aus demselben Bericht.
+- **Negative Ergebnisse aufschreiben.** Die widerlegte AVX-VNNI-Hypothese hat
+  einen Build gekostet; ohne Notiz kostet sie den nächsten noch einmal.
