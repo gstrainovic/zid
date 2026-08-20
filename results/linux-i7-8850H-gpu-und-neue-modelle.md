@@ -185,6 +185,38 @@ einem Schritt ab. Die Function-Calling-Spezialisierung ersetzt die
 fehlende Allgemeinfähigkeit der 1.5B-Klasse nicht — für Agentenarbeit
 zählt beides.
 
+## Nachtrag 2: Qwen3.5-4B und Qwen3.5-2B — kein Upgrade
+
+Getestet am 20.08. spätabends (aus dem LM-Studio-Bestand vom März, vor
+dessen Aufräumen). Beide sind Thinking-Modelle: Mit Standard-Template
+denken sie erst sichtbar-unsichtbar nach, was bei knappem Token-Budget
+(`probe.py`: 300) mehrfach zu leerer sichtbarer Antwort führte — die
+Stichproben sind darum nur teilweise bewertbar, die Werkzeugwahl (120
+Tokens genügten) vollständig.
+
+```
+Qwen3.5-4B-Q4_K_M  sha256 25082a7dd3776cc3c741c6347d3bd04523f05796607b3fbc32fa3a25dfa1418c  2707513696 Bytes  (4.21 B)
+Qwen3.5-2B-Q4_K_M  sha256 0bfe35afc9f05b7fac3fa04925e051ac7939a42a8a17ea11afc99701bea826cc  1270808032 Bytes  (1.88 B)
+```
+
+| | Werkzeug | CPU tg64 (best) | P1000 tg64 | P1000 pp128 |
+|---|---|---|---|---|
+| Qwen3.5-4B | **10/10** | 9.75 (t8) | 15.45 | 88.4 |
+| Qwen3.5-2B | 6/10 | 18.03 (t12) | 33.01 | 228.1 |
+
+**Qwen3.5-4B** hält die 10/10, ist aber auf der P1000 ein Fünftel
+langsamer als Qwen3-4B-2507 (15.45 gegen 19.27 — es ist mit 4.21 B etwas
+grösser) und bezahlt jede Antwort zusätzlich mit Denk-Tokens. Die
+Formatvorgabe (BERN) besteht es. Kein Grund zum Wechsel.
+
+**Qwen3.5-2B** ist schnell (33 tok/s auf der P1000), aber als Agent
+unbrauchbar: Verweigerungen („I don't have access…"), kaputtes JSON,
+ein erfundenes Werkzeug `tool_response`, Mehrschritt-Plan bricht nach
+einem Schritt ab. Dieselbe Lehre wie bei xLAM: unterhalb von ~3 B trägt
+die Allgemeinfähigkeit nicht.
+
+**Testsieger bleibt Qwen3-4B-2507.**
+
 ## Keine Perplexity in dieser Runde
 
 Absichtlich. Das Korpus-Perplexity-Verfahren vergleicht nur bei identischer

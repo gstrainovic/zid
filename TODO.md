@@ -13,9 +13,12 @@
   der P1000), aber schwächere Werkzeugwahl als die Generalisten und grobe
   Ausfälle bei Rechnen/Anweisungen. Details im Nachtrag von
   `results/linux-i7-8850H-gpu-und-neue-modelle.md`.
-- [ ] **Qwen3.5-4B und Qwen3.5-2B testen** (liegen in `~/.lmstudio/models/`,
-  neuer als der Benchmark-Sieger) — bevor LM Studio (23 GB, mit ~11 GB
-  Duplikaten) aufgeräumt wird.
+- [x] **Qwen3.5-4B und Qwen3.5-2B getestet** — 20.08. erledigt, **kein
+  Upgrade**: 4B hält 10/10, ist aber langsamer als Qwen3-4B-2507 und
+  denkt kostenpflichtig; 2B fällt mit 6/10 durch. Testsieger bleibt
+  Qwen3-4B-2507. Nachtrag 2 in
+  `results/linux-i7-8850H-gpu-und-neue-modelle.md`; beide GGUFs nach
+  `~/ki/BitNet/models/_compare/` gesichert.
 - [x] **Ollama-Modelle und HF-Cache aufgeräumt** — 20.08. erledigt: 17
   Ollama-Modelle plus HF-Hub gelöscht, Platte von 91 % auf **79 % (53 GB
   frei)**. Inventar mit allen Namen und Inspirations-Notizen:
