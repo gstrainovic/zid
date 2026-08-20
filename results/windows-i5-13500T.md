@@ -231,6 +231,15 @@ Markdown-Zaeune ignorieren alle drei, obwohl im System-Prompt ausdruecklich
 verboten. Der Auswerter entfernt sie deshalb, bevor er JSON parst — sonst
 misst man Formatierungsgehorsam statt Werkzeugwahl.
 
+## Perplexity — noch nicht gemessen
+
+Auf dieser Maschine steht die Perplexity-Messung noch aus. Wer sie nachholt,
+nimmt zwingend das Korpus aus dem Repo, `bench/ppl-corpus.txt` (sha256
+`e38278b03fa41f75d843cea8125ab5819ff685304ab13b6feb62a1abc848f2f5`, 115031
+Bytes), mit `-c 512` — nur dann sind die Zahlen mit dem Linux-Lauf
+(BitNet 11.19, Llama 8.86) vergleichbar. Fuer BitNet gilt auch hier der
+Pre-Tokenizer-Override; Details in `results/linux-i7-8850H.md`.
+
 ## Windows-Eigenheiten, die auf Linux wegfallen
 
 Alles hiervon ist Windows-spezifisch und sollte auf dem Laptop kein Thema sein:
