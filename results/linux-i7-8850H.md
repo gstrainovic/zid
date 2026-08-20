@@ -34,7 +34,7 @@ werden". Alle Zahlen unten stammen von dieser Engine.
 |---|---|---|
 | BitNet-b1.58-2B-4T i2_s, Pre-Tokenizer korrigiert | **22.4 tok/s** | **9/10** |
 | Llama-3.2-3B Q4_K_M (gleiche Engine) | 13.6 tok/s | **9/10** |
-| OLMoE-1B-7B int8 via colibri | 11.9 tok/s | 2/10 |
+| OLMoE-1B-7B int8 via colibri | 11.9 tok/s | 4/10 |
 
 Auf dieser Maschine ist BitNet dem gewöhnlichen 4-Bit-Modell in jeder Hinsicht
 überlegen: gleiche Trefferquote, 1.65-fache Generierung, 4.8-facher Prompt, halb
@@ -103,9 +103,27 @@ Auch der dort dokumentierte Rechenfehler verschwindet. Aufgabe 5 (Wechselgeld):
 Windows-Lauf `27.33` — falsch; hier mit Override eine korrekte Herleitung über
 7 Packungen à 5 Franken zu `ANSWER: 15`.
 
-Ebenso die Leerzeilen-Empfindlichkeit aus dem Windows-Bericht: Sie betraf ein
-Modell, das mit zerfallenden Bezeichnern kämpfte. Ob sie bei korrekter
-Tokenisierung fortbesteht, ist **nicht nachgemessen** — offener Punkt.
+### Die Leerzeilen-Empfindlichkeit verschwindet ebenfalls
+
+Der Windows-Bericht widmet einen eigenen Abschnitt der Beobachtung, dass eine
+einzige entfernte Leerzeile im System-Prompt BitNet von 4/10 auf 2/10 drückt, und
+schliesst daraus: „eine Zahl wie 4/10 ist für BitNet keine Modelleigenschaft,
+sondern gilt für genau diese Promptfassung."
+
+Nachgemessen, beide Fassungen auf derselben Engine:
+
+| System-Prompt | ohne Override | mit `llama-bpe` |
+|---|---|---|
+| mit Leerzeile | 4/10 | **9/10** |
+| ohne Leerzeile (`--compact-system`) | 3/10 | **9/10** |
+
+Ohne Override reproduziert sich die Empfindlichkeit (4 → 3; Windows sah 4 → 2).
+Mit korrektem Tokenizer ist sie **vollständig weg** — 9/10 in beiden Fassungen.
+
+Auch die Prompt-Fragilität war also kein Modellverhalten, sondern ein Symptom
+derselben Ursache: Ein Modell, das Bezeichner aus Bruchstücken zusammensetzen
+muss, hängt an jeder Formatierungskleinigkeit. Eines, das sie als Token sieht,
+nicht.
 
 ---
 
@@ -219,7 +237,7 @@ Zehn Aufgaben, fünf Werkzeuge, `temperature=0`, Engine `1f86f058`.
 | **BitNet-2B-4T + `llama-bpe`** | **10/10** | **9/10** |
 | Llama-3.2-3B Q4_K_M | 10/10 | 9/10 |
 | BitNet-2B-4T ohne Override | 9/10 | 4/10 |
-| OLMoE-1B-7B int8 (colibri) | 10/10 | 2/10 |
+| OLMoE-1B-7B int8 (colibri) | 10/10 | 4/10 |
 
 Llama verfehlt nur Aufgabe 9 (`parse_args` → `list_dir` statt `search`), BitNet
 mit Override dieselbe Aufgabe (→ `read_file`). Beide Werte decken sich mit dem
@@ -235,10 +253,36 @@ sauberes JSON, und dann achtmal `read_file`, egal was gefragt war:
 "Install the dependencies with npm install" -> npm(path=".", save=true)   erfunden
 ```
 
-Der Windows-Lauf mass hier 4/10, dieser 2/10. Die Fehlerart ist dieselbe, die
-Quote schwankt. Naheliegende Ursache: Auch die OLMoE-Konvertierung ist nicht
-gepinnt — `setup/linux.sh` zieht `allenai/OLMoE-1B-7B-0125-Instruct` von `main`.
-**Nicht nachgeprüft.**
+### Die anfänglichen 2/10 waren ein Fehler im Testgeschirr
+
+Der erste Lauf ergab 2/10 gegen die 4/10 des Windows-Berichts — stabil
+reproduzierbar, also kein Rauschen. Ursache war die Python-Portierung selbst.
+
+`olmoe` sendet im Chat-Modus bei jedem Zeilenumbruch sofort ab, der Prompt muss
+also einzeilig sein. `olmoe_eval.py` erledigte das mit
+`" ".join(text.split())` — und löschte die Umbrüche der Werkzeugliste dabei
+**ersatzlos**:
+
+```
+… and no others: read_file(path) - read a file write_file(path, text) - write a
+file list_dir(path) - list a directory run_shell(cmd) - …
+```
+
+Das PowerShell-Original trennt die Werkzeuge dagegen von Hand mit Semikola. Mit
+dessen Wortlaut liefert dieselbe Engine, dasselbe Modell, dieselbe Maschine
+**4/10** — der Windows-Wert, exakt getroffen.
+
+`bench/tasks.py` stellt jetzt beide Fassungen aus einer Quelle bereit:
+`TOOL_SYSTEM` (mehrzeilig, unverändert) und `TOOL_SYSTEM_ONELINE` (mit
+Semikola, wortgleich mit dem PowerShell-Original). `bench/test_prompts.py`
+sichert beides ab, samt Byte-Gleichheit von `TOOL_SYSTEM` — denn an dem Text
+hängt BitNets Leerzeilen-Verhalten.
+
+Die Zahl in der Tabelle oben ist die korrigierte: **4/10**.
+
+Bemerkenswert daran: Der README begründet die gemeinsame `tasks.py` damit, dass
+man sonst „Promptfassungen statt Modelle" vergleiche. Genau das ist beim
+Portieren trotzdem passiert — nur eine Ebene tiefer, in der Glättung.
 
 Der praktische Unterschied bleibt der aus dem Windows-Bericht: Ein kaputter
 Werkzeugname fällt dem Parser auf. Ein sauberer Aufruf des falschen Werkzeugs
@@ -372,13 +416,8 @@ size    1187801280
 
 ## Offen
 
-1. **Leerzeilen-Empfindlichkeit nachmessen** (`--compact-system`). Der
-   Windows-Lauf sah 4/10 → 2/10. Ob das bei korrekter Tokenisierung fortbesteht,
-   ist unbekannt und entscheidet, wie belastbar die 9/10 sind.
-2. **OLMoE 2/10 gegen 4/10** — Ursache nicht ermittelt. Verdacht: ungepinnte
-   Konvertierung.
-3. **Warum die neue Engine i2_s zerlegt** — der Ladepfad ist nicht untersucht.
+1. **Warum die neue Engine i2_s zerlegt** — der Ladepfad ist nicht untersucht.
    Für einen Fehlerbericht an microsoft/BitNet nötig.
-4. **Das fehlende `tokenizer.ggml.pre` gehört upstream gemeldet.** Es entwertet
+2. **Das fehlende `tokenizer.ggml.pre` gehört upstream gemeldet.** Es entwertet
    die veröffentlichte GGUF-Datei für Werkzeugaufgaben, und die Korrektur ist ein
    einzelnes Metadatenfeld.
