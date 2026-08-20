@@ -22,7 +22,7 @@ geplant.
 | Modell | Engine | i5-13500T (35 W) | i7-8850H | richtiges Werkzeug |
 |---|---|---|---|---|
 | BitNet-b1.58-2B-4T i2_s | llama.cpp, BitNet-Build | **8.9 tok/s** | **22.4 tok/s** | **8–9/10** |
-| Llama-3.2-3B Q4_K_M | derselbe BitNet-Build | 6.7 tok/s | 13.6 tok/s | 9/10 |
+| Llama-3.2-3B Q4_K_M | llama.cpp, BitNet-Build | 6.7 tok/s | 13.6 tok/s | 9/10 |
 | OLMoE-1B-7B int8 | colibri | 4.2 tok/s | 11.9 tok/s | 4/10 |
 
 BitNet ist schnell **und** für Werkzeugwahl brauchbar — gleichauf mit dem
