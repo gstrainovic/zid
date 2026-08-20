@@ -315,8 +315,9 @@ Auswerter entfernt sie vor dem Parsen.
 
 Kein wikitext, sondern ein eigenes Korpus: 115 KB englischer Fliesstext aus den
 `.md`-Dateien von llama.cpp und BitNet, Markdown-Zeilen entfernt. Die Datei liegt
-unter `~/ki/bench-artifacts/ppl-corpus.txt` und muss für jeden Vergleich
-identisch wiederverwendet werden. Absolutwerte sind **nicht** mit
+im Repo unter `bench/ppl-corpus.txt` (sha256
+`e38278b03fa41f75d843cea8125ab5819ff685304ab13b6feb62a1abc848f2f5`, 115031
+Bytes) und muss für jeden Vergleich identisch wiederverwendet werden. Absolutwerte sind **nicht** mit
 veröffentlichten wikitext-Zahlen vergleichbar. `-c 512`, `-t 8`.
 
 | Modell | Engine | Tokenizer | Chunks | PPL |

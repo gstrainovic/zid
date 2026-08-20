@@ -90,14 +90,15 @@ solange die Engine gepinnt ist.
 
 ### 3.2 Perplexity auf Windows
 
-Fehlt komplett. Der Linux-Lauf hat ein eigenes Korpus gebaut (115 KB
-englischer Fliesstext aus `.md`-Dateien von llama.cpp und BitNet, 61 Chunks bei
-`-c 512`), das unter `~/ki/bench-artifacts/ppl-corpus.txt` auf dem Laptop liegt.
+Die Messung selbst fehlt; sie braucht die Windows-Maschine. Das Korpus liegt
+seit dem 20.08. im Repo: `bench/ppl-corpus.txt` (sha256
+`e38278b03fa41f75d843cea8125ab5819ff685304ab13b6feb62a1abc848f2f5`, 115031
+Bytes — 115 KB englischer Fliesstext aus `.md`-Dateien von llama.cpp und
+BitNet, 61 Chunks bei `-c 512`). Beide `results/`-Dateien verweisen darauf.
 
-**Ohne exakt diese Datei sind die Zahlen nicht vergleichbar.** Sie gehört ins
-Repo, sonst ist der Vergleich beim nächsten Lauf verloren — 115 KB sind
-vertretbar. Wer das erledigt: Datei nach `bench/ppl-corpus.txt` legen, in
-`.gitignore` ausnehmen und in beiden `results/`-Dateien den Pfad nachziehen.
+**Ohne exakt diese Datei sind die Zahlen nicht vergleichbar.** Wer misst:
+gepinnte Engine, für BitNet den Pre-Tokenizer-Override (Abschnitt 1), `-c 512`,
+dann gegen die Linux-Werte 11.19 (BitNet) / 8.86 (Llama) stellen.
 
 ### 3.3 Die ±1-Abweichung bei der Werkzeugwahl
 
