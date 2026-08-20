@@ -115,20 +115,6 @@ zwischen Maschinen um ±1 schwanken, auch bei identischem Modell und identischer
 Engine. Wer es weiterverfolgen will, vergleicht die Logits der betroffenen
 Aufgabe direkt statt der Endergebnisse.
 
-### 3.4 Ein dritter Lauf wäre aussagekräftig
-
-Beide bisherigen CPUs haben AVX2, aber **kein AVX512**. Eine Maschine mit
-AVX512 (Zen 4/5, Xeon, Ice Lake und neuer) würde zeigen, ob BitNets Vorsprung
-gegen Q4 mit breiteren Vektoren wächst oder schrumpft. Das ist die grösste
-offene Wissenslücke.
-
-Ebenfalls unbeantwortet: **eine NVIDIA-GPU nützt hier nichts.** Die i2_s-Kernel
-in diesem Build sind CPU-only; BitNets `gpu/`-Pfad ist ein eigenes Projekt
-(eigene Konvertierung, `compute_80`, also Ampere aufwärts) und colibris
-CUDA-Backend lädt laut `docs/cuda.md` nur residente Tensoren, nicht die
-gestreamten Experten. Wer eine GPU testen will, misst damit llama.cpp mit
-Q4-Modellen — nicht BitNet.
-
 ---
 
 ## 4. Ausserhalb des Rahmens
@@ -144,6 +130,16 @@ festgehalten, weil man sie zum Messen kennen muss. Nur der Vorschlag, sie
 upstream zu melden, entfällt — bitte nicht erneut als offenen Punkt aufführen.
 
 Dasselbe gilt für colibri und jedes andere fremde Repo in diesem Projekt.
+
+**Keine Läufe auf weiterer Hardware.** Ein dritter Lauf auf einer
+AVX512-Maschine stand als offener Punkt im Raum; Entscheidung des
+Projektinhabers vom 20.08.2026: es bleibt bei den zwei vorhandenen Maschinen —
+bitte nicht erneut vorschlagen. Damit es auch niemand mit einer GPU versucht:
+**eine NVIDIA-GPU nützt hier nichts.** Die i2_s-Kernel in diesem Build sind
+CPU-only; BitNets `gpu/`-Pfad ist ein eigenes Projekt (eigene Konvertierung,
+`compute_80`, also Ampere aufwärts) und colibris CUDA-Backend lädt laut
+`docs/cuda.md` nur residente Tensoren, nicht die gestreamten Experten. Wer eine
+GPU testen will, misst damit llama.cpp mit Q4-Modellen — nicht BitNet.
 
 ---
 
