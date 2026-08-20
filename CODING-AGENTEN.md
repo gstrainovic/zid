@@ -1,7 +1,7 @@
 # Lokale Modelle als Coding-Agenten
 
 Dieses Dokument verbindet zwei Experimente: das Provider-Setup für den
-Pi-Agenten vom März 2026 (Notizen in `~/projects/agents/`) und die Messungen
+Pi-Agenten vom März 2026 (Notizen in `~/projects/agents/` auf den Linux Laptop) und die Messungen
 dieses Repos. Das eine lieferte die Agenten-Seite, das andere beantwortet,
 welches Modell auf welchem Gerät die Arbeit tragen kann.
 
@@ -92,6 +92,25 @@ pi --provider llamacpp-lokal --model qwen3-4b-lokal --tools bash "Wie viel RAM h
 `llama-server` übersetzt mit `--jinja` die OpenAI-Tool-Calls in Qwen3s
 natives Tool-Template — das ist derselbe Mechanismus, den `agent_eval.py`
 indirekt mitgeprüft hat, nur dass der Agent die Werkzeuge stellt.
+
+## Erster Praxistest (20.08.2026)
+
+Pi-Agent v0.61.1 (`--print`, Tools read/bash/edit/write) gegen ein
+Spielwiesen-Repo mit einem gedrehten Vorzeichen in einer
+Wechselgeld-Funktion und einem fehlschlagenden Test; Auftrag: Tests
+ausführen, Fehler beheben, bis alles grün ist. Qwen3-4B auf der P1000.
+
+Ergebnis: **geschafft, im zweiten Anlauf.** Der erste Fix drehte das
+Vorzeichen richtig, setzte es aber in den falschen Zweig (`return 0` im
+Normalfall); der Agent las den neuen Testfehlschlag und korrigierte sich
+selbst — der Fix-Zyklus schliesst sich. Alle Tests grün, unabhängig
+nachgeprüft. Schönheitsfehler: die Abschluss-Zusammenfassung beschreibt den
+eigenen Zwischenversuch, als wäre er der Originalfehler gewesen. Laufzeit:
+wenige Minuten für einen Ein-Zeilen-Bug.
+
+Spielwiese: `~/projects/pi-lokal-test` — eigenes Git-Repo, damit jeder
+Agentenpatzer per `git restore` rückholbar ist. Neue Experimente immer nur
+in Repos mit Git-Historie.
 
 ## Erwartungshaltung
 
