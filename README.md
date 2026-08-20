@@ -76,6 +76,7 @@ bench/
   windows/         die PowerShell-Fassungen des ersten Laufs
 patches/           ein nötiger Fix an BitNet, mit Begründung
 setup/linux.sh     baut beides, pinnt die Engine, prüft Modell und Engine
+setup/serve-coding-agent.sh   llama-server als Agenten-Endpunkt (CODING-AGENTEN.md)
 results/           je Lauf eine Datei
 CLAUDE.md          Betriebswissen und getroffene Entscheidungen
 ```
