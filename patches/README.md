@@ -24,3 +24,41 @@ Patch gleicht die erste nur an; er aendert keine Semantik.
 Ob der Patch auf einer bestimmten Maschine ueberhaupt noetig ist, haengt allein
 vom Compiler ab, nicht vom Betriebssystem. Wer den offiziellen MSVC-Weg geht,
 trifft den Fehler nie.
+
+## Wird die Datei ueberhaupt uebersetzt? Ja.
+
+`results/linux-i7-8850H.md` stellt das in Frage: `src/CMakeLists.txt` setze
+`GGML_SOURCES_BITNET` zweimal statt anzuhaengen, das zweite `set` ueberschreibe
+das erste, `ggml-bitnet-mad.cpp` lande daher in keinem Build — und dieser Patch
+korrigiere folglich eine nie uebersetzte Datei.
+
+Der doppelte `set`-Aufruf ist real. Die Schlussfolgerung stimmt fuer den hier
+gepinnten Stand trotzdem nicht: Diese Variable ist gar nicht der Mechanismus,
+der die Datei einzieht. `3rdparty/llama.cpp/ggml/src/CMakeLists.txt` listet
+beide Quelldateien mit festem Pfad direkt in den `ggml`-Zielen auf:
+
+```cmake
+../../../../src/ggml-bitnet-mad.cpp
+../../../../src/ggml-bitnet-lut.cpp
+```
+
+Nachgeprueft an einem Build mit `-DBITNET_X86_TL2=OFF`
+(`01eb415` + llama.cpp `1f86f058`, clang 22.1.7):
+
+```
+build/.../ggml.dir/__/__/__/__/src/ggml-bitnet-mad.cpp.obj   9941 Bytes
+build/.../ggml.dir/__/__/__/__/src/ggml-bitnet-lut.cpp.obj    646 Bytes
+```
+
+Beide erscheinen ausserdem in `compile_commands.json`. Dass `lut.cpp` fast leer
+bleibt, passt: sein Inhalt steht komplett hinter `#if defined(GGML_BITNET_X86_TL2)`
+und ist mit `OFF` inert. `mad.cpp` traegt dagegen echten Code bei.
+
+Der staerkste Beleg ist der Bauabbruch selbst — der Build ist genau an dieser
+Datei gescheitert. Was nicht uebersetzt wird, kann die Uebersetzung nicht
+abbrechen.
+
+Die abweichende Beobachtung im Linux-Bericht stammt vermutlich vom Build der
+**ungepinnten** Engine (`0b341e5` + llama.cpp `390c3077`), wo ggmls CMake
+umgebaut ist. Fuer den gepinnten Referenzstand, auf dem alle Messungen in
+`results/` beruhen, gilt sie nicht.

@@ -17,18 +17,29 @@ Ein Lauf auf anderer Hardware gehört als eigene Datei daneben.
 
 ## Ergebnis in drei Zeilen
 
-Auf einem i5-13500T (35 W, 16 GB, keine GPU):
+| Modell | i5-13500T (35 W) | i7-8850H | richtiges Werkzeug |
+|---|---|---|---|
+| BitNet-b1.58-2B-4T i2_s | **8.9 tok/s** | **22.4 tok/s** | **8–9/10** |
+| Llama-3.2-3B Q4_K_M (gleiche Engine) | 6.7 tok/s | 13.6 tok/s | 9/10 |
+| OLMoE-1B-7B int8 via colibri | 4.2 tok/s | 11.9 tok/s | 4/10 |
 
-| Modell | Generierung | richtiges Werkzeug (10 Aufgaben) |
-|---|---|---|
-| BitNet-b1.58-2B-4T i2_s | **8.9 tok/s** | 4/10 |
-| Llama-3.2-3B Q4_K_M (gleiche Engine) | 6.7 tok/s | **9/10** |
-| OLMoE-1B-7B int8 via colibri | 4.2 tok/s | 4/10 |
+BitNet ist schnell **und** für Werkzeugwahl brauchbar — gleichauf mit dem
+4-Bit-Modell bei 1.3–1.65-fachem Durchsatz und halber Dateigrösse. colibri ist
+sauber gebaut und rechnet korrekt, aber die grossen Modelle, für die es
+existiert, passen auf solche Maschinen nicht auf die Platte (GLM-5.2 int4:
+372 GB); mit einem 7-B-Modell greift sein Streaming-Konzept gar nicht.
 
-BitNet ist schnell und für Agentenarbeit unbrauchbar. colibri ist sauber gebaut
-und korrekt, aber die grossen Modelle, für die es existiert, passen auf so eine
-Maschine nicht auf die Platte (GLM-5.2 int4: 372 GB). Wer lokal etwas
-Agentenähnliches will, nimmt auf dieser Hardware das gewöhnliche 4-Bit-Modell.
+> **Zwei Dinge sind nicht optional, sonst misst man Unsinn.**
+>
+> 1. **Die Engine muss gepinnt sein** — BitNet `01eb415` mit llama.cpp-Submodul
+>    `1f86f058`. Der heutige Klon zeigt auf einen Fork-Branch, mit dem
+>    BitNet-b1.58-2B-4T degeneriert (Perplexity ×3.7, Endlosschleifen) — bei
+>    **unauffälligem Durchsatz**. `setup/linux.sh` pinnt und prüft das.
+> 2. **BitNet braucht `--override-kv tokenizer.ggml.pre=str:llama-bpe`** — dem
+>    ausgelieferten GGUF fehlt das Feld. Ohne den Override zerfallen
+>    Werkzeugnamen und die Trefferquote fällt von 8–9/10 auf 4/10.
+>
+> Beides ist in `results/` mit Belegen dokumentiert.
 
 ## Aufbau
 
@@ -40,11 +51,17 @@ bench/
   agent_eval.py    10 Werkzeugaufgaben      -> llama-server
   olmoe_eval.py    dieselben Aufgaben       -> colibris olmoe (stdin)
   olmoe_speed.py   Dekodier-Durchsatz per Steigungsmessung
+  test_prompts.py  sichert den Prompttext ab (Byte-Gleichheit, beide Fassungen)
   windows/         die PowerShell-Fassungen des ersten Laufs
 patches/           ein nötiger Fix an BitNet, mit Begründung
-setup/linux.sh     baut beides und holt die Modelle
+setup/linux.sh     baut beides, pinnt die Engine, prüft Modell und Engine
 results/           je Maschine eine Datei
+HANDOFF.md         offene Punkte für den nächsten Lauf
 ```
+
+Jede Datei in `results/` nennt **Engine-Commit, llama.cpp-Submodul-Commit und
+den sha256 der Modelldatei**. Ohne die drei Angaben ist ein Messwert nicht
+nachvollziehbar — genau daran ist der erste Linux-Lauf gescheitert.
 
 Die Python-Skripte brauchen **keine Fremdpakete** — Standardbibliothek genügt,
 damit auf dem Testrechner nichts zu installieren ist.
@@ -68,9 +85,11 @@ cd ~/ki/BitNet
 ./build/bin/llama-bench -m models/BitNet-b1.58-2B-4T/ggml-model-i2_s.gguf \
     -p 128 -n 64 -t 4,8,12,16 -r 2
 
-# Qualität: Server starten, dann die zwei Läufer
+# Qualität: Server starten, dann die zwei Läufer.
+# --override-kv ist Pflicht, nicht Feinschliff — siehe Kasten oben.
 ./build/bin/llama-server -m models/BitNet-b1.58-2B-4T/ggml-model-i2_s.gguf \
-    -t 4 -tb 12 -c 4096 --port 8080 &
+    -t 4 -tb 12 -c 4096 --port 8080 \
+    --override-kv tokenizer.ggml.pre=str:llama-bpe &
 python3 ~/bitnet-colibri-bench/bench/agent_eval.py --port 8080 --label BitNet-2B-4T
 python3 ~/bitnet-colibri-bench/bench/probe.py      --port 8080 --label BitNet-2B-4T
 
