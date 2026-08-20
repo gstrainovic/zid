@@ -5,15 +5,42 @@ Eine einzige Quelle, damit Windows- und Linux-Läufe wirklich dasselbe messen.
 
 # --- Teil 1: Fähigkeitsstichproben (qualitativ, werden von Hand beurteilt) ---
 
-TOOL_SYSTEM = (
-    "You are a tool-using agent. You have exactly these tools and no others:\n\n"
-    "read_file(path)          - read a file\n"
-    "write_file(path, text)   - write a file\n"
-    "list_dir(path)           - list a directory\n"
-    "run_shell(cmd)           - run a shell command\n"
-    "search(pattern, path)    - grep for a pattern\n\n"
+_TOOL_INTRO = "You are a tool-using agent. You have exactly these tools and no others:"
+
+# Aufrufform -> Beschreibung. Reihenfolge ist Teil des Prompts.
+_TOOLS = (
+    ("read_file(path)", "read a file"),
+    ("write_file(path, text)", "write a file"),
+    ("list_dir(path)", "list a directory"),
+    ("run_shell(cmd)", "run a shell command"),
+    ("search(pattern, path)", "grep for a pattern"),
+)
+
+_TOOL_OUTRO = (
     'Reply with a single JSON object and nothing else:\n'
     '{"tool": "<one of the five names above>", "args": {...}}'
+)
+
+# Mehrzeilig, fuer alles mit OpenAI-Endpunkt. Der Text ist absichtlich auf
+# Spalte 26 ausgerichtet und enthaelt zwei Leerzeilen: BitNet reagiert darauf
+# messbar (siehe results/windows-i5-13500T.md). Nicht umformatieren.
+TOOL_SYSTEM = (
+    _TOOL_INTRO + "\n\n"
+    + "".join(f"{call:<24} - {desc}\n" for call, desc in _TOOLS)
+    + "\n" + _TOOL_OUTRO
+)
+
+# Einzeilig, fuer colibris olmoe: dort loest ein Zeilenumbruch im Chat-Modus
+# sofort das Absenden aus. Die Werkzeuge werden mit Semikola getrennt statt die
+# Umbrueche ersatzlos zu streichen — sonst laeuft die Liste zu einem Fliesstext
+# ohne Trennzeichen zusammen ("read a file write_file(path, text) - ..."), was
+# OLMoE zwei von zehn Aufgaben kostet. Wortgleich mit
+# bench/windows/agent-eval-olmoe.ps1, damit Linux- und Windows-Lauf denselben
+# Prompt sehen.
+TOOL_SYSTEM_ONELINE = (
+    _TOOL_INTRO + " "
+    + "; ".join(f"{call} - {desc}" for call, desc in _TOOLS) + ". "
+    + " ".join(_TOOL_OUTRO.split())
 )
 
 PROBES = [
