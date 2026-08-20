@@ -1,5 +1,15 @@
 # TODO
 
+**Stand 20.08.2026, spätabends: alle Punkte erledigt.** Das Gesamtfazit
+des Projekts steht in `FAZIT.md`.
+
+- [x] **LM Studio aufgeräumt** — 20.08. erledigt: `~/.lmstudio/models`
+  (23 GB, mit ~11 GB Duplikaten) gelöscht, nachdem die
+  Qwen3.5-Testkandidaten gemessen und nach
+  `~/ki/BitNet/models/_compare/` gesichert waren; toter
+  KoboldCpp-Symlink mit entfernt. Platte: **77 %, 56 GB frei** (am Morgen
+  waren es 88 % / 31 GB).
+
 - [x] **Mehrdatei-Härtetest: Qwen3-4B (Testsieger) und Llama-3.2-3B
   (Tempo-Kontrast)** — am 20.08.2026 erledigt, **beide gescheitert**:
   Qwen3 kapituliert sauber (ändert nichts, erklärt die Tests für falsch),
