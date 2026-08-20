@@ -231,14 +231,17 @@ Markdown-Zaeune ignorieren alle drei, obwohl im System-Prompt ausdruecklich
 verboten. Der Auswerter entfernt sie deshalb, bevor er JSON parst — sonst
 misst man Formatierungsgehorsam statt Werkzeugwahl.
 
-## Perplexity — noch nicht gemessen
+## Perplexity — entfaellt bewusst
 
-Auf dieser Maschine steht die Perplexity-Messung noch aus. Wer sie nachholt,
-nimmt zwingend das Korpus aus dem Repo, `bench/ppl-corpus.txt` (sha256
+Auf dieser Maschine wurde keine Perplexity gemessen, und das bleibt so
+(Entscheidung des Projektinhabers vom 20.08.2026): Perplexity misst Modell und
+Engine, nicht die Hardware. Bei bytegleichem Modell und gepinnter Engine gelten
+die Linux-Werte — BitNet 11.19, Llama 8.86 — fuer beide Maschinen;
+Compiler-Unterschiede bewegen allenfalls Nachkommastellen. Wer trotzdem
+nachmisst, nimmt zwingend `bench/ppl-corpus.txt` (sha256
 `e38278b03fa41f75d843cea8125ab5819ff685304ab13b6feb62a1abc848f2f5`, 115031
-Bytes), mit `-c 512` — nur dann sind die Zahlen mit dem Linux-Lauf
-(BitNet 11.19, Llama 8.86) vergleichbar. Fuer BitNet gilt auch hier der
-Pre-Tokenizer-Override; Details in `results/linux-i7-8850H.md`.
+Bytes) mit `-c 512` und fuer BitNet den Pre-Tokenizer-Override; Details in
+`results/linux-i7-8850H.md`.
 
 ## Windows-Eigenheiten, die auf Linux wegfallen
 
