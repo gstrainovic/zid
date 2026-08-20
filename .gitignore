@@ -10,5 +10,5 @@ __pycache__/
 # private Einstellungen dieses Rechners
 .claude/
 
-# das Perplexity-Korpus gehoert bewusst ins Repo (HANDOFF.md 3.2)
+# das Perplexity-Korpus gehoert bewusst ins Repo (siehe CLAUDE.md)
 !bench/ppl-corpus.txt

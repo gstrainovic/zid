@@ -423,7 +423,8 @@ size    1187801280
 > **Nachtrag vom 20.08.2026.** Dieser Abschnitt führte ursprünglich als zweiten
 > Punkt, das fehlende `tokenizer.ggml.pre` an microsoft/BitNet zu melden.
 > Fehlerberichte an fremde Projekte sind ausdrücklich ausserhalb des Rahmens
-> dieses Repos — siehe `HANDOFF.md`, Abschnitt 4. Der Befund selbst bleibt
-> vollständig dokumentiert, weil man ihn zum Messen kennen muss.
+> dieses Repos — siehe `CLAUDE.md`, „Ausserhalb des Rahmens". Der Befund selbst
+> bleibt vollständig dokumentiert, weil man ihn zum Messen kennen muss.
 
-Die aktuelle Liste offener Punkte steht in `HANDOFF.md`, nicht hier.
+Das Projekt ist abgeschlossen; offene Punkte gibt es keine mehr. Betriebswissen
+und die Liste der Entscheidungen stehen in `CLAUDE.md`.

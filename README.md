@@ -12,8 +12,10 @@ Gemessen wird nicht nur Durchsatz, sondern auch, ob die Modelle als **Agent**
 taugen — also Werkzeuge zuverlässig auswählen — denn dort entscheidet sich, ob
 so etwas lokal einen Nutzen hat.
 
-Der Referenzlauf steht in [`results/windows-i5-13500T.md`](results/windows-i5-13500T.md).
-Ein Lauf auf anderer Hardware gehört als eigene Datei daneben.
+Der Referenzlauf steht in [`results/windows-i5-13500T.md`](results/windows-i5-13500T.md),
+der zweite Lauf in [`results/linux-i7-8850H.md`](results/linux-i7-8850H.md).
+**Das Projekt ist abgeschlossen** (20.08.2026); weitere Läufe sind nicht
+geplant.
 
 ## Ergebnis in drei Zeilen
 
@@ -56,7 +58,7 @@ bench/
 patches/           ein nötiger Fix an BitNet, mit Begründung
 setup/linux.sh     baut beides, pinnt die Engine, prüft Modell und Engine
 results/           je Maschine eine Datei
-HANDOFF.md         offene Punkte für den nächsten Lauf
+CLAUDE.md          Betriebswissen und getroffene Entscheidungen
 ```
 
 Jede Datei in `results/` nennt **Engine-Commit, llama.cpp-Submodul-Commit und
