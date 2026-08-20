@@ -417,7 +417,12 @@ size    1187801280
 ## Offen
 
 1. **Warum die neue Engine i2_s zerlegt** — der Ladepfad ist nicht untersucht.
-   Für einen Fehlerbericht an microsoft/BitNet nötig.
-2. **Das fehlende `tokenizer.ggml.pre` gehört upstream gemeldet.** Es entwertet
-   die veröffentlichte GGUF-Datei für Werkzeugaufgaben, und die Korrektur ist ein
-   einzelnes Metadatenfeld.
+   Reizvoll aus Neugier; praktisch nicht nötig, solange die Engine gepinnt ist.
+
+> **Nachtrag vom 20.08.2026.** Dieser Abschnitt führte ursprünglich als zweiten
+> Punkt, das fehlende `tokenizer.ggml.pre` an microsoft/BitNet zu melden.
+> Fehlerberichte an fremde Projekte sind ausdrücklich ausserhalb des Rahmens
+> dieses Repos — siehe `HANDOFF.md`, Abschnitt 4. Der Befund selbst bleibt
+> vollständig dokumentiert, weil man ihn zum Messen kennen muss.
+
+Die aktuelle Liste offener Punkte steht in `HANDOFF.md`, nicht hier.

@@ -81,30 +81,14 @@ size   1187801280
 
 Nach Nutzen sortiert.
 
-### 3.1 Zwei Fehlerberichte an microsoft/BitNet
+### 3.1 Warum die neue Engine i2_s zerlegt
 
-Beides ist reproduzierbar belegt und betrifft alle Nutzer der veröffentlichten
-Dateien. Noch nicht gemeldet.
+Der Ladepfad ist nicht untersucht. Die interessanteste technische Frage im
+ganzen Projekt: irgendwo zwischen b3962 und b9918 hat sich das Lesen der
+ternären Tensoren geändert. Reizvoll aus Neugier — praktisch nicht nötig,
+solange die Engine gepinnt ist.
 
-- **Fehlendes `tokenizer.ggml.pre` im GGUF.** Entwertet die Datei für
-  Werkzeugaufgaben; die Korrektur ist ein einzelnes Metadatenfeld. Belege:
-  `results/linux-i7-8850H.md` und `results/windows-i5-13500T.md`, jeweils
-  Abschnitt zur Werkzeugwahl.
-- **Kaputtes Chat-Template im GGUF.** Eingebacken ist
-  `Human: …\n\nBITNETAssistant: <|end_of_text|>`, Microsofts eigenes
-  `tokenizer_config.json` definiert
-  `System: …<|eot_id|>User: …<|eot_id|>Assistant: `. Falsche Rollennamen,
-  falscher Separator, EOS-Token genau dort, wo die Antwort beginnt. Auf der
-  gepinnten Engine folgenlos (sie ist älter als llama.cpps Jinja-Pfad), auf
-  neueren Engines schlägt es voll durch.
-
-### 3.2 Warum die neue Engine i2_s zerlegt
-
-Der Ladepfad ist nicht untersucht. Für einen brauchbaren Fehlerbericht nötig,
-und die interessanteste technische Frage im ganzen Projekt: irgendwo zwischen
-b3962 und b9918 hat sich das Lesen der ternären Tensoren geändert.
-
-### 3.3 Perplexity auf Windows
+### 3.2 Perplexity auf Windows
 
 Fehlt komplett. Der Linux-Lauf hat ein eigenes Korpus gebaut (115 KB
 englischer Fliesstext aus `.md`-Dateien von llama.cpp und BitNet, 61 Chunks bei
@@ -115,7 +99,7 @@ Repo, sonst ist der Vergleich beim nächsten Lauf verloren — 115 KB sind
 vertretbar. Wer das erledigt: Datei nach `bench/ppl-corpus.txt` legen, in
 `.gitignore` ausnehmen und in beiden `results/`-Dateien den Pfad nachziehen.
 
-### 3.4 Die ±1-Abweichung bei der Werkzeugwahl
+### 3.3 Die ±1-Abweichung bei der Werkzeugwahl
 
 Windows 8/10 gegen Linux 9/10, gleiche Engine, bytegleiches Modell, dieselbe
 Zusatzaufgabe (Nr. 4). Zwei Erklärungen wurden geprüft und **beide scheiden
@@ -130,7 +114,7 @@ zwischen Maschinen um ±1 schwanken, auch bei identischem Modell und identischer
 Engine. Wer es weiterverfolgen will, vergleicht die Logits der betroffenen
 Aufgabe direkt statt der Endergebnisse.
 
-### 3.5 Ein dritter Lauf wäre aussagekräftig
+### 3.4 Ein dritter Lauf wäre aussagekräftig
 
 Beide bisherigen CPUs haben AVX2, aber **kein AVX512**. Eine Maschine mit
 AVX512 (Zen 4/5, Xeon, Ice Lake und neuer) würde zeigen, ob BitNets Vorsprung
@@ -146,7 +130,23 @@ Q4-Modellen — nicht BitNet.
 
 ---
 
-## 4. Was nicht mehr offen ist
+## 4. Ausserhalb des Rahmens
+
+**Keine Fehlerberichte an fremde Projekte.** Die zwei belegten Defekte der
+BitNet-Auslieferung — das fehlende `tokenizer.ggml.pre` und das kaputte
+Chat-Template im GGUF — werden **nicht** an microsoft/BitNet gemeldet.
+Entscheidung des Projektinhabers vom 20.08.2026.
+
+Die technische Dokumentation bleibt bewusst erhalten: beide Defekte sind in
+`results/` mit Messungen belegt und in Abschnitt 1 als Betriebsanweisung
+festgehalten, weil man sie zum Messen kennen muss. Nur der Vorschlag, sie
+upstream zu melden, entfällt — bitte nicht erneut als offenen Punkt aufführen.
+
+Dasselbe gilt für colibri und jedes andere fremde Repo in diesem Projekt.
+
+---
+
+## 5. Was nicht mehr offen ist
 
 Damit es niemand erneut aufrollt:
 
@@ -169,7 +169,7 @@ Damit es niemand erneut aufrollt:
 
 ---
 
-## 5. Arbeitsregeln, die sich bewährt haben
+## 6. Arbeitsregeln, die sich bewährt haben
 
 - **Jede Zahl braucht Engine-Commit, Submodul-Commit und Modell-sha256.** Der
   erste Linux-Lauf ist genau daran gescheitert: Die Windows-Ergebnisse nannten
