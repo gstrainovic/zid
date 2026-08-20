@@ -23,7 +23,7 @@ import sys
 import time
 
 from common import extract_tool, shorten
-from tasks import AGENT_CASES, PROBE_EXPECTED, PROBES, TOOL_SYSTEM
+from tasks import AGENT_CASES, PROBE_EXPECTED, PROBES, TOOL_SYSTEM_ONELINE
 
 BANNER_PREFIXES = (
     "[OMP]", "[stop]", "olmoe chat", "== Streaming",
@@ -72,7 +72,7 @@ def run_agent(args):
     valid = correct = 0
     lines = []
     for index, (question, want) in enumerate(AGENT_CASES, start=1):
-        prompt = f"{TOOL_SYSTEM} Task: {question}"
+        prompt = f"{TOOL_SYSTEM_ONELINE} Task: {question}"
         try:
             text = run_once(args.engine, args.snap, prompt, args.cache, args.bits,
                             max_new=120, temp=0, ctx=args.ctx)
