@@ -1,7 +1,7 @@
 # Lokale Modelle als Coding-Agenten
 
 Dieses Dokument verbindet zwei Experimente: das Provider-Setup für den
-Pi-Agenten vom März 2026 (Notizen in `~/projects/agents/` auf den Linux Laptop) und die Messungen
+Pi-Agenten vom März 2026 (jetzt in `docs/` dieses Repos) und die Messungen
 dieses Repos. Das eine lieferte die Agenten-Seite, das andere beantwortet,
 welches Modell auf welchem Gerät die Arbeit tragen kann.
 
