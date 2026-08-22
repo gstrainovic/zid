@@ -32,11 +32,11 @@ des Projekts steht in `FAZIT.md`.
 - [x] **Ollama-Modelle und HF-Cache aufgeräumt** — 20.08. erledigt: 17
   Ollama-Modelle plus HF-Hub gelöscht, Platte von 91 % auf **79 % (53 GB
   frei)**. Inventar mit allen Namen und Inspirations-Notizen:
-  `~/projects/agents/modell-inventar-2026-08-20.md`. Nicht angerührt (war
+  `docs/modell-inventar-2026-08-20.md`. Nicht angerührt (war
   nicht im Umfang): `~/.lmstudio/models` mit 23 GB — grösster
   verbliebener Posten, enthält aber die Qwen3.5-Testkandidaten (siehe
   unten).
 - [x] **März-Dokumente zusammengeführt** — 20.08. erledigt:
-  `~/projects/agents/lokale-llm-provider-maerz-2026.md` konsolidiert alle
-  drei; Originale und `pi-start` in `~/projects/agents/archiv/`, das
+  `docs/lokale-llm-provider-maerz-2026.md` konsolidiert alle
+  drei; Originale und `pi-start` in `docs/archiv/`, das
   Streuverzeichnis `~/agents/` ist aufgelöst.
