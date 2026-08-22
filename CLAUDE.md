@@ -69,11 +69,11 @@ Bytes) bei `-c 512` — sonst nicht vergleichbar.
 
 Seit der zweiten Laptop-Runde gibt es eine zweite Engine: llama.cpp Tag
 `b10524` (Commit `9ee9fc04c136ef2ae729bfc60d18961b23c13ddf`), Build mit
-`GGML_VULKAN=ON` unter `~/ki/llama.cpp-vulkan/`. Sie existiert, weil die
+`GGML_VULKAN=ON` unter `~/projects/ki/llama.cpp-vulkan/`. Sie existiert, weil die
 gepinnte b3962 die Architekturen von Qwen3, Phi-4 und Gemma-3 nicht kennt
 und kein taugliches Vulkan hat. Die Zuordnung ist fest:
 
-- **BitNet i2_s → nur die gepinnte BitNet-Engine** (`~/ki/BitNet`). Auf der
+- **BitNet i2_s → nur die gepinnte BitNet-Engine** (`~/projects/ki/BitNet`). Auf der
   neuen Engine ist i2_s kaputt (der `Q1_0`-Defekt aus Abschnitt oben).
 - **Qwen3/Phi-4/Gemma-3 → nur b10524**, CPU wie GPU.
 - **Llama-3.2-3B läuft auf beiden** und dient als Brücke: tg64 13.64 (b3962)

@@ -47,6 +47,6 @@ llama-server ersetzt, der Symlink stirbt mit.
 
 ## Behalten (aktiv genutzt)
 
-- `~/ki/BitNet/models/` — Benchmark-Modelle mit sha256 in `results/`
-- `~/ki/llama.cpp-vulkan` — Engine b10524
+- `~/projects/ki/BitNet/models/` — Benchmark-Modelle mit sha256 in `results/`
+- `~/projects/ki/llama.cpp-vulkan` — Engine b10524
 - `~/projects/vulkan-ed/models/` — gemma-4-E2B für den Editor

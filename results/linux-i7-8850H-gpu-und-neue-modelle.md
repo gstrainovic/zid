@@ -45,7 +45,7 @@ Engine** (i2_s-Defekt, siehe `CLAUDE.md`).
 
 ```
 Engine   llama.cpp Tag b10524, Commit 9ee9fc04c136ef2ae729bfc60d18961b23c13ddf
-Build    ~/ki/llama.cpp-vulkan/build — GGML_VULKAN=ON, Release, gcc 15.3.1
+Build    ~/projects/ki/llama.cpp-vulkan/build — GGML_VULKAN=ON, Release, gcc 15.3.1
 GPUs     Vulkan0 = Intel UHD 630 (Mesa, uma:1, fp16:1)
          Vulkan1 = Quadro P1000 (NVIDIA 580.178.04, uma:0, fp16:0, int dot:1)
 ```

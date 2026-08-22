@@ -355,8 +355,8 @@ Zeilen mit verschiedener Chunk-Zahl und war falsch.
 
 ```bash
 # Engine, die i2_s korrekt lädt
-git clone --recursive https://github.com/microsoft/BitNet.git ~/ki/BitNet-ref
-cd ~/ki/BitNet-ref && git checkout 01eb415
+git clone --recursive https://github.com/microsoft/BitNet.git ~/projects/ki/BitNet-ref
+cd ~/projects/ki/BitNet-ref && git checkout 01eb415
 git submodule update --init --recursive     # llama.cpp 1f86f058
 git apply ~/projects/bitnet-colibri-bench/patches/bitnet-mad-const-y_col.patch
 python3 utils/codegen_tl2.py --model bitnet_b1_58-3B \
