@@ -93,7 +93,7 @@ damit auf dem Testrechner nichts zu installieren ist.
 
 ```bash
 git clone <dieses-repo> && cd bitnet-colibri-bench
-./setup/linux.sh ~/ki
+./setup/linux.sh ~/projects/ki
 ```
 
 Das holt und baut BitNet (mit Patch) und colibri, lädt BitNet-b1.58-2B-4T, das
@@ -101,7 +101,7 @@ Vergleichsmodell Llama-3.2-3B-Q4_K_M und konvertiert OLMoE. Rund 25 GB Platte,
 je nach Leitung ein bis zwei Stunden. Danach:
 
 ```bash
-cd ~/ki/BitNet
+cd ~/projects/ki/BitNet
 
 # Durchsatz. -t bewusst durchprobieren: die Vorgabe (alle Threads) ist
 # auf Hybrid-CPUs regelmässig die schlechteste Einstellung.
@@ -126,9 +126,9 @@ colibri hat keinen OpenAI-Endpunkt, deshalb ein eigener Läufer:
 
 ```bash
 python3 ~/bitnet-colibri-bench/bench/olmoe_eval.py \
-    --engine ~/ki/colibri/c/olmoe --snap ~/ki/colibri/olmoe_merged
+    --engine ~/projects/ki/colibri/c/olmoe --snap ~/projects/ki/colibri/olmoe_merged
 python3 ~/bitnet-colibri-bench/bench/olmoe_speed.py \
-    --engine ~/ki/colibri/c/olmoe --snap ~/ki/colibri/olmoe_merged
+    --engine ~/projects/ki/colibri/c/olmoe --snap ~/projects/ki/colibri/olmoe_merged
 ```
 
 ## Warum so gemessen

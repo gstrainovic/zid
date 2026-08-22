@@ -12,8 +12,8 @@ MODELL="${1:-qwen3}"
 GERAET="${2:-gpu}"
 PORT="${3:-8080}"
 
-ENGINE="$HOME/ki/llama.cpp-vulkan/build/bin/llama-server"
-MODELLE="$HOME/ki/BitNet/models/_compare"
+ENGINE="$HOME/projects/ki/llama.cpp-vulkan/build/bin/llama-server"
+MODELLE="$HOME/projects/ki/BitNet/models/_compare"
 
 case "$MODELL" in
   qwen3)  DATEI="Qwen3-4B-Instruct-2507-Q4_K_M.gguf" ;;

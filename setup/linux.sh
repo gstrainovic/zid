@@ -8,7 +8,7 @@
 # Braucht rund 25 GB Platte; OLMoE ist der grosse Posten.
 set -euo pipefail
 
-ROOT="${1:-$HOME/ki}"
+ROOT="${1:-$HOME/projects/ki}"
 BENCH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 mkdir -p "$ROOT"
