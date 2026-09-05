@@ -22,6 +22,7 @@ const pane_mod = @import("pane.zig");
 const dialog_mod = @import("dialog.zig");
 const folder_picker_mod = @import("folder_picker.zig");
 const shortcuts = @import("shortcuts");
+const shortcuts_dialog = @import("shortcuts_dialog.zig");
 const ai_chat_mod = @import("ai_chat.zig");
 const agent_mod = @import("agent");
 const textarea_mod = @import("components/textarea.zig");
@@ -99,6 +100,8 @@ pub const UI = struct {
     active_dialog: ?ActiveDialog,
     /// Ausgeklapptes Header-Menü (Index in shortcuts.menus), null = keins
     open_menu: ?usize = null,
+    /// Help → Keyboard Shortcuts offen
+    shortcuts_dialog_open: bool = false,
     /// Letzter Klick war im Explorer: F2/Entf gelten für den markierten Eintrag
     explorer_focused: bool = false,
     /// "Open Folder…"-Dialog
@@ -391,6 +394,10 @@ pub const UI = struct {
             self.folder_picker.handleKey(key);
             return;
         }
+        if (self.shortcuts_dialog_open) {
+            if (key == .escape or key == .f1) self.shortcuts_dialog_open = false;
+            return;
+        }
         if (self.open_menu != null and key == .escape) {
             self.open_menu = null;
             return;
@@ -592,6 +599,14 @@ pub const UI = struct {
         self.mouse_pressed_this_frame = (button == .mouse_left);
         self.is_mouse_down = (button == .mouse_left);
 
+        if (self.shortcuts_dialog_open) {
+            if (button == .mouse_left and (clay.pointerOver(clay.ElementId.ID(shortcuts_dialog.CLOSE_ID)) or
+                !clay.pointerOver(clay.ElementId.ID(shortcuts_dialog.BOX_ID))))
+            {
+                self.shortcuts_dialog_open = false;
+            }
+            return;
+        }
         // Ordner-Dialog ist modal: alle Klicks gehören ihm
         if (self.folder_picker.visible) {
             if (button == .mouse_left) self.folder_picker.handleMouseDown();
@@ -846,6 +861,7 @@ pub const UI = struct {
         self.open_menu = null;
         switch (cmd) {
             .open_folder => self.openFolderPicker(),
+            .show_shortcuts => self.shortcuts_dialog_open = true,
             .new_file => self.getActiveTabBar().openFile("New File.txt") catch |err| log.warn("new file failed: {}", .{err}),
             .close_tab => self.requestCloseActiveTab(),
             .next_tab => self.cycleTab(1),
@@ -1176,6 +1192,7 @@ pub const UI = struct {
 
         // "Open Folder…"-Dialog (floating, z_index=2000), modal wie der Dialog unten
         self.folder_picker.render(self.frame_arena.allocator(), t);
+        if (self.shortcuts_dialog_open) shortcuts_dialog.render(t);
 
         // Dialog INSIDE Clay layout (floating, z_index=2000 → overlays everything)
         // Must be here so Clay can register element bounds and mouse_pressed_this_frame is still true

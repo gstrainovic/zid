@@ -2044,7 +2044,7 @@ pub const CodeEditor = struct {
         clay.UI()(.{
             .id = item_id,
             .layout = .{
-                .sizing = .{ .w = .fixed(300), .h = .fixed(@floatFromInt(self.font_size + 12)) },
+                .sizing = .{ .w = .fixed(360), .h = .fixed(@floatFromInt(self.font_size + 12)) },
                 .padding = .{ .left = 12, .right = 12, .top = 6, .bottom = 6 },
                 .direction = .left_to_right,
                 .child_alignment = .{ .x = .left, .y = .center },
