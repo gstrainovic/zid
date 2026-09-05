@@ -28,6 +28,7 @@
 //!   OK bye
 
 const std = @import("std");
+const zigjr = @import("zigjr");
 const e2e_server = @import("e2e_server.zig");
 const ui_mod = @import("ui/mod.zig");
 
@@ -36,6 +37,9 @@ const log = std.log.scoped(.interactive);
 /// Interactive command handler - reuses E2EContext handlers directly
 pub const InteractiveHandler = struct {
     ctx: *e2e_server.E2EContext,
+    /// Per-Kommando Request-Context: Antworten und Fehlertexte landen in dc.arena()
+    /// und werden vom Aufrufer nach dem Schreiben der Antwort freigegeben.
+    dc: *zigjr.DispatchCtx,
 
     const Self = @This();
 
@@ -108,7 +112,7 @@ pub fn exec(self: *Self, line: []const u8) []const u8 {
         if (args.len < 1) return "ERROR open <path>";
         const path = args[0];
         log.info("Interactive: open '{s}'", .{path});
-        _ = e2e_server.openFile(self.ctx, path) catch |err| {
+        _ = e2e_server.openFile(self.ctx, self.dc, path) catch |err| {
             log.err("open failed: {}", .{err});
             return "ERROR open failed";
         };
@@ -119,7 +123,7 @@ pub fn exec(self: *Self, line: []const u8) []const u8 {
         if (args.len < 1) return "ERROR close-tab <index>";
         const idx = std.fmt.parseInt(u32, args[0], 10) catch return "ERROR invalid index";
         log.info("Interactive: close-tab {d}", .{idx});
-        _ = e2e_server.closeTab(self.ctx, @intCast(idx)) catch |err| {
+        _ = e2e_server.closeTab(self.ctx, self.dc, @intCast(idx)) catch |err| {
             log.err("close-tab failed: {}", .{err});
             return "ERROR close-tab failed";
         };
@@ -130,7 +134,7 @@ pub fn exec(self: *Self, line: []const u8) []const u8 {
         if (args.len < 1) return "ERROR switch-tab <index>";
         const idx = std.fmt.parseInt(u32, args[0], 10) catch return "ERROR invalid index";
         log.info("Interactive: switch-tab {d}", .{idx});
-        _ = e2e_server.setActiveTab(self.ctx, @intCast(idx)) catch |err| {
+        _ = e2e_server.setActiveTab(self.ctx, self.dc, @intCast(idx)) catch |err| {
             log.err("switch-tab failed: {}", .{err});
             return "ERROR switch-tab failed";
         };
@@ -142,7 +146,7 @@ pub fn exec(self: *Self, line: []const u8) []const u8 {
         const x = std.fmt.parseFloat(f32, args[0]) catch return "ERROR invalid x";
         const y = std.fmt.parseFloat(f32, args[1]) catch return "ERROR invalid y";
         log.info("Interactive: click {d} {d}", .{ x, y });
-        _ = e2e_server.click(self.ctx, undefined, x, y) catch |err| {
+        _ = e2e_server.click(self.ctx, self.dc, x, y) catch |err| {
             log.err("click failed: {}", .{err});
             return "ERROR click failed";
         };
@@ -154,7 +158,7 @@ pub fn exec(self: *Self, line: []const u8) []const u8 {
         const x = std.fmt.parseFloat(f32, args[0]) catch return "ERROR invalid x";
         const y = std.fmt.parseFloat(f32, args[1]) catch return "ERROR invalid y";
         log.info("Interactive: right-click {d} {d}", .{ x, y });
-        _ = e2e_server.rightClick(self.ctx, undefined, x, y) catch |err| {
+        _ = e2e_server.rightClick(self.ctx, self.dc, x, y) catch |err| {
             log.err("right-click failed: {}", .{err});
             return "ERROR right-click failed";
         };
@@ -166,7 +170,7 @@ pub fn exec(self: *Self, line: []const u8) []const u8 {
         const key_name = args[0];
         const is_ctrl = if (args.len > 1 and std.mem.eql(u8, args[1], "ctrl")) true else false;
         log.info("Interactive: key '{s}' ctrl={}", .{ key_name, is_ctrl });
-        _ = e2e_server.keyPress(self.ctx, undefined, key_name, is_ctrl) catch |err| {
+        _ = e2e_server.keyPress(self.ctx, self.dc, key_name, is_ctrl) catch |err| {
             log.err("key failed: {}", .{err});
             return "ERROR key failed";
         };
@@ -177,7 +181,7 @@ pub fn exec(self: *Self, line: []const u8) []const u8 {
         if (args.len < 1) return "ERROR type <text>";
         const text = args[0];
         log.info("Interactive: type '{s}'", .{text});
-        _ = e2e_server.typeText(self.ctx, undefined, text) catch |err| {
+        _ = e2e_server.typeText(self.ctx, self.dc, text) catch |err| {
             log.err("type failed: {}", .{err});
             return "ERROR type failed";
         };
@@ -187,7 +191,7 @@ pub fn exec(self: *Self, line: []const u8) []const u8 {
     fn execScreenshot(self: *Self, args: [][]const u8) []const u8 {
         _ = args;
         log.info("Interactive: screenshot", .{});
-        _ = e2e_server.screenshot(self.ctx, undefined) catch |err| {
+        _ = e2e_server.screenshot(self.ctx, self.dc) catch |err| {
             log.err("screenshot failed: {}", .{err});
             return "ERROR screenshot failed";
         };
@@ -201,7 +205,7 @@ pub fn exec(self: *Self, line: []const u8) []const u8 {
             return "ERROR split <h|v>";
         }
         log.info("Interactive: split {s}", .{direction});
-        _ = e2e_server.splitPane(self.ctx, undefined, direction) catch |err| {
+        _ = e2e_server.splitPane(self.ctx, self.dc, direction) catch |err| {
             log.err("split failed: {}", .{err});
             return "ERROR split failed";
         };
@@ -213,7 +217,7 @@ pub fn exec(self: *Self, line: []const u8) []const u8 {
         const x = std.fmt.parseFloat(f32, args[0]) catch return "ERROR invalid x";
         const y = std.fmt.parseFloat(f32, args[1]) catch return "ERROR invalid y";
         log.info("Interactive: show-menu {d} {d}", .{ x, y });
-        _ = e2e_server.showContextMenuRpc(self.ctx, undefined, x, y) catch |err| {
+        _ = e2e_server.showContextMenuRpc(self.ctx, self.dc, x, y) catch |err| {
             log.err("show-menu failed: {}", .{err});
             return "ERROR show-menu failed";
         };
@@ -223,7 +227,7 @@ pub fn exec(self: *Self, line: []const u8) []const u8 {
     fn execGetState(self: *Self, args: [][]const u8) []const u8 {
         _ = args;
         log.info("Interactive: get-state", .{});
-        const state = e2e_server.getState(self.ctx, undefined) catch |err| {
+        const state = e2e_server.getState(self.ctx, self.dc) catch |err| {
             log.err("get-state failed: {}", .{err});
             return "ERROR get-state failed";
         };
@@ -254,7 +258,18 @@ pub fn runInteractiveLoop(ctx: *e2e_server.E2EContext) void {
                 trimmed = trimmed[0..trimmed.len-1];
             }
 
-            var handler = InteractiveHandler{ .ctx = ctx };
+            // Arena pro Kommando: alles was Handler über dc.arena() anlegen,
+            // lebt bis die Antwort geschrieben ist und wird dann freigegeben.
+            var arena = std.heap.ArenaAllocator.init(ctx.allocator);
+            defer arena.deinit();
+            var nop_logger = zigjr.NopLogger{};
+            var dc_impl = zigjr.DispatchCtxImpl{
+                .arena = arena.allocator(),
+                .logger = nop_logger.asLogger(),
+            };
+            var dc = zigjr.DispatchCtx{ .dc_impl = &dc_impl };
+
+            var handler = InteractiveHandler{ .ctx = ctx, .dc = &dc };
             const response = handler.exec(trimmed);
 
             if (response.len > 0) {

@@ -2,6 +2,7 @@
     .fingerprint = 0xe53b65ee4e846b20,
     .name = .vulkan_ed,
     .version = "0.1.0",
+    .minimum_zig_version = "0.15.2",
     .dependencies = .{
         .wio = .{
             .path = "libs/wio",

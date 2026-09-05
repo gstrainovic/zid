@@ -38,3 +38,9 @@ test_agent
 test_agent.zig
 ai_test_screenshot.png
 ai_nvidia_test.png
+
+# Headless/Interactive Screenshot-Ausgabe
+tmp/
+
+# Lokaler Zig Package-Cache
+zig-pkg/
