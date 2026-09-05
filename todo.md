@@ -1,6 +1,5 @@
 # Todo: Tastenkürzel und Menüs sichtbar machen
 
-- [ ] 2. Explorer: F2 benennt den markierten Eintrag um, Entf löscht ihn (mit Bestätigungsdialog wie im Kontextmenü)
 - [ ] 3. Tabs: Ctrl+W schließt den aktiven Tab (mit Speichern-Nachfrage), Ctrl+Tab / Ctrl+Shift+Tab wechseln, Ctrl+N neue Datei
 - [ ] 4. Ansicht: Ctrl+B Explorer ein/aus, Ctrl+` neues Terminal, Ctrl+Shift+K Zeile löschen (Action existiert schon)
 - [ ] 5. Menüs im Header aus der Tabelle: File (New File, Save, Open Folder…), Edit (Undo, Redo, Cut, Copy, Paste, Select All), View (Explorer, Split V/H, MD-Preview, Terminal); Kürzel stehen rechts im Eintrag

@@ -8,6 +8,7 @@
 //!   element_bounds(id) - Bounding-Box eines Clay-Elements per String-ID
 //!   element_bounds_i(id, index) - dito für indexierte IDs (IDI)
 //!   folder_picker_state() - Zustand des "Open Folder…"-Dialogs
+//!   ui_state()         - Dialog/Menü/Fokus/Tabs (zuverlässig, element_bounds kann veraltet sein)
 //!   click(x, y)        - Maus-Klick an Koordinate
 //!   get_state()        - App-State zurückgeben
 //!   shutdown()         - App beenden
@@ -156,6 +157,7 @@ pub fn createDispatcher(alloc: std.mem.Allocator, ctx: *E2EContext) !*zigjr.RpcD
     try rpc_dispatcher.addWithCtx("element_bounds", ctx, elementBounds);
     try rpc_dispatcher.addWithCtx("element_bounds_i", ctx, elementBoundsIndexed);
     try rpc_dispatcher.addWithCtx("folder_picker_state", ctx, folderPickerState);
+    try rpc_dispatcher.addWithCtx("ui_state", ctx, uiState);
     try rpc_dispatcher.addWithCtx("save_file", ctx, saveFile);
     try rpc_dispatcher.addWithCtx("get_state", ctx, getState);
     try rpc_dispatcher.addWithCtx("benchmark_open_file", ctx, benchmarkOpenFile);
@@ -478,6 +480,36 @@ fn boundsJson(dc: *zigjr.DispatchCtx, data: clay.ElementData) ![]const u8 {
     return std.fmt.allocPrint(dc.arena(),
         \\{{"found": {}, "x": {d:.1}, "y": {d:.1}, "w": {d:.1}, "h": {d:.1}}}
     , .{ data.found, bb.x, bb.y, bb.width, bb.height });
+}
+
+/// UI-Zustand für Tests: Dialog, Header-Menü, Explorer-Fokus, aktiver Tab.
+/// Anders als element_bounds liest das den echten Zustand; Clay behält
+/// Element-Daten verschwundener Elemente noch eine Weile im Hash.
+fn uiState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
+    const ui = ctx.ui_system;
+    const tb = ui.getActiveTabBar();
+    var buf = std.Io.Writer.Allocating.init(dc.arena());
+    try buf.writer.writeAll("{\"dialog\": ");
+    if (ui.active_dialog) |ad| {
+        try buf.writer.print("\"{s}\"", .{ad.dialog.title});
+    } else {
+        try buf.writer.writeAll("null");
+    }
+    try buf.writer.print(
+        \\, "file_menu_open": {}, "explorer_focused": {}, "show_file_explorer": {}, "picker_open": {}, "tab_count": {d}, "active_tab":
+    , .{ ui.file_menu_open, ui.explorer_focused, ui.show_file_explorer, ui.folder_picker.visible, tb.count() });
+    if (tb.active_index) |idx| {
+        try buf.writer.print("{d}", .{idx});
+    } else {
+        try buf.writer.writeAll("null");
+    }
+    try buf.writer.writeAll(", \"tabs\": [");
+    for (tb.tabs.items, 0..) |tab, i| {
+        if (i > 0) try buf.writer.writeAll(", ");
+        try buf.writer.print("{{\"path\": \"{s}\", \"kind\": \"{s}\", \"modified\": {}}}", .{ tab.path, @tagName(tab.kind), tab.modified });
+    }
+    try buf.writer.writeAll("]}");
+    return buf.written();
 }
 
 /// Zustand des "Open Folder…"-Dialogs: offen, Pfadfeld, Fehlermeldung, Unterordner.
