@@ -1072,9 +1072,8 @@ pub const CodeEditor = struct {
                             .end = .{ .row = self.cursor.row, .col = self.cursor.col + 1 },
                         };
                         const del_text = self.getTextInRange(sel) catch "";
-                        const del_owned = if (del_text.len > 0) self.allocator.dupe(u8, del_text) catch "" else "";
-                        defer if (del_owned.len > 0) self.allocator.free(del_owned);
-                        self.pushEditForChange(self.cursor.row, self.cursor.col, del_owned, "");
+                        defer if (del_text.len > 0) self.allocator.free(del_text);
+                        self.pushEditForChange(self.cursor.row, self.cursor.col, del_text, "");
                         const result2 = self.buffer.root.delete_range(sel, self.buffer.allocator, null, m) catch return;
                         self.buffer.root = result2;
                     } else if (self.cursor.row + 1 < line_count) {
@@ -1101,9 +1100,8 @@ pub const CodeEditor = struct {
                                 .end = self.cursor,
                             };
                             const del_text = self.getTextInRange(sel) catch "";
-                            const del_owned = if (del_text.len > 0) self.allocator.dupe(u8, del_text) catch "" else "";
-                            defer if (del_owned.len > 0) self.allocator.free(del_owned);
-                            self.pushEditForChange(self.cursor.row, new_col, del_owned, "");
+                            defer if (del_text.len > 0) self.allocator.free(del_text);
+                            self.pushEditForChange(self.cursor.row, new_col, del_text, "");
                             const result2 = self.buffer.root.delete_range(sel, self.buffer.allocator, null, m) catch return;
                             self.buffer.root = result2;
                             self.cursor.col = new_col;
@@ -1129,9 +1127,8 @@ pub const CodeEditor = struct {
                                 .end = .{ .row = self.cursor.row, .col = new_col },
                             };
                             const del_text = self.getTextInRange(sel) catch "";
-                            const del_owned = if (del_text.len > 0) self.allocator.dupe(u8, del_text) catch "" else "";
-                            defer if (del_owned.len > 0) self.allocator.free(del_owned);
-                            self.pushEditForChange(self.cursor.row, self.cursor.col, del_owned, "");
+                            defer if (del_text.len > 0) self.allocator.free(del_text);
+                            self.pushEditForChange(self.cursor.row, self.cursor.col, del_text, "");
                             const result2 = self.buffer.root.delete_range(sel, self.buffer.allocator, null, m) catch return;
                             self.buffer.root = result2;
                         }
@@ -1154,9 +1151,8 @@ pub const CodeEditor = struct {
                     .end = .{ .row = row, .col = self.lineWidth(row) + 1 },
                 };
                 const del_text = self.getTextInRange(sel) catch "";
-                const del_owned = if (del_text.len > 0) self.allocator.dupe(u8, del_text) catch "" else "";
-                defer if (del_owned.len > 0) self.allocator.free(del_owned);
-                self.pushEditForChange(sel.begin.row, sel.begin.col, del_owned, "");
+                defer if (del_text.len > 0) self.allocator.free(del_text);
+                self.pushEditForChange(sel.begin.row, sel.begin.col, del_text, "");
                 const result2 = self.buffer.root.delete_range(sel, self.buffer.allocator, null, m) catch return;
                 self.buffer.root = result2;
                 if (joins_previous) self.cursor.row = row - 1;
@@ -2226,6 +2222,16 @@ test "Navigation: Right am Zeilenende springt an Anfang der nächsten Zeile" {
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
+// Test-Binary: wio-Backend-Symbole erzwingen (wio_wl_proxy_* werden sonst nicht
+// emittiert und der Linker meldet undefined symbols). Nur im Test relevant.
+comptime {
+    if (@import("builtin").is_test) {
+        _ = &wio.backend.init;
+        _ = &wio.backend.deinit;
+        if (@hasDecl(wio.backend, "wayland")) _ = &wio.backend.wayland.init;
+    }
+}
+
 fn testEditor(allocator: std.mem.Allocator, text: []const u8) !struct { buffer: *flow_core.Buffer, ed: CodeEditor } {
     const buffer = try flow_core.Buffer.create(allocator);
     var ed = CodeEditor.init(allocator, buffer);
@@ -2273,6 +2279,7 @@ test "DeleteLine: getippter Text, letzte Zeile verschwindet" {
     for ("drei") |c| t.ed.handleChar(c);
     t.ed.dispatchAction(.DeleteLine);
     const after = try t.ed.getTextInRange(.{ .begin = .{ .row = 0, .col = 0 }, .end = .{ .row = 1, .col = 100 } });
+    defer std.testing.allocator.free(after);
     try std.testing.expectEqual(@as(usize, 2), t.ed.lineCount());
     try std.testing.expectEqualStrings("abc\nzwei", after);
 }

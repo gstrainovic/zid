@@ -32,7 +32,7 @@ def item1_table_drives_ctrl_o():
     check(picker_open(), "Ctrl+O öffnet den Ordner-Dialog")
     key("escape")
     check(not picker_open(), "Escape schließt ihn")
-    menu_click("menu_file", "menu_open_folder")
+    menu_click("menu_file", "menu_item_open_folder")
     check(picker_open(), "Menü File → Open Folder… öffnet den Dialog")
     key("escape")
 
@@ -187,7 +187,55 @@ def item4_view():
     check(after == lines - 1, f"Ctrl+Shift+K löscht die aktuelle Zeile ({lines} → {after})")
 
 
-STEPS = [item1_table_drives_ctrl_o, item2_explorer_f2_delete, item3_tabs, item4_view]
+def item5_menus():
+    print("--- 5. Menüleiste File/Edit/View/Help aus der Tabelle, Einträge führen Commands aus")
+    for title in ("menu_file", "menu_edit", "menu_view", "menu_help"):
+        check(bounds(title)["found"], f"Header zeigt {title}")
+    click_center("menu_edit")
+    check(ui_state()["open_menu"] == "Edit", "Klick auf Edit öffnet das Edit-Menü")
+    rpc("move_mouse", [bounds("menu_view")["x"] + 10, bounds("menu_view")["y"] + 10]); settle()
+    check(ui_state()["open_menu"] == "View", "Hover über View wechselt bei offenem Menü")
+    key("escape")
+    check(ui_state()["open_menu"] is None, "Escape schließt das Menü")
+
+    # "New File.txt" ist aus Punkt 3 offen und geändert: New File wechselt dorthin,
+    # Close Tab fragt nach, "Don't Save" schließt.
+    menu_click("menu_file", "menu_item_new_file")
+    st = ui_state()
+    check(st["tabs"][st["active_tab"]]["path"].endswith("New File.txt") and st["open_menu"] is None,
+          "File → New File aktiviert 'New File.txt' und schließt das Menü")
+    n = st["tab_count"]
+    menu_click("menu_file", "menu_item_close_tab")
+    check(ui_state()["dialog"] == "Unsaved Changes", "File → Close Tab fragt bei Änderungen nach")
+    click_center("Don't Save")
+    settle(5)
+    check(ui_state()["tab_count"] == n - 1, "Don't Save schließt den Tab")
+    menu_click("menu_file", "menu_item_new_file")
+    check(ui_state()["tab_count"] == n, "File → New File legt danach einen neuen Tab an")
+
+    menu_click("menu_view", "menu_item_toggle_explorer")
+    check(not ui_state()["show_file_explorer"], "View → Toggle Explorer blendet aus")
+    menu_click("menu_view", "menu_item_toggle_explorer")
+    check(ui_state()["show_file_explorer"], "View → Toggle Explorer blendet ein")
+
+    # Edit → Delete Line im geänderten Text-Tab
+    while not ui_state()["tabs"][ui_state()["active_tab"]]["path"].endswith("New File.txt"):
+        key("tab", ctrl=True)
+    rpc("click", [700, 400]); settle()
+    before = int(rpc("editor_lines"))
+    key("end", ctrl=True); key("enter"); rpc("type_text", ["extra"]); settle(5)
+    menu_click("menu_edit", "menu_item_delete_line")
+    settle(5)
+    check(int(rpc("editor_lines")) == before, f"Edit → Delete Line löscht die neue Zeile (zurück auf {before})")
+    menu_click("menu_edit", "menu_item_undo")
+    settle(5)
+    check(int(rpc("editor_lines")) == before + 1, "Edit → Undo holt sie zurück")
+    click_center("menu_edit")
+    shot("e2e_menu_edit.ppm")
+    key("escape")
+
+
+STEPS = [item1_table_drives_ctrl_o, item2_explorer_f2_delete, item3_tabs, item4_view, item5_menus]
 
 
 def main():
