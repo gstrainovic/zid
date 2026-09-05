@@ -518,9 +518,15 @@ fn uiState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     } else {
         try buf.writer.writeAll("null");
     }
+    try buf.writer.writeAll(", \"open_menu\": ");
+    if (ui.open_menu) |mi| {
+        try buf.writer.print("\"{s}\"", .{@import("ui/shortcuts.zig").menus[mi].title});
+    } else {
+        try buf.writer.writeAll("null");
+    }
     try buf.writer.print(
-        \\, "file_menu_open": {}, "explorer_focused": {}, "show_file_explorer": {}, "picker_open": {}, "tab_count": {d}, "active_tab":
-    , .{ ui.file_menu_open, ui.explorer_focused, ui.show_file_explorer, ui.folder_picker.visible, tb.count() });
+        \\, "explorer_focused": {}, "show_file_explorer": {}, "picker_open": {}, "tab_count": {d}, "active_tab":
+    , .{ ui.explorer_focused, ui.show_file_explorer, ui.folder_picker.visible, tb.count() });
     if (tb.active_index) |idx| {
         try buf.writer.print("{d}", .{idx});
     } else {

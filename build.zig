@@ -201,18 +201,15 @@ pub fn build(b: *std.Build) void {
     code_editor_mod.addImport("flow_core", flow_core_dep.module("flow-core"));
     code_editor_mod.addImport("syntax", syntax_mod);
 
-    const editor_tests = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("test/test_editor.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
-    });
-    editor_tests.root_module.addImport("clay", clay_dep.module("zclay"));
-    editor_tests.root_module.addImport("wio", wio_dep.module("wio"));
-    editor_tests.root_module.addImport("flow_core", flow_core_dep.module("flow-core"));
-    editor_tests.root_module.addImport("syntax", syntax_mod);
-    editor_tests.root_module.addImport("code_editor", code_editor_mod);
+
+    // Tests IN code_editor.zig laufen nur, wenn die Datei selbst Test-Root ist:
+    // Tests aus importierten Modulen (test/test_editor.zig → "code_editor")
+    // führt der Test-Runner nicht aus.
+    code_editor_mod.addImport("clay", clay_dep.module("zclay"));
+    code_editor_mod.addImport("wio", wio_dep.module("wio"));
+    const code_editor_tests = b.addTest(.{ .root_module = code_editor_mod });
+    const run_code_editor_tests = b.addRunArtifact(code_editor_tests);
+    run_code_editor_tests.has_side_effects = true;
 
     const perf_test_mod = b.createModule(.{
         .root_source_file = b.path("src/editor/highlight_perf_tests.zig"),
@@ -356,20 +353,18 @@ pub fn build(b: *std.Build) void {
     run_chat_markdown_tests.has_side_effects = true;
     test_step.dependOn(&run_chat_markdown_tests.step);
 
-    const run_editor_tests = b.addRunArtifact(editor_tests);
     if (target.result.os.tag == .linux) {
-        editor_tests.root_module.linkSystemLibrary("wayland-client", .{});
-        editor_tests.root_module.linkSystemLibrary("wayland-egl", .{});
-        editor_tests.root_module.linkSystemLibrary("xkbcommon", .{});
-        editor_tests.root_module.linkSystemLibrary("decor-0", .{});
-        editor_tests.root_module.linkSystemLibrary("EGL", .{});
-        editor_tests.root_module.linkSystemLibrary("vulkan", .{});
-        editor_tests.root_module.linkSystemLibrary("freetype2", .{});
-        editor_tests.root_module.linkSystemLibrary("harfbuzz", .{});
-        editor_tests.root_module.linkSystemLibrary("png", .{});
-        editor_tests.root_module.link_libc = true;
+        code_editor_tests.root_module.linkSystemLibrary("wayland-client", .{});
+        code_editor_tests.root_module.linkSystemLibrary("wayland-egl", .{});
+        code_editor_tests.root_module.linkSystemLibrary("xkbcommon", .{});
+        code_editor_tests.root_module.linkSystemLibrary("decor-0", .{});
+        code_editor_tests.root_module.linkSystemLibrary("EGL", .{});
+        code_editor_tests.root_module.linkSystemLibrary("vulkan", .{});
+        code_editor_tests.root_module.linkSystemLibrary("freetype2", .{});
+        code_editor_tests.root_module.linkSystemLibrary("harfbuzz", .{});
+        code_editor_tests.root_module.linkSystemLibrary("png", .{});
+        code_editor_tests.root_module.link_libc = true;
     }
-    run_editor_tests.has_side_effects = true;
-    test_step.dependOn(&run_editor_tests.step);
+    test_step.dependOn(&run_code_editor_tests.step);
     test_step.dependOn(&run_perf_tests.step);
 }

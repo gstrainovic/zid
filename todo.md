@@ -1,6 +1,5 @@
 # Todo: Tastenkürzel und Menüs sichtbar machen
 
-- [ ] 5. Menüs im Header aus der Tabelle: File (New File, Save, Open Folder…), Edit (Undo, Redo, Cut, Copy, Paste, Select All), View (Explorer, Split V/H, MD-Preview, Terminal); Kürzel stehen rechts im Eintrag
 - [ ] 6. Editor-Kontextmenü zeigt die Kürzel aus der Tabelle (Cut, Copy, Paste, Split, MD-Preview)
 - [ ] 7. Help → Keyboard Shortcuts: Dialog listet alle Bindungen aus der Tabelle
 - [ ] 8. Ctrl+F: Suchleiste im Editor (Enter nächster Treffer, Shift+Enter vorheriger, Escape schließt); Action `Search` ist bisher ohne Implementierung

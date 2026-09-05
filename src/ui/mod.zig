@@ -97,8 +97,8 @@ pub const UI = struct {
     pending_split: ?pane_mod.PaneDirection,
 
     active_dialog: ?ActiveDialog,
-    /// Header-Menü "File" ausgeklappt
-    file_menu_open: bool = false,
+    /// Ausgeklapptes Header-Menü (Index in shortcuts.menus), null = keins
+    open_menu: ?usize = null,
     /// Letzter Klick war im Explorer: F2/Entf gelten für den markierten Eintrag
     explorer_focused: bool = false,
     /// "Open Folder…"-Dialog
@@ -391,8 +391,8 @@ pub const UI = struct {
             self.folder_picker.handleKey(key);
             return;
         }
-        if (self.file_menu_open and key == .escape) {
-            self.file_menu_open = false;
+        if (self.open_menu != null and key == .escape) {
+            self.open_menu = null;
             return;
         }
         // Kürzel aus der zentralen Tabelle (shortcuts.zig): global überall,
@@ -598,16 +598,25 @@ pub const UI = struct {
             return;
         }
         // Header-Menü: offen → Eintrag ausführen oder schließen; Klick auf "File" → öffnen
-        if (self.file_menu_open) {
-            self.file_menu_open = false;
-            if (button == .mouse_left and clay.pointerOver(clay.ElementId.ID("menu_open_folder"))) {
-                self.executeCommand(.open_folder);
+        if (self.open_menu) |mi| {
+            self.open_menu = null;
+            if (button == .mouse_left) {
+                for (shortcuts.menus[mi].items) |cmd| {
+                    if (clay.pointerOver(menuItemId(cmd))) {
+                        self.executeCommand(cmd);
+                        break;
+                    }
+                }
             }
             return;
         }
-        if (button == .mouse_left and clay.pointerOver(clay.ElementId.ID("menu_file"))) {
-            self.file_menu_open = true;
-            return;
+        if (button == .mouse_left) {
+            inline for (shortcuts.menus, 0..) |menu, i| {
+                if (clay.pointerOver(menuTitleId(menu))) {
+                    self.open_menu = i;
+                    return;
+                }
+            }
         }
 
         // Tastatur-Fokus folgt dem Klick: Explorer-Kürzel (F2/Entf) nur nach Klick im Explorer
@@ -834,7 +843,7 @@ pub const UI = struct {
 
     /// Ein Command aus Menü oder Tastenkürzel ausführen.
     pub fn executeCommand(self: *Self, cmd: shortcuts.Command) void {
-        self.file_menu_open = false;
+        self.open_menu = null;
         switch (cmd) {
             .open_folder => self.openFolderPicker(),
             .new_file => self.getActiveTabBar().openFile("New File.txt") catch |err| log.warn("new file failed: {}", .{err}),
@@ -846,6 +855,18 @@ pub const UI = struct {
                 if (!self.show_file_explorer) self.explorer_focused = false;
             },
             .new_terminal => self.getActiveTabBar().openTerminal(),
+            // Editor-Commands: dieselben Actions wie die Tastenkürzel im Editor-Keymap
+            .save => self.getActiveEditor().dispatchAction(.Save),
+            .undo => self.getActiveEditor().dispatchAction(.Undo),
+            .redo => self.getActiveEditor().dispatchAction(.Redo),
+            .cut => self.getActiveEditor().dispatchAction(.Cut),
+            .copy => self.getActiveEditor().dispatchAction(.Copy),
+            .paste => self.getActiveEditor().dispatchAction(.Paste),
+            .select_all => self.getActiveEditor().dispatchAction(.SelectAll),
+            .delete_line => self.getActiveEditor().dispatchAction(.DeleteLine),
+            .split_vertical => self.getActiveEditor().dispatchAction(.SplitVertical),
+            .split_horizontal => self.getActiveEditor().dispatchAction(.SplitHorizontal),
+            .md_preview => self.getActiveEditor().dispatchAction(.MdPreview),
             .rename_entry => {
                 if (self.file_explorer.selectedNodeIndex()) |node| self.file_explorer.startRename(node);
             },
@@ -881,7 +902,7 @@ pub const UI = struct {
 
     /// "Open Folder…"-Dialog im aktuellen Projektordner öffnen (Menü, Ctrl+O).
     pub fn openFolderPicker(self: *Self) void {
-        self.file_menu_open = false;
+        self.open_menu = null;
         self.folder_picker.open(self.current_directory orelse "/");
     }
 
@@ -945,29 +966,58 @@ pub const UI = struct {
     }
 
     /// UI Beispiel rendern
-    /// Header-Menü "File" mit Dropdown ("Open Folder…  Ctrl+O"), wie die Menüleiste in Zed.
-    fn renderFileMenu(self: *Self, t: Theme) void {
-        const menu_id = clay.ElementId.ID("menu_file");
-        const hover = clay.pointerOver(menu_id);
-        const active = self.file_menu_open;
-        clay.UI()(.{
-            .id = menu_id,
-            .layout = .{
-                .padding = .{ .left = 12, .right = 12, .top = 6, .bottom = 6 },
-                .child_alignment = .{ .y = .center },
-            },
-            .background_color = if (active) t.primary else if (hover) t.overlay else .{ 0, 0, 0, 0 },
-            .corner_radius = .all(4),
-        })({
-            clay.text("File", .{ .font_size = 20, .color = if (active) t.text_on_primary else t.text });
-        });
+    fn lowerAscii(comptime text: []const u8) []const u8 {
+        comptime {
+            var out: [text.len]u8 = undefined;
+            for (text, 0..) |c, i| out[i] = std.ascii.toLower(c);
+            const frozen = out;
+            return &frozen;
+        }
+    }
 
-        if (!active) return;
+    /// Clay-ID des Menütitels, z.B. "menu_file" (stabil für Tests).
+    fn menuTitleId(comptime menu: shortcuts.Menu) clay.ElementId {
+        return clay.ElementId.ID(comptime "menu_" ++ lowerAscii(menu.title));
+    }
+
+    /// Clay-ID eines Menüeintrags, z.B. "menu_item_open_folder".
+    fn menuItemId(cmd: shortcuts.Command) clay.ElementId {
+        switch (cmd) {
+            inline else => |c| return clay.ElementId.ID("menu_item_" ++ @tagName(c)),
+        }
+    }
+
+    /// Menüleiste im Header aus shortcuts.menus: Titel nebeneinander, das offene
+    /// Menü als Dropdown mit Label links und Kürzel rechts. Bei offenem Menü
+    /// wechselt Hover über einen anderen Titel das Menü (wie in Zed/VS Code).
+    fn renderMenuBar(self: *Self, t: Theme) void {
+        inline for (shortcuts.menus, 0..) |menu, i| {
+            const title_id = menuTitleId(menu);
+            const hover = clay.pointerOver(title_id);
+            if (hover and self.open_menu != null and self.open_menu.? != i) self.open_menu = i;
+            const active = self.open_menu != null and self.open_menu.? == i;
+            clay.UI()(.{
+                .id = title_id,
+                .layout = .{
+                    .padding = .{ .left = 12, .right = 12, .top = 6, .bottom = 6 },
+                    .child_alignment = .{ .y = .center },
+                },
+                .background_color = if (active) t.primary else if (hover) t.overlay else .{ 0, 0, 0, 0 },
+                .corner_radius = .all(4),
+            })({
+                clay.text(menu.title, .{ .font_size = 20, .wrap_mode = .none, .color = if (active) t.text_on_primary else t.text });
+            });
+            if (active) self.renderMenuDropdown(menu, title_id, t);
+        }
+    }
+
+    fn renderMenuDropdown(self: *Self, menu: shortcuts.Menu, title_id: clay.ElementId, t: Theme) void {
+        _ = self;
         clay.UI()(.{
-            .id = clay.ElementId.ID("menu_file_dropdown"),
+            .id = clay.ElementId.ID("menu_dropdown"),
             .floating = .{
                 .attach_to = .to_element_with_id,
-                .parentId = menu_id.id,
+                .parentId = title_id.id,
                 .attach_points = .{ .element = .left_top, .parent = .left_bottom },
                 .offset = .{ .x = 0, .y = 4 },
                 .z_index = 1500,
@@ -982,23 +1032,27 @@ pub const UI = struct {
             .border = .{ .width = .all(1), .color = t.border },
             .corner_radius = .all(4),
         })({
-            const item_id = clay.ElementId.ID("menu_open_folder");
-            const item_hover = clay.pointerOver(item_id);
-            clay.UI()(.{
-                .id = item_id,
-                .layout = .{
-                    .sizing = .{ .w = .fixed(320), .h = .fit },
-                    .padding = .{ .left = 12, .right = 12, .top = 6, .bottom = 6 },
-                    .direction = .left_to_right,
-                    .child_alignment = .{ .y = .center },
-                },
-                .background_color = if (item_hover) t.primary else .{ 0, 0, 0, 0 },
-                .corner_radius = .all(3),
-            })({
-                clay.text("Open Folder…", .{ .font_size = 20, .wrap_mode = .none, .color = if (item_hover) t.text_on_primary else t.text });
-                clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow } } })({});
-                clay.text(shortcuts.shortcutText(.open_folder), .{ .font_size = 16, .wrap_mode = .none, .color = if (item_hover) t.text_on_primary else t.muted });
-            });
+            for (menu.items) |cmd| {
+                const item_id = menuItemId(cmd);
+                const item_hover = clay.pointerOver(item_id);
+                const fg = if (item_hover) t.text_on_primary else t.text;
+                clay.UI()(.{
+                    .id = item_id,
+                    .layout = .{
+                        .sizing = .{ .w = .fixed(340), .h = .fit },
+                        .padding = .{ .left = 12, .right = 12, .top = 6, .bottom = 6 },
+                        .direction = .left_to_right,
+                        .child_alignment = .{ .y = .center },
+                    },
+                    .background_color = if (item_hover) t.primary else .{ 0, 0, 0, 0 },
+                    .corner_radius = .all(3),
+                })({
+                    clay.text(shortcuts.label(cmd), .{ .font_size = 20, .wrap_mode = .none, .color = fg });
+                    clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow } } })({});
+                    const sc = shortcuts.shortcutText(cmd);
+                    if (sc.len > 0) clay.text(sc, .{ .font_size = 16, .wrap_mode = .none, .color = if (item_hover) t.text_on_primary else t.muted });
+                });
+            }
         });
     }
 
@@ -1044,7 +1098,7 @@ pub const UI = struct {
                 }
 
                 clay.text("VULKAN-ED", .{ .font_size = 24, .color = t.text });
-                self.renderFileMenu(t);
+                self.renderMenuBar(t);
             });
 
             // Status Bar (Git Branch + Info)
