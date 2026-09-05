@@ -99,6 +99,8 @@ pub const UI = struct {
     active_dialog: ?ActiveDialog,
     /// Header-Menü "File" ausgeklappt
     file_menu_open: bool = false,
+    /// Letzter Klick war im Explorer: F2/Entf gelten für den markierten Eintrag
+    explorer_focused: bool = false,
     /// "Open Folder…"-Dialog
     folder_picker: folder_picker_mod.FolderPicker,
     /// Vom Dialog bestätigter Projektordner (owned); main.zig holt ihn per takePendingOpenFolder
@@ -393,12 +395,20 @@ pub const UI = struct {
             self.file_menu_open = false;
             return;
         }
-        // Globale Kürzel aus der zentralen Tabelle (shortcuts.zig), gelten überall
+        // Kürzel aus der zentralen Tabelle (shortcuts.zig): global überall,
+        // Explorer-Scope nur mit Fokus im Explorer und markiertem Eintrag
         if (self.active_dialog == null) {
             if (keyFromButton(key)) |k| {
-                if (shortcuts.lookup(k, self.currentMods(), .global)) |cmd| {
+                const mods = self.currentMods();
+                if (shortcuts.lookup(k, mods, .global)) |cmd| {
                     self.executeCommand(cmd);
                     return;
+                }
+                if (self.show_file_explorer and self.explorer_focused and self.file_explorer.selectedNodeIndex() != null) {
+                    if (shortcuts.lookup(k, mods, .explorer)) |cmd| {
+                        self.executeCommand(cmd);
+                        return;
+                    }
                 }
             }
         }
@@ -599,6 +609,9 @@ pub const UI = struct {
             self.file_menu_open = true;
             return;
         }
+
+        // Tastatur-Fokus folgt dem Klick: Explorer-Kürzel (F2/Entf) nur nach Klick im Explorer
+        self.explorer_focused = self.show_file_explorer and self.file_explorer.inSidebar(x);
 
         if (self.show_file_explorer) {
             if (self.file_explorer.handleMouseDown(x, y, button)) {
@@ -824,6 +837,12 @@ pub const UI = struct {
         self.file_menu_open = false;
         switch (cmd) {
             .open_folder => self.openFolderPicker(),
+            .rename_entry => {
+                if (self.file_explorer.selectedNodeIndex()) |node| self.file_explorer.startRename(node);
+            },
+            .delete_entry => {
+                if (self.file_explorer.selectedNodeIndex()) |node| self.showDeleteConfirmationDialog(node);
+            },
             else => log.warn("command {s} not implemented yet", .{@tagName(cmd)}),
         }
     }

@@ -37,7 +37,83 @@ def item1_table_drives_ctrl_o():
     key("escape")
 
 
-STEPS = [item1_table_drives_ctrl_o]
+def explorer():
+    return result_json("explorer_entries")
+
+
+def explorer_row_center(name):
+    """Zeilenmitte des Explorer-Eintrags `name`; scrollt ihn bei Bedarf in den Viewport."""
+    for _ in range(40):
+        ex = explorer()
+        rows = [e for e in ex["entries"] if e["name"] == name]
+        if not rows:
+            raise AssertionError(f"Explorer-Eintrag {name!r} nicht sichtbar")
+        vp, rh = ex["viewport"], ex["row_height"]
+        y = vp["y"] + rows[0]["index"] * rh + rh / 2 - ex["scroll"]
+        if vp["y"] <= y < vp["y"] + vp["h"]:
+            return vp["x"] + 60, y
+        lines = -3 if y >= vp["y"] + vp["h"] else 3
+        rpc("scroll", [vp["x"] + 60, vp["y"] + vp["h"] / 2, lines])
+        settle()
+    raise AssertionError(f"{name!r} nicht in den Viewport gescrollt")
+
+
+def explorer_click(name, right=False):
+    x, y = explorer_row_center(name)
+    rpc("right_click" if right else "click", [x, y])
+    settle()
+
+
+def ui_state():
+    return result_json("ui_state")
+
+
+def dialog_open():
+    return ui_state()["dialog"] is not None
+
+
+def item2_explorer_f2_delete():
+    print("--- 2. Explorer: F2 benennt um, Entf löscht (mit Dialog), nur mit Fokus im Explorer")
+    fixture_dir = os.path.join(ROOT, "tmp", "e2e_fx")
+    os.makedirs(fixture_dir, exist_ok=True)
+    victim = os.path.join(fixture_dir, "victim.txt")
+    with open(victim, "w") as f:
+        f.write("bye\n")
+    time.sleep(0.5)  # Watcher/Refresh
+    # tmp → e2e_fx aufklappen, Datei markieren
+    if not any(e["name"] == "e2e_fx" for e in explorer()["entries"]):
+        explorer_click("tmp")
+    if not any(e["name"] == "victim.txt" for e in explorer()["entries"]):
+        explorer_click("e2e_fx")
+    explorer_click("victim.txt")
+    settle(10)
+
+    key("f2")
+    check(explorer()["renaming"], "F2 startet das Umbenennen des markierten Eintrags")
+    key("escape")
+    check(not explorer()["renaming"], "Escape bricht das Umbenennen ab")
+
+    key("delete")
+    check(dialog_open(), "Entf öffnet den Lösch-Dialog")
+    click_center("Cancel")
+    check(not dialog_open() and os.path.exists(victim), "Cancel: Datei bleibt")
+
+    # Fokus im Editor: Entf darf nichts löschen
+    rpc("click", [1100, 400])
+    settle()
+    key("delete")
+    check(not dialog_open(), "Entf ohne Explorer-Fokus öffnet keinen Dialog")
+
+    explorer_click("victim.txt")
+    key("delete")
+    check(dialog_open(), "Entf nach erneutem Klick im Explorer öffnet den Dialog")
+    click_center("Delete")
+    settle(10)
+    check(not os.path.exists(victim), "Delete: Datei ist gelöscht")
+    os.rmdir(fixture_dir)
+
+
+STEPS = [item1_table_drives_ctrl_o, item2_explorer_f2_delete]
 
 
 def main():

@@ -333,6 +333,13 @@ pub const FileExplorerState = struct {
         self.selected_index = index;
     }
 
+    /// Knoten des markierten Eintrags (für F2/Entf).
+    pub fn selectedNodeIndex(self: *const Self) ?u32 {
+        const idx = self.selected_index orelse return null;
+        if (idx >= self.visible_entries.items.len) return null;
+        return self.visible_entries.items[idx].node_index;
+    }
+
     /// Datei öffnen (setzt file_to_open)
     pub fn openSelectedFile(self: *Self) void {
         if (self.selected_index) |idx| {
@@ -377,7 +384,7 @@ pub const FileExplorerState = struct {
         return idx;
     }
 
-    fn inSidebar(self: *const Self, x: f32) bool {
+    pub fn inSidebar(self: *const Self, x: f32) bool {
         return self.viewport_width > 0 and x >= self.viewport_x and x < self.viewport_x + self.viewport_width;
     }
 
