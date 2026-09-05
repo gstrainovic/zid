@@ -47,9 +47,13 @@ echo -e "open ./README.md\nget-state\nshutdown" | zig build run -- --interactive
   `open_file` geht nur über die Tab-Leiste.
 - `get_active_tab` liefert pro Tab `modified` sowie `editor_modified` und `editor_file`
   (Buffer, den der Editor gerade zeigt).
-- RPC-Handler laufen im Server-Thread. Alles, was die Tab-Liste verändert, muss über
-  `pending_tab_closes` bzw. `pending_switch_path` an den Main-Thread, sonst Absturz
-  während des Renderns (`close_active_tab` macht das bereits).
+- RPC-Handler laufen im Server-Thread. Im Fenstermodus werden `click`, `right_click`,
+  `move_mouse`, `key_press`, `type_text` und `screenshot` deshalb gepuffert und vom
+  Main-Thread pro Frame angewendet (`drainInputs` / `serviceScreenshot`). Alles andere,
+  was UI-State verändert, muss ebenfalls über den Main-Thread (`pending_tab_closes`,
+  `pending_switch_path`, `file_to_open`), sonst Absturz während des Renderns.
+  `open_file`, `split_pane`, `show_context_menu` sind im Fenstermodus noch nicht abgesichert.
+- Screenshot im Fenstermodus: Fenstergröße, z.B. 1920x1043 bei maximiertem Fenster.
 
 ## Bekannte Grenzen (kein Todo, bewusst so)
 

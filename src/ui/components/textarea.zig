@@ -1278,7 +1278,8 @@ pub const TextAreaState = struct {
     pub fn handleMouseDown(self: *Self, x: f32, y: f32, button: @import("wio").Button) void {
         self.mouse_x = x;
         self.mouse_y = y;
-        self.mouse_down = true;
+        // mouse_down erst im Linksklick-Pfad setzen: Rechtsklick öffnet nur das
+        // Kontextmenü und darf beim Ziehen keine Selektion vom alten Anker erweitern.
 
         if (self.show_context_menu) {
             if (clay.pointerOver(clay.getElementId("Editor-Cut"))) {
