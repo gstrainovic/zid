@@ -6,40 +6,52 @@ const std = @import("std");
 
 pub const max_name_len = 255;
 
-/// Editierpuffer für Inline-Umbenennen. Fester Speicher, UTF-8-bewusst.
-pub const RenameEdit = struct {
-    buf: [max_name_len]u8 = undefined,
-    len: usize = 0,
+/// Editierpuffer mit fester Kapazität, UTF-8-bewusst (Inline-Umbenennen,
+/// Pfad-Eingabe im Ordner-Dialog).
+pub fn EditBuffer(comptime capacity: usize) type {
+    return struct {
+        buf: [capacity]u8 = undefined,
+        len: usize = 0,
 
-    pub fn init(name: []const u8) RenameEdit {
-        var e = RenameEdit{};
-        const n = @min(name.len, max_name_len);
-        @memcpy(e.buf[0..n], name[0..n]);
-        e.len = n;
-        return e;
-    }
+        const Self = @This();
 
-    pub fn text(self: *const RenameEdit) []const u8 {
-        return self.buf[0..self.len];
-    }
+        pub fn init(initial: []const u8) Self {
+            var e = Self{};
+            e.set(initial);
+            return e;
+        }
 
-    pub fn insertCodepoint(self: *RenameEdit, cp: u21) void {
-        var tmp: [4]u8 = undefined;
-        const n = std.unicode.utf8Encode(cp, &tmp) catch return;
-        if (self.len + n > max_name_len) return;
-        @memcpy(self.buf[self.len .. self.len + n], tmp[0..n]);
-        self.len += n;
-    }
+        pub fn set(self: *Self, value: []const u8) void {
+            const n = @min(value.len, capacity);
+            @memcpy(self.buf[0..n], value[0..n]);
+            self.len = n;
+        }
 
-    /// Entfernt das letzte Codepoint (nicht nur das letzte Byte).
-    pub fn backspace(self: *RenameEdit) void {
-        if (self.len == 0) return;
-        var i = self.len - 1;
-        // UTF-8-Fortsetzungsbytes (10xxxxxx) überspringen bis zum Startbyte
-        while (i > 0 and (self.buf[i] & 0xC0) == 0x80) i -= 1;
-        self.len = i;
-    }
-};
+        pub fn text(self: *const Self) []const u8 {
+            return self.buf[0..self.len];
+        }
+
+        pub fn insertCodepoint(self: *Self, cp: u21) void {
+            var tmp: [4]u8 = undefined;
+            const n = std.unicode.utf8Encode(cp, &tmp) catch return;
+            if (self.len + n > capacity) return;
+            @memcpy(self.buf[self.len .. self.len + n], tmp[0..n]);
+            self.len += n;
+        }
+
+        /// Entfernt das letzte Codepoint (nicht nur das letzte Byte).
+        pub fn backspace(self: *Self) void {
+            if (self.len == 0) return;
+            var i = self.len - 1;
+            // UTF-8-Fortsetzungsbytes (10xxxxxx) überspringen bis zum Startbyte
+            while (i > 0 and (self.buf[i] & 0xC0) == 0x80) i -= 1;
+            self.len = i;
+        }
+    };
+}
+
+/// Editierpuffer für Inline-Umbenennen (Dateinamen bis 255 Bytes).
+pub const RenameEdit = EditBuffer(max_name_len);
 
 pub const RenameError = error{InvalidName} || std.fs.Dir.RenameError || std.mem.Allocator.Error;
 

@@ -308,6 +308,14 @@ pub fn build(b: *std.Build) void {
     const run_explorer_ops_tests = b.addRunArtifact(explorer_ops_tests);
     run_explorer_ops_tests.has_side_effects = true;
 
+    const folder_ops_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("src/ui/folder_ops.zig"),
+        .target = target,
+        .optimize = optimize,
+    }) });
+    const run_folder_ops_tests = b.addRunArtifact(folder_ops_tests);
+    run_folder_ops_tests.has_side_effects = true;
+
     const word_wrap_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("src/ui/word_wrap.zig"),
         .target = target,
@@ -329,6 +337,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_ai_worker_tests.step);
 
     test_step.dependOn(&run_explorer_ops_tests.step);
+    test_step.dependOn(&run_folder_ops_tests.step);
 
     const run_word_wrap_tests = b.addRunArtifact(word_wrap_tests);
     run_word_wrap_tests.has_side_effects = true;

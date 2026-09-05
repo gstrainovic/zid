@@ -582,6 +582,10 @@ pub var g_viewport_height: u32 = 800;
 
         // UI rendern wenn Commands vorhanden
         if (render_commands) |commands| {
+            // Wie im Fenster-Pfad: pro Render-Durchgang dürfen 4 neue SVGs
+            // rasterisiert werden. Ohne Reset blieben neue Icons headless
+            // nach dem ersten Screenshot dauerhaft "deferred".
+            if (svg_atlas) |sa| sa.resetFrameBudget();
             if (clay_rdr) |cr| {
                 if (text_gpu) |tg| {
                     if (text_renderer) |tr| {
