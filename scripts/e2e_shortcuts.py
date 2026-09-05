@@ -235,7 +235,18 @@ def item5_menus():
     key("escape")
 
 
-STEPS = [item1_table_drives_ctrl_o, item2_explorer_f2_delete, item3_tabs, item4_view, item5_menus]
+def item6_editor_context_menu():
+    print("--- 6. Editor-Kontextmenü zeigt Kürzel aus der Tabelle")
+    rpc("click", [700, 400]); settle()
+    rpc("right_click", [700, 400]); settle()
+    for item in ("Editor-Cut", "Editor-Copy", "Editor-Paste", "Editor-Split-V", "Editor-Split-H"):
+        check(bounds(item)["found"], f"Kontextmenü zeigt {item}")
+    shot("e2e_editor_ctx.ppm")
+    key("escape")
+    rpc("click", [1100, 700]); settle()
+
+
+STEPS = [item1_table_drives_ctrl_o, item2_explorer_f2_delete, item3_tabs, item4_view, item5_menus, item6_editor_context_menu]
 
 
 def main():

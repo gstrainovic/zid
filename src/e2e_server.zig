@@ -520,7 +520,7 @@ fn uiState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     }
     try buf.writer.writeAll(", \"open_menu\": ");
     if (ui.open_menu) |mi| {
-        try buf.writer.print("\"{s}\"", .{@import("ui/shortcuts.zig").menus[mi].title});
+        try buf.writer.print("\"{s}\"", .{@import("shortcuts").menus[mi].title});
     } else {
         try buf.writer.writeAll("null");
     }

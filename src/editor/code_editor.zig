@@ -8,6 +8,7 @@ const clay = @import("clay");
 const flow_core = @import("flow_core");
 const syntax = @import("syntax");
 const wio = @import("wio");
+const shortcuts = @import("shortcuts");
 
 const actions = @import("actions.zig");
 const keymap = @import("keymap.zig");
@@ -1997,17 +1998,17 @@ pub const CodeEditor = struct {
                 if (clay.hovered()) {
                     self.desired_cursor = .arrow;
                 }
-                self.renderContextMenuItem("Cut", "Editor-Cut", .Cut, arena);
-                self.renderContextMenuItem("Copy", "Editor-Copy", .Copy, arena);
-                self.renderContextMenuItem("Paste", "Editor-Paste", .Paste, arena);
+                self.renderContextMenuItem(.cut, "Editor-Cut");
+                self.renderContextMenuItem(.copy, "Editor-Copy");
+                self.renderContextMenuItem(.paste, "Editor-Paste");
                 if (is_md) {
-                    self.renderContextMenuItem("MD-Preview", "Editor-MD-Preview", .MdPreview, arena);
+                    self.renderContextMenuItem(.md_preview, "Editor-MD-Preview");
                 }
 
                 clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(1) } }, .background_color = .{ 80, 80, 80, 255 } })({});
-                
-                self.renderContextMenuItem("Split-Vertically", "Editor-Split-V", .SplitVertical, arena);
-                self.renderContextMenuItem("Split-Horizontally", "Editor-Split-H", .SplitHorizontal, arena);
+
+                self.renderContextMenuItem(.split_vertical, "Editor-Split-V");
+                self.renderContextMenuItem(.split_horizontal, "Editor-Split-H");
             });
         });
     }
@@ -2033,30 +2034,28 @@ pub const CodeEditor = struct {
         return is_hovered and mouse_pressed;
     }
 
-    fn renderContextMenuItem(self: *Self, label: []const u8, id: []const u8, _action: actions.Action, arena: std.mem.Allocator) void {
-        _ = _action;
+    /// Kontextmenü-Eintrag: Label links, Kürzel rechts, beides aus shortcuts.zig.
+    /// Die ID bleibt stabil (Klick-Erkennung in handleMouseDown und E2E-Tests).
+    fn renderContextMenuItem(self: *Self, cmd: shortcuts.Command, id: []const u8) void {
         const item_id = clay.getElementId(id);
         const is_hovered = clay.pointerOver(item_id);
-        if (is_hovered) {
-            self.desired_cursor = .arrow;
-            if (self.mouse_down) {
-                // Klick-Erkennung im Render-Loop ist bei Clay oft so gelöst, 
-                // oder man macht es im handleMouseDown. Wir machen beides robust.
-            }
-        }
+        if (is_hovered) self.desired_cursor = .arrow;
 
         clay.UI()(.{
             .id = item_id,
             .layout = .{
-                .sizing = .{ .w = .fit, .h = .fixed(@floatFromInt(self.font_size + 12)) },
+                .sizing = .{ .w = .fixed(300), .h = .fixed(@floatFromInt(self.font_size + 12)) },
                 .padding = .{ .left = 12, .right = 12, .top = 6, .bottom = 6 },
+                .direction = .left_to_right,
                 .child_alignment = .{ .x = .left, .y = .center },
             },
             .background_color = if (is_hovered) .{ 80, 80, 100, 255 } else .{ 0, 0, 0, 0 },
             .corner_radius = .all(2),
         })({
-            const persistent = arena.dupe(u8, label) catch "";
-            clay.text(persistent, .{ .font_size = self.font_size - 2, .color = .{ 220, 220, 240, 255 }, .wrap_mode = .none });
+            clay.text(shortcuts.label(cmd), .{ .font_size = self.font_size - 2, .color = .{ 220, 220, 240, 255 }, .wrap_mode = .none });
+            clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow } } })({});
+            const sc = shortcuts.shortcutText(cmd);
+            if (sc.len > 0) clay.text(sc, .{ .font_size = self.font_size - 6, .color = .{ 150, 150, 170, 255 }, .wrap_mode = .none });
         });
     }
 
