@@ -1,6 +1,5 @@
 # Todo: Tastenkürzel und Menüs sichtbar machen
 
-- [ ] 1. Zentrale Kürzel-Tabelle `src/ui/shortcuts.zig` (Command, Taste, Modifier, Label, Anzeige-Text, Scope) mit Tests; `mod.zig` löst globale Tasten darüber auf
 - [ ] 2. Explorer: F2 benennt den markierten Eintrag um, Entf löscht ihn (mit Bestätigungsdialog wie im Kontextmenü)
 - [ ] 3. Tabs: Ctrl+W schließt den aktiven Tab (mit Speichern-Nachfrage), Ctrl+Tab / Ctrl+Shift+Tab wechseln, Ctrl+N neue Datei
 - [ ] 4. Ansicht: Ctrl+B Explorer ein/aus, Ctrl+` neues Terminal, Ctrl+Shift+K Zeile löschen (Action existiert schon)

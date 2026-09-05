@@ -21,6 +21,7 @@ const markdown_view_mod = @import("markdown_view.zig");
 const pane_mod = @import("pane.zig");
 const dialog_mod = @import("dialog.zig");
 const folder_picker_mod = @import("folder_picker.zig");
+const shortcuts = @import("shortcuts.zig");
 const ai_chat_mod = @import("ai_chat.zig");
 const agent_mod = @import("agent");
 const textarea_mod = @import("components/textarea.zig");
@@ -392,10 +393,14 @@ pub const UI = struct {
             self.file_menu_open = false;
             return;
         }
-        // Ctrl+O: Ordner öffnen (wie Zed), gilt überall
-        if (self.is_ctrl_down and key == .o and self.active_dialog == null) {
-            self.openFolderPicker();
-            return;
+        // Globale Kürzel aus der zentralen Tabelle (shortcuts.zig), gelten überall
+        if (self.active_dialog == null) {
+            if (keyFromButton(key)) |k| {
+                if (shortcuts.lookup(k, self.currentMods(), .global)) |cmd| {
+                    self.executeCommand(cmd);
+                    return;
+                }
+            }
         }
         // Inline-Umbenennen im Explorer fängt alle Tasten ab
         if (self.show_file_explorer and self.file_explorer.isRenaming()) {
@@ -586,7 +591,7 @@ pub const UI = struct {
         if (self.file_menu_open) {
             self.file_menu_open = false;
             if (button == .mouse_left and clay.pointerOver(clay.ElementId.ID("menu_open_folder"))) {
-                self.openFolderPicker();
+                self.executeCommand(.open_folder);
             }
             return;
         }
@@ -799,6 +804,30 @@ pub const UI = struct {
         self.ai_chat.updateTimeMs(delta_ms);
     }
 
+    fn currentMods(self: *const Self) shortcuts.Mods {
+        return .{ .ctrl = self.is_ctrl_down, .shift = self.is_shift_down, .alt = self.is_alt_down };
+    }
+
+    /// wio-Taste auf die Kürzel-Tabelle abbilden; null = Taste hat dort keine Rolle.
+    fn keyFromButton(btn: wio.Button) ?shortcuts.Key {
+        return switch (btn) {
+            .a => .a, .b => .b, .c => .c, .f => .f, .k => .k, .n => .n, .o => .o,
+            .s => .s, .v => .v, .w => .w, .x => .x, .y => .y, .z => .z,
+            .tab => .tab, .grave => .grave, .f1 => .f1, .f2 => .f2, .delete => .delete,
+            .escape => .escape, .enter, .kp_enter => .enter,
+            else => null,
+        };
+    }
+
+    /// Ein Command aus Menü oder Tastenkürzel ausführen.
+    pub fn executeCommand(self: *Self, cmd: shortcuts.Command) void {
+        self.file_menu_open = false;
+        switch (cmd) {
+            .open_folder => self.openFolderPicker(),
+            else => log.warn("command {s} not implemented yet", .{@tagName(cmd)}),
+        }
+    }
+
     /// "Open Folder…"-Dialog im aktuellen Projektordner öffnen (Menü, Ctrl+O).
     pub fn openFolderPicker(self: *Self) void {
         self.file_menu_open = false;
@@ -917,7 +946,7 @@ pub const UI = struct {
             })({
                 clay.text("Open Folder…", .{ .font_size = 20, .wrap_mode = .none, .color = if (item_hover) t.text_on_primary else t.text });
                 clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow } } })({});
-                clay.text("Ctrl+O", .{ .font_size = 16, .wrap_mode = .none, .color = if (item_hover) t.text_on_primary else t.muted });
+                clay.text(shortcuts.shortcutText(.open_folder), .{ .font_size = 16, .wrap_mode = .none, .color = if (item_hover) t.text_on_primary else t.muted });
             });
         });
     }

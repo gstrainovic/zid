@@ -31,7 +31,7 @@ pub const InputEvent = union(enum) {
     click: Point,
     right_click: Point,
     move: Point,
-    key: struct { btn: @import("wio").Button, ctrl: bool },
+    key: struct { btn: @import("wio").Button, ctrl: bool, shift: bool = false },
     char: u21,
     /// Mausrad an Position: lines > 0 hoch, < 0 runter
     scroll: struct { x: f32, y: f32, lines: i32 },
@@ -117,7 +117,10 @@ fn applyInput(ui: *ui_mod.UI, ev: InputEvent) void {
         },
         .key => |k| {
             ui.setCtrlState(k.ctrl);
+            ui.setShiftState(k.shift);
             ui.handleKeyPress(k.btn);
+            ui.setCtrlState(false);
+            ui.setShiftState(false);
         },
         .char => |cp| ui.handleChar(cp),
         .scroll => |sc| {
@@ -143,6 +146,7 @@ pub fn createDispatcher(alloc: std.mem.Allocator, ctx: *E2EContext) !*zigjr.RpcD
     try rpc_dispatcher.addWithCtx("move_mouse", ctx, moveMouse);
     try rpc_dispatcher.addWithCtx("type_text", ctx, typeText);
     try rpc_dispatcher.addWithCtx("key_press", ctx, keyPress);
+    try rpc_dispatcher.addWithCtx("key_press_mods", ctx, keyPressMods);
     try rpc_dispatcher.addWithCtx("open_terminal", ctx, openTerminalRpc);
     try rpc_dispatcher.addWithCtx("open_chat", ctx, openChatRpc);
     try rpc_dispatcher.addWithCtx("get_chat_input", ctx, getChatInput);
@@ -332,29 +336,38 @@ fn moveMouse(ctx: *E2EContext, _: *zigjr.DispatchCtx, x: f64, y: f64) ![]const u
     return "ok";
 }
 
-pub fn keyPress(ctx: *E2EContext, _: *zigjr.DispatchCtx, key_name: []const u8, is_ctrl: bool) ![]const u8 {
-    log.info("RPC: key_press('{s}', ctrl={})", .{ key_name, is_ctrl });
+pub fn keyPress(ctx: *E2EContext, dc: *zigjr.DispatchCtx, key_name: []const u8, is_ctrl: bool) ![]const u8 {
+    return keyPressMods(ctx, dc, key_name, is_ctrl, false);
+}
 
-    var btn: ?@import("wio").Button = null;
-    if (std.mem.eql(u8, key_name, "enter")) btn = .enter
-    else if (std.mem.eql(u8, key_name, "backspace")) btn = .backspace
-    else if (std.mem.eql(u8, key_name, "a")) btn = .a
-    else if (std.mem.eql(u8, key_name, "c")) btn = .c
-    else if (std.mem.eql(u8, key_name, "v")) btn = .v
-    else if (std.mem.eql(u8, key_name, "x")) btn = .x
-    else if (std.mem.eql(u8, key_name, "k")) btn = .k
-    else if (std.mem.eql(u8, key_name, "y")) btn = .y
-    else if (std.mem.eql(u8, key_name, "n")) btn = .n
-    else if (std.mem.eql(u8, key_name, "o")) btn = .o
-    else if (std.mem.eql(u8, key_name, "up")) btn = .up
-    else if (std.mem.eql(u8, key_name, "down")) btn = .down
-    else if (std.mem.eql(u8, key_name, "escape")) btn = .escape
-    else if (std.mem.eql(u8, key_name, "delete")) btn = .delete
-    else if (std.mem.eql(u8, key_name, "f2")) btn = .f2;
-
-    const b = btn orelse return "error: unknown key";
-    dispatchInput(ctx, .{ .key = .{ .btn = b, .ctrl = is_ctrl } });
+/// key_press_mods(name, ctrl, shift): Taste mit Modifiern, z.B. Ctrl+Shift+Tab.
+pub fn keyPressMods(ctx: *E2EContext, _: *zigjr.DispatchCtx, key_name: []const u8, is_ctrl: bool, is_shift: bool) ![]const u8 {
+    log.info("RPC: key_press('{s}', ctrl={}, shift={})", .{ key_name, is_ctrl, is_shift });
+    const b = buttonFromName(key_name) orelse return "error: unknown key";
+    dispatchInput(ctx, .{ .key = .{ .btn = b, .ctrl = is_ctrl, .shift = is_shift } });
     return "ok";
+}
+
+fn buttonFromName(name: []const u8) ?@import("wio").Button {
+    const Button = @import("wio").Button;
+    const named = [_]struct { []const u8, Button }{
+        .{ "enter", .enter },       .{ "backspace", .backspace }, .{ "escape", .escape },
+        .{ "delete", .delete },     .{ "tab", .tab },             .{ "grave", .grave },
+        .{ "up", .up },             .{ "down", .down },           .{ "left", .left },
+        .{ "right", .right },       .{ "home", .home },           .{ "end", .end },
+        .{ "page_up", .page_up },   .{ "page_down", .page_down }, .{ "f1", .f1 },
+        .{ "f2", .f2 },
+    };
+    for (named) |entry| {
+        if (std.mem.eql(u8, name, entry[0])) return entry[1];
+    }
+    // Einzelne Buchstaben a–z
+    if (name.len == 1 and name[0] >= 'a' and name[0] <= 'z') {
+        inline for (@typeInfo(Button).@"enum".fields) |field| {
+            if (field.name.len == 1 and field.name[0] == name[0]) return @field(Button, field.name);
+        }
+    }
+    return null;
 }
 
 pub fn typeText(ctx: *E2EContext, _: *zigjr.DispatchCtx, text: []const u8) ![]const u8 {
