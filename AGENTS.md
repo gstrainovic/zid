@@ -58,7 +58,16 @@ echo -e "open ./README.md\nget-state\nshutdown" | zig build run -- --interactive
 - Explorer testen: `explorer_entries` liefert Viewport-Bounds, `row_height`, `scroll` und die
   sichtbaren Zeilen mit Index; Zeilenmitte = `viewport.y + index*row_height + row_height/2 - scroll`.
   Zeilen außerhalb des Viewports vorher mit `scroll x y lines` (negativ = runter) hereinholen.
-  Rechtsklick auf Zeile öffnet das Menü (Rename/Delete), `key_press` kennt `escape`, `delete`, `f2`.
+  Rechtsklick auf Zeile öffnet das Menü (Rename/Delete); F2/Entf wirken auf den markierten
+  Eintrag, aber nur wenn der letzte Klick im Explorer war (`ui_state.explorer_focused`).
+- `key_press(name, ctrl)` kennt alle Buchstaben a–z sowie enter, backspace, escape, delete, tab,
+  grave, up/down/left/right, home/end, page_up/page_down, f1, f2; `key_press_mods(name, ctrl, shift)`
+  zusätzlich Shift (Ctrl+Shift+Tab). Modifier werden nach der Taste wieder gelöscht.
+- `ui_state` liefert Dialog-Titel, offenes Menü, Explorer-Fokus, Explorer sichtbar, Picker/Shortcut-
+  Dialog offen, Tabs (Pfad, Art, geändert) und aktiven Tab. `editor_state` liefert Zeilen, Cursor,
+  Suchleiste (offen, Begriff, kein Treffer) und den Text. `element_bounds(id)` /
+  `element_bounds_i(id, index)` geben Clay-Bounding-Boxen für Klicks; für "existiert das Element
+  gerade?" sind sie unzuverlässig (Clay behält Daten verschwundener Elemente), dafür `ui_state`.
   Fixtures unter `tmp/` anlegen (gitignored, im Explorer sichtbar).
 
 ## Projektordner wechseln ("Open Folder…")
@@ -84,10 +93,35 @@ echo -e "open ./README.md\nget-state\nshutdown" | zig build run -- --interactive
 - Logs: `logFn` schreibt per `writerStreaming`; mit `File.writer()` wurde eine umgeleitete
   Log-Datei (`2>log`) laufend ab Offset 0 überschrieben.
 
+## Tastenkürzel und Menüs: eine Quelle
+
+- `src/ui/shortcuts.zig` (Modul `shortcuts`) ist die einzige Tabelle: Command, Taste, Modifier,
+  Scope (global / editor / explorer), Label, Anzeige-Text und die Menüstruktur File/Edit/View/Help.
+  Unit-Tests prüfen Eindeutigkeit und Labels. Neue Kürzel nur dort eintragen, dann erscheinen sie
+  automatisch in Menüleiste, Editor-Kontextmenü und Help → Keyboard Shortcuts (F1).
+- Globale und Explorer-Kürzel löst `UI.handleKeyPress` über `shortcuts.lookup` auf und führt sie
+  mit `executeCommand` aus; Menüklicks gehen denselben Weg. Editor-Kürzel (Scope `editor`) liegen
+  weiterhin in `src/editor/keymap.zig` und müssen zur Tabelle passen (Save, Undo/Redo, Cut/Copy/
+  Paste, Select All, Delete Line Ctrl+Shift+K, Find Ctrl+F).
+- Globale Kürzel greifen vor Terminal/Chat/TextArea: Ctrl+W, Ctrl+N, Ctrl+O, Ctrl+B, Ctrl+` und
+  Ctrl+Tab kommen im Terminal nicht mehr an der Shell an (bewusst, wie in Zed).
+- Suchleiste (`CodeEditor.find`, Logik in `src/editor/find_ops.zig`): inkrementell beim Tippen,
+  Enter/Shift+Enter weiter/zurück mit Umbruch, Escape schließt, markierter Text wird Suchbegriff.
+  Spalten sind Codepoints, Tabs/Breitzeichen sind nicht berücksichtigt.
+- Tests in `src/editor/code_editor.zig` laufen nur, weil die Datei eigenes Test-Root ist
+  (`code_editor_tests` in build.zig, wio-Symbol-Hack unter `is_test` in der Datei). Tests in
+  importierten Modulen führt der Runner nicht aus; `zig build test --summary all` zeigt die
+  Zähler pro Modul, ein absichtlich kaputter Test ist der schnellste Beweis.
+- E2E: `python3 scripts/e2e_shortcuts.py` fährt headless alle Kürzel und Menüs durch (Explorer
+  F2/Entf, Tabs, Ansicht, Menüleiste, Kontextmenü, Shortcut-Dialog, Suchleiste) und legt
+  Screenshots unter `tmp/e2e_*.ppm` ab.
+
 ## Explorer: Umbenennen/Löschen und offene Tabs
 
 - Umbenennen zieht Tab-Pfad, Titel, Buffer-Pfad und `open_buffers`-Schlüssel mit, auch für
   alle Tabs unter einem umbenannten Ordner (Preview-Tabs mit `preview://`-Präfix ebenso).
+- Klick in den Editor setzt `selection_anchor = cursor`; jede Eingabe hebt den Anker wieder auf
+  (`deleteSelection`), sonst ersetzt das zweite getippte Zeichen das erste.
 - Löschen schließt Tabs ohne ungespeicherte Änderungen; geänderte Tabs bleiben offen mit
   Stern, Speichern legt die Datei wieder an (Verhalten wie VS Code). Buffer gelöschter
   Dateien wandern nach `orphan_buffers` (bis Programmende), damit ein neu angelegtes File
