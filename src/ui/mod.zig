@@ -20,6 +20,7 @@ const file_types = @import("file_types.zig");
 const markdown_view_mod = @import("markdown_view.zig");
 const pane_mod = @import("pane.zig");
 const dialog_mod = @import("dialog.zig");
+const folder_picker_mod = @import("folder_picker.zig");
 const ai_chat_mod = @import("ai_chat.zig");
 const agent_mod = @import("agent");
 const textarea_mod = @import("components/textarea.zig");
@@ -95,6 +96,12 @@ pub const UI = struct {
     pending_split: ?pane_mod.PaneDirection,
 
     active_dialog: ?ActiveDialog,
+    /// Header-Menü "File" ausgeklappt
+    file_menu_open: bool = false,
+    /// "Open Folder…"-Dialog
+    folder_picker: folder_picker_mod.FolderPicker,
+    /// Vom Dialog bestätigter Projektordner (owned); main.zig holt ihn per takePendingOpenFolder
+    pending_open_folder: ?[]u8 = null,
     pending_tab_closes: std.ArrayListUnmanaged(TabCloseRequest),
 
     open_buffers: std.StringHashMap(*@import("flow_core").Buffer),
@@ -205,6 +212,7 @@ pub const UI = struct {
             .pending_pdf_page_change = null,
             .pending_split = null,
             .active_dialog = null,
+            .folder_picker = folder_picker_mod.FolderPicker.init(allocator),
             .pending_tab_closes = std.ArrayListUnmanaged(TabCloseRequest).empty,
             .open_buffers = open_buffers,
             .open_images = std.StringHashMap(*anyopaque).init(allocator),
@@ -290,6 +298,8 @@ pub const UI = struct {
         self.open_markdown_views.deinit();
 
         if (self.current_directory) |dir| self.allocator.free(dir);
+        if (self.pending_open_folder) |p| self.allocator.free(p);
+        self.folder_picker.deinit();
         if (self.git_branch.len > 0) self.allocator.free(self.git_branch);
         self.pending_tab_closes.deinit(self.allocator);
 
@@ -373,6 +383,20 @@ pub const UI = struct {
 
     /// Keyboard Input verarbeiten
     pub fn handleKeyPress(self: *Self, key: @import("wio").Button) void {
+        // Offener Ordner-Dialog ist modal
+        if (self.folder_picker.visible) {
+            self.folder_picker.handleKey(key);
+            return;
+        }
+        if (self.file_menu_open and key == .escape) {
+            self.file_menu_open = false;
+            return;
+        }
+        // Ctrl+O: Ordner öffnen (wie Zed), gilt überall
+        if (self.is_ctrl_down and key == .o and self.active_dialog == null) {
+            self.openFolderPicker();
+            return;
+        }
         // Inline-Umbenennen im Explorer fängt alle Tasten ab
         if (self.show_file_explorer and self.file_explorer.isRenaming()) {
             self.file_explorer.handleRenameKey(key);
@@ -457,6 +481,10 @@ pub const UI = struct {
 
     /// Text Input verarbeiten
     pub fn handleChar(self: *Self, char_code: u21) void {
+        if (self.folder_picker.visible) {
+            self.folder_picker.handleChar(char_code);
+            return;
+        }
         if (self.show_file_explorer and self.file_explorer.isRenaming()) {
             self.file_explorer.handleRenameChar(char_code);
             return;
@@ -548,6 +576,24 @@ pub const UI = struct {
         // Kontextmenüs und darf z.B. keine Datei öffnen.
         self.mouse_pressed_this_frame = (button == .mouse_left);
         self.is_mouse_down = (button == .mouse_left);
+
+        // Ordner-Dialog ist modal: alle Klicks gehören ihm
+        if (self.folder_picker.visible) {
+            if (button == .mouse_left) self.folder_picker.handleMouseDown();
+            return;
+        }
+        // Header-Menü: offen → Eintrag ausführen oder schließen; Klick auf "File" → öffnen
+        if (self.file_menu_open) {
+            self.file_menu_open = false;
+            if (button == .mouse_left and clay.pointerOver(clay.ElementId.ID("menu_open_folder"))) {
+                self.openFolderPicker();
+            }
+            return;
+        }
+        if (button == .mouse_left and clay.pointerOver(clay.ElementId.ID("menu_file"))) {
+            self.file_menu_open = true;
+            return;
+        }
 
         if (self.show_file_explorer) {
             if (self.file_explorer.handleMouseDown(x, y, button)) {
@@ -701,6 +747,10 @@ pub const UI = struct {
 
     /// Scroll-Events an Editor oder Terminal weiterleiten
     pub fn handleScroll(self: *Self, delta: i32) void {
+        if (self.folder_picker.visible) {
+            self.folder_picker.handleScroll(delta);
+            return;
+        }
         if (self.show_file_explorer and clay.pointerOver(clay.ElementId.ID("file_explorer"))) {
             self.file_explorer.scrollLines(delta);
             return;
@@ -740,9 +790,26 @@ pub const UI = struct {
             defer change.deinit(self.allocator);
             self.applyFsChange(change);
         }
+        if (self.folder_picker.takeResult()) |path| {
+            if (self.pending_open_folder) |old| self.allocator.free(old);
+            self.pending_open_folder = path;
+        }
         self.anim_manager.update(delta_ms);
         self.getActiveEditor().time_ms += delta_ms;
         self.ai_chat.updateTimeMs(delta_ms);
+    }
+
+    /// "Open Folder…"-Dialog im aktuellen Projektordner öffnen (Menü, Ctrl+O).
+    pub fn openFolderPicker(self: *Self) void {
+        self.file_menu_open = false;
+        self.folder_picker.open(self.current_directory orelse "/");
+    }
+
+    /// Vom Dialog bestätigten Projektordner abholen (owned, Aufrufer gibt frei).
+    pub fn takePendingOpenFolder(self: *Self) ?[]u8 {
+        const p = self.pending_open_folder orelse return null;
+        self.pending_open_folder = null;
+        return p;
     }
 
     /// Layout beginnen
@@ -798,6 +865,63 @@ pub const UI = struct {
     }
 
     /// UI Beispiel rendern
+    /// Header-Menü "File" mit Dropdown ("Open Folder…  Ctrl+O"), wie die Menüleiste in Zed.
+    fn renderFileMenu(self: *Self, t: Theme) void {
+        const menu_id = clay.ElementId.ID("menu_file");
+        const hover = clay.pointerOver(menu_id);
+        const active = self.file_menu_open;
+        clay.UI()(.{
+            .id = menu_id,
+            .layout = .{
+                .padding = .{ .left = 12, .right = 12, .top = 6, .bottom = 6 },
+                .child_alignment = .{ .y = .center },
+            },
+            .background_color = if (active) t.primary else if (hover) t.overlay else .{ 0, 0, 0, 0 },
+            .corner_radius = .all(4),
+        })({
+            clay.text("File", .{ .font_size = 20, .color = if (active) t.text_on_primary else t.text });
+        });
+
+        if (!active) return;
+        clay.UI()(.{
+            .id = clay.ElementId.ID("menu_file_dropdown"),
+            .floating = .{
+                .attach_to = .to_element_with_id,
+                .parentId = menu_id.id,
+                .attach_points = .{ .element = .left_top, .parent = .left_bottom },
+                .offset = .{ .x = 0, .y = 4 },
+                .z_index = 1500,
+            },
+            .layout = .{
+                .sizing = .{ .w = .fit, .h = .fit },
+                .direction = .top_to_bottom,
+                .padding = .all(4),
+                .child_gap = 2,
+            },
+            .background_color = t.overlay,
+            .border = .{ .width = .all(1), .color = t.border },
+            .corner_radius = .all(4),
+        })({
+            const item_id = clay.ElementId.ID("menu_open_folder");
+            const item_hover = clay.pointerOver(item_id);
+            clay.UI()(.{
+                .id = item_id,
+                .layout = .{
+                    .sizing = .{ .w = .fixed(320), .h = .fit },
+                    .padding = .{ .left = 12, .right = 12, .top = 6, .bottom = 6 },
+                    .direction = .left_to_right,
+                    .child_alignment = .{ .y = .center },
+                },
+                .background_color = if (item_hover) t.primary else .{ 0, 0, 0, 0 },
+                .corner_radius = .all(3),
+            })({
+                clay.text("Open Folder…", .{ .font_size = 20, .wrap_mode = .none, .color = if (item_hover) t.text_on_primary else t.text });
+                clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow } } })({});
+                clay.text("Ctrl+O", .{ .font_size = 16, .wrap_mode = .none, .color = if (item_hover) t.text_on_primary else t.muted });
+            });
+        });
+    }
+
     pub fn renderExample(self: *Self, image_data: ?*const anyopaque) []clay.RenderCommand {
         self.beginLayout();
 
@@ -840,6 +964,7 @@ pub const UI = struct {
                 }
 
                 clay.text("VULKAN-ED", .{ .font_size = 24, .color = t.text });
+                self.renderFileMenu(t);
             });
 
             // Status Bar (Git Branch + Info)
@@ -914,6 +1039,9 @@ pub const UI = struct {
 
             });
         });
+
+        // "Open Folder…"-Dialog (floating, z_index=2000), modal wie der Dialog unten
+        self.folder_picker.render(self.frame_arena.allocator(), t);
 
         // Dialog INSIDE Clay layout (floating, z_index=2000 → overlays everything)
         // Must be here so Clay can register element bounds and mouse_pressed_this_frame is still true

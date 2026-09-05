@@ -32,6 +32,8 @@ pub const FileWatcher = struct {
     should_stop: std.atomic.Value(bool),
     scheduler: *scheduler_mod.Scheduler,
     thread: std.Thread,
+    /// Wurzel, deren Baum der Watcher-Thread beim Start registriert
+    root_path: []const u8,
     last_path: []const u8 = "",
     last_tag: ?scheduler_mod.ResultTag = null,
 
@@ -44,6 +46,9 @@ pub const FileWatcher = struct {
         const inotify_fd = try std.posix.inotify_init1(0);
         errdefer std.posix.close(inotify_fd);
 
+        const root_path = try allocator.dupe(u8, watch_path);
+        errdefer allocator.free(root_path);
+
         self.* = .{
             .allocator = allocator,
             .inotify_fd = inotify_fd,
@@ -51,10 +56,12 @@ pub const FileWatcher = struct {
             .should_stop = std.atomic.Value(bool).init(false),
             .scheduler = scheduler_ptr,
             .thread = undefined,
+            .root_path = root_path,
         };
 
-        try self.addTree(watch_path);
-
+        // Den Baum registriert der Watcher-Thread selbst: bei großen Ordnern
+        // (z.B. ~/projects mit tausenden Verzeichnissen) dauert das Sekunden
+        // und darf den Main-Thread nicht blockieren.
         self.thread = std.Thread.spawn(.{}, runLoop, .{self}) catch |err| {
             self.cleanup();
             return err;
@@ -64,6 +71,7 @@ pub const FileWatcher = struct {
     }
 
     fn addTree(self: *Self, dir_path: []const u8) !void {
+        if (self.should_stop.load(.acquire)) return;
         const wd = try std.posix.inotify_add_watch(self.inotify_fd, dir_path, WATCH_MASK);
         const owned = try self.allocator.dupe(u8, dir_path);
         try self.wd_to_path.put(wd, owned);
@@ -98,11 +106,15 @@ pub const FileWatcher = struct {
         var it = self.wd_to_path.valueIterator();
         while (it.next()) |path| self.allocator.free(path.*);
         self.wd_to_path.deinit();
+        self.allocator.free(self.root_path);
         self.allocator.free(self.last_path);
         self.allocator.destroy(self);
     }
 
     fn runLoop(self: *Self) void {
+        self.addTree(self.root_path) catch |err| {
+            log.warn("failed to watch {s}: {}", .{ self.root_path, err });
+        };
         var buf: [8192]u8 = undefined;
 
         while (!self.should_stop.load(.acquire)) {

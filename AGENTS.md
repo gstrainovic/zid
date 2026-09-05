@@ -61,6 +61,29 @@ echo -e "open ./README.md\nget-state\nshutdown" | zig build run -- --interactive
   Rechtsklick auf Zeile öffnet das Menü (Rename/Delete), `key_press` kennt `escape`, `delete`, `f2`.
   Fixtures unter `tmp/` anlegen (gitignored, im Explorer sichtbar).
 
+## Projektordner wechseln ("Open Folder…")
+
+- Header-Menü **File → Open Folder…** oder **Ctrl+O** öffnet einen modalen Dialog
+  (`src/ui/folder_picker.zig`, Logik ohne Clay in `src/ui/folder_ops.zig` mit Tests):
+  editierbarer Pfad (`~` wird expandiert), Liste der sichtbaren Unterordner (Klick steigt ab),
+  ↑ für den Elternordner, Enter/Open bestätigt, Escape/Cancel schließt.
+- Bestätigt → `UI.pending_open_folder`; `main.zig` holt es per `takePendingOpenFolder` und
+  ruft `openProjectFolder` (auch beim Start): Explorer-Root, `current_directory`,
+  Git-Branch/-Status und File-Watcher wechseln. Offene Tabs bleiben erhalten.
+- Kein nativer Dialog (zenity/kdialog/Portal): der In-App-Dialog ist headless testbar
+  und braucht keine Systemabhängigkeit.
+- File-Watcher registriert seinen Baum im eigenen Thread (`~/projects` hat tausende
+  Ordner, das darf den Frame-Loop nicht blockieren).
+- E2E: `python3 scripts/e2e_open_folder.py [ordner]` startet headless, fährt Menü → Dialog →
+  Pfad tippen → Enter und prüft den neuen Root; Screenshots in `tmp/e2e_menu.ppm` und
+  `tmp/e2e_dialog.ppm`. RPCs dafür: `element_bounds(id)`, `element_bounds_i(id, index)`
+  (Clay-Bounding-Box für Klicks auf beliebige Elemente), `folder_picker_state`,
+  `get_state.root`, `key_press` kennt zusätzlich `o`, `up`, `down`.
+- Headless-Screenshots: der SVG-Atlas rasterisiert max. 4 neue Icons pro Render-Durchgang;
+  neue Icons erscheinen daher erst im zweiten Screenshot (das Skript rendert zweimal).
+- Logs: `logFn` schreibt per `writerStreaming`; mit `File.writer()` wurde eine umgeleitete
+  Log-Datei (`2>log`) laufend ab Offset 0 überschrieben.
+
 ## Explorer: Umbenennen/Löschen und offene Tabs
 
 - Umbenennen zieht Tab-Pfad, Titel, Buffer-Pfad und `open_buffers`-Schlüssel mit, auch für

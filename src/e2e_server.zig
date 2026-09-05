@@ -4,7 +4,10 @@
 //! Starten mit: ./vulkan-ed --e2e
 //!
 //! Commands:
-//!   open_folder(path)  - Ordner im File Explorer öffnen
+//!   open_folder(path)  - Ordner im File Explorer öffnen (direkt, ohne UI)
+//!   element_bounds(id) - Bounding-Box eines Clay-Elements per String-ID
+//!   element_bounds_i(id, index) - dito für indexierte IDs (IDI)
+//!   folder_picker_state() - Zustand des "Open Folder…"-Dialogs
 //!   click(x, y)        - Maus-Klick an Koordinate
 //!   get_state()        - App-State zurückgeben
 //!   shutdown()         - App beenden
@@ -146,6 +149,9 @@ pub fn createDispatcher(alloc: std.mem.Allocator, ctx: *E2EContext) !*zigjr.RpcD
     try rpc_dispatcher.addWithCtx("get_active_tab", ctx, getActiveTabDebug);
     try rpc_dispatcher.addWithCtx("explorer_open", ctx, explorerOpen);
     try rpc_dispatcher.addWithCtx("explorer_entries", ctx, explorerEntries);
+    try rpc_dispatcher.addWithCtx("element_bounds", ctx, elementBounds);
+    try rpc_dispatcher.addWithCtx("element_bounds_i", ctx, elementBoundsIndexed);
+    try rpc_dispatcher.addWithCtx("folder_picker_state", ctx, folderPickerState);
     try rpc_dispatcher.addWithCtx("save_file", ctx, saveFile);
     try rpc_dispatcher.addWithCtx("get_state", ctx, getState);
     try rpc_dispatcher.addWithCtx("benchmark_open_file", ctx, benchmarkOpenFile);
@@ -339,6 +345,9 @@ pub fn keyPress(ctx: *E2EContext, _: *zigjr.DispatchCtx, key_name: []const u8, i
     else if (std.mem.eql(u8, key_name, "k")) btn = .k
     else if (std.mem.eql(u8, key_name, "y")) btn = .y
     else if (std.mem.eql(u8, key_name, "n")) btn = .n
+    else if (std.mem.eql(u8, key_name, "o")) btn = .o
+    else if (std.mem.eql(u8, key_name, "up")) btn = .up
+    else if (std.mem.eql(u8, key_name, "down")) btn = .down
     else if (std.mem.eql(u8, key_name, "escape")) btn = .escape
     else if (std.mem.eql(u8, key_name, "delete")) btn = .delete
     else if (std.mem.eql(u8, key_name, "f2")) btn = .f2;
@@ -441,6 +450,44 @@ fn explorerEntries(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     return buf.written();
 }
 
+/// Bounding-Box eines Clay-Elements aus dem letzten Layout (String-ID).
+fn elementBounds(_: *E2EContext, dc: *zigjr.DispatchCtx, id: []const u8) ![]const u8 {
+    return boundsJson(dc, clay.getElementData(clay.ElementId.ID(id)));
+}
+
+/// Bounding-Box eines indexierten Clay-Elements (IDI, z.B. fp_entry + 3).
+fn elementBoundsIndexed(_: *E2EContext, dc: *zigjr.DispatchCtx, id: []const u8, index: i64) ![]const u8 {
+    return boundsJson(dc, clay.getElementData(clay.ElementId.IDI(id, @intCast(index))));
+}
+
+fn boundsJson(dc: *zigjr.DispatchCtx, data: clay.ElementData) ![]const u8 {
+    const bb = data.bounding_box;
+    return std.fmt.allocPrint(dc.arena(),
+        \\{{"found": {}, "x": {d:.1}, "y": {d:.1}, "w": {d:.1}, "h": {d:.1}}}
+    , .{ data.found, bb.x, bb.y, bb.width, bb.height });
+}
+
+/// Zustand des "Open Folder…"-Dialogs: offen, Pfadfeld, Fehlermeldung, Unterordner.
+fn folderPickerState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
+    const fp = &ctx.ui_system.folder_picker;
+    var buf = std.Io.Writer.Allocating.init(dc.arena());
+    try buf.writer.print(
+        \\{{"open": {}, "path": "{s}", "error": 
+    , .{ fp.visible, fp.model.edit.text() });
+    if (fp.model.error_msg) |m| {
+        try buf.writer.print("\"{s}\"", .{m});
+    } else {
+        try buf.writer.writeAll("null");
+    }
+    try buf.writer.writeAll(", \"entries\": [");
+    for (fp.model.entries, 0..) |name, i| {
+        if (i > 0) try buf.writer.writeAll(", ");
+        try buf.writer.print("\"{s}\"", .{name});
+    }
+    try buf.writer.writeAll("]}");
+    return buf.written();
+}
+
 /// Simuliert einen Klick im File-Explorer (setzt file_to_open, wie ein echter Klick).
 /// Anders als open_file läuft das durch den Explorer-Pfad in main.zig.
 var explorer_open_buf: [std.fs.max_path_bytes]u8 = undefined;
@@ -457,9 +504,10 @@ fn explorerOpen(ctx: *E2EContext, _: *zigjr.DispatchCtx, path: []const u8) ![]co
 pub fn getState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     const explorer = &ctx.ui_system.file_explorer;
     var buf = std.Io.Writer.Allocating.init(dc.arena());
+    const root = if (explorer.nodes.items.len > 0) explorer.nodes.items[0].path else "";
     try buf.writer.print(
-        \\{{"visible_entries": {d}, "nodes": {d}, "selected": 
-    , .{ explorer.visible_entries.items.len, explorer.nodes.items.len });
+        \\{{"root": "{s}", "visible_entries": {d}, "nodes": {d}, "selected": 
+    , .{ root, explorer.visible_entries.items.len, explorer.nodes.items.len });
     if (explorer.selected_index) |idx| {
         try buf.writer.print("{d}", .{idx});
     } else {

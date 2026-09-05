@@ -40,7 +40,9 @@ fn logFn(
 
     const stderr_file = std.fs.File.stderr();
     var buf: [4096]u8 = undefined;
-    var stderr_writer = stderr_file.writer(&buf);
+    // writerStreaming: File.writer() schreibt positional ab Offset 0 und
+    // überschreibt bei umgeleitetem stderr (2>log) laufend den Dateianfang.
+    var stderr_writer = stderr_file.writerStreaming(&buf);
     const w = &stderr_writer.interface;
 
     std.debug.lockStdErr();
@@ -284,31 +286,7 @@ pub fn main() !void {
     var git_repo_path: ?[]u8 = null;
     defer if (git_repo_path) |p| allocator.free(p);
     if (cwd_path) |path| {
-        ui_system.file_explorer.loadDirectory(path) catch |err| {
-            log.warn("Failed to load directory '{s}': {}", .{ path, err });
-        };
-        // Speicher für current_directory duplizieren (owned)
-        ui_system.current_directory = try allocator.dupe(u8, path);
-        git_repo_path = try allocator.dupe(u8, path);
-
-        // Git-Branch und Git-Status asynchron abfragen
-        if (git_worker.Params.init(allocator, path, "")) |params| {
-            _ = scheduler.submit(.{ .func = git_worker.taskGitBranch, .data = params });
-        } else |err| {
-            log.warn("git_branch submit failed: {}", .{err});
-        }
-        if (git_worker.Params.init(allocator, path, "")) |params| {
-            _ = scheduler.submit(.{ .func = git_worker.taskGitStatus, .data = params });
-        } else |err| {
-            log.warn("git_status submit failed: {}", .{err});
-        }
-
-        // File Watcher für dieses Verzeichnis starten
-        if (file_watcher_mod.FileWatcher.start(allocator, scheduler, path)) |w| {
-            watcher = w;
-        } else |err| {
-            log.warn("file_watcher start failed: {}", .{err});
-        }
+        try openProjectFolder(allocator, &ui_system, scheduler, &watcher, &git_repo_path, path);
     }
 
     // Phase 9: Aktuelle Datei als Tab öffnen (falls geladen)
@@ -437,6 +415,14 @@ pub fn main() !void {
 
         // UI updaten (Animationen)
         ui_system.update(delta_time_ms);
+
+        // "Open Folder…" bestätigt: Explorer, Git und Watcher auf den neuen Ordner umstellen
+        if (ui_system.takePendingOpenFolder()) |new_root| {
+            defer allocator.free(new_root);
+            openProjectFolder(allocator, &ui_system, scheduler, &watcher, &git_repo_path, new_root) catch |err| {
+                log.err("open folder '{s}' failed: {}", .{ new_root, err });
+            };
+        }
 
         // Theme-Wechsel für Verifizierung entfernt — Standard: Dark
         if (theme_override) |t| {
@@ -861,6 +847,56 @@ pub fn main() !void {
 }
 
 
+
+/// Projektordner setzen: Explorer-Root, current_directory, Git-Branch/-Status
+/// und File-Watcher. Beim Start und nach "Open Folder…" (dann ersetzt es den
+/// alten Ordner; offene Tabs bleiben erhalten).
+fn openProjectFolder(
+    allocator: std.mem.Allocator,
+    ui_system: *ui.UI,
+    scheduler: *async_mod.Scheduler,
+    watcher: *?*file_watcher_mod.FileWatcher,
+    git_repo_path: *?[]u8,
+    path: []const u8,
+) !void {
+    ui_system.file_explorer.loadDirectory(path) catch |err| {
+        log.warn("Failed to load directory '{s}': {}", .{ path, err });
+    };
+
+    const dir_copy = try allocator.dupe(u8, path);
+    if (ui_system.current_directory) |old| allocator.free(old);
+    ui_system.current_directory = dir_copy;
+
+    const repo_copy = try allocator.dupe(u8, path);
+    if (git_repo_path.*) |old| allocator.free(old);
+    git_repo_path.* = repo_copy;
+
+    // Alte Git-Daten gelten nicht mehr; neue kommen asynchron
+    ui_system.updateBranch("");
+    ui_system.updateGitStatus("");
+    if (git_worker.Params.init(allocator, path, "")) |params| {
+        _ = scheduler.submit(.{ .func = git_worker.taskGitBranch, .data = params });
+    } else |err| {
+        log.warn("git_branch submit failed: {}", .{err});
+    }
+    if (git_worker.Params.init(allocator, path, "")) |params| {
+        _ = scheduler.submit(.{ .func = git_worker.taskGitStatus, .data = params });
+    } else |err| {
+        log.warn("git_status submit failed: {}", .{err});
+    }
+
+    // File Watcher auf das neue Verzeichnis umstellen
+    if (watcher.*) |w| {
+        w.deinit();
+        watcher.* = null;
+    }
+    if (file_watcher_mod.FileWatcher.start(allocator, scheduler, path)) |w| {
+        watcher.* = w;
+    } else |err| {
+        log.warn("file_watcher start failed: {}", .{err});
+    }
+    log.info("project folder: {s}", .{path});
+}
 
 /// Reiht genau einen git-status-Task ein, wenn die Debounce fällig ist.
 fn submitGitStatusIfDue(
