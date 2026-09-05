@@ -156,7 +156,38 @@ def item3_tabs():
     check(ui_state()["dialog"] is None and ui_state()["tab_count"] == n, "Cancel behält den Tab")
 
 
-STEPS = [item1_table_drives_ctrl_o, item2_explorer_f2_delete, item3_tabs]
+def item4_view():
+    print("--- 4. Ansicht: Ctrl+B Explorer, Ctrl+` Terminal, Ctrl+Shift+K Zeile löschen")
+    key("b", ctrl=True)
+    check(not ui_state()["show_file_explorer"], "Ctrl+B blendet den Explorer aus")
+    key("b", ctrl=True)
+    check(ui_state()["show_file_explorer"], "Ctrl+B blendet ihn wieder ein")
+
+    n = ui_state()["tab_count"]
+    key("grave", ctrl=True)
+    settle(10)
+    st = ui_state()
+    check(st["tab_count"] == n + 1 and st["tabs"][st["active_tab"]]["kind"] == "terminal", "Ctrl+` öffnet einen Terminal-Tab")
+    key("w", ctrl=True)
+    settle(5)
+    check(ui_state()["tab_count"] == n, "Ctrl+W schließt den Terminal-Tab wieder")
+
+    # Zurück in den geänderten Text-Tab (New File.txt), drei Zeilen, eine löschen
+    while not ui_state()["tabs"][ui_state()["active_tab"]]["path"].endswith("New File.txt"):
+        key("tab", ctrl=True)
+    rpc("click", [700, 400])
+    settle()
+    key("end", ctrl=True)
+    key("enter"); rpc("type_text", ["zwei"]); key("enter"); rpc("type_text", ["drei"])
+    settle(10)
+    lines = int(rpc("editor_lines"))
+    key("k", ctrl=True, shift=True)
+    settle(5)
+    after = int(rpc("editor_lines"))
+    check(after == lines - 1, f"Ctrl+Shift+K löscht die aktuelle Zeile ({lines} → {after})")
+
+
+STEPS = [item1_table_drives_ctrl_o, item2_explorer_f2_delete, item3_tabs, item4_view]
 
 
 def main():
