@@ -13,8 +13,8 @@ Tool-Calls werden als `json`-Codeblock mit Syntax-Highlighting gerendert, Tool-E
   zusammengefügt.
 - Jede Nachricht parst ihr Markdown pro Frame neu (gleiches Verhalten wie die Vorschau).
 
-## File-Watcher flutet den Scheduler
+## File-Watcher-Flut — behoben (2026-09-05)
 
-Im Headless-Lauf mit Screenshot-Schreibzugriffen kamen >1400 Dateiereignisse, jedes
-löst einen git-status-Task aus → "work queue full". Ereignisse debouncen oder
-`tmp/` und `.zig-cache/` vom Watcher ausnehmen.
+Debounce im Main-Loop (ein git-status-Task pro 300-ms-Fenster), Watcher unterdrückt
+direkt aufeinanderfolgende identische Ereignisse und ignoriert `zig-out`/`node_modules`.
+Headless-Lauf mit Screenshot: 2037 → 2 Ereignisse, keine vollen Queues mehr.

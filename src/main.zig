@@ -272,6 +272,9 @@ pub fn main() !void {
 
     // File Watcher (inotify auf Linux)
     var watcher: ?*file_watcher_mod.FileWatcher = null;
+    // Datei-Ereignisse kommen in Bursts (ein Schreibvorgang = hunderte IN_MODIFY).
+    // Ein git-status-Task pro Fenster reicht, sonst läuft die Work-Queue voll.
+    var git_refresh = async_mod.Debounce{ .delay_ms = 300 };
     defer if (watcher) |w| w.deinit();
 
     // Phase 9: File Explorer mit aktuellem Verzeichnis initialisieren
@@ -402,18 +405,12 @@ pub fn main() !void {
                     .ai_download_error => ui_system.handleAIDownloadError(result.payload),
                     .file_changed, .file_created, .file_deleted => {
                         log.debug("file event: {} for {s}", .{ result.tag, result.payload });
-                        if (git_repo_path) |path| {
-                            if (git_worker.Params.init(allocator, path, "")) |params| {
-                                // Task gibt params selbst frei; bei voller Queue müssen wir es tun.
-                                if (!scheduler.submit(.{ .func = git_worker.taskGitStatus, .data = params })) {
-                                    params.deinit();
-                                }
-                            } else |_| {}
-                        }
+                        git_refresh.mark(std.time.milliTimestamp());
                     },
                     else => {},
                 }
             }
+            submitGitStatusIfDue(&git_refresh, scheduler, allocator, git_repo_path);
             std.Thread.sleep(std.time.ns_per_ms * 100);
         }
         log.info("Headless mode shutdown requested", .{});
@@ -451,20 +448,13 @@ pub fn main() !void {
                     .ai_download_error => ui_system.handleAIDownloadError(result.payload),
                     .file_changed, .file_created, .file_deleted => {
                         log.debug("file event: {} for {s}", .{ result.tag, result.payload });
-                        // File geändert → Git Status neu abfragen
-                        if (git_repo_path) |path| {
-                            if (git_worker.Params.init(allocator, path, "")) |params| {
-                                // Task gibt params selbst frei; bei voller Queue müssen wir es tun.
-                                if (!scheduler.submit(.{ .func = git_worker.taskGitStatus, .data = params })) {
-                                    params.deinit();
-                                }
-                            } else |_| {}
-                        }
+                        git_refresh.mark(std.time.milliTimestamp());
                     },
                     else => {},
                 }
             }
             if (results.len > 0) wio.cancelWait();
+            submitGitStatusIfDue(&git_refresh, scheduler, allocator, git_repo_path);
         }
 
         // UI updaten (Animationen)
@@ -890,3 +880,21 @@ pub fn main() !void {
     }
 }
 
+
+
+/// Reiht genau einen git-status-Task ein, wenn die Debounce fällig ist.
+fn submitGitStatusIfDue(
+    git_refresh: *async_mod.Debounce,
+    scheduler: *async_mod.Scheduler,
+    allocator: std.mem.Allocator,
+    git_repo_path: ?[]const u8,
+) void {
+    if (!git_refresh.take(std.time.milliTimestamp())) return;
+    const path = git_repo_path orelse return;
+    const params = git_worker.Params.init(allocator, path, "") catch return;
+    log.debug("git status refresh submitted (debounced)", .{});
+    // Task gibt params selbst frei; bei voller Queue müssen wir es tun.
+    if (!scheduler.submit(.{ .func = git_worker.taskGitStatus, .data = params })) {
+        params.deinit();
+    }
+}

@@ -32,6 +32,8 @@ pub const FileWatcher = struct {
     should_stop: std.atomic.Value(bool),
     scheduler: *scheduler_mod.Scheduler,
     thread: std.Thread,
+    last_path: []const u8 = "",
+    last_tag: ?scheduler_mod.ResultTag = null,
 
     const Self = @This();
 
@@ -71,7 +73,7 @@ pub const FileWatcher = struct {
 
         var iter = dir.iterate();
         while (iter.next() catch null) |entry| {
-            if (entry.kind == .directory and !std.mem.startsWith(u8, entry.name, ".")) {
+            if (entry.kind == .directory and !std.mem.startsWith(u8, entry.name, ".") and !isIgnoredDir(entry.name)) {
                 const child_path = std.fs.path.join(self.allocator, &.{ dir_path, entry.name }) catch continue;
                 defer self.allocator.free(child_path);
                 self.addTree(child_path) catch |err| {
@@ -96,6 +98,7 @@ pub const FileWatcher = struct {
         var it = self.wd_to_path.valueIterator();
         while (it.next()) |path| self.allocator.free(path.*);
         self.wd_to_path.deinit();
+        self.allocator.free(self.last_path);
         self.allocator.destroy(self);
     }
 
@@ -153,15 +156,13 @@ pub const FileWatcher = struct {
         }
     }
 
+    /// Build-Ausgaben erzeugen Ereignis-Fluten ohne Relevanz für den Editor.
+    fn isIgnoredDir(name: []const u8) bool {
+        return std.mem.eql(u8, name, "zig-out") or std.mem.eql(u8, name, "node_modules");
+    }
+
     fn handleEvent(self: *Self, parent_path: []const u8, filename: []const u8, mask: u32) void {
         if (std.mem.endsWith(u8, filename, ".gguf")) return;
-
-        const full_path = std.fs.path.join(self.allocator, &.{ parent_path, filename }) catch return;
-        const owned_path = self.allocator.dupe(u8, full_path) catch {
-            self.allocator.free(full_path);
-            return;
-        };
-        self.allocator.free(full_path);
 
         const tag: scheduler_mod.ResultTag = if ((mask & (IN_MOVED_TO | IN_CREATE)) != 0)
             .file_created
@@ -169,6 +170,20 @@ pub const FileWatcher = struct {
             .file_deleted
         else
             .file_changed;
+
+        const full_path = std.fs.path.join(self.allocator, &.{ parent_path, filename }) catch return;
+
+        // Ein Schreibvorgang liefert hunderte IN_MODIFY für dieselbe Datei:
+        // direkt aufeinanderfolgende identische Ereignisse nur einmal melden.
+        if (self.last_tag == tag and std.mem.eql(u8, self.last_path, full_path)) {
+            self.allocator.free(full_path);
+            return;
+        }
+        self.allocator.free(self.last_path);
+        self.last_path = full_path;
+        self.last_tag = tag;
+
+        const owned_path = self.allocator.dupe(u8, full_path) catch return;
 
         const result = scheduler_mod.TaskResult{
             .tag = tag,
