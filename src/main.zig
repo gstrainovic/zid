@@ -12,6 +12,7 @@ const svg = @import("svg/mod.zig");
 const svg_gpu_mod = @import("svg/gpu_renderer.zig");
 const editor = @import("editor/mod.zig");
 const e2e_server = @import("e2e_server.zig");
+const e2e_interactive = @import("e2e_interactive.zig");
 const async_mod = @import("scheduler");
 const git_worker = @import("git_worker");
 const file_watcher_mod = @import("file_watcher");
@@ -62,6 +63,7 @@ pub fn main() !void {
     var default_file_path: ?[]const u8 = null;
     var e2e_mode = false;
     var headless_mode = false;
+    var interactive_mode = false;
     var ai_disabled = false;
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
@@ -86,6 +88,11 @@ pub fn main() !void {
             headless_mode = true;
             e2e_mode = true;
             log.info("Headless mode enabled — no window, screenshots possible via RPC on port 9999", .{});
+        } else if (std.mem.eql(u8, args[i], "--interactive")) {
+            interactive_mode = true;
+            headless_mode = true;
+            e2e_mode = true;
+            log.info("Interactive mode enabled — stdin/stdout command interface", .{});
         } else if (std.mem.eql(u8, args[i], "--ai=off")) {
             ai_disabled = true;
             log.info("AI disabled via --ai=off", .{});
@@ -99,6 +106,7 @@ pub fn main() !void {
             try w.writeAll("  --theme light|dark    Override theme\n");
             try w.writeAll("  --e2e                 Enable E2E mode (RPC on port 9999)\n");
             try w.writeAll("  --headless            Headless mode (no window, screenshots via RPC on port 9999)\n");
+            try w.writeAll("  --interactive         Interactive mode (stdin/stdout command interface)\n");
             try w.writeAll("  --ai=off              Disable AI chat (llama-server)\n");
             try w.writeAll("  --help, -h            Show this help\n");
             try w.flush();
@@ -370,7 +378,14 @@ pub fn main() !void {
 
     // In headless mode: poll async results + wait for E2E shutdown (no rendering loop)
     if (headless_mode) {
-        log.info("=== vulkan-ed headless ready — waiting for RPC requests ===", .{});
+        log.info("=== vulkan-ed headless ready ===", .{});
+        if (interactive_mode) {
+            log.info("Interactive mode — stdin/stdout command interface", .{});
+            e2e_interactive.runInteractiveLoop(&e2e_ctx.?);
+            log.info("Interactive mode ended", .{});
+            return;
+        }
+        log.info("Waiting for RPC requests on port 9999...", .{});
         while (e2e_ctx == null or !e2e_ctx.?.shutdown_flag.load(.seq_cst)) {
             var result_buf: [32]async_mod.TaskResult = undefined;
             const results = scheduler.pollResults(&result_buf);

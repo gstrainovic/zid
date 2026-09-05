@@ -131,34 +131,34 @@ fn handleConnection(ctx: *E2EContext, connection: std.net.Server.Connection) voi
 // =============================================================================
 
 /// Ordner im File Explorer öffnen
-fn openFolder(ctx: *E2EContext, path: []const u8) ![]const u8 {
+fn openFolder(ctx: *E2EContext, dc: *zigjr.DispatchCtx, path: []const u8) ![]const u8 {
     log.info("RPC: open_folder('{s}')", .{path});
 
     ctx.ui_system.file_explorer.loadDirectory(path) catch |err| {
-        const msg = try std.fmt.allocPrint(ctx.allocator, "error: {}", .{err});
+        const msg = try std.fmt.allocPrint(dc.arena(), "error: {}", .{err});
         return msg;
     };
 
-    return ctx.allocator.dupe(u8, "ok") catch "error: out of memory";
+    return "ok";
 }
 
 /// Datei speichern
-fn saveFile(ctx: *E2EContext, params: []const u8) ![]const u8 {
+fn saveFile(ctx: *E2EContext, dc: *zigjr.DispatchCtx, params: []const u8) ![]const u8 {
     _ = params;
     log.info("RPC: save_file()", .{});
     ctx.ui_system.getActiveEditor().save() catch |err| {
-         const msg = try std.fmt.allocPrint(ctx.allocator, "error: {}", .{err});
+         const msg = try std.fmt.allocPrint(dc.arena(), "error: {}", .{err});
          return msg;
     };
-    return ctx.allocator.dupe(u8, "ok") catch "error: out of memory";
+    return "ok";
 }
 
 /// Datei im Editor öffnen (oder Bild-Vorschau)
-fn openFile(ctx: *E2EContext, path: []const u8) ![]const u8 {
+pub fn openFile(ctx: *E2EContext, dc: *zigjr.DispatchCtx, path: []const u8) ![]const u8 {
     log.info("RPC: open_file('{s}')", .{path});
 
     ctx.ui_system.getActiveTabBar().openFile(path) catch |err| {
-        const msg = try std.fmt.allocPrint(ctx.allocator, "error: {}", .{err});
+        const msg = try std.fmt.allocPrint(dc.arena(), "error: {}", .{err});
         return msg;
     };
 
@@ -173,41 +173,41 @@ fn openFile(ctx: *E2EContext, path: []const u8) ![]const u8 {
     const wio = @import("wio");
     wio.cancelWait();
 
-    return ctx.allocator.dupe(u8, "ok") catch "error: out of memory";
+    return "ok";
 }
 
 /// Tab schließen (nach Index)
-fn closeTab(ctx: *E2EContext, index: i64) ![]const u8 {
+pub fn closeTab(ctx: *E2EContext, dc: *zigjr.DispatchCtx, index: i64) ![]const u8 {
     log.info("RPC: close_tab({d})", .{index});
 
     if (index < 0 or @as(usize, @intCast(index)) >= ctx.ui_system.getActiveTabBar().count()) {
-        const msg = try std.fmt.allocPrint(ctx.allocator, "error: tab index {d} out of range (only {d} tabs)", .{ index, ctx.ui_system.getActiveTabBar().count() });
+        const msg = try std.fmt.allocPrint(dc.arena(), "error: tab index {d} out of range (only {d} tabs)", .{ index, ctx.ui_system.getActiveTabBar().count() });
         return msg;
     }
 
     ctx.ui_system.getActiveTabBar().closeTab(@intCast(index));
     @import("wio").cancelWait();
 
-    return ctx.allocator.dupe(u8, "ok") catch "error: out of memory";
+    return "ok";
 }
 
 /// Aktiven Tab wechseln (setzt pending_switch_path)
-fn setActiveTab(ctx: *E2EContext, index: i64) ![]const u8 {
+pub fn setActiveTab(ctx: *E2EContext, dc: *zigjr.DispatchCtx, index: i64) ![]const u8 {
     log.info("RPC: set_active_tab({d})", .{index});
 
     if (index < 0 or @as(usize, @intCast(index)) >= ctx.ui_system.getActiveTabBar().count()) {
-        const msg = try std.fmt.allocPrint(ctx.allocator, "error: tab index {d} out of range (only {d} tabs)", .{ index, ctx.ui_system.getActiveTabBar().count() });
+        const msg = try std.fmt.allocPrint(dc.arena(), "error: tab index {d} out of range (only {d} tabs)", .{ index, ctx.ui_system.getActiveTabBar().count() });
         return msg;
     }
 
     ctx.ui_system.getActiveTabBar().setActive(@intCast(index));
     @import("wio").cancelWait();
 
-    return ctx.allocator.dupe(u8, "ok") catch "error: out of memory";
+    return "ok";
 }
 
 /// Maus-Klick an Koordinate (simuliert)
-fn click(ctx: *E2EContext, dc: *zigjr.DispatchCtx, x: f64, y: f64) ![]const u8 {
+pub fn click(ctx: *E2EContext, _: *zigjr.DispatchCtx, x: f64, y: f64) ![]const u8 {
     log.info("RPC: click({d}, {d})", .{ x, y });
 
     // Pointer State für Clay setzen (Hover/Press)
@@ -225,11 +225,11 @@ fn click(ctx: *E2EContext, dc: *zigjr.DispatchCtx, x: f64, y: f64) ![]const u8 {
     const wio = @import("wio");
     wio.cancelWait();
 
-    return dc.arena().dupe(u8, "ok") catch "error: out of memory";
+    return "ok";
 }
 
 /// Maus-Rechtsklick an Koordinate
-fn rightClick(ctx: *E2EContext, dc: *zigjr.DispatchCtx, x: f64, y: f64) ![]const u8 {
+pub fn rightClick(ctx: *E2EContext, _: *zigjr.DispatchCtx, x: f64, y: f64) ![]const u8 {
     log.info("RPC: right_click({d}, {d})", .{ x, y });
 
     // Pointer position setzen
@@ -242,11 +242,11 @@ fn rightClick(ctx: *E2EContext, dc: *zigjr.DispatchCtx, x: f64, y: f64) ![]const
     const wio = @import("wio");
     wio.cancelWait();
 
-    return dc.arena().dupe(u8, "ok") catch "error: out of memory";
+    return "ok";
 }
 
 /// Maus-Bewegung zu Koordinate (simuliert)
-fn moveMouse(ctx: *E2EContext, dc: *zigjr.DispatchCtx, x: f64, y: f64) ![]const u8 {
+fn moveMouse(ctx: *E2EContext, _: *zigjr.DispatchCtx, x: f64, y: f64) ![]const u8 {
     log.info("RPC: move_mouse({d}, {d})", .{ x, y });
 
     // Pointer State für Clay setzen (Hover)
@@ -257,10 +257,10 @@ fn moveMouse(ctx: *E2EContext, dc: *zigjr.DispatchCtx, x: f64, y: f64) ![]const 
     const wio = @import("wio");
     wio.cancelWait();
 
-    return dc.arena().dupe(u8, "ok") catch "error: out of memory";
+    return "ok";
 }
 
-fn keyPress(ctx: *E2EContext, dc: *zigjr.DispatchCtx, key_name: []const u8, is_ctrl: bool) ![]const u8 {
+pub fn keyPress(ctx: *E2EContext, _: *zigjr.DispatchCtx, key_name: []const u8, is_ctrl: bool) ![]const u8 {
     log.info("RPC: key_press('{s}', ctrl={})", .{ key_name, is_ctrl });
 
     ctx.ui_system.setCtrlState(is_ctrl);
@@ -279,13 +279,13 @@ fn keyPress(ctx: *E2EContext, dc: *zigjr.DispatchCtx, key_name: []const u8, is_c
     if (btn) |b| {
         ctx.ui_system.handleKeyPress(b);
         @import("wio").cancelWait();
-        return dc.arena().dupe(u8, "ok") catch "error: out of memory";
+        return "ok";
     }
 
-    return dc.arena().dupe(u8, "error: unknown key") catch "error: out of memory";
+    return "error: unknown key";
 }
 
-fn typeText(ctx: *E2EContext, dc: *zigjr.DispatchCtx, text: []const u8) ![]const u8 {
+pub fn typeText(ctx: *E2EContext, _: *zigjr.DispatchCtx, text: []const u8) ![]const u8 {
     log.info("RPC: type_text('{s}')", .{text});
 
     // Wir iterieren über UTF-8 Zeichen
@@ -298,11 +298,11 @@ fn typeText(ctx: *E2EContext, dc: *zigjr.DispatchCtx, text: []const u8) ![]const
     }
     @import("wio").cancelWait();
 
-    return dc.arena().dupe(u8, "ok") catch "error: out of memory";
+    return "ok";
 }
 
 /// Terminal öffnen
-fn openTerminalRpc(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
+fn openTerminalRpc(ctx: *E2EContext, _: *zigjr.DispatchCtx) ![]const u8 {
     log.info("RPC: open_terminal", .{});
     ctx.ui_system.getActiveTabBar().openTerminal();
 
@@ -310,11 +310,11 @@ fn openTerminalRpc(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     const wio = @import("wio");
     wio.cancelWait();
 
-    return dc.arena().dupe(u8, "ok") catch "error: out of memory";
+    return "ok";
 }
 
 /// AI Chat öffnen
-fn openChatRpc(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
+fn openChatRpc(ctx: *E2EContext, _: *zigjr.DispatchCtx) ![]const u8 {
     log.info("RPC: open_chat", .{});
     ctx.ui_system.getActiveTabBar().openChat();
 
@@ -322,7 +322,7 @@ fn openChatRpc(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     const wio = @import("wio");
     wio.cancelWait();
 
-    return dc.arena().dupe(u8, "ok") catch "error: out of memory";
+    return "ok";
 }
 
 /// Chat Input Content abfragen
@@ -360,29 +360,23 @@ fn getActiveTabDebug(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
 }
 
 /// App-State zurückgeben (JSON)
-fn getState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
+pub fn getState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     const explorer = &ctx.ui_system.file_explorer;
     var buf = std.Io.Writer.Allocating.init(dc.arena());
-
     try buf.writer.print(
-        \\{{"visible_entries": {d}, "nodes": {d}, "selected":
-    , .{
-            explorer.visible_entries.items.len,
-            explorer.nodes.items.len,
-        });
-
+        \\{{"visible_entries": {d}, "nodes": {d}, "selected": 
+    , .{ explorer.visible_entries.items.len, explorer.nodes.items.len });
     if (explorer.selected_index) |idx| {
         try buf.writer.print("{d}", .{idx});
     } else {
         try buf.writer.writeAll("null");
     }
-
     try buf.writer.writeAll("}");
     return buf.written();
 }
 
 /// Pane teilen
-fn splitPane(ctx: *E2EContext, dc: *zigjr.DispatchCtx, direction: []const u8) ![]const u8 {
+pub fn splitPane(ctx: *E2EContext, _: *zigjr.DispatchCtx, direction: []const u8) ![]const u8 {
     log.info("RPC: split_pane('{s}')", .{direction});
     if (std.mem.eql(u8, direction, "h")) {
         ctx.ui_system.pending_split = .horizontal;
@@ -394,11 +388,10 @@ fn splitPane(ctx: *E2EContext, dc: *zigjr.DispatchCtx, direction: []const u8) ![
     const wio = @import("wio");
     wio.cancelWait();
     
-    return dc.arena().dupe(u8, "ok") catch "error: out of memory";
+    return "ok";
 }
 
-fn showContextMenuRpc(ctx: *E2EContext, dc: *zigjr.DispatchCtx, x: f64, y: f64) !void {
-    _ = dc;
+pub fn showContextMenuRpc(ctx: *E2EContext, _: *zigjr.DispatchCtx, x: f64, y: f64) !void {
     log.info("RPC: show_context_menu({d}, {d})", .{ x, y });
     const ed = ctx.ui_system.getActiveEditor();
     ed.show_context_menu = true;
@@ -406,8 +399,7 @@ fn showContextMenuRpc(ctx: *E2EContext, dc: *zigjr.DispatchCtx, x: f64, y: f64) 
     ed.context_menu_y = @floatCast(y);
 }
 
-fn closeActiveTabRpc(ctx: *E2EContext, dc: *zigjr.DispatchCtx) !void {
-    _ = dc;
+fn closeActiveTabRpc(ctx: *E2EContext, _: *zigjr.DispatchCtx) !void {
     log.info("RPC: close_active_tab()", .{});
     const tb = ctx.ui_system.getActiveTabBar();
     if (tb.active_index) |idx| {
@@ -417,8 +409,7 @@ fn closeActiveTabRpc(ctx: *E2EContext, dc: *zigjr.DispatchCtx) !void {
 }
 
 /// Screenshot: rendert aktuellen Frame und speichert als PPM nach ./tmp/vulkan-screenshot.ppm
-fn screenshot(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
-    _ = dc;
+pub fn screenshot(ctx: *E2EContext, _: *zigjr.DispatchCtx) ![]const u8 {
     log.info("=== SCREENSHOT RPC CALLED ===", .{});
 
     const renderer_ptr = @import("rendering/mod.zig").Renderer.g_renderer_ptr orelse return "error: no renderer";
@@ -462,7 +453,7 @@ fn screenshot(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
         log.err("headlessRenderToBuffer failed: {}, using clear color", .{err});
         // Fallback: just render clear color
         try renderer.headlessScreenshot(ctx.allocator, path);
-        return try ctx.allocator.dupe(u8, path);
+        return path;
     };
     defer ctx.allocator.free(rgba);
 
@@ -487,7 +478,7 @@ fn screenshot(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     try file.sync();
     log.info("screenshot: wrote PPM to {s}", .{path});
 
-    return try ctx.allocator.dupe(u8, path);
+    return path;
 }
 
 /// App beenden
@@ -501,7 +492,6 @@ fn shutdown(ctx: *E2EContext) zigjr.DispatchResult {
 /// Parameter: path (string), iterations (i64, default 10)
 /// Rückgabe: JSON mit min, max, avg, total Zeiten in Millisekunden
 fn benchmarkOpenFile(ctx: *E2EContext, dc: *zigjr.DispatchCtx, path: []const u8, iterations_i64: i64) ![]const u8 {
-    _ = dc;
     const iterations: usize = @intCast(@max(1, @min(iterations_i64, 100)));
     log.info("RPC: benchmark_open_file('{s}', {d} iterations)", .{ path, iterations });
 
@@ -522,7 +512,7 @@ fn benchmarkOpenFile(ctx: *E2EContext, dc: *zigjr.DispatchCtx, path: []const u8,
 
         const t_start = std.time.microTimestamp();
         ctx.ui_system.getActiveTabBar().openFile(path) catch |err| {
-            const err_msg = try std.fmt.allocPrint(ctx.allocator,
+            const err_msg = try std.fmt.allocPrint(dc.arena(),
                 \\{{"error": "openFile failed: {}", "iterations_completed": {d}}}
             , .{ err, i });
             return err_msg;
@@ -546,7 +536,7 @@ fn benchmarkOpenFile(ctx: *E2EContext, dc: *zigjr.DispatchCtx, path: []const u8,
     const avg_ms_str = formatMsX100(bench_alloc, avg_ms_x100) catch "error";
     const total_ms_str = formatMsX100(bench_alloc, total_ms) catch "error";
 
-    const json = try std.fmt.allocPrint(ctx.allocator,
+    const json = try std.fmt.allocPrint(dc.arena(),
         \\{{"path": "{s}", "iterations": {d}, "min_ms": {s}, "max_ms": {s}, "avg_ms": {s}, "total_ms": {s}}}
     , .{ path, iterations, min_ms_str, max_ms_str, avg_ms_str, total_ms_str });
 
@@ -562,7 +552,6 @@ fn formatMsX100(alloc: std.mem.Allocator, ms_x100: u128) ![]const u8 {
 
 /// Benchmark: Datei komplett laden (readFileAlloc + setText) — misst echten I/O + Parsing Overhead
 fn benchmarkLoadFile(ctx: *E2EContext, dc: *zigjr.DispatchCtx, path: []const u8, iterations_i64: i64) ![]const u8 {
-    _ = dc;
     const iterations: usize = @intCast(@max(1, @min(iterations_i64, 100)));
     log.info("RPC: benchmark_load_file('{s}', {d} iterations)", .{ path, iterations });
 
@@ -582,7 +571,7 @@ fn benchmarkLoadFile(ctx: *E2EContext, dc: *zigjr.DispatchCtx, path: []const u8,
         // Phase 1: File lesen (I/O)
         const t_io_start = std.time.microTimestamp();
         const content = std.fs.cwd().readFileAlloc(bench_alloc, path, 64 * 1024 * 1024) catch |err| {
-            const err_msg = try std.fmt.allocPrint(ctx.allocator,
+            const err_msg = try std.fmt.allocPrint(dc.arena(),
                 \\{{"error": "readFileAlloc failed: {}", "iterations_completed": {d}}}
             , .{ err, i });
             return err_msg;
@@ -625,7 +614,7 @@ fn benchmarkLoadFile(ctx: *E2EContext, dc: *zigjr.DispatchCtx, path: []const u8,
     const file_stat = std.fs.cwd().statFile(path) catch null;
     const file_size = if (file_stat) |s| s.size else 0;
 
-    const json = try std.fmt.allocPrint(ctx.allocator,
+    const json = try std.fmt.allocPrint(dc.arena(),
         \\{{"path": "{s}", "file_size_bytes": {d}, "iterations": {d}, "first_load_ms": {s}, "min_ms": {s}, "max_ms": {s}, "avg_ms": {s}, "total_ms": {s}}}
     , .{ path, file_size, iterations, formatMsX100(bench_alloc, first_load_ms) catch "error", min_ms_str, max_ms_str, avg_ms_str, total_ms_str });
 
