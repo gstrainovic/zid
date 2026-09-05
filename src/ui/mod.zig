@@ -173,29 +173,25 @@ pub const UI = struct {
         const active_pane = root_pane;
         if (default_file_path) |path| active_pane.data.leaf.code_editor.setLanguageFromPath(path);
 
-        // AI Chat initialisieren (falls nicht deaktiviert)
-        const ai_chat = ai_chat_mod.AIChatState.init(allocator) catch |err| @panic(@errorName(err));
-        // AI:暂时禁用，快速测试文本输入
-        // if (!config.ai_disabled) {
-        //     const llama_server_path = std.process.getEnvVarOwned(allocator, "LLAMA_SERVER_PATH") catch |err| blk: {
-        //         if (err == error.EnvironmentVariableNotFound) {
-        //             break :blk try allocator.dupe(u8, "ollama");
-        //         }
-        //         return err;
-        //     };
-        //     defer allocator.free(llama_server_path);
-        //     const model_path = std.process.getEnvVarOwned(allocator, "LLAMA_MODEL_PATH") catch |err| blk: {
-        //         if (err == error.EnvironmentVariableNotFound) {
-        //             break :blk try allocator.dupe(u8, "gemma4:e2b");
-        //         }
-        //         return err;
-        //     };
-        //     defer allocator.free(model_path);
-        //
-        //     ai_chat.initAgent(llama_server_path, model_path) catch |err| {
-        //         log.err("Failed to initialize AI Agent: {}. AI Chat will be disabled.", .{err});
-        //     };
-        // }
+        // AI Chat initialisieren (falls nicht deaktiviert). Standard: Ollama mit
+        // gemma4:e2b; LLAMA_SERVER_PATH / LLAMA_MODEL_PATH überschreiben das.
+        // Ohne Agent erklärt der Chat beim Senden, warum nichts passiert.
+        var ai_chat = ai_chat_mod.AIChatState.init(allocator) catch |err| @panic(@errorName(err));
+        if (!config.ai_disabled) {
+            const server_path = std.process.getEnvVarOwned(allocator, "LLAMA_SERVER_PATH") catch |err| blk: {
+                if (err == error.EnvironmentVariableNotFound) break :blk try allocator.dupe(u8, "ollama");
+                return err;
+            };
+            defer allocator.free(server_path);
+            const model_path = std.process.getEnvVarOwned(allocator, "LLAMA_MODEL_PATH") catch |err| blk: {
+                if (err == error.EnvironmentVariableNotFound) break :blk try allocator.dupe(u8, "gemma4:e2b");
+                return err;
+            };
+            defer allocator.free(model_path);
+            ai_chat.initAgent(server_path, model_path) catch |err| {
+                log.err("AI agent init failed: {}. Chat will explain when used.", .{err});
+            };
+        }
 
         return Self{
             .allocator = allocator,
