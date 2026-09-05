@@ -426,8 +426,10 @@ fn chatState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     , .{@tagName(chat.agent_status)});
     try std.json.Stringify.value(chat.statusDetail(), .{}, &buf.writer);
     try buf.writer.print(
-        \\, "loading": {}, "initializing": {}, "downloading": {}, "model_exists": {}, "messages": [
-    , .{ chat.is_loading, chat.is_initializing, chat.is_downloading, chat.model_exists });
+        \\, "loading": {}, "initializing": {}, "downloading": {}, "model_exists": {}, "streaming_len": {d}, "title":
+    , .{ chat.is_loading, chat.is_initializing, chat.is_downloading, chat.model_exists, chat.stream_text.items.len });
+    try std.json.Stringify.value(chat.agentTitle(), .{}, &buf.writer);
+    try buf.writer.writeAll(", \"messages\": [");
     chat.mutex.lock();
     defer chat.mutex.unlock();
     for (chat.messages.items, 0..) |m, i| {

@@ -414,6 +414,8 @@ pub fn main() !void {
                     .git_status => ui_system.updateGitStatus(result.payload),
                     .ai_chat_reply => ui_system.handleAIReply(result.payload),
                     .ai_chat_error => ui_system.handleAIError(result.payload),
+                    .ai_chat_delta => ui_system.handleAIDelta(result.payload),
+                    .ai_chat_cancelled => ui_system.handleAICancelled(result.payload),
                     .ai_warmup_done => ui_system.handleAIWarmupDone(),
                     .ai_warmup_error => ui_system.handleAIWarmupError(result.payload),
                     .ai_download_done => ui_system.handleAIDownloadDone(),

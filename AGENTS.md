@@ -121,25 +121,41 @@ echo -e "open ./README.md\nget-state\nshutdown" | zig build run -- --interactive
   F2/Entf, Tabs, Ansicht, Menüleiste, Kontextmenü, Shortcut-Dialog, Suchleiste) und legt
   Screenshots unter `tmp/e2e_*.ppm` ab.
 
-## KI-Chat (Ollama / llama-server)
+## KI-Chat (llama-server / Ollama)
 
-- Start: `UI.init` ruft `ai_chat.initAgent(server, model)` auf, sofern nicht `--ai=off`.
-  Default `ollama` + `gemma4:e2b`; `LLAMA_SERVER_PATH` (Pfad zu llama-server) und
-  `LLAMA_MODEL_PATH` überschreiben. Dieser Block war seit Commit 8a5c7fb auskommentiert,
-  deshalb blieb jede Nachricht bei "Gemma is thinking...".
+- **Backend-Wahl beim Start** (`UI.init`, sofern nicht `--ai=off`): Standard ist der
+  llama.cpp-Vulkan-Build `~/projects/ki/llama.cpp-vulkan/build/bin/llama-server` mit
+  `~/projects/ki/BitNet/models/_compare/Qwen3-4B-Instruct-2507-Q4_K_M.gguf`. Fehlt der Build,
+  Fallback auf Ollama mit `gemma4:e2b`. `LLAMA_SERVER_PATH` (Pfad oder `ollama`) und
+  `LLAMA_MODEL_PATH` überschreiben. Der Init-Block war seit Commit 8a5c7fb auskommentiert.
+- **Warum Qwen3-4B:** Messung auf diesem Laptop (i7-8850H, Quadro P1000 4 GB) mit der Frage
+  "hallo, was kannst du alles?": gemma4:e2b über Ollama 232 s für 1022 Tokens (4,4 tok/s, das
+  5,2-GB-Modell passt nicht in den VRAM); Qwen3-4B Q4 über llama-server auf der P1000 27 s für
+  494 Tokens (18,8 tok/s). Deckt sich mit `~/projects/bitnet-colibri-bench` (Testsieger, 10/10
+  Werkzeugwahl). Ohne GPU läuft dasselbe Modell auf der CPU mit ~7–10 tok/s; BitNet-b1.58 wäre
+  auf reiner CPU ~2× schneller, braucht aber die gepinnte Engine (siehe dort) und ist nur Option.
+- **llama-server-Start** (`agent.zig`): prüft Engine- und Modelldatei, fragt
+  `--list-devices` ab und wählt per `device_select.zig` (unit-getestet) eine diskrete GPU mit
+  ≥ 3 GB, sonst CPU (`-dev none -t N`). iGPUs (Intel UHD …) werden übersprungen: laut Bench ein
+  Drittel der CPU. Argumente: `--jinja -c 8192 --log-disable`, GPU `-dev VulkanN -ngl 99`.
+  Port 8080 (`default_llama_port`); Ollama bleibt auf 11434. Ohne `-dev` landete das Modell
+  womöglich auf der iGPU, ohne `--jinja` stimmt das Qwen3-Chat-Template nicht.
+- **Streaming:** `streamChatCompletion` (SSE, `stream: true`) → Worker pusht jedes Delta per
+  `Scheduler.pushResult` als `ai_chat_delta`, der Chat zeigt die wachsende Antwort
+  (`stream_text`, Markdown wird bei neuem Text neu gebaut). Finale Antwort kommt als
+  `ai_chat_reply` mit dem ganzen Text. **Escape** setzt `cancel_flag`, der Worker beendet den
+  Stream → `ai_chat_cancelled`, der Teiltext bleibt mit "(abgebrochen)".
 - `AgentStatus` (`none`, `model_missing`, `initializing`, `ready`, `failed`) ist der echte
-  Verbindungszustand: Statuspunkt und Text neben "Gemma 4 Agent" hängen daran, `sendMessage`
-  antwortet ohne bereiten Agent sofort mit einer Erklärung statt zu laden.
-- Fehlt das Modell in Ollama, wird beim Start NICHT synchron gepullt (blockierte den Start
-  minutenlang). Der Chat zeigt "Pull model with Ollama" → `ai_worker.taskOllamaPull` → nach
-  `ai_download_done` erneutes `initAgent`. Alternative ohne Download, wenn das GGUF lokal liegt:
-  `printf 'FROM /abs/pfad/model.gguf\n' > Modelfile && ollama create gemma4:e2b -f Modelfile`.
-- Warmup schickt "ping" mit `max_tokens = 1`. Ohne Limit schrieb das Modell eine ganze Antwort;
-  auf einer 4-GB-GPU (Quadro P1000, Modell 5,2 GB, teilweise CPU) hieß das "Initializing..."
-  über Minuten. Erwartung: kaltes Modell ~10–30 s (Laden), warm < 1 s.
-- RPC `chat_state`: Status, Detail, loading/initializing/downloading und alle Nachrichten.
-- E2E: `python3 scripts/e2e_ai_chat.py` (braucht laufendes Ollama mit installiertem Modell;
-  `--only-off` prüft nur den `--ai=off`-Pfad). Warmup lädt das Modell, das kann bis ~1 min dauern.
+  Verbindungszustand: Statuspunkt, Kopfzeile (`agentTitle`: Modell · Gerät) und `sendMessage`
+  (antwortet ohne bereiten Agent sofort mit Erklärung) hängen daran. Warmup schickt "ping" mit
+  `max_tokens = 1` (ohne Limit dauerte der Start minutenlang).
+- Fehlt das Ollama-Modell, wird nicht synchron gepullt; der Chat zeigt "Pull model with Ollama"
+  (`ai_worker.taskOllamaPull`). Lokales GGUF ohne Download registrieren:
+  `printf 'FROM /abs/pfad/model.gguf\n' > Modelfile && ollama create NAME -f Modelfile`.
+- RPC `chat_state`: Status, Detail, Titel, loading/initializing/downloading, `streaming_len`,
+  alle Nachrichten. E2E: `python3 scripts/e2e_ai_chat.py` (Warmup, erstes Delta < 30 s, Escape,
+  kurze Antwort; `--only-off` nur den `--ai=off`-Pfad). Messwerte 05.09.2026: Warmup 2,0 s,
+  erstes Delta 2,3 s, PONG 0,8 s.
 - Keine Unit-Tests für `ai_chat.zig`: die Datei importiert `components/textarea.zig`, das
   `../../editor/actions.zig` zieht, also kein eigenes Test-Root möglich. Logik dort klein halten.
 

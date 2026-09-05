@@ -178,13 +178,24 @@ pub const UI = struct {
         // Ohne Agent erklärt der Chat beim Senden, warum nichts passiert.
         var ai_chat = ai_chat_mod.AIChatState.init(allocator) catch |err| @panic(@errorName(err));
         if (!config.ai_disabled) {
+            // Standard: llama.cpp-Vulkan-Build + Qwen3-4B (Testsieger in
+            // ~/projects/bitnet-colibri-bench: 18,8 tok/s auf der P1000, 10/10 Werkzeugwahl).
+            // Fehlt der Build, fällt es auf Ollama mit gemma4:e2b zurück.
+            const home = std.posix.getenv("HOME") orelse "";
+            const default_engine = try std.fs.path.join(allocator, &.{ home, "projects/ki/llama.cpp-vulkan/build/bin/llama-server" });
+            defer allocator.free(default_engine);
+            const default_model = try std.fs.path.join(allocator, &.{ home, "projects/ki/BitNet/models/_compare/Qwen3-4B-Instruct-2507-Q4_K_M.gguf" });
+            defer allocator.free(default_model);
+            const engine_available = if (std.fs.cwd().access(default_engine, .{})) |_| true else |_| false;
+
             const server_path = std.process.getEnvVarOwned(allocator, "LLAMA_SERVER_PATH") catch |err| blk: {
-                if (err == error.EnvironmentVariableNotFound) break :blk try allocator.dupe(u8, "ollama");
+                if (err == error.EnvironmentVariableNotFound) break :blk try allocator.dupe(u8, if (engine_available) default_engine else "ollama");
                 return err;
             };
             defer allocator.free(server_path);
+            const use_ollama = std.mem.eql(u8, server_path, "ollama");
             const model_path = std.process.getEnvVarOwned(allocator, "LLAMA_MODEL_PATH") catch |err| blk: {
-                if (err == error.EnvironmentVariableNotFound) break :blk try allocator.dupe(u8, "gemma4:e2b");
+                if (err == error.EnvironmentVariableNotFound) break :blk try allocator.dupe(u8, if (use_ollama) "gemma4:e2b" else default_model);
                 return err;
             };
             defer allocator.free(model_path);
@@ -318,6 +329,14 @@ pub const UI = struct {
 
     pub fn handleAIError(self: *Self, payload: []const u8) void {
         self.ai_chat.handleError(payload);
+    }
+
+    pub fn handleAIDelta(self: *Self, payload: []const u8) void {
+        self.ai_chat.handleDelta(payload);
+    }
+
+    pub fn handleAICancelled(self: *Self, payload: []const u8) void {
+        self.ai_chat.handleCancelled(payload);
     }
 
     pub fn handleAIWarmupDone(self: *Self) void {

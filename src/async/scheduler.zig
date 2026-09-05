@@ -23,6 +23,10 @@ pub const ResultTag = enum {
     file_deleted,
     ai_chat_reply,
     ai_chat_error,
+    /// Teilstück einer gestreamten Antwort (Worker pusht per pushResult)
+    ai_chat_delta,
+    /// Antwort per Escape abgebrochen; Payload = bisheriger Text
+    ai_chat_cancelled,
     ai_warmup_done,
     ai_warmup_error,
     ai_download_done,

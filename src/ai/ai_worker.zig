@@ -16,6 +16,10 @@ pub const ChatParams = struct {
     messages: []agent_mod.LlamaAgent.ChatMessage,
     owned_strings: std.ArrayListUnmanaged([]u8),
     should_stop: ?*const std.atomic.Value(bool) = null,
+    /// Für Streaming: Deltas gehen per pushResult an den Main-Thread
+    sched: ?*scheduler.Scheduler = null,
+    /// Escape im Chat setzt das Flag; der Stream endet mit ai_chat_cancelled
+    cancel: ?*const std.atomic.Value(bool) = null,
 
     pub fn init(
         alloc: std.mem.Allocator,
@@ -61,6 +65,21 @@ pub const ChatParams = struct {
         return self;
     }
 
+    /// Streaming-Variante: Deltas an `sched`, Abbruch über `cancel`.
+    pub fn initStreaming(
+        alloc: std.mem.Allocator,
+        agent: *agent_mod.LlamaAgent,
+        messages: []const agent_mod.LlamaAgent.ChatMessage,
+        sched: *scheduler.Scheduler,
+        should_stop: ?*const std.atomic.Value(bool),
+        cancel: ?*const std.atomic.Value(bool),
+    ) !*ChatParams {
+        const self = try initWithStop(alloc, agent, messages, should_stop);
+        self.sched = sched;
+        self.cancel = cancel;
+        return self;
+    }
+
     pub fn deinit(self: *ChatParams) void {
         for (self.owned_strings.items) |s| self.alloc.free(s);
         self.owned_strings.deinit(self.alloc);
@@ -69,10 +88,48 @@ pub const ChatParams = struct {
     }
 };
 
+/// Sammelt den gestreamten Text und reicht jedes Delta an den Main-Thread weiter.
+const StreamAcc = struct {
+    alloc: std.mem.Allocator,
+    sched: *scheduler.Scheduler,
+    text: std.ArrayListUnmanaged(u8) = .empty,
+
+    fn onDelta(ctx: *anyopaque, delta: []const u8) void {
+        const self: *StreamAcc = @ptrCast(@alignCast(ctx));
+        self.text.appendSlice(self.alloc, delta) catch return;
+        const payload = self.alloc.dupe(u8, delta) catch return;
+        // Volle Ergebnis-Queue: Delta verwerfen, die finale Antwort trägt den ganzen Text.
+        if (!self.sched.pushResult(.{ .tag = .ai_chat_delta, .payload = payload, .allocator = self.alloc })) {
+            self.alloc.free(payload);
+        }
+    }
+};
+
 /// Worker-Thread Entry: HTTP-Call an llama-server, Reply als Payload.
+/// Mit `params.sched` wird gestreamt (Deltas als ai_chat_delta), sonst blockierend.
 pub fn taskChatCompletion(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.TaskResult {
     const params: *ChatParams = @ptrCast(@alignCast(data.?));
     defer params.deinit();
+
+    if (params.sched) |sched| {
+        var acc = StreamAcc{ .alloc = alloc, .sched = sched };
+        defer acc.text.deinit(alloc);
+        params.agent.streamChatCompletion(params.messages, params.should_stop, params.cancel, .{
+            .ctx = &acc,
+            .on_delta = StreamAcc.onDelta,
+        }) catch |err| {
+            if (err == error.Cancelled) {
+                return .{ .tag = .ai_chat_cancelled, .payload = try acc.text.toOwnedSlice(alloc), .allocator = alloc };
+            }
+            // Stream brach nach Teiltext ab: lieber den Teiltext zeigen als nur den Fehler
+            if (acc.text.items.len > 0) {
+                return .{ .tag = .ai_chat_reply, .payload = try acc.text.toOwnedSlice(alloc), .allocator = alloc };
+            }
+            const msg = try std.fmt.allocPrint(alloc, "{s}", .{@errorName(err)});
+            return .{ .tag = .ai_chat_error, .payload = msg, .allocator = alloc };
+        };
+        return .{ .tag = .ai_chat_reply, .payload = try acc.text.toOwnedSlice(alloc), .allocator = alloc };
+    }
 
     const reply = params.agent.sendChatCompletionWithStop(params.messages, params.should_stop) catch |err| {
         const msg = try std.fmt.allocPrint(alloc, "{s}", .{@errorName(err)});

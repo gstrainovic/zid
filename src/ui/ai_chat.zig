@@ -39,6 +39,13 @@ pub const AIChatState = struct {
     agent_status: AgentStatus = .none,
     status_detail_buf: [256]u8 = undefined,
     status_detail_len: usize = 0,
+    title_buf: [160]u8 = undefined,
+    /// Gestreamte Antwort, die gerade wächst (bis ai_chat_reply/cancelled kommt)
+    stream_text: std.ArrayListUnmanaged(u8) = .empty,
+    stream_md: ?MarkdownView = null,
+    stream_dirty: bool = false,
+    /// Escape setzt das Flag; der Worker beendet den Stream
+    cancel_flag: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
 
     is_loading: bool = false,
     is_downloading: bool = false,
@@ -130,6 +137,8 @@ pub const AIChatState = struct {
         self.input_textarea.deinit();
         self.input_buffer.deinit();
         if (self.agent) |a| a.deinit();
+        self.clearStream();
+        self.stream_text.deinit(self.allocator);
         if (self.server_path.len > 0) self.allocator.free(self.server_path);
         if (self.model_path.len > 0) self.allocator.free(self.model_path);
     }
@@ -147,6 +156,51 @@ pub const AIChatState = struct {
         const n = @min(detail.len, self.status_detail_buf.len);
         @memcpy(self.status_detail_buf[0..n], detail[0..n]);
         self.status_detail_len = n;
+    }
+
+    /// Kopfzeile: Modell und Gerät, z.B. "Qwen3-4B-Instruct-2507-Q4_K_M · Quadro P1000"
+    pub fn agentTitle(self: *Self) []const u8 {
+        const model = if (self.isOllama()) self.model_path else blk: {
+            const base = std.fs.path.basename(self.model_path);
+            break :blk if (std.mem.endsWith(u8, base, ".gguf")) base[0 .. base.len - 5] else base;
+        };
+        if (model.len == 0) return "AI Agent";
+        const device = if (self.agent) |a| a.device_label else "";
+        if (device.len > 0) {
+            return std.fmt.bufPrint(&self.title_buf, "{s} · {s}", .{ model, device }) catch model;
+        }
+        return std.fmt.bufPrint(&self.title_buf, "{s}", .{model}) catch model;
+    }
+
+    fn clearStream(self: *Self) void {
+        self.stream_text.clearRetainingCapacity();
+        if (self.stream_md) |*md| md.deinit();
+        self.stream_md = null;
+        self.stream_dirty = false;
+    }
+
+    /// Delta einer gestreamten Antwort (Main-Thread, aus dem Scheduler-Ergebnis).
+    pub fn handleDelta(self: *Self, payload: []const u8) void {
+        if (!self.is_loading) return;
+        self.stream_text.appendSlice(self.allocator, payload) catch return;
+        self.stream_dirty = true;
+        self.scroll_offset_y = 999999;
+    }
+
+    /// Escape: laufende Antwort abbrechen. Der Teiltext bleibt als Nachricht.
+    pub fn cancelRequest(self: *Self) void {
+        if (self.is_loading) self.cancel_flag.store(true, .release);
+    }
+
+    pub fn handleCancelled(self: *Self, payload: []const u8) void {
+        var buf: [4096]u8 = undefined;
+        const msg: []const u8 = if (payload.len > 0)
+            std.fmt.bufPrint(&buf, "{s}\n\n(abgebrochen)", .{payload[0..@min(payload.len, buf.len - 24)]}) catch payload
+        else
+            "(abgebrochen)";
+        self.addMessage("assistant", msg) catch {};
+        self.clearStream();
+        self.is_loading = false;
     }
 
     /// Kurztext neben dem Statuspunkt
@@ -177,7 +231,8 @@ pub const AIChatState = struct {
             self.model_path = mp;
         }
 
-        self.agent = agent.LlamaAgent.init(self.allocator, self.server_path, self.model_path, 11434) catch |err| {
+        const port: u16 = if (self.isOllama()) 11434 else agent.default_llama_port;
+        self.agent = agent.LlamaAgent.init(self.allocator, self.server_path, self.model_path, port) catch |err| {
             if (err == error.ModelNotInstalled) {
                 // Ollama läuft, Modell fehlt: Knopf "Pull model" anbieten, kein Fehler
                 self.model_exists = false;
@@ -185,10 +240,16 @@ pub const AIChatState = struct {
                 return;
             }
             log.err("Failed to initialize AI Agent: {}", .{err});
-            self.setStatus(.failed, @errorName(err));
+            var detail_buf: [256]u8 = undefined;
+            const detail: []const u8 = switch (err) {
+                error.EngineNotFound => std.fmt.bufPrint(&detail_buf, "llama-server not found: {s}", .{self.server_path}) catch "llama-server not found",
+                error.ModelFileNotFound => std.fmt.bufPrint(&detail_buf, "model file not found: {s}", .{self.model_path}) catch "model file not found",
+                else => @errorName(err),
+            };
+            self.setStatus(.failed, detail);
             return err;
         };
-        if (self.isOllama()) self.model_exists = true;
+        self.model_exists = true;
 
         self.setStatus(.initializing, "");
         self.is_initializing = true;
@@ -233,7 +294,7 @@ pub const AIChatState = struct {
         if (self.agent_status == .ready and self.agent != null) return null;
         var buf: [400]u8 = undefined;
         const msg: []const u8 = switch (self.agent_status) {
-            .ready, .none => "AI is not connected. Start vulkan-ed without --ai=off; Ollama (default) or LLAMA_SERVER_PATH must be available.",
+            .ready, .none => "AI is not connected. Start vulkan-ed without --ai=off. Default: llama-server + Qwen3-4B from ~/projects/ki, fallback Ollama; LLAMA_SERVER_PATH / LLAMA_MODEL_PATH override.",
             .model_missing => std.fmt.bufPrint(&buf, "Model '{s}' is not installed in Ollama. Click 'Pull model' above or run: ollama pull {s}", .{ self.model_path, self.model_path }) catch "Model is not installed in Ollama.",
             .initializing => "AI agent is still initializing, please try again in a moment.",
             .failed => std.fmt.bufPrint(&buf, "AI agent failed to start: {s}", .{self.statusDetail()}) catch "AI agent failed to start.",
@@ -305,7 +366,7 @@ pub const AIChatState = struct {
 
         try api_messages.append(self.allocator, .{
             .role = "system",
-            .content = "You are Gemma 4, an intelligent coding assistant in vulkan-ed. You can use tools by outputting a JSON block. " ++
+            .content = "You are the coding assistant built into the vulkan-ed editor. You can use tools by outputting a JSON block. " ++
                 "To read a file, output exactly: {\"tool\": \"read_file\", \"path\": \"<file_path>\"}. " ++
                 "To replace text in a file, output: {\"tool\": \"replace_text\", \"path\": \"<file_path>\", \"old\": \"<exact_old_text>\", \"new\": \"<new_text>\"}. " ++
                 "Only output the JSON block when using a tool. Otherwise, chat normally.",
@@ -319,7 +380,9 @@ pub const AIChatState = struct {
             }
         }
 
-        const params = try ai_worker.ChatParams.initWithStop(self.allocator, a, api_messages.items, &sched.should_stop);
+        self.cancel_flag.store(false, .release);
+        self.clearStream();
+        const params = try ai_worker.ChatParams.initStreaming(self.allocator, a, api_messages.items, sched, &sched.should_stop, &self.cancel_flag);
         if (!sched.submit(.{ .func = ai_worker.taskChatCompletion, .data = params })) {
             params.deinit();
             self.is_loading = false;
@@ -328,6 +391,7 @@ pub const AIChatState = struct {
     }
 
     pub fn handleReply(self: *Self, payload: []const u8) void {
+        self.clearStream();
         const tool_executed = self.tryExecuteToolCall(payload);
         if (tool_executed) {
             self.submitCompletion() catch |err| {
@@ -343,6 +407,7 @@ pub const AIChatState = struct {
 
     pub fn handleError(self: *Self, payload: []const u8) void {
         log.err("AI task error: {s}", .{payload});
+        self.clearStream();
         self.addMessage("assistant", "Error communicating with AI agent.") catch {};
         self.is_loading = false;
     }
@@ -461,6 +526,13 @@ pub const AIChatState = struct {
 
     pub fn handleKeyPress(self: *Self, key: wio.Button) bool {
         switch (key) {
+            .escape => {
+                if (self.is_loading) {
+                    self.cancelRequest();
+                    return true;
+                }
+                return false;
+            },
             .enter => {
                 self.input_textarea.handleKeyPress(key);
                 self.sendMessage() catch |err| log.err("Send message failed: {}", .{err});
@@ -568,6 +640,13 @@ pub fn renderAIChat(
 ) void {
     state.input_textarea.setWindow(window);
 
+    // "Ans Ende scrollen" (999999) VOR dem Layout auflösen: sonst rendert dieser Frame
+    // mit child_offset -999999 ins Leere. Beim Streaming setzt jedes Delta den Marker,
+    // dann wäre der Chat fast dauernd leer. content_height stammt aus dem letzten Frame.
+    if (state.scroll_offset_y == 999999.0) {
+        state.scroll_offset_y = @max(0.0, state.content_height - state.viewport_height);
+    }
+
     clay.UI()(.{
         .id = clay.ElementId.ID("ai_chat_root"),
         .layout = .{
@@ -587,7 +666,7 @@ pub fn renderAIChat(
                 .child_alignment = .{ .y = .center },
             },
         })({
-            clay.text("Gemma 4 Agent", .{ .font_size = 20, .color = theme.primary });
+            clay.text(state.agentTitle(), .{ .font_size = 20, .color = theme.primary, .wrap_mode = .none });
 
             const status_color: clay.Color = switch (state.agent_status) {
                 .ready => .{ 100, 255, 100, 255 },
@@ -604,7 +683,7 @@ pub fn renderAIChat(
         });
 
         // ── Download button / progress ───────────────────────────────────
-        if (!state.model_exists) {
+        if (!state.model_exists and state.isOllama()) {
             const btn_id = clay.ElementId.ID("ai_download_btn");
             const hovered = clay.pointerOver(btn_id);
             if (hovered and mouse_pressed and !state.is_downloading) {
@@ -698,7 +777,7 @@ pub fn renderAIChat(
                             .corner_radius = .all(4),
                         })({
                             clay.text(
-                                if (is_user) "You:" else if (show_copied) "Gemma (Copied!):" else "Gemma:",
+                                if (is_user) "You:" else if (show_copied) "AI (Copied!):" else "AI:",
                                 .{ .font_size = 12, .color = if (is_user) .{ 180, 180, 255, 255 } else if (show_copied) theme.primary else .{ 150, 230, 150, 255 } },
                             );
                             msg.md.renderDocument(arena, theme, ui_ptr);
@@ -706,7 +785,36 @@ pub fn renderAIChat(
                     }
 
                     if (state.is_loading) {
-                        clay.text("Gemma is thinking...", .{ .font_size = 14, .color = .{ 150, 150, 150, 255 } });
+                        if (state.stream_text.items.len > 0) {
+                            // Wachsende Antwort: Markdown nur neu bauen, wenn Text dazukam
+                            if (state.stream_dirty or state.stream_md == null) {
+                                if (state.stream_md) |*old| old.deinit();
+                                state.stream_md = null;
+                                if (chat_markdown.toDisplayMarkdown(state.allocator, state.stream_text.items)) |display| {
+                                    defer state.allocator.free(display);
+                                    var md = MarkdownView.init(state.allocator, display, "");
+                                    md.font_size = message_font_size;
+                                    md.text_color = message_text_color;
+                                    state.stream_md = md;
+                                } else |_| {}
+                                state.stream_dirty = false;
+                            }
+                            clay.UI()(.{
+                                .id = clay.ElementId.ID("ai_stream_msg"),
+                                .layout = .{
+                                    .sizing = .{ .w = .grow, .h = .fit },
+                                    .direction = .top_to_bottom,
+                                    .padding = .{ .left = 8, .right = 8, .top = 6, .bottom = 6 },
+                                },
+                                .background_color = .{ 40, 40, 48, 255 },
+                                .corner_radius = .all(4),
+                            })({
+                                clay.text("AI (Esc = abbrechen):", .{ .font_size = 12, .color = .{ 150, 230, 150, 255 } });
+                                if (state.stream_md) |*md| md.renderDocument(arena, theme, ui_ptr);
+                            });
+                        } else {
+                            clay.text("AI is thinking... (Esc = abbrechen)", .{ .font_size = 14, .color = .{ 150, 150, 150, 255 } });
+                        }
                     }
                 });
             });

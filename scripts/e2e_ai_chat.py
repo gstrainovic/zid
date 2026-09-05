@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Headless-E2E für den KI-Chat.
 
-Lauf A (Standard): vulkan-ed ohne --ai=off gegen das laufende Ollama. Chat öffnen,
-Frage senden, Antwort erscheint, Lade-Zustand endet.
+Lauf A (Standard): vulkan-ed ohne --ai=off gegen das konfigurierte Backend
+(Default: llama-server + Qwen3-4B aus ~/projects/ki, sonst Ollama). Prüft:
+Warmup, Streaming (erstes Textstück kommt schnell), Escape bricht ab,
+kurze Frage wird vollständig beantwortet.
 Lauf B (--ai=off): Senden liefert sofort eine Erklärung statt endlos "thinking".
 
-Voraussetzung für Lauf A: Ollama läuft und das Modell (Default gemma4:e2b) ist
-installiert (`ollama list`). Aufruf: python3 scripts/e2e_ai_chat.py [--only-off]
+Aufruf: python3 scripts/e2e_ai_chat.py [--only-off]
 """
 import os, subprocess, sys, time
 
@@ -24,8 +25,8 @@ def wait_for(pred, timeout_s, what):
     while time.time() - t0 < timeout_s:
         st = chat()
         if pred(st):
-            return st
-        time.sleep(0.5)
+            return st, time.time() - t0
+        time.sleep(0.25)
     raise AssertionError(f"Timeout ({timeout_s}s): {what}; zuletzt {chat()}")
 
 
@@ -52,31 +53,45 @@ def stop(proc, log):
     log.close()
 
 
-def open_chat_and_send(text):
-    rpc("open_chat")
-    settle(10)
-    st = ui_state()
-    check(st["tabs"][st["active_tab"]]["kind"] == "chat", "Chat-Tab ist aktiv")
+def send(text):
     rpc("type_text", [text])
     settle(5)
     check(rpc("get_chat_input") == text, "Frage steht im Eingabefeld")
     key("enter")
 
 
-def run_with_ollama():
-    print("--- A. Chat gegen Ollama: Frage senden, Antwort kommt")
-    proc, log = start(["--ai=off"] if False else [], "e2e_ai_chat.log")
+def run_with_backend():
+    print("--- A. Chat gegen das Backend: Warmup, Streaming, Escape, Antwort")
+    proc, log = start([], "e2e_ai_chat.log")
     try:
-        t0 = time.time()
-        st = wait_for(lambda s: s["status"] in ("ready", "failed", "model_missing", "none"), 90, "Agent-Warmup")
-        check(st["status"] == "ready", f"Agent-Status nach Start: {st['status']} {st['detail']!r} (Warmup {time.time() - t0:.1f}s)")
-        open_chat_and_send("Antworte nur mit dem Wort PONG")
-        st = chat()
-        check(st["loading"] and st["messages"][-1]["role"] == "user", "Nach Enter: Frage im Verlauf, Antwort wird geladen")
-        st = wait_for(lambda s: not s["loading"], 180, "Antwort von Ollama")
+        st, dt = wait_for(lambda s: s["status"] in ("ready", "failed", "model_missing", "none"), 120, "Agent-Warmup")
+        check(st["status"] == "ready", f"Agent-Status nach Start: {st['status']} {st['detail']!r} (Warmup {dt:.1f}s)")
+        print(f"     Backend: {st['title']}")
+
+        rpc("open_chat")
+        settle(10)
+        s = ui_state()
+        check(s["tabs"][s["active_tab"]]["kind"] == "chat", "Chat-Tab ist aktiv")
+
+        # 1) Lange Antwort: Streaming muss schnell sichtbar werden, Escape bricht ab
+        send("Erkläre ausführlich in etwa 400 Wörtern, was die Vulkan-Grafik-API ist.")
+        st, dt = wait_for(lambda s: s["streaming_len"] > 0 or not s["loading"], 30, "erstes Streaming-Delta")
+        check(st["loading"] and st["streaming_len"] > 0, f"Erstes Textstück nach {dt:.1f}s ({st['streaming_len']} Zeichen)")
+        time.sleep(2.0)
+        grown = chat()["streaming_len"]
+        check(grown > st["streaming_len"], f"Antwort wächst weiter ({grown} Zeichen)")
+        shot("e2e_ai_stream.ppm")
+        key("escape")
+        st, dt = wait_for(lambda s: not s["loading"], 20, "Abbruch nach Escape")
         last = st["messages"][-1]
-        check(last["role"] == "assistant" and len(last["content"].strip()) > 0, f"Antwort erhalten: {last['content'].strip()[:60]!r}")
-        check("pong" in last["content"].lower(), "Antwort enthält PONG")
+        check(last["role"] == "assistant" and "abgebrochen" in last["content"], f"Escape bricht ab, Teilantwort bleibt ({len(last['content'])} Zeichen, {dt:.1f}s)")
+        check(st["streaming_len"] == 0 and st["status"] == "ready", "Streaming-Puffer geleert, Agent weiter bereit")
+
+        # 2) Kurze Frage läuft vollständig durch
+        send("Antworte nur mit dem Wort PONG")
+        st, dt = wait_for(lambda s: not s["loading"], 120, "Antwort")
+        last = st["messages"][-1]
+        check(last["role"] == "assistant" and "pong" in last["content"].lower(), f"Antwort erhalten: {last['content'].strip()[:60]!r} ({dt:.1f}s)")
         shot("e2e_ai_chat.ppm")
     finally:
         stop(proc, log)
@@ -88,7 +103,9 @@ def run_ai_off():
     try:
         st = chat()
         check(st["status"] == "none", f"Agent-Status mit --ai=off: {st['status']}")
-        open_chat_and_send("hallo")
+        rpc("open_chat")
+        settle(10)
+        send("hallo")
         st = chat()
         check(not st["loading"], "Kein Lade-Zustand ohne Agent")
         last = st["messages"][-1]
@@ -100,7 +117,7 @@ def run_ai_off():
 
 def main():
     if "--only-off" not in sys.argv:
-        run_with_ollama()
+        run_with_backend()
     run_ai_off()
     print("ALL PASSED")
 
