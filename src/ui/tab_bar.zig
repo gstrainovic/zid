@@ -403,8 +403,9 @@ pub const TabBarState = struct {
                     self.pending_switch_path = null;
                 }
             } else if (active == index) {
-                // Geschlossener Tab war aktiv → neuen aktiven wählen
-                self.active_index = @min(active, self.tabs.items.len - 1);
+                // Geschlossener Tab war aktiv → neuen aktiven wählen und den
+                // Buffer-Wechsel anstoßen, sonst zeigt der Editor weiter den alten Buffer.
+                self.setActive(@min(active, self.tabs.items.len - 1));
             } else if (active > index) {
                 // Aktiver Tab war nach dem geschlossenen → Index dekrementieren
                 self.active_index = active - 1;

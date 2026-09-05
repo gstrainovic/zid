@@ -595,14 +595,10 @@ pub fn main() !void {
             log.info("Opening file: {s} (kind: {s})", .{path, @tagName(kind)});
             
             if (kind == .text) {
-                // Text-Dateien in den Editor laden
-                const content = std.fs.cwd().readFileAlloc(allocator, path, 64 * 1024 * 1024) catch |err| blk: {
-                    log.err("Failed to open {s}: {}", .{ path, err });
-                    break :blk allocator.dupe(u8, "Fehler beim Öffnen der Datei.") catch unreachable;
-                };
-                ui_system.getActiveEditor().setText(content);
-                ui_system.getActiveEditor().setLanguageFromPath(path);
-                allocator.free(content);
+                // Nichts zu tun: openFile → setActive → pending_switch_path, und der
+                // Tab-Wechsel unten lädt den Buffer über getOrCreateBuffer. Früher stand
+                // hier ein setText in den *aktuellen* Buffer, also den der vorher aktiven
+                // Datei — die galt danach als geändert und zeigte fremden Inhalt.
             } else if (kind == .image) {
                 // Bild-Dateien in den Textur-Cache laden
                 if (!ui_system.open_images.contains(path)) {
