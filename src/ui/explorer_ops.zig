@@ -69,6 +69,19 @@ pub fn deletePath(path: []const u8, is_folder: bool) !void {
     }
 }
 
+/// true wenn `path` gleich `root` ist oder darunter liegt.
+pub fn isPathOrUnder(path: []const u8, root: []const u8) bool {
+    if (std.mem.eql(u8, path, root)) return true;
+    return path.len > root.len and std.mem.startsWith(u8, path, root) and path[root.len] == '/';
+}
+
+/// Neuer Pfad für `path`, wenn `old_root` nach `new_root` umbenannt wurde:
+/// exakt gleich oder darunter → Präfix ersetzt (owned), sonst null.
+pub fn pathAfterRename(alloc: std.mem.Allocator, path: []const u8, old_root: []const u8, new_root: []const u8) !?[]u8 {
+    if (!isPathOrUnder(path, old_root)) return null;
+    return try std.mem.concat(alloc, u8, &.{ new_root, path[old_root.len..] });
+}
+
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 const testing = std.testing;
@@ -149,4 +162,24 @@ test "deletePath: löscht Datei und Ordner mit Inhalt" {
     try testing.expectError(error.FileNotFound, tmp.dir.access("f.txt", .{}));
     try deletePath(d, true);
     try testing.expectError(error.FileNotFound, tmp.dir.access("d", .{}));
+}
+
+test "isPathOrUnder: exakt, darunter, nicht bloß gleicher Präfix" {
+    try testing.expect(isPathOrUnder("/a/b", "/a/b"));
+    try testing.expect(isPathOrUnder("/a/b/c.txt", "/a/b"));
+    try testing.expect(!isPathOrUnder("/a/bc/x", "/a/b"));
+    try testing.expect(!isPathOrUnder("/a", "/a/b"));
+}
+
+test "pathAfterRename: Datei, Ordner mit Kindern, unbeteiligte Pfade" {
+    const f = try pathAfterRename(testing.allocator, "/p/old.txt", "/p/old.txt", "/p/new.txt");
+    defer if (f) |x| testing.allocator.free(x);
+    try testing.expectEqualStrings("/p/new.txt", f.?);
+
+    const child = try pathAfterRename(testing.allocator, "/p/dir/sub/f.zig", "/p/dir", "/p/renamed");
+    defer if (child) |x| testing.allocator.free(x);
+    try testing.expectEqualStrings("/p/renamed/sub/f.zig", child.?);
+
+    try testing.expect((try pathAfterRename(testing.allocator, "/p/dirx/f.zig", "/p/dir", "/p/renamed")) == null);
+    try testing.expect((try pathAfterRename(testing.allocator, "/q/other", "/p/dir", "/p/renamed")) == null);
 }

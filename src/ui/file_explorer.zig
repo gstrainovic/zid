@@ -26,6 +26,18 @@ pub const ContextMenu = struct { x: f32, y: f32, node_index: u32 };
 /// Laufendes Inline-Umbenennen
 pub const RenameState = struct { node_index: u32, edit: explorer_ops.RenameEdit };
 
+/// Dateisystem-Änderung durch den Explorer, damit die UI Tabs/Buffer nachzieht.
+pub const FsChange = struct {
+    kind: enum { renamed, deleted },
+    old_path: []u8,
+    new_path: ?[]u8,
+
+    pub fn deinit(self: FsChange, alloc: std.mem.Allocator) void {
+        alloc.free(self.old_path);
+        if (self.new_path) |p| alloc.free(p);
+    }
+};
+
 /// Ein Knoten im Dateibaum
 pub const TreeNode = struct {
     /// Parent-Index (null = Root)
@@ -81,6 +93,8 @@ pub const FileExplorerState = struct {
     pending_delete: ?u32 = null,
     /// Vom Dialog bestätigt; wird im nächsten Frame vor dem Layout ausgeführt
     confirmed_delete: ?u32 = null,
+    /// Letzte ausgeführte Änderung, von der UI abzuholen (takeFsChange)
+    pending_fs_change: ?FsChange = null,
     /// Viewport-Bounds des letzten Frames (Hit-Test für Einträge)
     viewport_x: f32 = 0,
     viewport_y: f32 = 0,
@@ -125,6 +139,7 @@ pub const FileExplorerState = struct {
     }
 
     pub fn deinit(self: *Self) void {
+        if (self.pending_fs_change) |c| c.deinit(self.allocator);
         for (self.nodes.items) |*node| {
             self.allocator.free(node.name);
             self.allocator.free(node.path);
@@ -413,7 +428,26 @@ pub const FileExplorerState = struct {
         };
         defer self.allocator.free(new_path);
         log.info("renamed '{s}' -> '{s}'", .{ node.path, new_path });
+        self.setFsChange(.renamed, node.path, new_path);
         self.refresh(new_path);
+    }
+
+    fn setFsChange(self: *Self, kind: @FieldType(FsChange, "kind"), old_path: []const u8, new_path: ?[]const u8) void {
+        if (self.pending_fs_change) |old| old.deinit(self.allocator);
+        self.pending_fs_change = null;
+        const old_dup = self.allocator.dupe(u8, old_path) catch return;
+        const new_dup: ?[]u8 = if (new_path) |p| (self.allocator.dupe(u8, p) catch {
+            self.allocator.free(old_dup);
+            return;
+        }) else null;
+        self.pending_fs_change = .{ .kind = kind, .old_path = old_dup, .new_path = new_dup };
+    }
+
+    /// Von der UI einmal pro Frame abholen; der Aufrufer gibt das Ergebnis frei.
+    pub fn takeFsChange(self: *Self) ?FsChange {
+        const v = self.pending_fs_change;
+        self.pending_fs_change = null;
+        return v;
     }
 
     /// Vom Dialog-Callback: Löschen vormerken (Ausführung im nächsten Frame vor dem Layout,
@@ -444,6 +478,7 @@ pub const FileExplorerState = struct {
             return;
         };
         log.info("deleted '{s}'", .{node.path});
+        self.setFsChange(.deleted, node.path, null);
         self.refresh(null);
     }
 
