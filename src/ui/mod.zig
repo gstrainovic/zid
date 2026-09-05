@@ -98,6 +98,9 @@ pub const UI = struct {
     pending_tab_closes: std.ArrayListUnmanaged(TabCloseRequest),
 
     open_buffers: std.StringHashMap(*@import("flow_core").Buffer),
+    /// Buffer, die aus open_buffers entfernt wurden, aber noch referenziert sein
+    /// können (gelöschte/umbenannte Dateien). Werden erst in deinit freigegeben.
+    orphan_buffers: std.ArrayListUnmanaged(*@import("flow_core").Buffer) = .empty,
     open_images: std.StringHashMap(*anyopaque),
     open_pdfs: std.StringHashMap(*anyopaque),
     open_markdown_views: std.StringHashMap(*markdown_view_mod.MarkdownView),
@@ -255,6 +258,8 @@ pub const UI = struct {
             self.allocator.free(entry.key_ptr.*);
         }
         self.open_buffers.deinit();
+        for (self.orphan_buffers.items) |b| b.deinit();
+        self.orphan_buffers.deinit(self.allocator);
 
         // Bilder aufräumen
         var iter = self.open_images.iterator();
@@ -731,6 +736,10 @@ pub const UI = struct {
     pub fn update(self: *Self, delta_ms: f32) void {
         // Bestätigtes Löschen im Explorer: vor dem Layout, nie im Dialog-Callback
         self.file_explorer.processPending();
+        if (self.file_explorer.takeFsChange()) |change| {
+            defer change.deinit(self.allocator);
+            self.applyFsChange(change);
+        }
         self.anim_manager.update(delta_ms);
         self.getActiveEditor().time_ms += delta_ms;
         self.ai_chat.updateTimeMs(delta_ms);
@@ -1400,6 +1409,93 @@ pub const UI = struct {
         self.active_pane = new_split_leaf;
         
         wio.cancelWait();
+    }
+
+    /// Umbenennen/Löschen aus dem Explorer auf offene Tabs und Buffer anwenden.
+    /// Umbenennen: Tab-Pfad, Titel, Buffer-Pfad und Map-Schlüssel folgen (auch unter
+    /// umbenannten Ordnern). Löschen: Tabs ohne ungespeicherte Änderungen schließen,
+    /// geänderte bleiben offen (Inhalt lässt sich per Speichern wiederherstellen).
+    fn applyFsChange(self: *Self, change: file_explorer_mod.FsChange) void {
+        const explorer_ops = @import("explorer_ops.zig");
+        self.applyFsChangeToPane(self.root_pane, change);
+
+        // Buffer-Map nach Pfad umschlüsseln bzw. verwaiste Buffer aus der Map nehmen
+        var keys_to_fix: std.ArrayListUnmanaged([]const u8) = .empty;
+        defer keys_to_fix.deinit(self.allocator);
+        var it = self.open_buffers.keyIterator();
+        while (it.next()) |k| {
+            if (explorer_ops.isPathOrUnder(k.*, change.old_path)) keys_to_fix.append(self.allocator, k.*) catch {};
+        }
+        for (keys_to_fix.items) |old_key| {
+            const kv = self.open_buffers.fetchRemove(old_key) orelse continue;
+            switch (change.kind) {
+                .renamed => {
+                    const new_key = explorer_ops.pathAfterRename(self.allocator, kv.key, change.old_path, change.new_path.?) catch null;
+                    self.allocator.free(kv.key);
+                    if (new_key) |nk| {
+                        kv.value.set_file_path(nk);
+                        self.open_buffers.put(nk, kv.value) catch {
+                            self.allocator.free(nk);
+                            self.orphan_buffers.append(self.allocator, kv.value) catch {};
+                        };
+                    } else {
+                        self.orphan_buffers.append(self.allocator, kv.value) catch {};
+                    }
+                },
+                .deleted => {
+                    // Nicht deinit: der aktive Editor kann den Buffer bis zum nächsten
+                    // Tab-Wechsel noch zeigen. Bleibt bis zum Programmende erhalten.
+                    self.allocator.free(kv.key);
+                    self.orphan_buffers.append(self.allocator, kv.value) catch {};
+                },
+            }
+        }
+    }
+
+    fn applyFsChangeToPane(self: *Self, pane: *pane_mod.Pane, change: file_explorer_mod.FsChange) void {
+        const explorer_ops = @import("explorer_ops.zig");
+        switch (pane.data) {
+            .split => |*sp| {
+                self.applyFsChangeToPane(sp.children[0], change);
+                self.applyFsChangeToPane(sp.children[1], change);
+            },
+            .leaf => |*leaf| {
+                const tabs = leaf.tab_bar.tabs.items;
+                var i: usize = 0;
+                while (i < tabs.len) : (i += 1) {
+                    const tab = &tabs[i];
+                    const prefix: []const u8 = if (std.mem.startsWith(u8, tab.path, "preview://")) "preview://" else "";
+                    const base = tab.path[prefix.len..];
+                    if (!explorer_ops.isPathOrUnder(base, change.old_path)) continue;
+                    switch (change.kind) {
+                        .renamed => {
+                            const new_base = (explorer_ops.pathAfterRename(self.allocator, base, change.old_path, change.new_path.?) catch null) orelse continue;
+                            defer self.allocator.free(new_base);
+                            const new_path = std.mem.concat(self.allocator, u8, &.{ prefix, new_base }) catch continue;
+                            const new_name = self.allocator.dupe(u8, std.fs.path.basename(new_base)) catch {
+                                self.allocator.free(new_path);
+                                continue;
+                            };
+                            self.allocator.free(tab.path);
+                            self.allocator.free(tab.display_name);
+                            tab.path = new_path;
+                            tab.display_name = new_name;
+                            if (tab.buffer) |b| b.set_file_path(new_base);
+                        },
+                        .deleted => {
+                            const dirty = if (tab.buffer) |b| (b.last_save != null and b.root != b.last_save.?) else tab.modified;
+                            if (dirty) {
+                                tab.modified = true;
+                                continue;
+                            }
+                            // Aufsteigend einreihen: pending_tab_closes wird als Stack
+                            // abgearbeitet, höchste Indizes zuerst → Indizes bleiben gültig.
+                            self.pending_tab_closes.append(self.allocator, .{ .pane = pane, .index = i }) catch {};
+                        },
+                    }
+                }
+            },
+        }
     }
 
     fn showDeleteConfirmationDialog(self: *Self, node_index: u32) void {

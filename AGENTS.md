@@ -61,6 +61,17 @@ echo -e "open ./README.md\nget-state\nshutdown" | zig build run -- --interactive
   Rechtsklick auf Zeile öffnet das Menü (Rename/Delete), `key_press` kennt `escape`, `delete`, `f2`.
   Fixtures unter `tmp/` anlegen (gitignored, im Explorer sichtbar).
 
+## Explorer: Umbenennen/Löschen und offene Tabs
+
+- Umbenennen zieht Tab-Pfad, Titel, Buffer-Pfad und `open_buffers`-Schlüssel mit, auch für
+  alle Tabs unter einem umbenannten Ordner (Preview-Tabs mit `preview://`-Präfix ebenso).
+- Löschen schließt Tabs ohne ungespeicherte Änderungen; geänderte Tabs bleiben offen mit
+  Stern, Speichern legt die Datei wieder an (Verhalten wie VS Code). Buffer gelöschter
+  Dateien wandern nach `orphan_buffers` (bis Programmende), damit ein neu angelegtes File
+  mit gleichem Namen nicht den alten Inhalt bekommt.
+- Ablauf: Explorer setzt `pending_fs_change`, `UI.update()` holt es per `takeFsChange` ab
+  und wendet es vor dem Layout an (`applyFsChange`).
+
 ## Bekannte Grenzen (kein Todo, bewusst so)
 
 - **Durchgestrichen in Markdown:** `~~text~~` toggelt zigdown zweimal und bleibt ungestylt,
