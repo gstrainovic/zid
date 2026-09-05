@@ -1,6 +1,7 @@
 const std = @import("std");
 const clay = @import("clay");
 const zigdown = @import("zigdown");
+const word_wrap = @import("word_wrap.zig");
 const ui_mod = @import("mod.zig");
 const Theme = ui_mod.Theme;
 const ImageTexture = @import("../clay_renderer/image_renderer.zig").ImageTexture;
@@ -16,6 +17,11 @@ pub const MarkdownView = struct {
     /// Überschreibt theme.text, wenn der Inhalt auf einem Hintergrund liegt,
     /// der nicht dem Theme-Hintergrund entspricht (z.B. Chat-Bubbles).
     text_color: ?clay.Color = null,
+    /// Laufende Nummer der Fließtext-Container im aktuellen Frame (für Element-IDs).
+    run_counter: u32 = 0,
+    /// Obergrenze für die Umbruchbreite. Nötig in horizontal scrollbaren
+    /// Viewports, wo Clay dem Container die volle Inhaltsbreite meldet.
+    wrap_width_hint: ?f32 = null,
 
     /// View for scrolling
     view: flow_core.View,
@@ -243,6 +249,7 @@ pub const MarkdownView = struct {
         };
         var effective_theme = theme;
         if (self.text_color) |c| effective_theme.text = c;
+        self.run_counter = 0;
         self.renderBlock(&result.parser.document, arena, effective_theme, ui_ptr);
     }
 
@@ -254,6 +261,8 @@ pub const MarkdownView = struct {
             self.viewport_height = clip_data.bounding_box.height;
             self.scrollbar_track_x = clip_data.bounding_box.x + clip_data.bounding_box.width;
             self.scrollbar_track_y = clip_data.bounding_box.y;
+            // md_content hat 24px Padding je Seite
+            self.wrap_width_hint = @max(0, clip_data.bounding_box.width - 48);
         }
         if (content_data.found) {
             self.content_height = content_data.bounding_box.height;
@@ -493,10 +502,10 @@ pub const MarkdownView = struct {
                     .Heading => |h| {
                         const multiplier: f32 = switch (h.level) { 1 => 2.0, 2 => 1.5, 3 => 1.2, else => 1.1 };
                         const size: u16 = @intFromFloat(@as(f32, @floatFromInt(self.font_size)) * multiplier);
-                        self.renderInlineRun(leaf.inlines.items, size, theme.text, arena, ui_ptr);
+                        self.renderInlineRun(leaf.inlines.items, size, theme, arena, ui_ptr);
                     },
                     .Paragraph => {
-                        self.renderInlineRun(leaf.inlines.items, self.font_size, theme.text, arena, ui_ptr);
+                        self.renderInlineRun(leaf.inlines.items, self.font_size, theme, arena, ui_ptr);
                     },
                     .Code => |c| {
                         clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .padding = .all(16) }, .background_color = theme.surface, .corner_radius = .all(4) })({
@@ -506,7 +515,7 @@ pub const MarkdownView = struct {
                     .Alert => |a| {
                         clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .top_to_bottom, .padding = .all(16) }, .background_color = theme.surface, .border = .{ .width = .{ .left = 4 }, .color = theme.accent } })({
                             clay.text(if (a.alert) |at| at else "ALERT", .{ .font_size = self.font_size, .color = theme.accent });
-                            self.renderInlineRun(leaf.inlines.items, self.font_size, theme.text, arena, ui_ptr);
+                            self.renderInlineRun(leaf.inlines.items, self.font_size, theme, arena, ui_ptr);
                         });
                     },
                     .Break => {
@@ -517,40 +526,96 @@ pub const MarkdownView = struct {
         }
     }
 
-    /// Rendert eine Inline-Folge als umbrechenden Fließtext.
-    ///
-    /// zigdown liefert jedes Wort und jedes Leerzeichen als eigenes Text-Inline.
-    /// Als einzelne Clay-Elemente in einer Zeile brechen sie nicht um und laufen
-    /// bei langen Absätzen aus dem Container. Deshalb werden Text, Codespans und
-    /// Link-Texte verbatim zu einem String zusammengefügt und als ein Textelement
-    /// mit Wortumbruch gerendert. Nur Bilder unterbrechen den Lauf.
-    fn renderInlineRun(self: *Self, inlines: []const Inline, base_size: u16, base_color: clay.Color, arena: std.mem.Allocator, ui_ptr: *ui_mod.UI) void {
-        clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .top_to_bottom, .child_gap = 4 } })({
-            var run: std.ArrayListUnmanaged(u8) = .empty;
-            for (inlines) |*item| {
-                switch (item.content) {
-                    .text => |t| run.appendSlice(arena, t.text) catch {},
-                    .codespan => |c| run.appendSlice(arena, c.text) catch {},
-                    .link => |l| {
-                        for (l.text.items) |t| run.appendSlice(arena, t.text) catch {};
-                    },
-                    .image => {
-                        flushRun(&run, base_size, base_color);
-                        self.renderInline(item, base_size, base_color, arena, ui_ptr);
-                    },
-                    else => {},
-                }
-            }
-            flushRun(&run, base_size, base_color);
-        });
+    const link_color: clay.Color = .{ 100, 149, 237, 255 };
+
+    /// Ein gemessenes Textstück: Wort, Leerzeichen, Codespan oder Link-Text.
+    const Piece = struct {
+        text: []const u8,
+        color: clay.Color,
+        is_space: bool,
+    };
+
+    /// Farbe eines Text-Inlines aus seinem zigdown-Style. Es gibt nur eine
+    /// Font-Face, deshalb werden Fett/Kursiv/Durchgestrichen über Farbe angezeigt.
+    fn styledColor(style: anytype, base: clay.Color, theme: Theme) clay.Color {
+        if (style.strike) return theme.muted;
+        if (style.bold) return theme.primary;
+        if (style.italic) return theme.accent;
+        return base;
     }
 
-    fn flushRun(run: *std.ArrayListUnmanaged(u8), base_size: u16, base_color: clay.Color) void {
-        const text = std.mem.trim(u8, run.items, " ");
-        if (text.len > 0) {
-            clay.text(text, .{ .font_size = base_size, .color = base_color, .wrap_mode = .words });
+    /// Rendert eine Inline-Folge als umbrechenden Fließtext mit Per-Wort-Farben.
+    ///
+    /// zigdown liefert jedes Wort und jedes Leerzeichen als eigenes Inline. Clay
+    /// bricht Reihen von Elementen nicht um, also messen wir jedes Stück selbst,
+    /// lassen word_wrap die Zeilen berechnen und rendern pro Zeile eine Reihe.
+    /// Die verfügbare Breite stammt aus dem Bounding-Box des Containers im
+    /// vorherigen Frame; im allerersten Frame fällt der Lauf auf ein einzelnes
+    /// umbrechendes Textelement zurück. Nur Bilder unterbrechen den Lauf.
+    fn renderInlineRun(self: *Self, inlines: []const Inline, base_size: u16, theme: Theme, arena: std.mem.Allocator, ui_ptr: *ui_mod.UI) void {
+        var pieces: std.ArrayListUnmanaged(Piece) = .empty;
+        for (inlines) |*item| {
+            switch (item.content) {
+                .text => |t| pieces.append(arena, .{
+                    .text = t.text,
+                    .color = styledColor(t.style, theme.text, theme),
+                    .is_space = std.mem.eql(u8, t.text, " "),
+                }) catch {},
+                .codespan => |c| pieces.append(arena, .{ .text = c.text, .color = theme.warning, .is_space = false }) catch {},
+                .link => |l| {
+                    for (l.text.items) |t| pieces.append(arena, .{
+                        .text = t.text,
+                        .color = link_color,
+                        .is_space = std.mem.eql(u8, t.text, " "),
+                    }) catch {};
+                },
+                .image => {
+                    self.flushPieces(&pieces, base_size, theme, arena);
+                    self.renderInline(item, base_size, theme.text, arena, ui_ptr);
+                },
+                else => {},
+            }
         }
-        run.items.len = 0;
+        self.flushPieces(&pieces, base_size, theme, arena);
+    }
+
+    fn flushPieces(self: *Self, pieces: *std.ArrayListUnmanaged(Piece), base_size: u16, theme: Theme, arena: std.mem.Allocator) void {
+        if (pieces.items.len == 0) return;
+        defer pieces.clearRetainingCapacity();
+
+        self.run_counter += 1;
+        const id_str = std.fmt.allocPrint(arena, "md_run_{x}_{d}", .{ @intFromPtr(self), self.run_counter }) catch "md_run";
+        const run_id = clay.ElementId.ID(id_str);
+        const data = clay.getElementData(run_id);
+        var avail: f32 = if (data.found) data.bounding_box.width else 0;
+        if (self.wrap_width_hint) |hint| avail = @min(avail, hint);
+        const size_f: f32 = @floatFromInt(base_size);
+
+        clay.UI()(.{
+            .id = run_id,
+            .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .top_to_bottom, .child_gap = 2 },
+        })({
+            if (avail <= 0) {
+                // Breite noch unbekannt (erster Frame): ein Element, Clay bricht selbst um
+                var run: std.ArrayListUnmanaged(u8) = .empty;
+                for (pieces.items) |p| run.appendSlice(arena, p.text) catch {};
+                const text = std.mem.trim(u8, run.items, " ");
+                if (text.len > 0) clay.text(text, .{ .font_size = base_size, .color = theme.text, .wrap_mode = .words });
+            } else {
+                const items = arena.alloc(word_wrap.Item, pieces.items.len) catch return;
+                for (pieces.items, 0..) |p, i| {
+                    items[i] = .{ .width = ui_mod.measureTextWidth(p.text, size_f), .is_space = p.is_space };
+                }
+                const lines = word_wrap.wrapLines(arena, items, avail - 2) catch return;
+                for (lines) |line| {
+                    clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .left_to_right, .child_gap = 0 } })({
+                        for (pieces.items[line.start..line.end]) |p| {
+                            clay.text(p.text, .{ .font_size = base_size, .color = p.color, .wrap_mode = .none });
+                        }
+                    });
+                }
+            }
+        });
     }
 
     fn renderInline(self: *Self, item: *const Inline, base_size: u16, base_color: clay.Color, arena: std.mem.Allocator, ui_ptr: *ui_mod.UI) void {
