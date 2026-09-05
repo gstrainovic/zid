@@ -573,7 +573,7 @@ pub const CodeEditor = struct {
     }
 
     /// Total number of lines
-    fn lineCount(self: *const Self) usize {
+    pub fn lineCount(self: *const Self) usize {
         return self.buffer.root.lines();
     }
 
@@ -1142,18 +1142,26 @@ pub const CodeEditor = struct {
                 }
             },
             .DeleteLine => {
-                const line_w = self.lineWidth(self.cursor.row);
-                const sel: flow_core.Selection = .{
-                    .begin = .{ .row = self.cursor.row, .col = 0 },
-                    .end = .{ .row = self.cursor.row, .col = line_w + 1 },
+                // Letzte Zeile hat keinen eigenen Umbruch: dann den davor mitnehmen,
+                // sonst bliebe eine leere Zeile stehen (VS-Code-Verhalten).
+                const row = self.cursor.row;
+                const joins_previous = row + 1 >= line_count and row > 0;
+                const sel: flow_core.Selection = if (joins_previous) .{
+                    .begin = .{ .row = row - 1, .col = self.lineWidth(row - 1) },
+                    .end = .{ .row = row, .col = self.lineWidth(row) },
+                } else .{
+                    .begin = .{ .row = row, .col = 0 },
+                    .end = .{ .row = row, .col = self.lineWidth(row) + 1 },
                 };
                 const del_text = self.getTextInRange(sel) catch "";
                 const del_owned = if (del_text.len > 0) self.allocator.dupe(u8, del_text) catch "" else "";
                 defer if (del_owned.len > 0) self.allocator.free(del_owned);
-                self.pushEditForChange(self.cursor.row, 0, del_owned, "");
+                self.pushEditForChange(sel.begin.row, sel.begin.col, del_owned, "");
                 const result2 = self.buffer.root.delete_range(sel, self.buffer.allocator, null, m) catch return;
                 self.buffer.root = result2;
+                if (joins_previous) self.cursor.row = row - 1;
                 self.cursor.col = 0;
+                self.cursor.target = 0;
             },
             .InsertNewline => {
                 if (self.deleteSelection()) {}
@@ -2214,4 +2222,57 @@ test "Navigation: Right am Zeilenende springt an Anfang der nächsten Zeile" {
 
     try std.testing.expectEqual(@as(usize, 1), ed.cursor.row);
     try std.testing.expectEqual(@as(usize, 0), ed.cursor.col);
+}
+
+// ─── Tests ───────────────────────────────────────────────────────────────────
+
+fn testEditor(allocator: std.mem.Allocator, text: []const u8) !struct { buffer: *flow_core.Buffer, ed: CodeEditor } {
+    const buffer = try flow_core.Buffer.create(allocator);
+    var ed = CodeEditor.init(allocator, buffer);
+    ed.setText(text);
+    return .{ .buffer = buffer, .ed = ed };
+}
+
+test "DeleteLine: mittlere Zeile verschwindet, Cursor bleibt auf der Zeile" {
+    var t = try testEditor(std.testing.allocator, "eins\nzwei\ndrei");
+    defer t.buffer.deinit();
+    defer t.ed.deinit();
+    t.ed.cursor.row = 1;
+    t.ed.dispatchAction(.DeleteLine);
+    try std.testing.expectEqual(@as(usize, 2), t.ed.lineCount());
+    try std.testing.expectEqual(@as(usize, 1), t.ed.cursor.row);
+}
+
+test "DeleteLine: letzte Zeile ohne Umbruch verschwindet samt vorherigem Umbruch" {
+    var t = try testEditor(std.testing.allocator, "eins\nzwei\ndrei");
+    defer t.buffer.deinit();
+    defer t.ed.deinit();
+    t.ed.cursor.row = 2;
+    t.ed.dispatchAction(.DeleteLine);
+    try std.testing.expectEqual(@as(usize, 2), t.ed.lineCount());
+    try std.testing.expectEqual(@as(usize, 1), t.ed.cursor.row);
+}
+
+test "DeleteLine: einzige Zeile wird nur geleert" {
+    var t = try testEditor(std.testing.allocator, "allein");
+    defer t.buffer.deinit();
+    defer t.ed.deinit();
+    t.ed.dispatchAction(.DeleteLine);
+    try std.testing.expectEqual(@as(usize, 1), t.ed.lineCount());
+    try std.testing.expectEqual(@as(usize, 0), t.ed.cursor.row);
+}
+
+test "DeleteLine: getippter Text, letzte Zeile verschwindet" {
+    var t = try testEditor(std.testing.allocator, "");
+    defer t.buffer.deinit();
+    defer t.ed.deinit();
+    for ("abc") |c| t.ed.handleChar(c);
+    t.ed.dispatchAction(.InsertNewline);
+    for ("zwei") |c| t.ed.handleChar(c);
+    t.ed.dispatchAction(.InsertNewline);
+    for ("drei") |c| t.ed.handleChar(c);
+    t.ed.dispatchAction(.DeleteLine);
+    const after = try t.ed.getTextInRange(.{ .begin = .{ .row = 0, .col = 0 }, .end = .{ .row = 1, .col = 100 } });
+    try std.testing.expectEqual(@as(usize, 2), t.ed.lineCount());
+    try std.testing.expectEqualStrings("abc\nzwei", after);
 }

@@ -841,6 +841,11 @@ pub const UI = struct {
             .close_tab => self.requestCloseActiveTab(),
             .next_tab => self.cycleTab(1),
             .prev_tab => self.cycleTab(-1),
+            .toggle_explorer => {
+                self.show_file_explorer = !self.show_file_explorer;
+                if (!self.show_file_explorer) self.explorer_focused = false;
+            },
+            .new_terminal => self.getActiveTabBar().openTerminal(),
             .rename_entry => {
                 if (self.file_explorer.selectedNodeIndex()) |node| self.file_explorer.startRename(node);
             },

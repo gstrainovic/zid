@@ -158,6 +158,8 @@ pub fn createDispatcher(alloc: std.mem.Allocator, ctx: *E2EContext) !*zigjr.RpcD
     try rpc_dispatcher.addWithCtx("element_bounds_i", ctx, elementBoundsIndexed);
     try rpc_dispatcher.addWithCtx("folder_picker_state", ctx, folderPickerState);
     try rpc_dispatcher.addWithCtx("ui_state", ctx, uiState);
+    try rpc_dispatcher.addWithCtx("editor_lines", ctx, editorLines);
+    try rpc_dispatcher.addWithCtx("editor_state", ctx, editorState);
     try rpc_dispatcher.addWithCtx("save_file", ctx, saveFile);
     try rpc_dispatcher.addWithCtx("get_state", ctx, getState);
     try rpc_dispatcher.addWithCtx("benchmark_open_file", ctx, benchmarkOpenFile);
@@ -480,6 +482,27 @@ fn boundsJson(dc: *zigjr.DispatchCtx, data: clay.ElementData) ![]const u8 {
     return std.fmt.allocPrint(dc.arena(),
         \\{{"found": {}, "x": {d:.1}, "y": {d:.1}, "w": {d:.1}, "h": {d:.1}}}
     , .{ data.found, bb.x, bb.y, bb.width, bb.height });
+}
+
+/// Zeilenzahl des aktiven Editors (für Editier-Kürzel wie Delete Line).
+fn editorLines(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
+    return std.fmt.allocPrint(dc.arena(), "{d}", .{ctx.ui_system.getActiveEditor().lineCount()});
+}
+
+/// Editor-Zustand: Zeilen, Cursor und der gesamte Text (JSON-escaped).
+fn editorState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
+    const ed = ctx.ui_system.getActiveEditor();
+    const lines = ed.lineCount();
+    const last: usize = if (lines > 0) lines - 1 else 0;
+    const text = ed.getTextInRange(.{
+        .begin = .{ .row = 0, .col = 0 },
+        .end = .{ .row = last, .col = 100_000 },
+    }) catch "";
+    var buf = std.Io.Writer.Allocating.init(dc.arena());
+    try buf.writer.print("{{\"lines\": {d}, \"row\": {d}, \"col\": {d}, \"text\": ", .{ lines, ed.cursor.row, ed.cursor.col });
+    try std.json.Stringify.value(text, .{}, &buf.writer);
+    try buf.writer.writeAll("}");
+    return buf.written();
 }
 
 /// UI-Zustand für Tests: Dialog, Header-Menü, Explorer-Fokus, aktiver Tab.
