@@ -52,14 +52,28 @@ fn executeInner(ui: *UI, alloc: std.mem.Allocator, call: *const ai_tools.ToolCal
         const path = (try ai_tools.resolveInProject(alloc, root, rel)) orelse return .{ .done = outsideJson(alloc, rel) };
         defer alloc.free(path);
         std.fs.cwd().access(path, .{}) catch return .{ .done = errorJson(alloc, "file not found: {s}", .{rel}) };
-        // Läuft der Chat im aktiven Pane und gibt es ein zweites, dort öffnen: der
-        // Chat bleibt sichtbar. Das Ziel-Pane wird aktiv, weil main.zig Buffer nur
-        // für das aktive Pane lädt (pending_switch_path).
-        const target = pickPaneForFile(ui);
+        // Regel aus ai_tools.choosePaneForFile: Chat bleibt sichtbar, notfalls wird
+        // gesplittet. Der Buffer lädt für jedes Pane (main.zig, leavesWithPendingSwitch),
+        // darum kann der Fokus danach zurück zum Chat.
+        const chat_pane = ui.active_pane;
+        const chat_active = isChatActive(ui);
+        const other = firstOtherLeaf(ui.root_pane, chat_pane);
+        var target: *pane_mod.Pane = chat_pane;
+        var focus_after: *pane_mod.Pane = chat_pane;
+        switch (ai_tools.choosePaneForFile(chat_active, other != null)) {
+            .active => {},
+            .other => target = other.?,
+            .split_new => {
+                try ui.splitActivePane(.vertical);
+                // chat_pane ist jetzt der Split-Knoten: Chat oben, Datei unten
+                target = chat_pane.data.split.children[1];
+                focus_after = chat_pane.data.split.children[0];
+            },
+        }
         const tb = &target.data.leaf.tab_bar;
         try tb.openFile(path);
         if (tb.active_index) |idx| tb.setActive(idx);
-        ui.active_pane = target;
+        ui.active_pane = focus_after;
         log.info("agent: open_file {s}", .{path});
         return .{ .done = try okPath(alloc, path) };
     }
@@ -89,10 +103,10 @@ fn executeInner(ui: *UI, alloc: std.mem.Allocator, call: *const ai_tools.ToolCal
         if (std.fs.path.dirname(path)) |dir| std.fs.cwd().makePath(dir) catch {};
         try std.fs.cwd().writeFile(.{ .sub_path = path, .data = content });
         ui.file_explorer.refresh(path);
-        log.info("agent: write_file {s} ({d} bytes)", .{ path, content.len });
-        var buf: [512]u8 = undefined;
-        const note = if (ui.open_buffers.contains(path)) "; the file is open in a tab, reopen it to see the new content" else "";
-        const msg = std.fmt.bufPrint(&buf, "wrote {d} bytes{s}", .{ content.len, note }) catch "written";
+        const reloaded = ui.reloadFileFromDisk(path, content);
+        log.info("agent: write_file {s} ({d} bytes, reloaded={})", .{ path, content.len, reloaded });
+        var buf: [128]u8 = undefined;
+        const msg = std.fmt.bufPrint(&buf, "wrote {d} bytes{s}", .{ content.len, if (reloaded) "; open tab reloaded" else "" }) catch "written";
         return .{ .done = try jsonObject(alloc, &.{ .{ "path", path }, .{ "result", msg } }) };
     }
 
@@ -112,8 +126,9 @@ fn executeInner(ui: *UI, alloc: std.mem.Allocator, call: *const ai_tools.ToolCal
         defer alloc.free(updated);
         try std.fs.cwd().writeFile(.{ .sub_path = path, .data = updated });
         ui.file_explorer.refresh(path);
-        log.info("agent: replace_text {s}", .{path});
-        const note = if (ui.open_buffers.contains(path)) "replaced; the file is open in a tab, reopen it to see the change" else "replaced";
+        const reloaded = ui.reloadFileFromDisk(path, updated);
+        log.info("agent: replace_text {s} (reloaded={})", .{ path, reloaded });
+        const note = if (reloaded) "replaced; open tab reloaded" else "replaced";
         return .{ .done = try jsonObject(alloc, &.{ .{ "path", path }, .{ "result", note } }) };
     }
 
@@ -188,12 +203,10 @@ fn executeInner(ui: *UI, alloc: std.mem.Allocator, call: *const ai_tools.ToolCal
     return .{ .done = errorJson(alloc, "unknown tool '{s}'. Available tools: {s}", .{ call.name, names }) };
 }
 
-fn pickPaneForFile(ui: *UI) *pane_mod.Pane {
-    const active = ui.active_pane;
-    const active_tab = active.data.leaf.tab_bar.getActiveTab();
-    const chat_active = active_tab != null and (active_tab.?.kind == .chat or active_tab.?.kind == .chat2);
-    if (!chat_active) return active;
-    return firstOtherLeaf(ui.root_pane, active) orelse active;
+fn isChatActive(ui: *UI) bool {
+    if (ui.active_pane.data != .leaf) return false;
+    const tab = ui.active_pane.data.leaf.tab_bar.getActiveTab() orelse return false;
+    return tab.kind == .chat or tab.kind == .chat2;
 }
 
 fn firstOtherLeaf(pane: *pane_mod.Pane, exclude: *pane_mod.Pane) ?*pane_mod.Pane {

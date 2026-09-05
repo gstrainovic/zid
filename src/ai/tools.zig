@@ -37,6 +37,17 @@ pub fn replaceCountsAsRewrite(file_len: usize, old_len: usize) bool {
     return old_len * 2 >= file_len;
 }
 
+pub const PaneChoice = enum { active, other, split_new };
+
+/// Wo eine vom Agenten geöffnete Datei erscheint. Regel in Code statt im Prompt:
+/// Läuft der Chat nicht im aktiven Pane, kommt die Datei dorthin (der Benutzer
+/// arbeitet im Editor). Läuft der Chat im aktiven Pane, muss er sichtbar bleiben:
+/// anderes Pane nutzen oder eines abspalten.
+pub fn choosePaneForFile(chat_in_active_pane: bool, has_other_leaf: bool) PaneChoice {
+    if (!chat_in_active_pane) return .active;
+    return if (has_other_leaf) .other else .split_new;
+}
+
 pub const Tool = struct {
     name: []const u8,
     description: []const u8,
@@ -359,6 +370,13 @@ test "replaceCountsAsRewrite: kleine Edits frei, halbe Datei oder mehr fragt nac
     try testing.expect(replaceCountsAsRewrite(47, 47));
     try testing.expect(!replaceCountsAsRewrite(0, 0));
     try testing.expect(findTool("replace_text").?.confirm == .if_rewrite);
+}
+
+test "choosePaneForFile: Chat bleibt sichtbar, Editor-Fokus bleibt Editor" {
+    try testing.expectEqual(PaneChoice.active, choosePaneForFile(false, false));
+    try testing.expectEqual(PaneChoice.active, choosePaneForFile(false, true));
+    try testing.expectEqual(PaneChoice.other, choosePaneForFile(true, true));
+    try testing.expectEqual(PaneChoice.split_new, choosePaneForFile(true, false));
 }
 
 test "findTool/toolNames" {
