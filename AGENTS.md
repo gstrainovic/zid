@@ -159,6 +159,38 @@ echo -e "open ./README.md\nget-state\nshutdown" | zig build run -- --interactive
 - Keine Unit-Tests für `ai_chat.zig`: die Datei importiert `components/textarea.zig`, das
   `../../editor/actions.zig` zieht, also kein eigenes Test-Root möglich. Logik dort klein halten.
 
+## Agent-Werkzeuge: der Agent kann, was der Editor kann
+
+- **Natives Tool-Calling** (OpenAI `tools`-Feld, `tool_calls` in der Antwort, `role: tool` zurück).
+  Geprüft 05.09.2026 mit llama-server b10524 + Qwen3-4B + `--jinja`: funktioniert nicht-streamend
+  und streamend (`delta.tool_calls` je Index zusammensetzen), das Modell nutzt Tool-Ergebnisse.
+  Das alte JSON-im-Text-Verfahren (`tryExecuteToolCall`) ist entfernt. Kein MCP, kein RPC:
+  Agent und Editor sind derselbe Prozess; MCP wäre nur für externe Agenten interessant.
+- **Definitionen** in `src/ai/tools.zig` (Modul `ai_tools`, unit-getestet): `command` (Enum aus
+  `shortcuts.Command`, Beschreibung mit Label + Kürzel jedes Kommandos → jedes Menü/Kürzel ist
+  automatisch Agent-Werkzeug), `open_file`, `read_file` (≤ 200 KB), `write_file`, `replace_text`,
+  `list_files` (≤ 200 Einträge), `open_folder`, `find_in_editor`. `toolsJson` liefert das Schema,
+  `parseEnvelope` die Aufrufe aus dem Worker-Ergebnis `{"content","tool_calls"}`.
+- **Ausführung** auf dem Main-Thread in `src/ui/agent_actions.zig` (`UI.driveAgentTools` in
+  `update()`): `command` → `executeCommand`; Dateien nur innerhalb von `current_directory`
+  (`ai_tools.resolveInProject`, `..` und fremde absolute Pfade → `{"error": "outside the project"}`).
+  `open_file` öffnet im anderen Pane, wenn der Chat im aktiven liegt, und macht es aktiv
+  (main.zig lädt Buffer nur für das aktive Pane). Ergebnisse gehen als JSON in `tool`-Nachrichten.
+- **Bestätigung** über den normalen Dialog ("AI agent", Allow/Deny): `write_file` auf bestehende
+  Datei; `replace_text`, wenn `old` ≥ halbe Datei ist (`replaceCountsAsRewrite`; Qwen umging so
+  die write_file-Regel). Antwort wird in `update()` verarbeitet, nie im Dialog-Callback. Deny →
+  `{"error":"the user denied this action"}` ans Modell. `close_tab`/`delete_entry` fragen über
+  ihre bestehenden Dialoge. Max. 8 Werkzeugrunden pro Frage (`max_tool_rounds`).
+- Anzeige: Assistant-Aufrufe als `🔧 name(args)`, Ergebnisse als `✅/⚠️ name → JSON…`.
+- Bekannte Lücke: Schreibt der Agent in eine Datei, die als Tab offen ist, zeigt der Tab den
+  alten Inhalt (Ergebnis sagt das dem Modell). Kein `run_shell` (bewusst, erst mit Sandbox).
+- RPCs: `focus_chat` (Chat-Tab in irgendeinem Pane aktivieren), `ui_state.pane_count`,
+  `ui_state.all_tabs`, `ui_state.agent_confirm_pending`, `chat_state.tool_rounds/pending_tools`,
+  Nachrichten mit `tool_calls`/`tool_call_id`.
+- E2E `python3 scripts/e2e_ai_tools.py`: split per Chat, Datei anlegen+öffnen, lesen, Überschreiben
+  → Dialog → Deny → unverändert, `/etc/hostname` abgelehnt. Messung: command 13–14 s (erste
+  Runde nach Warmup), write+open 7 s, read 3 s, confirm 4 s.
+
 ## Explorer: Umbenennen/Löschen und offene Tabs
 
 - Umbenennen zieht Tab-Pfad, Titel, Buffer-Pfad und `open_buffers`-Schlüssel mit, auch für

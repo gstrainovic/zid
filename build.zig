@@ -79,6 +79,14 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     exe_mod.addImport("shortcuts", shortcuts_mod);
+    // Agent-Werkzeuge: eigenes Modul (Tests ohne UI), braucht die Kürzel-Tabelle
+    const ai_tools_mod = b.createModule(.{
+        .root_source_file = b.path("src/ai/tools.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    ai_tools_mod.addImport("shortcuts", shortcuts_mod);
+    exe_mod.addImport("ai_tools", ai_tools_mod);
     exe_mod.addImport("wio", wio_dep.module("wio"));
     exe_mod.addImport("wgpu", wgpu_dep.module("wgpu"));
     exe_mod.addImport("zigimg", zigimg_dep.module("zigimg"));
@@ -342,6 +350,10 @@ pub fn build(b: *std.Build) void {
     const run_device_select_tests = b.addRunArtifact(device_select_tests);
     run_device_select_tests.has_side_effects = true;
 
+    const ai_tools_tests = b.addTest(.{ .root_module = ai_tools_mod });
+    const run_ai_tools_tests = b.addRunArtifact(ai_tools_tests);
+    run_ai_tools_tests.has_side_effects = true;
+
     const word_wrap_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("src/ui/word_wrap.zig"),
         .target = target,
@@ -367,6 +379,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_shortcuts_tests.step);
     test_step.dependOn(&run_find_ops_tests.step);
     test_step.dependOn(&run_device_select_tests.step);
+    test_step.dependOn(&run_ai_tools_tests.step);
 
     const run_word_wrap_tests = b.addRunArtifact(word_wrap_tests);
     run_word_wrap_tests.has_side_effects = true;

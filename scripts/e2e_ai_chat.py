@@ -54,6 +54,8 @@ def stop(proc, log):
 
 
 def send(text):
+    rpc("focus_chat")  # Agent-Aktionen (open_file) können das aktive Pane gewechselt haben
+    settle()
     rpc("type_text", [text])
     settle(5)
     check(rpc("get_chat_input") == text, "Frage steht im Eingabefeld")

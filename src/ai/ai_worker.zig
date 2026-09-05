@@ -20,6 +20,8 @@ pub const ChatParams = struct {
     sched: ?*scheduler.Scheduler = null,
     /// Escape im Chat setzt das Flag; der Stream endet mit ai_chat_cancelled
     cancel: ?*const std.atomic.Value(bool) = null,
+    /// OpenAI-`tools`-Array (owned Kopie), null = ohne Werkzeuge
+    tools: ?[]u8 = null,
 
     pub fn init(
         alloc: std.mem.Allocator,
@@ -52,7 +54,19 @@ pub const ChatParams = struct {
             try owned.append(alloc, role_dup);
             const content_dup = try alloc.dupe(u8, m.content);
             try owned.append(alloc, content_dup);
-            msg_copy[i] = .{ .role = role_dup, .content = content_dup };
+            var tc_dup: ?[]const u8 = null;
+            if (m.tool_calls) |tc| {
+                const d = try alloc.dupe(u8, tc);
+                try owned.append(alloc, d);
+                tc_dup = d;
+            }
+            var id_dup: ?[]const u8 = null;
+            if (m.tool_call_id) |id| {
+                const d = try alloc.dupe(u8, id);
+                try owned.append(alloc, d);
+                id_dup = d;
+            }
+            msg_copy[i] = .{ .role = role_dup, .content = content_dup, .tool_calls = tc_dup, .tool_call_id = id_dup };
         }
 
         self.* = .{
@@ -73,14 +87,18 @@ pub const ChatParams = struct {
         sched: *scheduler.Scheduler,
         should_stop: ?*const std.atomic.Value(bool),
         cancel: ?*const std.atomic.Value(bool),
+        tools: ?[]const u8,
     ) !*ChatParams {
         const self = try initWithStop(alloc, agent, messages, should_stop);
+        errdefer self.deinit();
         self.sched = sched;
         self.cancel = cancel;
+        if (tools) |t| self.tools = try alloc.dupe(u8, t);
         return self;
     }
 
     pub fn deinit(self: *ChatParams) void {
+        if (self.tools) |t| self.alloc.free(t);
         for (self.owned_strings.items) |s| self.alloc.free(s);
         self.owned_strings.deinit(self.alloc);
         self.alloc.free(self.messages);
@@ -114,7 +132,7 @@ pub fn taskChatCompletion(alloc: std.mem.Allocator, data: ?*anyopaque) !schedule
     if (params.sched) |sched| {
         var acc = StreamAcc{ .alloc = alloc, .sched = sched };
         defer acc.text.deinit(alloc);
-        params.agent.streamChatCompletion(params.messages, params.should_stop, params.cancel, .{
+        const tool_calls = params.agent.streamChatCompletion(params.messages, params.tools, params.should_stop, params.cancel, .{
             .ctx = &acc,
             .on_delta = StreamAcc.onDelta,
         }) catch |err| {
@@ -128,6 +146,22 @@ pub fn taskChatCompletion(alloc: std.mem.Allocator, data: ?*anyopaque) !schedule
             const msg = try std.fmt.allocPrint(alloc, "{s}", .{@errorName(err)});
             return .{ .tag = .ai_chat_error, .payload = msg, .allocator = alloc };
         };
+        if (tool_calls) |tc| {
+            defer alloc.free(tc);
+            // Hülle für den Main-Thread: Text + rohes tool_calls-Array
+            var out: std.Io.Writer.Allocating = .init(alloc);
+            errdefer out.deinit();
+            var jw: std.json.Stringify = .{ .writer = &out.writer, .options = .{} };
+            try jw.beginObject();
+            try jw.objectField("content");
+            try jw.write(acc.text.items);
+            try jw.objectField("tool_calls");
+            try jw.beginWriteRaw();
+            try jw.writer.writeAll(tc);
+            jw.endWriteRaw();
+            try jw.endObject();
+            return .{ .tag = .ai_chat_tool_calls, .payload = try out.toOwnedSlice(), .allocator = alloc };
+        }
         return .{ .tag = .ai_chat_reply, .payload = try acc.text.toOwnedSlice(alloc), .allocator = alloc };
     }
 

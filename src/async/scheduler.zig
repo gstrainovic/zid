@@ -27,6 +27,8 @@ pub const ResultTag = enum {
     ai_chat_delta,
     /// Antwort per Escape abgebrochen; Payload = bisheriger Text
     ai_chat_cancelled,
+    /// Modell will Werkzeuge: Payload = {"content": "...", "tool_calls": [OpenAI-Array]}
+    ai_chat_tool_calls,
     ai_warmup_done,
     ai_warmup_error,
     ai_download_done,
