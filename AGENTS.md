@@ -116,6 +116,25 @@ echo -e "open ./README.md\nget-state\nshutdown" | zig build run -- --interactive
   F2/Entf, Tabs, Ansicht, Menüleiste, Kontextmenü, Shortcut-Dialog, Suchleiste) und legt
   Screenshots unter `tmp/e2e_*.ppm` ab.
 
+## KI-Chat (Ollama / llama-server)
+
+- Start: `UI.init` ruft `ai_chat.initAgent(server, model)` auf, sofern nicht `--ai=off`.
+  Default `ollama` + `gemma4:e2b`; `LLAMA_SERVER_PATH` (Pfad zu llama-server) und
+  `LLAMA_MODEL_PATH` überschreiben. Dieser Block war seit Commit 8a5c7fb auskommentiert,
+  deshalb blieb jede Nachricht bei "Gemma is thinking...".
+- `AgentStatus` (`none`, `model_missing`, `initializing`, `ready`, `failed`) ist der echte
+  Verbindungszustand: Statuspunkt und Text neben "Gemma 4 Agent" hängen daran, `sendMessage`
+  antwortet ohne bereiten Agent sofort mit einer Erklärung statt zu laden.
+- Fehlt das Modell in Ollama, wird beim Start NICHT synchron gepullt (blockierte den Start
+  minutenlang). Der Chat zeigt "Pull model with Ollama" → `ai_worker.taskOllamaPull` → nach
+  `ai_download_done` erneutes `initAgent`. Alternative ohne Download, wenn das GGUF lokal liegt:
+  `printf 'FROM /abs/pfad/model.gguf\n' > Modelfile && ollama create gemma4:e2b -f Modelfile`.
+- RPC `chat_state`: Status, Detail, loading/initializing/downloading und alle Nachrichten.
+- E2E: `python3 scripts/e2e_ai_chat.py` (braucht laufendes Ollama mit installiertem Modell;
+  `--only-off` prüft nur den `--ai=off`-Pfad). Warmup lädt das Modell, das kann bis ~1 min dauern.
+- Keine Unit-Tests für `ai_chat.zig`: die Datei importiert `components/textarea.zig`, das
+  `../../editor/actions.zig` zieht, also kein eigenes Test-Root möglich. Logik dort klein halten.
+
 ## Explorer: Umbenennen/Löschen und offene Tabs
 
 - Umbenennen zieht Tab-Pfad, Titel, Buffer-Pfad und `open_buffers`-Schlüssel mit, auch für

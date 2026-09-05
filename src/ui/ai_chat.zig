@@ -13,6 +13,8 @@ const ui_mod = @import("mod.zig");
 
 const log = std.log.scoped(.ai_chat);
 
+pub const AgentStatus = enum { none, model_missing, initializing, ready, failed };
+
 pub const ChatMessage = struct {
     role: []const u8,
     /// Roher Text, geht so an die API und in die Zwischenablage.
@@ -30,8 +32,13 @@ pub const AIChatState = struct {
     agent: ?*agent.LlamaAgent = null,
     scheduler: ?*scheduler_mod.Scheduler = null,
 
+    /// Eigene Kopien (initAgent dupliziert), leer = nicht konfiguriert
     server_path: []const u8 = "",
     model_path: []const u8 = "",
+    /// Echter Verbindungszustand für Statuspunkt und Fehlermeldungen
+    agent_status: AgentStatus = .none,
+    status_detail_buf: [256]u8 = undefined,
+    status_detail_len: usize = 0,
 
     is_loading: bool = false,
     is_downloading: bool = false,
@@ -123,6 +130,34 @@ pub const AIChatState = struct {
         self.input_textarea.deinit();
         self.input_buffer.deinit();
         if (self.agent) |a| a.deinit();
+        if (self.server_path.len > 0) self.allocator.free(self.server_path);
+        if (self.model_path.len > 0) self.allocator.free(self.model_path);
+    }
+
+    pub fn isOllama(self: *const Self) bool {
+        return std.mem.eql(u8, self.server_path, "ollama");
+    }
+
+    pub fn statusDetail(self: *const Self) []const u8 {
+        return self.status_detail_buf[0..self.status_detail_len];
+    }
+
+    fn setStatus(self: *Self, status: AgentStatus, detail: []const u8) void {
+        self.agent_status = status;
+        const n = @min(detail.len, self.status_detail_buf.len);
+        @memcpy(self.status_detail_buf[0..n], detail[0..n]);
+        self.status_detail_len = n;
+    }
+
+    /// Kurztext neben dem Statuspunkt
+    pub fn statusText(self: *const Self) []const u8 {
+        return switch (self.agent_status) {
+            .none => "Not connected",
+            .model_missing => "Model missing",
+            .initializing => "Initializing...",
+            .ready => "Ready",
+            .failed => "Failed",
+        };
     }
 
     pub fn initAgent(self: *Self, server_path: []const u8, model_path: []const u8) !void {
@@ -131,14 +166,31 @@ pub const AIChatState = struct {
             self.agent = null;
         }
 
-        self.server_path = server_path;
-        self.model_path = model_path;
+        if (server_path.ptr != self.server_path.ptr) {
+            const sp = try self.allocator.dupe(u8, server_path);
+            if (self.server_path.len > 0) self.allocator.free(self.server_path);
+            self.server_path = sp;
+        }
+        if (model_path.ptr != self.model_path.ptr) {
+            const mp = try self.allocator.dupe(u8, model_path);
+            if (self.model_path.len > 0) self.allocator.free(self.model_path);
+            self.model_path = mp;
+        }
 
-        self.agent = agent.LlamaAgent.init(self.allocator, server_path, model_path, 11434) catch |err| {
+        self.agent = agent.LlamaAgent.init(self.allocator, self.server_path, self.model_path, 11434) catch |err| {
+            if (err == error.ModelNotInstalled) {
+                // Ollama läuft, Modell fehlt: Knopf "Pull model" anbieten, kein Fehler
+                self.model_exists = false;
+                self.setStatus(.model_missing, self.model_path);
+                return;
+            }
             log.err("Failed to initialize AI Agent: {}", .{err});
+            self.setStatus(.failed, @errorName(err));
             return err;
         };
+        if (self.isOllama()) self.model_exists = true;
 
+        self.setStatus(.initializing, "");
         self.is_initializing = true;
         self.submitWarmup() catch |err| switch (err) {
             error.NoScheduler => {},
@@ -159,16 +211,34 @@ pub const AIChatState = struct {
 
     pub fn handleWarmupDone(self: *Self) void {
         self.mutex.lock();
-        defer self.mutex.unlock();
         self.is_initializing = false;
+        self.mutex.unlock();
+        self.setStatus(.ready, "");
         log.info("AI Agent is warm and ready.", .{});
     }
 
     pub fn handleWarmupError(self: *Self, payload: []const u8) void {
         log.err("AI warmup failed: {s}", .{payload});
         self.mutex.lock();
-        defer self.mutex.unlock();
         self.is_initializing = false;
+        self.mutex.unlock();
+        self.setStatus(.failed, payload);
+        var buf: [320]u8 = undefined;
+        const msg = std.fmt.bufPrint(&buf, "AI agent failed to start: {s}", .{payload}) catch "AI agent failed to start.";
+        self.addMessage("assistant", msg) catch {};
+    }
+
+    /// Erklärung, warum gerade nicht gesendet werden kann (null = bereit).
+    fn notReadyMessage(self: *Self) ?[]const u8 {
+        if (self.agent_status == .ready and self.agent != null) return null;
+        var buf: [400]u8 = undefined;
+        const msg: []const u8 = switch (self.agent_status) {
+            .ready, .none => "AI is not connected. Start vulkan-ed without --ai=off; Ollama (default) or LLAMA_SERVER_PATH must be available.",
+            .model_missing => std.fmt.bufPrint(&buf, "Model '{s}' is not installed in Ollama. Click 'Pull model' above or run: ollama pull {s}", .{ self.model_path, self.model_path }) catch "Model is not installed in Ollama.",
+            .initializing => "AI agent is still initializing, please try again in a moment.",
+            .failed => std.fmt.bufPrint(&buf, "AI agent failed to start: {s}", .{self.statusDetail()}) catch "AI agent failed to start.",
+        };
+        return self.allocator.dupe(u8, msg) catch null;
     }
 
     pub fn addMessage(self: *Self, role: []const u8, content: []const u8) !void {
@@ -202,17 +272,28 @@ pub const AIChatState = struct {
     pub fn sendMessage(self: *Self) !void {
         const text = self.input_buffer.store_to_string_cached(self.input_buffer.root, self.input_buffer.file_eol_mode);
         std.log.debug("SEND: buffer len={d} text={s}", .{ text.len, text });
-        // if (text.len == 0 or self.is_loading or self.is_initializing) return;
-        // if (self.agent == null or self.scheduler == null) return error.NoAgent;
+        if (std.mem.trim(u8, text, " \t\r\n").len == 0) return;
+        if (self.is_loading) return;
 
         const user_text = try self.allocator.dupe(u8, text);
         defer self.allocator.free(user_text);
         try self.addMessage("user", user_text);
-
         self.input_textarea.setText("");
 
+        // Kein Agent: sofort erklären statt endlos "Gemma is thinking..."
+        if (self.notReadyMessage()) |msg| {
+            defer self.allocator.free(msg);
+            try self.addMessage("assistant", msg);
+            return;
+        }
+
         self.is_loading = true;
-        try self.submitCompletion();
+        self.submitCompletion() catch |err| {
+            self.is_loading = false;
+            var buf: [200]u8 = undefined;
+            const msg = std.fmt.bufPrint(&buf, "Could not send: {s}", .{@errorName(err)}) catch "Could not send.";
+            try self.addMessage("assistant", msg);
+        };
     }
 
     fn submitCompletion(self: *Self) !void {
@@ -330,6 +411,16 @@ pub const AIChatState = struct {
     pub fn triggerDownload(self: *Self) !void {
         if (self.is_downloading or self.model_exists) return;
         const sched = self.scheduler orelse return error.NoScheduler;
+
+        if (self.isOllama()) {
+            const params = try ai_worker.PullParams.init(self.allocator, self.model_path);
+            if (!sched.submit(.{ .func = ai_worker.taskOllamaPull, .data = params })) {
+                params.deinit();
+                return error.SchedulerQueueFull;
+            }
+            self.is_downloading = true;
+            return;
+        }
 
         const url = "https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-Q4_K_M.gguf";
 
@@ -498,19 +589,18 @@ pub fn renderAIChat(
         })({
             clay.text("Gemma 4 Agent", .{ .font_size = 20, .color = theme.primary });
 
-            const status_color: clay.Color = if (state.model_exists and !state.is_initializing)
-                .{ 100, 255, 100, 255 }
-            else
-                .{ 255, 200, 100, 255 };
+            const status_color: clay.Color = switch (state.agent_status) {
+                .ready => .{ 100, 255, 100, 255 },
+                .initializing, .model_missing => .{ 255, 200, 100, 255 },
+                .none, .failed => .{ 255, 90, 90, 255 },
+            };
             clay.UI()(.{
+                .id = clay.ElementId.ID("ai_status_dot"),
                 .layout = .{ .sizing = .{ .w = .fixed(10), .h = .fixed(10) } },
                 .background_color = status_color,
                 .corner_radius = .all(5),
             })({});
-
-            if (state.is_initializing) {
-                clay.text("Initializing...", .{ .font_size = 12, .color = .{ 150, 150, 150, 255 } });
-            }
+            clay.text(state.statusText(), .{ .font_size = 12, .color = .{ 150, 150, 150, 255 } });
         });
 
         // ── Download button / progress ───────────────────────────────────
@@ -530,7 +620,7 @@ pub fn renderAIChat(
                 .corner_radius = .all(4),
             })({
                 clay.text(
-                    if (state.is_downloading) "Downloading..." else "Download Model (3GB)",
+                    if (state.is_downloading) (if (state.isOllama()) "Pulling..." else "Downloading...") else if (state.isOllama()) "Pull model with Ollama" else "Download Model (3GB)",
                     .{ .font_size = 12, .color = .{ 255, 255, 255, 255 } },
                 );
             });

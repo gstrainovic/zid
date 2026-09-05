@@ -151,6 +151,7 @@ pub fn createDispatcher(alloc: std.mem.Allocator, ctx: *E2EContext) !*zigjr.RpcD
     try rpc_dispatcher.addWithCtx("open_terminal", ctx, openTerminalRpc);
     try rpc_dispatcher.addWithCtx("open_chat", ctx, openChatRpc);
     try rpc_dispatcher.addWithCtx("get_chat_input", ctx, getChatInput);
+    try rpc_dispatcher.addWithCtx("chat_state", ctx, chatState);
     try rpc_dispatcher.addWithCtx("get_active_tab", ctx, getActiveTabDebug);
     try rpc_dispatcher.addWithCtx("explorer_open", ctx, explorerOpen);
     try rpc_dispatcher.addWithCtx("explorer_entries", ctx, explorerEntries);
@@ -414,6 +415,31 @@ fn getChatInput(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     const buf = ctx.ui_system.ai_chat.input_buffer;
     const text = buf.store_to_string_cached(buf.root, buf.file_eol_mode);
     return dc.arena().dupe(u8, text) catch "error: out of memory";
+}
+
+/// KI-Chat-Zustand: Verbindungsstatus, Lade-/Init-Flags und alle Nachrichten.
+fn chatState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
+    const chat = &ctx.ui_system.ai_chat;
+    var buf = std.Io.Writer.Allocating.init(dc.arena());
+    try buf.writer.print(
+        \\{{"status": "{s}", "detail":
+    , .{@tagName(chat.agent_status)});
+    try std.json.Stringify.value(chat.statusDetail(), .{}, &buf.writer);
+    try buf.writer.print(
+        \\, "loading": {}, "initializing": {}, "downloading": {}, "model_exists": {}, "messages": [
+    , .{ chat.is_loading, chat.is_initializing, chat.is_downloading, chat.model_exists });
+    chat.mutex.lock();
+    defer chat.mutex.unlock();
+    for (chat.messages.items, 0..) |m, i| {
+        if (i > 0) try buf.writer.writeAll(", ");
+        try buf.writer.writeAll("{\"role\": ");
+        try std.json.Stringify.value(m.role, .{}, &buf.writer);
+        try buf.writer.writeAll(", \"content\": ");
+        try std.json.Stringify.value(m.content, .{}, &buf.writer);
+        try buf.writer.writeAll("}");
+    }
+    try buf.writer.writeAll("]}");
+    return buf.written();
 }
 
 /// Debug: Active Tab Info

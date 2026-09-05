@@ -50,7 +50,7 @@ pub const LlamaAgent = struct {
         return false;
     }
 
-    fn pullModel(allocator: std.mem.Allocator, model_name: []const u8) !void {
+    pub fn pullModel(allocator: std.mem.Allocator, model_name: []const u8) !void {
         const result = try std.process.Child.run(.{
             .allocator = allocator,
             .argv = &[_][]const u8{ "ollama", "pull", model_name },
@@ -166,10 +166,11 @@ pub const LlamaAgent = struct {
                 std.log.info("Ollama daemon started", .{});
             }
 
+            // Kein synchroner Pull: das blockierte den UI-Start minutenlang.
+            // Der Chat zeigt stattdessen einen "Pull model"-Knopf (ai_worker.taskOllamaPull).
             if (!try isModelInstalled(allocator, self.model_path)) {
-                std.log.info("Model {s} not installed, pulling...", .{self.model_path});
-                try pullModel(allocator, self.model_path);
-                std.log.info("Model {s} pulled successfully", .{self.model_path});
+                std.log.warn("Model {s} not installed in Ollama", .{self.model_path});
+                return error.ModelNotInstalled;
             }
 
             std.log.info("Using Ollama with model {s} on port 11434", .{self.model_path});
