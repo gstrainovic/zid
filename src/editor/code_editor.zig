@@ -9,6 +9,7 @@ const flow_core = @import("flow_core");
 const syntax = @import("syntax");
 const wio = @import("wio");
 const shortcuts = @import("shortcuts");
+const find_ops = @import("find_ops.zig");
 
 const actions = @import("actions.zig");
 const keymap = @import("keymap.zig");
@@ -144,6 +145,8 @@ pub const CodeEditor = struct {
     typing_in_progress: bool = false,
 
     pending_md_preview: bool = false,
+    /// Suchleiste (Ctrl+F)
+    find: FindState = .{},
 
     /// Zeitpunkt der letzten Cursor-Bewegung (für Blink-Delay)
     last_cursor_movement_ms: f32 = 0,
@@ -1259,6 +1262,7 @@ pub const CodeEditor = struct {
             .MdPreview => {
                 self.pending_md_preview = true;
             },
+            .Search => self.openFind(),
             .SplitVertical => {
                 self.pending_split_v = true;
             },
@@ -1270,7 +1274,6 @@ pub const CodeEditor = struct {
                     std.log.scoped(.editor).err("Failed to save file: {}", .{err});
                 };
             },
-            else => {},
         }
         self.recordCursorMovement();
         self.current_line = self.cursor.row + 1;
@@ -1299,8 +1302,156 @@ pub const CodeEditor = struct {
         };
     }
 
+    pub const FindState = struct {
+        active: bool = false,
+        query: [256]u8 = undefined,
+        len: usize = 0,
+        /// Letzter Treffer; Ausgangspunkt für weiter/zurück
+        last_match: ?find_ops.Match = null,
+        not_found: bool = false,
+
+        pub fn text(self: *const FindState) []const u8 {
+            return self.query[0..self.len];
+        }
+    };
+
+    const LineSource = struct {
+        ed: *CodeEditor,
+        pub fn lineCount(self: LineSource) usize {
+            return self.ed.lineCount();
+        }
+        pub fn line(self: LineSource, i: usize) []const u8 {
+            return self.ed.getLine(i);
+        }
+    };
+
+    pub fn openFind(self: *Self) void {
+        self.find.active = true;
+        self.find.not_found = false;
+        // Markierten Text als Suchbegriff übernehmen (einzeilig)
+        if (self.selectionRange()) |r| {
+            if (r.begin.row == r.end.row) {
+                const t = self.getTextInRange(r) catch "";
+                defer if (t.len > 0) self.allocator.free(t);
+                const n = @min(t.len, self.find.query.len);
+                @memcpy(self.find.query[0..n], t[0..n]);
+                self.find.len = n;
+            }
+        }
+    }
+
+    pub fn closeFind(self: *Self) void {
+        self.find.active = false;
+    }
+
+    /// Nächsten/vorherigen Treffer markieren. `inclusive`: ein Treffer an der
+    /// aktuellen Stelle zählt (beim Tippen), sonst wird weitergesprungen.
+    fn findStep(self: *Self, forward: bool, inclusive: bool) void {
+        const Finder = find_ops.Finder(LineSource);
+        const anchor: find_ops.Pos = if (self.find.last_match) |m| m.begin else .{ .row = self.cursor.row, .col = self.cursor.col };
+        var from = anchor;
+        if (inclusive and forward) {
+            if (from.col > 0) from.col -= 1 else if (from.row > 0) {
+                from.row -= 1;
+                from.col = std.math.maxInt(u32);
+            } else {
+                from = .{ .row = self.lineCount() -| 1, .col = std.math.maxInt(u32) };
+            }
+        }
+        const m = Finder.find(.{ .ed = self }, self.find.text(), from, forward) orelse {
+            self.find.not_found = self.find.len > 0;
+            return;
+        };
+        self.find.not_found = false;
+        self.find.last_match = m;
+        self.selection_anchor = .{ .row = m.begin.row, .col = m.begin.col, .target = m.begin.col };
+        self.cursor = .{ .row = m.end.row, .col = m.end.col, .target = m.end.col };
+        self.ensureCursorVisible();
+    }
+
+    pub fn findNext(self: *Self, forward: bool) void {
+        self.findStep(forward, false);
+    }
+
+    fn handleFindKey(self: *Self, key: wio.Button) void {
+        switch (key) {
+            .escape => self.closeFind(),
+            .enter, .kp_enter => self.findNext(!self.mods.shift),
+            .backspace => {
+                if (self.find.len > 0) {
+                    var i = self.find.len - 1;
+                    while (i > 0 and (self.find.query[i] & 0xC0) == 0x80) i -= 1;
+                    self.find.len = i;
+                }
+                self.find.last_match = null;
+                self.find.not_found = false;
+                if (self.find.len > 0) self.findStep(true, true);
+            },
+            else => {},
+        }
+    }
+
+    fn handleFindChar(self: *Self, cp: u21) void {
+        var tmp: [4]u8 = undefined;
+        const n = std.unicode.utf8Encode(cp, &tmp) catch return;
+        if (self.find.len + n > self.find.query.len) return;
+        @memcpy(self.find.query[self.find.len .. self.find.len + n], tmp[0..n]);
+        self.find.len += n;
+        self.findStep(true, true);
+    }
+
+    fn renderFindWidget(self: *Self, arena: std.mem.Allocator, editor_id: clay.ElementId) void {
+        clay.UI()(.{
+            .id = clay.ElementId.ID("find_widget"),
+            .floating = .{
+                .attach_to = .to_element_with_id,
+                .parentId = editor_id.id,
+                .attach_points = .{ .element = .right_top, .parent = .right_top },
+                .offset = .{ .x = -24, .y = 8 },
+                .z_index = 500,
+            },
+            .layout = .{
+                .sizing = .{ .w = .fit, .h = .fit },
+                .direction = .left_to_right,
+                .padding = .all(8),
+                .child_gap = 10,
+                .child_alignment = .{ .y = .center },
+            },
+            .background_color = .{ 45, 45, 60, 255 },
+            .border = .{ .width = .all(1), .color = .{ 100, 100, 120, 255 } },
+            .corner_radius = .all(4),
+        })({
+            clay.text("Find", .{ .font_size = 18, .color = .{ 150, 150, 170, 255 }, .wrap_mode = .none });
+            clay.UI()(.{
+                .id = clay.ElementId.ID("find_input"),
+                .layout = .{
+                    .sizing = .{ .w = .fixed(260), .h = .fixed(30) },
+                    .padding = .axes(0, 8),
+                    .child_alignment = .{ .y = .center },
+                },
+                .clip = .{ .horizontal = true },
+                .background_color = .{ 30, 30, 46, 255 },
+                .border = .{ .width = .all(1), .color = if (self.find.not_found) .{ 220, 90, 90, 255 } else .{ 120, 140, 220, 255 } },
+                .corner_radius = .all(3),
+            })({
+                const shown = std.fmt.allocPrint(arena, "{s}|", .{self.find.text()}) catch self.find.text();
+                clay.text(shown, .{ .font_size = 18, .color = .{ 220, 220, 240, 255 }, .wrap_mode = .none });
+            });
+            const status: []const u8 = if (self.find.not_found) "No results" else if (self.find.last_match) |m|
+                std.fmt.allocPrint(arena, "Line {d}", .{m.begin.row + 1}) catch ""
+            else
+                "";
+            if (status.len > 0) clay.text(status, .{ .font_size = 16, .color = if (self.find.not_found) .{ 220, 90, 90, 255 } else .{ 150, 150, 170, 255 }, .wrap_mode = .none });
+            clay.text("Enter ↓  Shift+Enter ↑  Esc", .{ .font_size = 14, .color = .{ 120, 120, 140, 255 }, .wrap_mode = .none });
+        });
+    }
+
     pub fn handleKeyPress(self: *Self, key: wio.Button) void {
         std.log.info(">>> handleKeyPress ENTRY: key={} self.mods={}", .{key, self.mods});
+        if (self.find.active) {
+            self.handleFindKey(key);
+            return;
+        }
         if (self.keymap) |km| {
             std.log.info("    keymap present, doing lookup key={} mods={}", .{key, self.mods});
             if (km.lookup(key, self.mods)) |action| {
@@ -1530,6 +1681,10 @@ pub const CodeEditor = struct {
         }
         if (char_code < 32 or char_code == 127) return;
         if (self.mods.ctrl and !self.mods.alt) return;
+        if (self.find.active) {
+            self.handleFindChar(char_code);
+            return;
+        }
 
         if (!self.typing_in_progress) {
             self.snapshotForUndo();
@@ -1579,6 +1734,7 @@ pub const CodeEditor = struct {
             },
             .background_color = self.bg_color,
         })({
+            if (self.find.active) self.renderFindWidget(arena, editor_id);
             // pointerOver must be called INSIDE clay.UI where Clay's internal state is valid
             if (clay.pointerOver(editor_id)) {
                 self.last_frame_hovered = true;

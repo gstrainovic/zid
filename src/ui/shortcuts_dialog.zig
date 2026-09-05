@@ -1,5 +1,6 @@
 //! Help → Keyboard Shortcuts: modaler Dialog, der alle Bindungen aus
 //! shortcuts.zig gruppiert nach Scope auflistet. Keine eigene Logik, nur Anzeige.
+//! Zwei Spalten (Global+Explorer links, Editor rechts), damit es in 800px Höhe passt.
 
 const std = @import("std");
 const clay = @import("clay");
@@ -9,12 +10,36 @@ const Theme = @import("theme.zig").Theme;
 pub const BOX_ID = "sc_box";
 pub const CLOSE_ID = "sc_close";
 
+const COLUMN_WIDTH: f32 = 400;
+
 fn scopeTitle(scope: shortcuts.Scope) []const u8 {
     return switch (scope) {
         .global => "Global",
         .editor => "Editor",
         .explorer => "Explorer (selected entry)",
     };
+}
+
+fn renderScope(comptime scope: shortcuts.Scope, t: Theme) void {
+    clay.UI()(.{ .layout = .{ .padding = .{ .top = 6, .bottom = 2 } } })({
+        clay.text(scopeTitle(scope), .{ .font_size = 18, .color = t.accent });
+    });
+    inline for (shortcuts.bindings) |b| {
+        if (b.scope == scope) {
+            clay.UI()(.{
+                .layout = .{
+                    .sizing = .{ .w = .grow, .h = .fit },
+                    .direction = .left_to_right,
+                    .padding = .axes(1, 8),
+                    .child_alignment = .{ .y = .center },
+                },
+            })({
+                clay.text(shortcuts.label(b.command), .{ .font_size = 19, .wrap_mode = .none, .color = t.text });
+                clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow } } })({});
+                clay.text(shortcuts.shortcutTextFor(b.key, b.mods), .{ .font_size = 17, .wrap_mode = .none, .color = t.muted });
+            });
+        }
+    }
 }
 
 pub fn render(t: Theme) void {
@@ -30,10 +55,10 @@ pub fn render(t: Theme) void {
         clay.UI()(.{
             .id = clay.ElementId.ID(BOX_ID),
             .layout = .{
-                .sizing = .{ .w = .fixed(560) },
+                .sizing = .{ .w = .fit },
                 .padding = .all(20),
                 .direction = .top_to_bottom,
-                .child_gap = 10,
+                .child_gap = 8,
             },
             .background_color = t.surface,
             .border = .{ .width = .all(1), .color = t.border },
@@ -41,27 +66,17 @@ pub fn render(t: Theme) void {
         })({
             clay.text("Keyboard Shortcuts", .{ .font_size = 26, .color = t.text });
 
-            inline for ([_]shortcuts.Scope{ .global, .editor, .explorer }) |scope| {
-                clay.UI()(.{ .layout = .{ .padding = .{ .top = 8 } } })({
-                    clay.text(scopeTitle(scope), .{ .font_size = 18, .color = t.accent });
+            clay.UI()(.{
+                .layout = .{ .direction = .left_to_right, .child_gap = 32 },
+            })({
+                clay.UI()(.{ .layout = .{ .sizing = .{ .w = .fixed(COLUMN_WIDTH) }, .direction = .top_to_bottom } })({
+                    renderScope(.global, t);
+                    renderScope(.explorer, t);
                 });
-                inline for (shortcuts.bindings) |b| {
-                    if (b.scope == scope) {
-                        clay.UI()(.{
-                            .layout = .{
-                                .sizing = .{ .w = .grow, .h = .fit },
-                                .direction = .left_to_right,
-                                .padding = .axes(2, 8),
-                                .child_alignment = .{ .y = .center },
-                            },
-                        })({
-                            clay.text(shortcuts.label(b.command), .{ .font_size = 20, .wrap_mode = .none, .color = t.text });
-                            clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow } } })({});
-                            clay.text(shortcuts.shortcutTextFor(b.key, b.mods), .{ .font_size = 18, .wrap_mode = .none, .color = t.muted });
-                        });
-                    }
-                }
-            }
+                clay.UI()(.{ .layout = .{ .sizing = .{ .w = .fixed(COLUMN_WIDTH) }, .direction = .top_to_bottom } })({
+                    renderScope(.editor, t);
+                });
+            });
 
             clay.UI()(.{
                 .layout = .{
