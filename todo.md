@@ -7,10 +7,15 @@ Anzeige-Markdown) und `MarkdownView.renderDocument` (Blöcke ohne Scroll-Contain
 Tool-Calls werden als `json`-Codeblock mit Syntax-Highlighting gerendert, Tool-Ergebnisse
 (system-Rolle) als Codeblock, damit Dateiinhalte nicht als Markdown geparst werden.
 
+### Inline-Styling — umgesetzt (2026-09-05)
+Es gibt nur eine Font-Face, deshalb zeigt die MarkdownView Styles über Farbe:
+fett = primary, kursiv = accent, Codespan = warning, Link = blau, durchgestrichen = muted.
+Umbruch mit Per-Wort-Farben läuft über `src/ui/word_wrap.zig` (gemessene Stücke,
+greedy-Zeilen), Chat und Vorschau nutzen denselben Pfad.
+
 ### Bekannte Grenzen
-- **fett**/*kursiv* werden geparst, aber nicht gestylt (MarkdownView ignoriert TextStyle).
-- Links erscheinen als Text ohne Farbe; Fließtext wird für den Umbruch zu einem Element
-  zusammengefügt.
+- `~~text~~` wird von zigdown als zwei Tilden getoggelt und bleibt ungestylt; `~text~` funktioniert.
+- Echte Fett-/Kursiv-Schnitte bräuchten Font-IDs im Text-Renderer (zweite Face laden).
 - Jede Nachricht parst ihr Markdown pro Frame neu (gleiches Verhalten wie die Vorschau).
 
 ## File-Watcher-Flut — behoben (2026-09-05)
