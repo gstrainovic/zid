@@ -55,6 +55,11 @@ echo -e "open ./README.md\nget-state\nshutdown" | zig build run -- --interactive
   Nur `--interactive` (stdin) wendet Handler direkt an, dort gibt es keinen Loop.
   `open_file`, `split_pane`, `show_context_menu` mutieren noch direkt aus dem Server-Thread.
 - Headless-Screenshot ist 1200x800, Tab-Kopf liegt bei y≈105, Inhalt ab y≈130.
+- Explorer testen: `explorer_entries` liefert Viewport-Bounds, `row_height`, `scroll` und die
+  sichtbaren Zeilen mit Index; Zeilenmitte = `viewport.y + index*row_height + row_height/2 - scroll`.
+  Zeilen außerhalb des Viewports vorher mit `scroll x y lines` (negativ = runter) hereinholen.
+  Rechtsklick auf Zeile öffnet das Menü (Rename/Delete), `key_press` kennt `escape`, `delete`, `f2`.
+  Fixtures unter `tmp/` anlegen (gitignored, im Explorer sichtbar).
 
 ## Bekannte Grenzen (kein Todo, bewusst so)
 

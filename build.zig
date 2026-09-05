@@ -300,6 +300,14 @@ pub fn build(b: *std.Build) void {
     exe_mod.addImport("chat_markdown", chat_markdown_mod);
     const chat_markdown_tests = b.addTest(.{ .root_module = chat_markdown_mod });
 
+    const explorer_ops_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("src/ui/explorer_ops.zig"),
+        .target = target,
+        .optimize = optimize,
+    }) });
+    const run_explorer_ops_tests = b.addRunArtifact(explorer_ops_tests);
+    run_explorer_ops_tests.has_side_effects = true;
+
     const word_wrap_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("src/ui/word_wrap.zig"),
         .target = target,
@@ -319,6 +327,8 @@ pub fn build(b: *std.Build) void {
     const run_ai_worker_tests = b.addRunArtifact(ai_worker_tests);
     run_ai_worker_tests.has_side_effects = true;
     test_step.dependOn(&run_ai_worker_tests.step);
+
+    test_step.dependOn(&run_explorer_ops_tests.step);
 
     const run_word_wrap_tests = b.addRunArtifact(word_wrap_tests);
     run_word_wrap_tests.has_side_effects = true;
