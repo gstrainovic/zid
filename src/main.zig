@@ -6,6 +6,7 @@ const platform = @import("platform/mod.zig");
 const rendering = @import("rendering/mod.zig");
 const text = @import("text/mod.zig");
 const ui = @import("ui/mod.zig");
+const PaneT = @import("ui/pane.zig").Pane;
 const clay_renderer_mod = @import("clay_renderer/mod.zig");
 const image_renderer_mod = @import("clay_renderer/image_renderer.zig");
 const svg = @import("svg/mod.zig");
@@ -681,6 +682,15 @@ pub fn main() !void {
             state_dirty = true;
         }
 
+        // Tab-Wechsel für JEDES Pane abarbeiten, nicht nur das aktive: der Agent öffnet
+        // Dateien im Nachbar-Pane und lässt den Fokus im Chat. Der Block arbeitet über
+        // getActiveTabBar()/getActiveEditor(), deshalb wird active_pane pro Leaf kurz
+        // umgebogen und per defer wiederhergestellt (auch bei `continue`).
+        var switch_leaves_buf: [32]*PaneT = undefined;
+        for (ui_system.leavesWithPendingSwitch(&switch_leaves_buf)) |switch_leaf| {
+        const saved_active_pane = ui_system.active_pane;
+        ui_system.active_pane = switch_leaf;
+        defer ui_system.active_pane = saved_active_pane;
         if (ui_system.getActiveTabBar().pending_switch_path) |path| {
             // Get actual kind from the tab (not from file extension, since terminal tabs have no path)
             const kind = blk: {
@@ -812,6 +822,7 @@ pub fn main() !void {
             ui_system.allocator.free(path);
             ui_system.getActiveTabBar().pending_switch_path = null;
             state_dirty = true;
+        }
         }
 
         // State hat sich geändert (neue Tab / neue Textur) → gleichen Frame neu

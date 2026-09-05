@@ -153,6 +153,7 @@ pub fn createDispatcher(alloc: std.mem.Allocator, ctx: *E2EContext) !*zigjr.RpcD
     try rpc_dispatcher.addWithCtx("get_chat_input", ctx, getChatInput);
     try rpc_dispatcher.addWithCtx("chat_state", ctx, chatState);
     try rpc_dispatcher.addWithCtx("focus_chat", ctx, focusChat);
+    try rpc_dispatcher.addWithCtx("file_text", ctx, fileText);
     try rpc_dispatcher.addWithCtx("get_active_tab", ctx, getActiveTabDebug);
     try rpc_dispatcher.addWithCtx("explorer_open", ctx, explorerOpen);
     try rpc_dispatcher.addWithCtx("explorer_entries", ctx, explorerEntries);
@@ -541,6 +542,20 @@ fn editorState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     try buf.writer.writeAll(", \"text\": ");
     try std.json.Stringify.value(text, .{}, &buf.writer);
     try buf.writer.writeAll("}");
+    return buf.written();
+}
+
+/// Inhalt des offenen Buffers zu `path` (wie ihn der Editor zeigt), oder open=false.
+fn fileText(ctx: *E2EContext, dc: *zigjr.DispatchCtx, path: []const u8) ![]const u8 {
+    var buf = std.Io.Writer.Allocating.init(dc.arena());
+    if (ctx.ui_system.open_buffers.get(path)) |b| {
+        const text = b.store_to_string_cached(b.root, b.file_eol_mode);
+        try buf.writer.writeAll("{\"open\": true, \"text\": ");
+        try std.json.Stringify.value(text, .{}, &buf.writer);
+        try buf.writer.writeAll("}");
+    } else {
+        try buf.writer.writeAll("{\"open\": false}");
+    }
     return buf.written();
 }
 

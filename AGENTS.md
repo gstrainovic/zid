@@ -174,22 +174,35 @@ echo -e "open ./README.md\nget-state\nshutdown" | zig build run -- --interactive
 - **Ausführung** auf dem Main-Thread in `src/ui/agent_actions.zig` (`UI.driveAgentTools` in
   `update()`): `command` → `executeCommand`; Dateien nur innerhalb von `current_directory`
   (`ai_tools.resolveInProject`, `..` und fremde absolute Pfade → `{"error": "outside the project"}`).
-  `open_file` öffnet im anderen Pane, wenn der Chat im aktiven liegt, und macht es aktiv
-  (main.zig lädt Buffer nur für das aktive Pane). Ergebnisse gehen als JSON in `tool`-Nachrichten.
+  Ergebnisse gehen als JSON in `tool`-Nachrichten.
+- **Regeln in Code, nicht im Prompt** (Qwen3-4B hält Prompt-Regeln unzuverlässig ein, siehe
+  replace_text-Umweg). Der Systemprompt nennt nur Rolle und "Pfade relativ zum Projekt".
+  `ai_tools.choosePaneForFile` (unit-getestet) entscheidet für `open_file`: Chat nicht im
+  aktiven Pane → dort öffnen; Chat aktiv und zweites Pane vorhanden → dort; sonst vertikal
+  splitten (Chat oben, Datei unten). Danach geht der Fokus zurück zum Chat-Pane, man kann
+  weiterschreiben. Dafür lädt main.zig Tab-Wechsel jetzt für **alle** Leaves
+  (`UI.leavesWithPendingSwitch`; der Block biegt `active_pane` pro Leaf kurz um), vorher nur
+  für das aktive Pane.
+- `write_file`/`replace_text` auf eine offene Datei laden den Buffer und alle Editoren darauf
+  neu (`UI.reloadFileFromDisk`: `setText`, `setLanguageFromPath`, `last_save = root`, Tabs
+  gelten als gespeichert). Zed/VS Code lösen das Sichtbarkeitsproblem mit einem Chat-Dock
+  neben den Editor-Panes; das bleibt eine Option, der Split reicht vorerst.
 - **Bestätigung** über den normalen Dialog ("AI agent", Allow/Deny): `write_file` auf bestehende
   Datei; `replace_text`, wenn `old` ≥ halbe Datei ist (`replaceCountsAsRewrite`; Qwen umging so
   die write_file-Regel). Antwort wird in `update()` verarbeitet, nie im Dialog-Callback. Deny →
   `{"error":"the user denied this action"}` ans Modell. `close_tab`/`delete_entry` fragen über
   ihre bestehenden Dialoge. Max. 8 Werkzeugrunden pro Frage (`max_tool_rounds`).
 - Anzeige: Assistant-Aufrufe als `🔧 name(args)`, Ergebnisse als `✅/⚠️ name → JSON…`.
-- Bekannte Lücke: Schreibt der Agent in eine Datei, die als Tab offen ist, zeigt der Tab den
-  alten Inhalt (Ergebnis sagt das dem Modell). Kein `run_shell` (bewusst, erst mit Sandbox).
-- RPCs: `focus_chat` (Chat-Tab in irgendeinem Pane aktivieren), `ui_state.pane_count`,
+- Kein `run_shell` (bewusst, erst mit Sandbox). Kein Diff-Review vor dem Schreiben (Zed zeigt
+  Agent-Änderungen erst als Vorschlag); wäre der nächste Schritt nach dem Dock.
+- RPCs: `focus_chat` (Chat-Tab in irgendeinem Pane aktivieren), `file_text(path)` (Inhalt des
+  offenen Buffers), `ui_state.pane_count`,
   `ui_state.all_tabs`, `ui_state.agent_confirm_pending`, `chat_state.tool_rounds/pending_tools`,
   Nachrichten mit `tool_calls`/`tool_call_id`.
-- E2E `python3 scripts/e2e_ai_tools.py`: split per Chat, Datei anlegen+öffnen, lesen, Überschreiben
-  → Dialog → Deny → unverändert, `/etc/hostname` abgelehnt. Messung: command 13–14 s (erste
-  Runde nach Warmup), write+open 7 s, read 3 s, confirm 4 s.
+- E2E `python3 scripts/e2e_ai_tools.py`: Explorer per Chat aus/ein, Datei anlegen+öffnen ohne
+  zweites Pane → Split, Fokus bleibt im Chat, Buffer im Nachbar-Pane geladen; lesen; kleine
+  replace_text-Änderung ohne Dialog mit Tab-Reload; Überschreiben → Dialog → Deny → unverändert;
+  `/etc/hostname` abgelehnt. Messung: erste Runde nach Warmup 13–14 s, danach 3–9 s je Frage.
 
 ## Explorer: Umbenennen/Löschen und offene Tabs
 

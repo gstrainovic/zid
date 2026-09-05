@@ -924,6 +924,63 @@ pub const UI = struct {
         self.ai_chat.handleToolCalls(payload);
     }
 
+    /// Alle Leaf-Panes mit ausstehendem Tab-Wechsel (pending_switch_path). main.zig
+    /// lädt deren Buffer, egal welches Pane aktiv ist.
+    pub fn leavesWithPendingSwitch(self: *Self, buf: []*pane_mod.Pane) []*pane_mod.Pane {
+        var n: usize = 0;
+        collectPendingSwitch(self.root_pane, buf, &n);
+        return buf[0..n];
+    }
+
+    fn collectPendingSwitch(pane: *pane_mod.Pane, buf: []*pane_mod.Pane, n: *usize) void {
+        switch (pane.data) {
+            .leaf => |leaf| {
+                if (leaf.tab_bar.pending_switch_path != null and n.* < buf.len) {
+                    buf[n.*] = pane;
+                    n.* += 1;
+                }
+            },
+            .split => |s| {
+                collectPendingSwitch(s.children[0], buf, n);
+                collectPendingSwitch(s.children[1], buf, n);
+            },
+        }
+    }
+
+    /// Datei wurde außerhalb des Editors neu geschrieben (Agent): offenen Buffer und
+    /// alle Editoren darauf mit `content` neu laden, Tabs gelten als gespeichert.
+    /// false, wenn die Datei nicht offen ist.
+    pub fn reloadFileFromDisk(self: *Self, path: []const u8, content: []const u8) bool {
+        const buf = self.open_buffers.get(path) orelse return false;
+        var via_editor = false;
+        self.reloadInPane(self.root_pane, buf, path, content, &via_editor);
+        if (!via_editor) {
+            buf.root = buf.load_from_string(content, &buf.file_eol_mode, &buf.file_utf8_sanitized) catch return true;
+        }
+        buf.last_save = buf.root;
+        return true;
+    }
+
+    fn reloadInPane(self: *Self, pane: *pane_mod.Pane, buf: *@import("flow_core").Buffer, path: []const u8, content: []const u8, via_editor: *bool) void {
+        switch (pane.data) {
+            .leaf => |*leaf| {
+                if (leaf.code_editor.buffer == buf) {
+                    leaf.code_editor.setText(content);
+                    leaf.code_editor.setLanguageFromPath(path);
+                    leaf.code_editor.is_modified = false;
+                    via_editor.* = true;
+                }
+                for (leaf.tab_bar.tabs.items) |*tab| {
+                    if (std.mem.eql(u8, tab.path, path)) tab.modified = false;
+                }
+            },
+            .split => |s| {
+                self.reloadInPane(s.children[0], buf, path, content, via_editor);
+                self.reloadInPane(s.children[1], buf, path, content, via_editor);
+            },
+        }
+    }
+
     fn currentMods(self: *const Self) shortcuts.Mods {
         return .{ .ctrl = self.is_ctrl_down, .shift = self.is_shift_down, .alt = self.is_alt_down };
     }

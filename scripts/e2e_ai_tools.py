@@ -2,11 +2,13 @@
 """Headless-E2E: der Agent bedient den Editor über Werkzeuge.
 
 Braucht das konfigurierte KI-Backend (Default llama-server + Qwen3-4B). Prüft:
-1. Editor-Kommando per Chat (split_vertical) → Pane-Zahl steigt
-2. Datei anlegen (write_file) → existiert; öffnen (open_file) → Tab aktiv
+1. Editor-Kommando per Chat (toggle_explorer) → Explorer aus und wieder an
+2. Datei anlegen und öffnen ohne zweites Pane → Split entsteht, Datei im neuen Pane,
+   Fokus bleibt im Chat
 3. Datei lesen (read_file) → Antwort nennt den Inhalt
-4. Überschreiben → Bestätigungsdialog; Deny → Datei unverändert, Agent meldet Ablehnung
-5. Pfad außerhalb des Projekts wird abgelehnt
+4. Kleine Änderung (replace_text) → kein Dialog, offener Tab zeigt den neuen Inhalt
+5. Überschreiben → Bestätigungsdialog; Deny → Datei unverändert, Agent meldet Ablehnung
+6. Pfad außerhalb des Projekts wird abgelehnt
 Aufruf: python3 scripts/e2e_ai_tools.py
 """
 import os, subprocess, sys, time
@@ -20,20 +22,25 @@ FIXTURE_REL = "tmp/agent_e2e/hello.py"
 FIXTURE = os.path.join(ROOT, FIXTURE_REL)
 
 
-def tool_names(st):
+def tool_names(msgs):
     names = []
-    for m in st["messages"]:
+    for m in msgs:
         for tc in m.get("tool_calls") or []:
             names.append(tc["function"]["name"])
     return names
 
 
 def ask(text, timeout=180):
-    """Frage senden, auf Ende der Runde warten (inkl. Werkzeugrunden), Zustand liefern."""
+    """Frage senden, auf Ende der Runde warten (inkl. Werkzeugrunden), neue Nachrichten liefern."""
     before = len(chat()["messages"])
     send(text)
     st, dt = wait_for(lambda s: not s["loading"] and not s["pending_tools"] and not ui_state()["agent_confirm_pending"], timeout, f"Antwort auf {text!r}")
     return st, st["messages"][before:], dt
+
+
+def active_kind():
+    s = ui_state()
+    return s["tabs"][s["active_tab"]]["kind"] if s["active_tab"] is not None else None
 
 
 def main():
@@ -47,32 +54,46 @@ def main():
         settle(10)
 
         print("--- 1. Editor-Kommando per Chat")
-        panes = ui_state()["pane_count"]
-        st, new, dt = ask("Teile den Editor vertikal.")
-        check("command" in tool_names({"messages": new}), f"Modell ruft das command-Werkzeug ({dt:.1f}s)")
-        check(ui_state()["pane_count"] == panes + 1, f"Pane-Zahl {panes} → {ui_state()['pane_count']}")
+        st, new, dt = ask("Blende den Datei-Explorer aus.")
+        check("command" in tool_names(new), f"Modell ruft das command-Werkzeug ({dt:.1f}s)")
+        check(not ui_state()["show_file_explorer"], "Explorer ist ausgeblendet")
+        st, new, dt = ask("Blende den Datei-Explorer wieder ein.")
+        check(ui_state()["show_file_explorer"], f"Explorer ist wieder da ({dt:.1f}s)")
         check(new[-1]["role"] == "assistant" and not new[-1].get("tool_calls"), f"Abschließende Antwort: {new[-1]['content'][:70]!r}")
 
-        print("--- 2. Datei anlegen und öffnen")
+        print("--- 2. Datei anlegen und öffnen: Split entsteht, Chat bleibt im Fokus")
+        check(ui_state()["pane_count"] == 1, "Start mit einem Pane")
         st, new, dt = ask(f"Erstelle die Datei {FIXTURE_REL} mit einem Python-Programm, das nach dem Namen fragt und dann 'Hallo, <name>!' ausgibt. Öffne sie danach im Editor.")
-        names = tool_names({"messages": new})
-        check("write_file" in names, f"write_file aufgerufen ({names}, {dt:.1f}s)")
+        names = tool_names(new)
+        check("write_file" in names and "open_file" in names, f"write_file + open_file aufgerufen ({names}, {dt:.1f}s)")
         check(os.path.exists(FIXTURE), "Datei existiert auf der Platte")
         content = open(FIXTURE).read() if os.path.exists(FIXTURE) else ""
         check("input(" in content and "print(" in content, f"Inhalt ist ein Python-Programm ({len(content)} Zeichen)")
         s = ui_state()
+        check(s["pane_count"] == 2, f"Editor wurde automatisch geteilt ({s['pane_count']} Panes)")
         check(any(p.endswith("hello.py") for p in s["all_tabs"]), "Datei ist als Tab geöffnet")
-        check(s["tabs"][s["active_tab"]]["path"].endswith("hello.py"), "Datei-Tab liegt im anderen Pane und ist dort aktiv")
+        check(active_kind() == "chat", f"Fokus bleibt im Chat (aktiver Tab: {active_kind()})")
+        ft = result_json("file_text", [FIXTURE])
+        check(ft["open"] and ft["text"].strip() == content.strip(), "Buffer im Nachbar-Pane ist geladen (ohne Fokuswechsel)")
         shot("e2e_ai_tools_write.ppm")
 
         print("--- 3. Datei lesen")
         st, new, dt = ask(f"Lies {FIXTURE_REL} und nenne mir nur die erste Zeile, sonst nichts.")
-        check("read_file" in tool_names({"messages": new}), f"read_file aufgerufen ({dt:.1f}s)")
+        check("read_file" in tool_names(new), f"read_file aufgerufen ({dt:.1f}s)")
         first_line = content.splitlines()[0].strip() if content else ""
-        answer = new[-1]["content"]
-        check(first_line[:12] in answer, f"Antwort enthält die erste Zeile: {answer[:80]!r}")
+        check(first_line[:12] in new[-1]["content"], f"Antwort enthält die erste Zeile: {new[-1]['content'][:80]!r}")
 
-        print("--- 4. Überschreiben braucht Bestätigung; Deny lässt die Datei in Ruhe")
+        print("--- 4. Kleine Änderung: kein Dialog, offener Tab lädt neu")
+        st, new, dt = ask(f"Ersetze in {FIXTURE_REL} das Wort Hallo durch Servus. Nutze replace_text mit old='Hallo' und new='Servus'.")
+        check("replace_text" in tool_names(new), f"replace_text aufgerufen ({dt:.1f}s)")
+        check(not ui_state()["agent_confirm_pending"], "Kein Bestätigungsdialog für eine kleine Änderung")
+        content = open(FIXTURE).read()
+        check("Servus" in content, "Datei enthält die Änderung")
+        ft = result_json("file_text", [FIXTURE])
+        check(ft["open"] and "Servus" in ft["text"], "Offener Tab zeigt den neuen Inhalt")
+        check(not any(t["path"].endswith("hello.py") and t["modified"] for t in ui_state()["tabs"]), "Tab gilt nicht als ungespeichert")
+
+        print("--- 5. Überschreiben braucht Bestätigung; Deny lässt die Datei in Ruhe")
         before_content = content
         send(f"Überschreibe {FIXTURE_REL} mit genau einer Zeile: print('ersetzt')")
         st, dt = wait_for(lambda s: ui_state()["agent_confirm_pending"] or (not s["loading"] and not s["pending_tools"]), 120, "Bestätigungsdialog")
@@ -85,11 +106,10 @@ def main():
         last_tool = [m for m in st["messages"] if m["role"] == "tool"][-1]
         check("denied" in last_tool["content"], f"Werkzeugergebnis meldet Ablehnung: {last_tool['content'][:60]!r}")
 
-        print("--- 5. Pfad außerhalb des Projekts")
+        print("--- 6. Pfad außerhalb des Projekts")
         st, new, dt = ask("Lies die Datei /etc/hostname und sag mir den Inhalt.")
         tools_msgs = [m for m in new if m["role"] == "tool"]
         check(tools_msgs and all("outside the project" in m["content"] for m in tools_msgs), f"Zugriff abgelehnt ({dt:.1f}s)")
-        check(not any("hostname" in m["content"] and "outside" not in m["content"] for m in tools_msgs), "Kein Dateiinhalt durchgereicht")
         shot("e2e_ai_tools_done.ppm")
         print("ALL PASSED")
     finally:

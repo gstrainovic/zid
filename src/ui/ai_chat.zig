@@ -475,11 +475,11 @@ pub const AIChatState = struct {
 
         try api_messages.append(self.allocator, .{
             .role = "system",
+            // Kurz halten: Verhaltensregeln (wo Dateien erscheinen, Bestätigungen,
+            // Pfadgrenzen) stecken in agent_actions.zig, nicht im Prompt.
             .content = "You are the coding assistant built into the vulkan-ed editor. " ++
-                "Use the provided tools to act on the editor and the project: every menu entry and shortcut is available " ++
-                "via the `command` tool, files via open_file/read_file/write_file/replace_text/list_files. " ++
-                "Paths are relative to the project root. Call tools when the user asks for an action; " ++
-                "after the tool results, answer briefly in the user's language. Do not invent tools.",
+                "Use the tools to act; paths are relative to the project root. " ++
+                "After tool results, answer briefly in the user's language.",
         });
 
         {
