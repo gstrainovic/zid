@@ -10,6 +10,7 @@ const textarea_mod = @import("components/mod.zig");
 const chat_markdown = @import("chat_markdown");
 const MarkdownView = @import("markdown_view.zig").MarkdownView;
 const ui_mod = @import("mod.zig");
+const ai_tools = @import("ai_tools");
 
 const log = std.log.scoped(.ai_chat);
 
@@ -21,7 +22,14 @@ pub const ChatMessage = struct {
     content: []const u8,
     /// Anzeige-Markdown (Tool-Calls als Codeblock) mit eigenem Renderer.
     md: MarkdownView,
+    /// Assistant: rohes OpenAI-tool_calls-Array (owned), geht unverändert zurück
+    tool_calls_json: ?[]u8 = null,
+    /// role = "tool": beantworteter Aufruf (owned)
+    tool_call_id: ?[]u8 = null,
 };
+
+/// Mehr Runden hintereinander deuten auf eine Schleife des Modells hin.
+pub const max_tool_rounds: u32 = 8;
 
 const message_font_size: u16 = 16;
 const message_text_color: clay.Color = .{ 240, 240, 240, 255 };
@@ -46,6 +54,14 @@ pub const AIChatState = struct {
     stream_dirty: bool = false,
     /// Escape setzt das Flag; der Worker beendet den Stream
     cancel_flag: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+    /// OpenAI-`tools`-Array aus ai_tools.toolsJson (owned)
+    tools_json: []u8 = "",
+    /// Vom Modell angeforderte, noch nicht ausgeführte Aufrufe (UI.update arbeitet sie ab)
+    pending_tools: std.ArrayListUnmanaged(ai_tools.ToolCall) = .empty,
+    /// Aufrufe, deren Ergebnis noch fehlt; bei 0 geht die Runde ans Modell zurück
+    awaiting_tool_results: usize = 0,
+    /// Werkzeugrunden seit der letzten Benutzerfrage
+    tool_rounds: u32 = 0,
 
     is_loading: bool = false,
     is_downloading: bool = false,
@@ -110,6 +126,7 @@ pub const AIChatState = struct {
             .model_exists = exists,
         };
         state.input_textarea.is_textarea = true;
+        state.tools_json = ai_tools.toolsJson(allocator) catch "";
         // Buffer.create liefert einen Root ohne Zeilenanfang (keine Zeile 0).
         // Erst load_from_string("") via setText macht den Puffer beschreibbar,
         // sonst verwirft der Rope-Walker jedes Zeichen nach dem ersten.
@@ -132,8 +149,13 @@ pub const AIChatState = struct {
             msg.md.deinit();
             self.allocator.free(msg.content);
             self.allocator.free(msg.role);
+            if (msg.tool_calls_json) |t| self.allocator.free(t);
+            if (msg.tool_call_id) |t| self.allocator.free(t);
         }
         self.messages.deinit(self.allocator);
+        for (self.pending_tools.items) |c| c.deinit(self.allocator);
+        self.pending_tools.deinit(self.allocator);
+        if (self.tools_json.len > 0) self.allocator.free(self.tools_json);
         self.input_textarea.deinit();
         self.input_buffer.deinit();
         if (self.agent) |a| a.deinit();
@@ -303,12 +325,23 @@ pub const AIChatState = struct {
     }
 
     pub fn addMessage(self: *Self, role: []const u8, content: []const u8) !void {
+        return self.addMessageFull(role, content, null, null, null);
+    }
+
+    /// `display` überschreibt die Anzeige (Markdown); null = aus dem Inhalt ableiten.
+    fn addMessageFull(self: *Self, role: []const u8, content: []const u8, tool_calls_json: ?[]const u8, tool_call_id: ?[]const u8, display_override: ?[]const u8) !void {
         const dupe_role = try self.allocator.dupe(u8, role);
         errdefer self.allocator.free(dupe_role);
         const dupe_content = try self.allocator.dupe(u8, content);
         errdefer self.allocator.free(dupe_content);
+        const dupe_tc: ?[]u8 = if (tool_calls_json) |t| try self.allocator.dupe(u8, t) else null;
+        errdefer if (dupe_tc) |t| self.allocator.free(t);
+        const dupe_id: ?[]u8 = if (tool_call_id) |t| try self.allocator.dupe(u8, t) else null;
+        errdefer if (dupe_id) |t| self.allocator.free(t);
 
-        const display = if (std.mem.eql(u8, role, "system"))
+        const display = if (display_override) |d|
+            try self.allocator.dupe(u8, d)
+        else if (std.mem.eql(u8, role, "system"))
             try chat_markdown.wrapToolResult(self.allocator, content)
         else
             try chat_markdown.toDisplayMarkdown(self.allocator, content);
@@ -326,8 +359,83 @@ pub const AIChatState = struct {
             .role = dupe_role,
             .content = dupe_content,
             .md = md,
+            .tool_calls_json = dupe_tc,
+            .tool_call_id = dupe_id,
         });
         self.scroll_offset_y = 999999;
+    }
+
+    // ─── Werkzeuge ───────────────────────────────────────────────────────────
+
+    /// Worker-Ergebnis ai_chat_tool_calls: Assistant-Nachricht anlegen und die
+    /// Aufrufe für UI.update bereitstellen. Ausgeführt wird auf dem Main-Thread.
+    pub fn handleToolCalls(self: *Self, payload: []const u8) void {
+        self.clearStream();
+        const env = ai_tools.parseEnvelope(self.allocator, payload) catch |err| {
+            log.err("tool_calls envelope invalid: {}", .{err});
+            self.addMessage("assistant", "The model returned an unreadable tool call.") catch {};
+            self.is_loading = false;
+            return;
+        };
+        defer self.allocator.free(env.content);
+        defer self.allocator.free(env.tool_calls_json);
+        defer self.allocator.free(env.calls);
+
+        // Anzeige: Text (falls vorhanden) + Liste der Aufrufe
+        var display: std.ArrayListUnmanaged(u8) = .empty;
+        defer display.deinit(self.allocator);
+        if (env.content.len > 0) {
+            display.appendSlice(self.allocator, env.content) catch {};
+            display.appendSlice(self.allocator, "\n\n") catch {};
+        }
+        for (env.calls) |c| {
+            const summary = ai_tools.summarizeCall(self.allocator, c) catch continue;
+            defer self.allocator.free(summary);
+            display.appendSlice(self.allocator, "🔧 `") catch {};
+            display.appendSlice(self.allocator, summary) catch {};
+            display.appendSlice(self.allocator, "`\n") catch {};
+        }
+        self.addMessageFull("assistant", env.content, env.tool_calls_json, null, display.items) catch {};
+
+        self.tool_rounds += 1;
+        if (self.tool_rounds > max_tool_rounds) {
+            for (env.calls) |c| {
+                self.addMessageFull("tool", "{\"error\":\"tool round limit reached; answer the user without further tools\"}", null, c.id, "⛔ tool round limit reached") catch {};
+                c.deinit(self.allocator);
+            }
+            self.addMessage("assistant", "(Werkzeug-Limit erreicht, ich höre hier auf.)") catch {};
+            self.is_loading = false;
+            return;
+        }
+        for (env.calls) |c| self.pending_tools.append(self.allocator, c) catch c.deinit(self.allocator);
+        self.awaiting_tool_results = env.calls.len;
+        if (env.calls.len == 0) {
+            self.is_loading = false;
+        }
+    }
+
+    /// Nächsten offenen Aufruf entnehmen (Eigentum geht an den Aufrufer).
+    pub fn takePendingToolCall(self: *Self) ?ai_tools.ToolCall {
+        if (self.pending_tools.items.len == 0) return null;
+        return self.pending_tools.orderedRemove(0);
+    }
+
+    /// Ergebnis eines Aufrufs eintragen; ist die Runde komplett, geht sie ans Modell.
+    pub fn pushToolResult(self: *Self, call: *const ai_tools.ToolCall, result_json: []const u8) void {
+        const ok = std.mem.indexOf(u8, result_json, "\"error\"") == null;
+        var disp_buf: [512]u8 = undefined;
+        const preview = result_json[0..@min(result_json.len, 300)];
+        const display = std.fmt.bufPrint(&disp_buf, "{s} **{s}** → `{s}{s}`", .{
+            if (ok) "✅" else "⚠️", call.name, preview, if (result_json.len > 300) "…" else "",
+        }) catch result_json;
+        self.addMessageFull("tool", result_json, null, call.id, display) catch {};
+        if (self.awaiting_tool_results > 0) self.awaiting_tool_results -= 1;
+        if (self.awaiting_tool_results == 0 and self.pending_tools.items.len == 0) {
+            self.submitCompletion() catch |err| {
+                log.err("submitCompletion after tools failed: {}", .{err});
+                self.is_loading = false;
+            };
+        }
     }
 
     pub fn sendMessage(self: *Self) !void {
@@ -348,6 +456,7 @@ pub const AIChatState = struct {
             return;
         }
 
+        self.tool_rounds = 0;
         self.is_loading = true;
         self.submitCompletion() catch |err| {
             self.is_loading = false;
@@ -366,23 +475,25 @@ pub const AIChatState = struct {
 
         try api_messages.append(self.allocator, .{
             .role = "system",
-            .content = "You are the coding assistant built into the vulkan-ed editor. You can use tools by outputting a JSON block. " ++
-                "To read a file, output exactly: {\"tool\": \"read_file\", \"path\": \"<file_path>\"}. " ++
-                "To replace text in a file, output: {\"tool\": \"replace_text\", \"path\": \"<file_path>\", \"old\": \"<exact_old_text>\", \"new\": \"<new_text>\"}. " ++
-                "Only output the JSON block when using a tool. Otherwise, chat normally.",
+            .content = "You are the coding assistant built into the vulkan-ed editor. " ++
+                "Use the provided tools to act on the editor and the project: every menu entry and shortcut is available " ++
+                "via the `command` tool, files via open_file/read_file/write_file/replace_text/list_files. " ++
+                "Paths are relative to the project root. Call tools when the user asks for an action; " ++
+                "after the tool results, answer briefly in the user's language. Do not invent tools.",
         });
 
         {
             self.mutex.lock();
             defer self.mutex.unlock();
             for (self.messages.items) |m| {
-                try api_messages.append(self.allocator, .{ .role = m.role, .content = m.content });
+                try api_messages.append(self.allocator, .{ .role = m.role, .content = m.content, .tool_calls = m.tool_calls_json, .tool_call_id = m.tool_call_id });
             }
         }
 
         self.cancel_flag.store(false, .release);
         self.clearStream();
-        const params = try ai_worker.ChatParams.initStreaming(self.allocator, a, api_messages.items, sched, &sched.should_stop, &self.cancel_flag);
+        const tools: ?[]const u8 = if (self.tools_json.len > 0) self.tools_json else null;
+        const params = try ai_worker.ChatParams.initStreaming(self.allocator, a, api_messages.items, sched, &sched.should_stop, &self.cancel_flag, tools);
         if (!sched.submit(.{ .func = ai_worker.taskChatCompletion, .data = params })) {
             params.deinit();
             self.is_loading = false;
@@ -392,17 +503,8 @@ pub const AIChatState = struct {
 
     pub fn handleReply(self: *Self, payload: []const u8) void {
         self.clearStream();
-        const tool_executed = self.tryExecuteToolCall(payload);
-        if (tool_executed) {
-            self.submitCompletion() catch |err| {
-                log.err("submitCompletion failed after tool: {}", .{err});
-                self.addMessage("assistant", "Error continuing after tool call.") catch {};
-                self.is_loading = false;
-            };
-        } else {
-            self.addMessage("assistant", payload) catch {};
-            self.is_loading = false;
-        }
+        self.addMessage("assistant", payload) catch {};
+        self.is_loading = false;
     }
 
     pub fn handleError(self: *Self, payload: []const u8) void {
@@ -410,67 +512,6 @@ pub const AIChatState = struct {
         self.clearStream();
         self.addMessage("assistant", "Error communicating with AI agent.") catch {};
         self.is_loading = false;
-    }
-
-    fn tryExecuteToolCall(self: *Self, response: []const u8) bool {
-        const json_str = chat_markdown.findToolCall(response) orelse return false;
-        var parsed = std.json.parseFromSlice(std.json.Value, self.allocator, json_str, .{ .ignore_unknown_fields = true }) catch return false;
-        defer parsed.deinit();
-        if (parsed.value != .object) return false;
-
-        const tool_val = parsed.value.object.get("tool") orelse return false;
-        if (tool_val != .string) return false;
-
-        if (std.mem.eql(u8, tool_val.string, "read_file")) {
-            const path_val = parsed.value.object.get("path") orelse return false;
-            if (path_val != .string) return false;
-            const path = path_val.string;
-
-            self.addMessage("assistant", response) catch {};
-
-            if (std.fs.cwd().readFileAlloc(self.allocator, path, 10 * 1024 * 1024)) |content| {
-                defer self.allocator.free(content);
-                var sys_msg: std.ArrayListUnmanaged(u8) = .empty;
-                defer sys_msg.deinit(self.allocator);
-                std.fmt.format(sys_msg.writer(self.allocator), "Tool read_file result for '{s}':\n{s}", .{ path, content }) catch {};
-                self.addMessage("system", sys_msg.items) catch {};
-            } else |_| {
-                self.addMessage("system", "Tool error: File not found or cannot be read.") catch {};
-            }
-            return true;
-        } else if (std.mem.eql(u8, tool_val.string, "replace_text")) {
-            const path_val = parsed.value.object.get("path") orelse return false;
-            const old_val = parsed.value.object.get("old") orelse return false;
-            const new_val = parsed.value.object.get("new") orelse return false;
-            if (path_val != .string or old_val != .string or new_val != .string) return false;
-
-            const path = path_val.string;
-            const old_str = old_val.string;
-            const new_str = new_val.string;
-
-            self.addMessage("assistant", response) catch {};
-
-            if (std.fs.cwd().readFileAlloc(self.allocator, path, 10 * 1024 * 1024)) |content| {
-                defer self.allocator.free(content);
-                if (std.mem.indexOf(u8, content, old_str)) |replace_idx| {
-                    var new_content: std.ArrayListUnmanaged(u8) = .empty;
-                    defer new_content.deinit(self.allocator);
-                    new_content.appendSlice(self.allocator, content[0..replace_idx]) catch {};
-                    new_content.appendSlice(self.allocator, new_str) catch {};
-                    new_content.appendSlice(self.allocator, content[replace_idx + old_str.len ..]) catch {};
-
-                    std.fs.cwd().writeFile(.{ .sub_path = path, .data = new_content.items }) catch {};
-                    self.addMessage("system", "Tool replace_text success.") catch {};
-                } else {
-                    self.addMessage("system", "Tool error: Old text not found in file.") catch {};
-                }
-            } else |_| {
-                self.addMessage("system", "Tool error: File not found.") catch {};
-            }
-            return true;
-        }
-
-        return false;
     }
 
     pub fn triggerDownload(self: *Self) !void {
@@ -776,8 +817,9 @@ pub fn renderAIChat(
                             .background_color = bg,
                             .corner_radius = .all(4),
                         })({
+                            const is_tool = std.mem.eql(u8, msg.role, "tool");
                             clay.text(
-                                if (is_user) "You:" else if (show_copied) "AI (Copied!):" else "AI:",
+                                if (is_user) "You:" else if (is_tool) "Tool:" else if (show_copied) "AI (Copied!):" else "AI:",
                                 .{ .font_size = 12, .color = if (is_user) .{ 180, 180, 255, 255 } else if (show_copied) theme.primary else .{ 150, 230, 150, 255 } },
                             );
                             msg.md.renderDocument(arena, theme, ui_ptr);

@@ -416,6 +416,7 @@ pub fn main() !void {
                     .ai_chat_error => ui_system.handleAIError(result.payload),
                     .ai_chat_delta => ui_system.handleAIDelta(result.payload),
                     .ai_chat_cancelled => ui_system.handleAICancelled(result.payload),
+                    .ai_chat_tool_calls => ui_system.handleAIToolCalls(result.payload),
                     .ai_warmup_done => ui_system.handleAIWarmupDone(),
                     .ai_warmup_error => ui_system.handleAIWarmupError(result.payload),
                     .ai_download_done => ui_system.handleAIDownloadDone(),

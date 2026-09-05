@@ -23,6 +23,8 @@ const dialog_mod = @import("dialog.zig");
 const folder_picker_mod = @import("folder_picker.zig");
 const shortcuts = @import("shortcuts");
 const shortcuts_dialog = @import("shortcuts_dialog.zig");
+const ai_tools = @import("ai_tools");
+const agent_actions = @import("agent_actions.zig");
 const ai_chat_mod = @import("ai_chat.zig");
 const agent_mod = @import("agent");
 const textarea_mod = @import("components/textarea.zig");
@@ -102,6 +104,10 @@ pub const UI = struct {
     open_menu: ?usize = null,
     /// Help → Keyboard Shortcuts offen
     shortcuts_dialog_open: bool = false,
+    /// Agent-Aufruf, der auf die Antwort des Bestätigungsdialogs wartet
+    agent_confirm: ?ai_tools.ToolCall = null,
+    /// Antwort des Dialogs (true = erlaubt), wird in update() verarbeitet
+    agent_confirm_answer: ?bool = null,
     /// Letzter Klick war im Explorer: F2/Entf gelten für den markierten Eintrag
     explorer_focused: bool = false,
     /// "Open Folder…"-Dialog
@@ -312,6 +318,7 @@ pub const UI = struct {
 
         if (self.current_directory) |dir| self.allocator.free(dir);
         if (self.pending_open_folder) |p| self.allocator.free(p);
+        if (self.agent_confirm) |c| c.deinit(self.allocator);
         self.folder_picker.deinit();
         if (self.git_branch.len > 0) self.allocator.free(self.git_branch);
         self.pending_tab_closes.deinit(self.allocator);
@@ -851,9 +858,70 @@ pub const UI = struct {
             if (self.pending_open_folder) |old| self.allocator.free(old);
             self.pending_open_folder = path;
         }
+        self.driveAgentTools();
         self.anim_manager.update(delta_ms);
         self.getActiveEditor().time_ms += delta_ms;
         self.ai_chat.updateTimeMs(delta_ms);
+    }
+
+    /// Werkzeugaufrufe des Agenten auf dem Main-Thread ausführen. Bestätigungs-
+    /// pflichtige Aufrufe halten die Runde an, bis der Dialog beantwortet ist.
+    fn driveAgentTools(self: *Self) void {
+        if (self.agent_confirm) |*call| {
+            const answer = self.agent_confirm_answer orelse return; // Dialog offen
+            self.agent_confirm_answer = null;
+            if (answer) {
+                switch (agent_actions.execute(self, self.allocator, call, true)) {
+                    .done => |res| {
+                        defer self.allocator.free(res);
+                        self.ai_chat.pushToolResult(call, res);
+                    },
+                    .needs_confirm => |msg| {
+                        self.allocator.free(msg);
+                        self.ai_chat.pushToolResult(call, "{\"error\":\"still requires confirmation\"}");
+                    },
+                }
+            } else {
+                self.ai_chat.pushToolResult(call, "{\"error\":\"the user denied this action\"}");
+            }
+            call.deinit(self.allocator);
+            self.agent_confirm = null;
+        }
+        while (self.ai_chat.takePendingToolCall()) |call| {
+            switch (agent_actions.execute(self, self.allocator, &call, false)) {
+                .done => |res| {
+                    defer self.allocator.free(res);
+                    self.ai_chat.pushToolResult(&call, res);
+                    call.deinit(self.allocator);
+                },
+                .needs_confirm => |msg| {
+                    self.agent_confirm = call;
+                    self.agent_confirm_answer = null;
+                    self.active_dialog = .{
+                        .dialog = .{
+                            .title = "AI agent",
+                            .message = msg,
+                            .actions = &.{
+                                .{ .label = "Allow", .result = .yes },
+                                .{ .label = "Deny", .result = .cancel },
+                            },
+                        },
+                        .callback = handleAgentConfirm,
+                        .message_needs_free = true,
+                    };
+                    return;
+                },
+            }
+        }
+    }
+
+    fn handleAgentConfirm(ui: *UI, res: dialog_mod.DialogResult, _: usize, _: ?*anyopaque) void {
+        // Nicht hier ausführen (Render-Commands dieses Frames leben noch): update() macht weiter
+        ui.agent_confirm_answer = (res == .yes);
+    }
+
+    pub fn handleAIToolCalls(self: *Self, payload: []const u8) void {
+        self.ai_chat.handleToolCalls(payload);
     }
 
     fn currentMods(self: *const Self) shortcuts.Mods {

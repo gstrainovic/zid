@@ -215,7 +215,63 @@ pub const LlamaAgent = struct {
     pub const ChatMessage = struct {
         role: []const u8,
         content: []const u8,
+        /// Assistant: rohes OpenAI-`tool_calls`-Array (JSON), geht unverändert zurück
+        tool_calls: ?[]const u8 = null,
+        /// role = "tool": ID des beantworteten Aufrufs
+        tool_call_id: ?[]const u8 = null,
+
+        /// Optionale Felder nur schreiben, wenn gesetzt: `"tool_calls": null`
+        /// bringt das Jinja-Template mancher Modelle durcheinander.
+        pub fn jsonStringify(self: ChatMessage, jw: anytype) !void {
+            try jw.beginObject();
+            try jw.objectField("role");
+            try jw.write(self.role);
+            try jw.objectField("content");
+            try jw.write(self.content);
+            if (self.tool_calls) |tc| {
+                try jw.objectField("tool_calls");
+                try jw.beginWriteRaw();
+                try jw.writer.writeAll(tc);
+                jw.endWriteRaw();
+            }
+            if (self.tool_call_id) |id| {
+                try jw.objectField("tool_call_id");
+                try jw.write(id);
+            }
+            try jw.endObject();
+        }
     };
+
+    /// Request-Body für /v1/chat/completions. `tools` ist ein fertiges JSON-Array
+    /// (ai_tools.toolsJson) und wird roh eingefügt.
+    fn buildPayload(self: *Self, messages: []const ChatMessage, stream: bool, tools: ?[]const u8, max_tokens: ?u32) ![]u8 {
+        var out: std.Io.Writer.Allocating = .init(self.allocator);
+        errdefer out.deinit();
+        var jw: std.json.Stringify = .{ .writer = &out.writer, .options = .{} };
+        try jw.beginObject();
+        try jw.objectField("model");
+        try jw.write(self.model_path);
+        try jw.objectField("messages");
+        try jw.write(messages);
+        try jw.objectField("temperature");
+        try jw.write(0.7);
+        if (stream) {
+            try jw.objectField("stream");
+            try jw.write(true);
+        }
+        if (max_tokens) |mt| {
+            try jw.objectField("max_tokens");
+            try jw.write(mt);
+        }
+        if (tools) |t| {
+            try jw.objectField("tools");
+            try jw.beginWriteRaw();
+            try jw.writer.writeAll(t);
+            jw.endWriteRaw();
+        }
+        try jw.endObject();
+        return out.toOwnedSlice();
+    }
 
     /// Sends a chat completion request to the local llama-server with retries
     /// Returns error if should_stop is set OR connection fails after max_attempts.
@@ -236,19 +292,7 @@ pub const LlamaAgent = struct {
         defer client.deinit();
         var uri_buf: [128]u8 = undefined;
         const uri_str = try std.fmt.bufPrint(&uri_buf, "http://127.0.0.1:{d}/v1/chat/completions", .{self.server_port});
-        const json_payload = if (max_tokens) |mt|
-            try std.json.Stringify.valueAlloc(self.allocator, .{
-                .model = self.model_path,
-                .messages = messages,
-                .temperature = 0.7,
-                .max_tokens = mt,
-            }, .{})
-        else
-            try std.json.Stringify.valueAlloc(self.allocator, .{
-                .model = self.model_path,
-                .messages = messages,
-                .temperature = 0.7,
-            }, .{});
+        const json_payload = try self.buildPayload(messages, false, null, max_tokens);
         defer self.allocator.free(json_payload);
 
         // Retry loop (Wait for server to be ready)
@@ -312,25 +356,40 @@ pub const LlamaAgent = struct {
     /// Gestreamte Chat-Completion (SSE, `stream: true`): jedes Textstück geht an
     /// `sink`, sobald es ankommt. `cancel` (Escape) und `should_stop` (Shutdown)
     /// beenden den Stream mit error.Cancelled; der Aufrufer hat den Teiltext.
+    /// Teil-Aufruf während des Streamings (Deltas werden je Index zusammengesetzt)
+    const PartialCall = struct {
+        id: std.ArrayListUnmanaged(u8) = .empty,
+        name: std.ArrayListUnmanaged(u8) = .empty,
+        args: std.ArrayListUnmanaged(u8) = .empty,
+    };
+
+    /// Gestreamte Chat-Completion. Textstücke gehen an `sink`; will das Modell
+    /// Werkzeuge, kommt am Ende das komplette OpenAI-`tool_calls`-Array als JSON
+    /// zurück (owned), sonst null.
     pub fn streamChatCompletion(
         self: *Self,
         messages: []const ChatMessage,
+        tools: ?[]const u8,
         should_stop: ?*const std.atomic.Value(bool),
         cancel: ?*const std.atomic.Value(bool),
         sink: DeltaSink,
-    ) !void {
+    ) !?[]u8 {
+        var calls: std.ArrayListUnmanaged(PartialCall) = .empty;
+        defer {
+            for (calls.items) |*c| {
+                c.id.deinit(self.allocator);
+                c.name.deinit(self.allocator);
+                c.args.deinit(self.allocator);
+            }
+            calls.deinit(self.allocator);
+        }
         var client = std.http.Client{ .allocator = self.allocator };
         defer client.deinit();
         var uri_buf: [128]u8 = undefined;
         const uri_str = try std.fmt.bufPrint(&uri_buf, "http://127.0.0.1:{d}/v1/chat/completions", .{self.server_port});
         const uri = try std.Uri.parse(uri_str);
 
-        const json_payload = try std.json.Stringify.valueAlloc(self.allocator, .{
-            .model = self.model_path,
-            .messages = messages,
-            .temperature = 0.7,
-            .stream = true,
-        }, .{});
+        const json_payload = try self.buildPayload(messages, true, tools, null);
         defer self.allocator.free(json_payload);
 
         var attempt: u32 = 0;
@@ -363,23 +422,68 @@ pub const LlamaAgent = struct {
             while (true) {
                 if (isSet(should_stop) or isSet(cancel)) return error.Cancelled;
                 // null = Stream zu Ende (EndOfStream kommt hier als null, nicht als Fehler)
-                const line = (try reader.takeDelimiter('\n')) orelse return;
+                const line = (try reader.takeDelimiter('\n')) orelse return try self.finishToolCalls(&calls);
                 const trimmed = std.mem.trim(u8, line, " \r");
                 if (!std.mem.startsWith(u8, trimmed, "data:")) continue;
                 const data = std.mem.trim(u8, trimmed["data:".len..], " ");
-                if (std.mem.eql(u8, data, "[DONE]")) return;
+                if (std.mem.eql(u8, data, "[DONE]")) return try self.finishToolCalls(&calls);
                 const parsed = std.json.parseFromSlice(std.json.Value, self.allocator, data, .{ .ignore_unknown_fields = true }) catch continue;
                 defer parsed.deinit();
                 const choices = parsed.value.object.get("choices") orelse continue;
                 if (choices != .array or choices.array.items.len == 0) continue;
                 const delta = choices.array.items[0].object.get("delta") orelse continue;
                 if (delta != .object) continue;
+                if (delta.object.get("tool_calls")) |tcs| {
+                    if (tcs == .array) try self.accumulateToolCalls(&calls, tcs.array.items);
+                }
                 const content = delta.object.get("content") orelse continue;
                 if (content != .string or content.string.len == 0) continue;
                 sink.on_delta(sink.ctx, content.string);
             }
         }
         return error.ConnectionRefused;
+    }
+
+    fn accumulateToolCalls(self: *Self, calls: *std.ArrayListUnmanaged(PartialCall), items: []const std.json.Value) !void {
+        for (items) |item| {
+            if (item != .object) continue;
+            const idx_v = item.object.get("index");
+            const idx: usize = if (idx_v != null and idx_v.? == .integer and idx_v.?.integer >= 0) @intCast(idx_v.?.integer) else calls.items.len;
+            while (calls.items.len <= idx) try calls.append(self.allocator, .{});
+            const c = &calls.items[idx];
+            if (item.object.get("id")) |id| if (id == .string) try c.id.appendSlice(self.allocator, id.string);
+            if (item.object.get("function")) |f| if (f == .object) {
+                if (f.object.get("name")) |n| if (n == .string) try c.name.appendSlice(self.allocator, n.string);
+                if (f.object.get("arguments")) |a| if (a == .string) try c.args.appendSlice(self.allocator, a.string);
+            };
+        }
+    }
+
+    /// OpenAI-Form: [{"id","type":"function","function":{"name","arguments"}}]
+    fn finishToolCalls(self: *Self, calls: *std.ArrayListUnmanaged(PartialCall)) !?[]u8 {
+        if (calls.items.len == 0) return null;
+        var out: std.Io.Writer.Allocating = .init(self.allocator);
+        errdefer out.deinit();
+        var jw: std.json.Stringify = .{ .writer = &out.writer, .options = .{} };
+        try jw.beginArray();
+        for (calls.items, 0..) |c, i| {
+            if (c.name.items.len == 0) continue;
+            try jw.beginObject();
+            try jw.objectField("id");
+            if (c.id.items.len > 0) try jw.write(c.id.items) else try jw.print("\"call_{d}\"", .{i});
+            try jw.objectField("type");
+            try jw.write("function");
+            try jw.objectField("function");
+            try jw.beginObject();
+            try jw.objectField("name");
+            try jw.write(c.name.items);
+            try jw.objectField("arguments");
+            try jw.write(if (c.args.items.len > 0) c.args.items else "{}");
+            try jw.endObject();
+            try jw.endObject();
+        }
+        try jw.endArray();
+        return try out.toOwnedSlice();
     }
 
     fn isSet(flag: ?*const std.atomic.Value(bool)) bool {

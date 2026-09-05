@@ -1377,6 +1377,18 @@ pub const CodeEditor = struct {
         self.findStep(forward, false);
     }
 
+    /// Suchleiste mit vorgegebenem Begriff öffnen und zum ersten Treffer springen
+    /// (Agent-Werkzeug find_in_editor).
+    pub fn findText(self: *Self, query: []const u8) void {
+        self.openFind();
+        const n = @min(query.len, self.find.query.len);
+        @memcpy(self.find.query[0..n], query[0..n]);
+        self.find.len = n;
+        self.find.last_match = null;
+        self.find.not_found = false;
+        if (n > 0) self.findStep(true, true);
+    }
+
     fn handleFindKey(self: *Self, key: wio.Button) void {
         switch (key) {
             .escape => self.closeFind(),

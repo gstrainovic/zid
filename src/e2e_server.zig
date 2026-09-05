@@ -152,6 +152,7 @@ pub fn createDispatcher(alloc: std.mem.Allocator, ctx: *E2EContext) !*zigjr.RpcD
     try rpc_dispatcher.addWithCtx("open_chat", ctx, openChatRpc);
     try rpc_dispatcher.addWithCtx("get_chat_input", ctx, getChatInput);
     try rpc_dispatcher.addWithCtx("chat_state", ctx, chatState);
+    try rpc_dispatcher.addWithCtx("focus_chat", ctx, focusChat);
     try rpc_dispatcher.addWithCtx("get_active_tab", ctx, getActiveTabDebug);
     try rpc_dispatcher.addWithCtx("explorer_open", ctx, explorerOpen);
     try rpc_dispatcher.addWithCtx("explorer_entries", ctx, explorerEntries);
@@ -426,8 +427,8 @@ fn chatState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     , .{@tagName(chat.agent_status)});
     try std.json.Stringify.value(chat.statusDetail(), .{}, &buf.writer);
     try buf.writer.print(
-        \\, "loading": {}, "initializing": {}, "downloading": {}, "model_exists": {}, "streaming_len": {d}, "title":
-    , .{ chat.is_loading, chat.is_initializing, chat.is_downloading, chat.model_exists, chat.stream_text.items.len });
+        \\, "loading": {}, "initializing": {}, "downloading": {}, "model_exists": {}, "streaming_len": {d}, "tool_rounds": {d}, "pending_tools": {d}, "title":
+    , .{ chat.is_loading, chat.is_initializing, chat.is_downloading, chat.model_exists, chat.stream_text.items.len, chat.tool_rounds, chat.pending_tools.items.len });
     try std.json.Stringify.value(chat.agentTitle(), .{}, &buf.writer);
     try buf.writer.writeAll(", \"messages\": [");
     chat.mutex.lock();
@@ -438,6 +439,14 @@ fn chatState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
         try std.json.Stringify.value(m.role, .{}, &buf.writer);
         try buf.writer.writeAll(", \"content\": ");
         try std.json.Stringify.value(m.content, .{}, &buf.writer);
+        if (m.tool_calls_json) |tc| {
+            try buf.writer.writeAll(", \"tool_calls\": ");
+            try buf.writer.writeAll(tc);
+        }
+        if (m.tool_call_id) |id| {
+            try buf.writer.writeAll(", \"tool_call_id\": ");
+            try std.json.Stringify.value(id, .{}, &buf.writer);
+        }
         try buf.writer.writeAll("}");
     }
     try buf.writer.writeAll("]}");
@@ -535,6 +544,56 @@ fn editorState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     return buf.written();
 }
 
+/// Chat-Tab in irgendeinem Pane aktivieren (Pane + Tab), damit Eingaben dort landen.
+fn focusChat(ctx: *E2EContext, _: *zigjr.DispatchCtx) ![]const u8 {
+    const ui = ctx.ui_system;
+    if (findChatLeaf(ui.root_pane)) |leaf| {
+        const tb = &leaf.data.leaf.tab_bar;
+        for (tb.tabs.items, 0..) |tab, i| {
+            if (tab.kind == .chat) {
+                ui.active_pane = leaf;
+                tb.setActive(i);
+                return "ok";
+            }
+        }
+    }
+    return "error: no chat tab";
+}
+
+fn findChatLeaf(pane: *@import("ui/pane.zig").Pane) ?*@import("ui/pane.zig").Pane {
+    switch (pane.data) {
+        .leaf => |leaf| {
+            for (leaf.tab_bar.tabs.items) |tab| if (tab.kind == .chat) return pane;
+            return null;
+        },
+        .split => |s| {
+            if (findChatLeaf(s.children[0])) |p| return p;
+            return findChatLeaf(s.children[1]);
+        },
+    }
+}
+
+fn writeAllTabs(pane: *const @import("ui/pane.zig").Pane, w: *std.Io.Writer, first: *bool) !void {
+    switch (pane.data) {
+        .leaf => |leaf| for (leaf.tab_bar.tabs.items) |tab| {
+            if (!first.*) try w.writeAll(", ");
+            first.* = false;
+            try std.json.Stringify.value(tab.path, .{}, w);
+        },
+        .split => |s| {
+            try writeAllTabs(s.children[0], w, first);
+            try writeAllTabs(s.children[1], w, first);
+        },
+    }
+}
+
+fn countLeaves(pane: *const @import("ui/pane.zig").Pane) usize {
+    return switch (pane.data) {
+        .leaf => 1,
+        .split => |s| countLeaves(s.children[0]) + countLeaves(s.children[1]),
+    };
+}
+
 /// UI-Zustand für Tests: Dialog, Header-Menü, Explorer-Fokus, aktiver Tab.
 /// Anders als element_bounds liest das den echten Zustand; Clay behält
 /// Element-Daten verschwundener Elemente noch eine Weile im Hash.
@@ -562,6 +621,11 @@ fn uiState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     } else {
         try buf.writer.writeAll("null");
     }
+    try buf.writer.print(", \"pane_count\": {d}, \"agent_confirm_pending\": {}", .{ countLeaves(ui.root_pane), ui.agent_confirm != null });
+    try buf.writer.writeAll(", \"all_tabs\": [");
+    var first_tab = true;
+    try writeAllTabs(ui.root_pane, &buf.writer, &first_tab);
+    try buf.writer.writeAll("]");
     try buf.writer.writeAll(", \"tabs\": [");
     for (tb.tabs.items, 0..) |tab, i| {
         if (i > 0) try buf.writer.writeAll(", ");
