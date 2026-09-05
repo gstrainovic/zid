@@ -1,20 +1,20 @@
-# AI Chat Markdown Rendering
+# Offene Punkte
 
-## Status
-Geplant, nicht umgesetzt.
+## AI Chat Markdown Rendering — umgesetzt (2026-09-05)
 
-## Was nötig wäre
-AI-Chat-Antworten werden aktuell als Plain-Text via `clay.text()` gerendert (ai_chat.zig:594).
+Chat-Nachrichten laufen jetzt über `src/ai/chat_markdown.zig` (Tool-Call-Erkennung,
+Anzeige-Markdown) und `MarkdownView.renderDocument` (Blöcke ohne Scroll-Container).
+Tool-Calls werden als `json`-Codeblock mit Syntax-Highlighting gerendert, Tool-Ergebnisse
+(system-Rolle) als Codeblock, damit Dateiinhalte nicht als Markdown geparst werden.
 
-Um Markdown-Formatierung einzubauen (wie in markdown_view.zig):
+### Bekannte Grenzen
+- **fett**/*kursiv* werden geparst, aber nicht gestylt (MarkdownView ignoriert TextStyle).
+- Links erscheinen als Text ohne Farbe; Fließtext wird für den Umbruch zu einem Element
+  zusammengefügt.
+- Jede Nachricht parst ihr Markdown pro Frame neu (gleiches Verhalten wie die Vorschau).
 
-1. **Erst** Tool-Call-JSON parsen (im rohen String, für `tryExecuteToolCall`)
-2. **Dann** String als Markdown parsen (zigdown Block/Inline Tree)
-3. Blocks rendern mit Syntax-Highlighting
-4. Tool-Call-JSON als Code-Block behandeln
+## File-Watcher flutet den Scheduler
 
-## Warum komplex
-- `tryExecuteToolCall` sucht nach JSON-Fragmente im gesamten `payload` String
-- Bei Markdown-Parse wird der String in strukturierte Blocks zerlegt
-- Tool-Call-Logik muss weiterhin funktionieren
-- Message-Logik von `addMessage` bis `render` muss neu strukturiert werden
+Im Headless-Lauf mit Screenshot-Schreibzugriffen kamen >1400 Dateiereignisse, jedes
+löst einen git-status-Task aus → "work queue full". Ereignisse debouncen oder
+`tmp/` und `.zig-cache/` vom Watcher ausnehmen.

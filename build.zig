@@ -292,6 +292,14 @@ pub fn build(b: *std.Build) void {
     exe_mod.addImport("ai_worker", ai_worker_mod);
     const ai_worker_tests = b.addTest(.{ .root_module = ai_worker_mod });
 
+    const chat_markdown_mod = b.createModule(.{
+        .root_source_file = b.path("src/ai/chat_markdown.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    exe_mod.addImport("chat_markdown", chat_markdown_mod);
+    const chat_markdown_tests = b.addTest(.{ .root_module = chat_markdown_mod });
+
     const test_step = b.step("test", "Run tests");
 
     const run_async_tests = b.addRunArtifact(async_tests);
@@ -305,6 +313,10 @@ pub fn build(b: *std.Build) void {
     const run_ai_worker_tests = b.addRunArtifact(ai_worker_tests);
     run_ai_worker_tests.has_side_effects = true;
     test_step.dependOn(&run_ai_worker_tests.step);
+
+    const run_chat_markdown_tests = b.addRunArtifact(chat_markdown_tests);
+    run_chat_markdown_tests.has_side_effects = true;
+    test_step.dependOn(&run_chat_markdown_tests.step);
 
     const run_editor_tests = b.addRunArtifact(editor_tests);
     if (target.result.os.tag == .linux) {

@@ -404,7 +404,10 @@ pub fn main() !void {
                         log.debug("file event: {} for {s}", .{ result.tag, result.payload });
                         if (git_repo_path) |path| {
                             if (git_worker.Params.init(allocator, path, "")) |params| {
-                                _ = scheduler.submit(.{ .func = git_worker.taskGitStatus, .data = params });
+                                // Task gibt params selbst frei; bei voller Queue müssen wir es tun.
+                                if (!scheduler.submit(.{ .func = git_worker.taskGitStatus, .data = params })) {
+                                    params.deinit();
+                                }
                             } else |_| {}
                         }
                     },
@@ -451,7 +454,10 @@ pub fn main() !void {
                         // File geändert → Git Status neu abfragen
                         if (git_repo_path) |path| {
                             if (git_worker.Params.init(allocator, path, "")) |params| {
-                                _ = scheduler.submit(.{ .func = git_worker.taskGitStatus, .data = params });
+                                // Task gibt params selbst frei; bei voller Queue müssen wir es tun.
+                                if (!scheduler.submit(.{ .func = git_worker.taskGitStatus, .data = params })) {
+                                    params.deinit();
+                                }
                             } else |_| {}
                         }
                     },

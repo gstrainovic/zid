@@ -7,13 +7,22 @@ const scheduler_mod = @import("scheduler");
 const ai_worker = @import("ai_worker");
 const flow_core = @import("flow_core");
 const textarea_mod = @import("components/mod.zig");
+const chat_markdown = @import("chat_markdown");
+const MarkdownView = @import("markdown_view.zig").MarkdownView;
+const ui_mod = @import("mod.zig");
 
 const log = std.log.scoped(.ai_chat);
 
 pub const ChatMessage = struct {
     role: []const u8,
+    /// Roher Text, geht so an die API und in die Zwischenablage.
     content: []const u8,
+    /// Anzeige-Markdown (Tool-Calls als Codeblock) mit eigenem Renderer.
+    md: MarkdownView,
 };
+
+const message_font_size: u16 = 16;
+const message_text_color: clay.Color = .{ 240, 240, 240, 255 };
 
 pub const AIChatState = struct {
     allocator: std.mem.Allocator,
@@ -87,6 +96,10 @@ pub const AIChatState = struct {
             .model_exists = exists,
         };
         state.input_textarea.is_textarea = true;
+        // Buffer.create liefert einen Root ohne Zeilenanfang (keine Zeile 0).
+        // Erst load_from_string("") via setText macht den Puffer beschreibbar,
+        // sonst verwirft der Rope-Walker jedes Zeichen nach dem ersten.
+        state.input_textarea.setText("");
 
         return state;
     }
@@ -101,7 +114,8 @@ pub const AIChatState = struct {
     pub fn deinit(self: *Self) void {
         self.stop_flag.store(true, .seq_cst);
 
-        for (self.messages.items) |msg| {
+        for (self.messages.items) |*msg| {
+            msg.md.deinit();
             self.allocator.free(msg.content);
             self.allocator.free(msg.role);
         }
@@ -163,12 +177,24 @@ pub const AIChatState = struct {
         const dupe_content = try self.allocator.dupe(u8, content);
         errdefer self.allocator.free(dupe_content);
 
+        const display = if (std.mem.eql(u8, role, "system"))
+            try chat_markdown.wrapToolResult(self.allocator, content)
+        else
+            try chat_markdown.toDisplayMarkdown(self.allocator, content);
+        defer self.allocator.free(display);
+
+        var md = MarkdownView.init(self.allocator, display, "");
+        errdefer md.deinit();
+        md.font_size = message_font_size;
+        md.text_color = message_text_color;
+
         self.mutex.lock();
         defer self.mutex.unlock();
 
         try self.messages.append(self.allocator, .{
             .role = dupe_role,
             .content = dupe_content,
+            .md = md,
         });
         self.scroll_offset_y = 999999;
     }
@@ -241,14 +267,7 @@ pub const AIChatState = struct {
     }
 
     fn tryExecuteToolCall(self: *Self, response: []const u8) bool {
-        if (std.mem.indexOf(u8, response, "{") == null) return false;
-        if (std.mem.indexOf(u8, response, "\"tool\"") == null) return false;
-
-        const start_idx = std.mem.indexOf(u8, response, "{") orelse return false;
-        const end_idx = std.mem.lastIndexOf(u8, response, "}") orelse return false;
-        if (end_idx <= start_idx) return false;
-
-        const json_str = response[start_idx .. end_idx + 1];
+        const json_str = chat_markdown.findToolCall(response) orelse return false;
         var parsed = std.json.parseFromSlice(std.json.Value, self.allocator, json_str, .{ .ignore_unknown_fields = true }) catch return false;
         defer parsed.deinit();
         if (parsed.value != .object) return false;
@@ -454,6 +473,7 @@ pub fn renderAIChat(
     theme: Theme,
     mouse_pressed: bool,
     window: ?*wio.Window,
+    ui_ptr: *ui_mod.UI,
 ) void {
     state.input_textarea.setWindow(window);
 
@@ -557,7 +577,7 @@ pub fn renderAIChat(
                 })({
                     state.mutex.lock();
                     defer state.mutex.unlock();
-                    for (state.messages.items, 0..) |msg, idx| {
+                    for (state.messages.items, 0..) |*msg, idx| {
                         const is_user = std.mem.eql(u8, msg.role, "user");
                         const msg_id = clay.ElementId.ID(std.fmt.allocPrint(arena, "ai_msg_{d}", .{idx}) catch "ai_msg_x");
                         const hovered = clay.pointerOver(msg_id);
@@ -591,7 +611,7 @@ pub fn renderAIChat(
                                 if (is_user) "You:" else if (show_copied) "Gemma (Copied!):" else "Gemma:",
                                 .{ .font_size = 12, .color = if (is_user) .{ 180, 180, 255, 255 } else if (show_copied) theme.primary else .{ 150, 230, 150, 255 } },
                             );
-                            clay.text(msg.content, .{ .font_size = 16, .color = .{ 240, 240, 240, 255 }, .wrap_mode = .words });
+                            msg.md.renderDocument(arena, theme, ui_ptr);
                         });
                     }
 

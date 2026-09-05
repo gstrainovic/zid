@@ -1048,6 +1048,7 @@ pub const UI = struct {
                                     t,
                                     self.mouse_pressed_this_frame,
                                     self.window,
+                                    self,
                                 );
                                 special_active = true;
                             } else if (tab.kind == .textarea) {
