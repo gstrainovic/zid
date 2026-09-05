@@ -377,48 +377,20 @@ pub fn main() !void {
         const e2e_server_sock = try e2e_listen_addr.listen(.{ .reuse_address = true });
         e2e_ctx = e2e_server.E2EContext.init(allocator, &ui_system, e2e_server_sock);
         // Fenstermodus: RPC-Eingaben puffern, der Main-Loop wendet sie pro Frame an.
-        e2e_ctx.?.defer_input = !headless_mode;
+        e2e_ctx.?.defer_input = !interactive_mode;
         e2e_thread = try e2e_server.start(&e2e_ctx.?);
     }
     defer if (e2e_ctx) |*c| c.deinit();
 
-    // In headless mode: poll async results + wait for E2E shutdown (no rendering loop)
-    if (headless_mode) {
+    // Interactive mode (stdin/stdout) hat keinen Frame-Loop: Handler laufen direkt.
+    if (headless_mode and interactive_mode) {
         log.info("=== vulkan-ed headless ready ===", .{});
-        if (interactive_mode) {
-            log.info("Interactive mode — stdin/stdout command interface", .{});
-            e2e_interactive.runInteractiveLoop(&e2e_ctx.?);
-            log.info("Interactive mode ended", .{});
-            return;
-        }
-        log.info("Waiting for RPC requests on port 9999...", .{});
-        while (e2e_ctx == null or !e2e_ctx.?.shutdown_flag.load(.seq_cst)) {
-            var result_buf: [32]async_mod.TaskResult = undefined;
-            const results = scheduler.pollResults(&result_buf);
-            for (results) |result| {
-                defer result.deinit();
-                switch (result.tag) {
-                    .git_branch => ui_system.updateBranch(result.payload),
-                    .git_status => ui_system.updateGitStatus(result.payload),
-                    .ai_chat_reply => ui_system.handleAIReply(result.payload),
-                    .ai_chat_error => ui_system.handleAIError(result.payload),
-                    .ai_warmup_done => ui_system.handleAIWarmupDone(),
-                    .ai_warmup_error => ui_system.handleAIWarmupError(result.payload),
-                    .ai_download_done => ui_system.handleAIDownloadDone(),
-                    .ai_download_error => ui_system.handleAIDownloadError(result.payload),
-                    .file_changed, .file_created, .file_deleted => {
-                        log.debug("file event: {} for {s}", .{ result.tag, result.payload });
-                        git_refresh.mark(std.time.milliTimestamp());
-                    },
-                    else => {},
-                }
-            }
-            submitGitStatusIfDue(&git_refresh, scheduler, allocator, git_repo_path);
-            std.Thread.sleep(std.time.ns_per_ms * 100);
-        }
-        log.info("Headless mode shutdown requested", .{});
+        log.info("Interactive mode — stdin/stdout command interface", .{});
+        e2e_interactive.runInteractiveLoop(&e2e_ctx.?);
+        log.info("Interactive mode ended", .{});
         return;
     }
+    if (headless_mode) log.info("=== vulkan-ed headless ready — frame loop without window, RPC on port 9999 ===", .{});
 
     // Render Loop
     var frame_count: u32 = 0;
@@ -429,11 +401,13 @@ pub fn main() !void {
     var ctrl_held: bool = false;
     var alt_held: bool = false;
 
-    while (plat.isRunning() and (e2e_ctx == null or !e2e_ctx.?.shutdown_flag.load(.seq_cst))) {
+    // Headless und Fenster teilen sich diesen Loop. Headless hat keine Plattform:
+    // keine Fenster-Events, kein Cursor, keine Präsentation, Polling statt wio.wait.
+    while ((headless_mode or plat.isRunning()) and (e2e_ctx == null or !e2e_ctx.?.shutdown_flag.load(.seq_cst))) {
         if (e2e_ctx) |*c| e2e_server.drainInputs(c);
         const delta_time_ms: f32 = 16.0;
 
-        wio.update();
+        if (!headless_mode) wio.update();
 
         // Async Results verarbeiten (non-blocking)
         {
@@ -473,7 +447,8 @@ pub fn main() !void {
 
         // Events verarbeiten
         var scroll_delta_y: f32 = 0;
-        if (plat.window) |*win| {
+        const event_window: ?*wio.Window = if (headless_mode) null else (if (plat.window) |*w| w else null);
+        if (event_window) |win| {
             while (win.getEvent()) |event| {
                 switch (event) {
                     .size_logical => |sz| {
@@ -840,9 +815,9 @@ pub fn main() !void {
         }
 
         // Cursor-Form anpassen basierend auf Layout-Ergebnis
-        plat.setCursor(ui_system.getDesiredCursor());
+        if (!headless_mode) plat.setCursor(ui_system.getDesiredCursor());
 
-        renderer.renderFrameWithText(
+        if (!headless_mode) renderer.renderFrameWithText(
             &clay_rdr,
             &text_gpu,
             &text_renderer,
@@ -860,7 +835,9 @@ pub fn main() !void {
 
         frame_count += 1;
 
-        if (has_more_work or e2e_ctx != null) {
+        if (headless_mode) {
+            std.Thread.sleep(16 * std.time.ns_per_ms);
+        } else if (has_more_work or e2e_ctx != null) {
             wio.wait(.{ .timeout_ns = 16 * 1000 * 1000 });
         } else {
             wio.wait(.{});
