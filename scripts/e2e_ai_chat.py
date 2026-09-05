@@ -67,8 +67,9 @@ def run_with_ollama():
     print("--- A. Chat gegen Ollama: Frage senden, Antwort kommt")
     proc, log = start(["--ai=off"] if False else [], "e2e_ai_chat.log")
     try:
+        t0 = time.time()
         st = wait_for(lambda s: s["status"] in ("ready", "failed", "model_missing", "none"), 90, "Agent-Warmup")
-        check(st["status"] == "ready", f"Agent-Status nach Start: {st['status']} {st['detail']!r}")
+        check(st["status"] == "ready", f"Agent-Status nach Start: {st['status']} {st['detail']!r} (Warmup {time.time() - t0:.1f}s)")
         open_chat_and_send("Antworte nur mit dem Wort PONG")
         st = chat()
         check(st["loading"] and st["messages"][-1]["role"] == "user", "Nach Enter: Frage im Verlauf, Antwort wird geladen")

@@ -203,18 +203,30 @@ pub const LlamaAgent = struct {
 
     /// Same as sendChatCompletion but checks should_stop during retry loop.
     pub fn sendChatCompletionWithStop(self: *Self, messages: []const ChatMessage, should_stop: ?*const std.atomic.Value(bool)) ![]u8 {
+        return self.sendChatCompletionOpts(messages, should_stop, null);
+    }
+
+    /// `max_tokens`: Antwortlänge begrenzen (Warmup braucht nur ein Token; ohne
+    /// Limit schrieb das Modell auf "ping" eine ganze Antwort und der Start
+    /// dauerte auf kleinen GPUs minutenlang).
+    pub fn sendChatCompletionOpts(self: *Self, messages: []const ChatMessage, should_stop: ?*const std.atomic.Value(bool), max_tokens: ?u32) ![]u8 {
         var client = std.http.Client{ .allocator = self.allocator };
         defer client.deinit();
-
         var uri_buf: [128]u8 = undefined;
         const uri_str = try std.fmt.bufPrint(&uri_buf, "http://127.0.0.1:{d}/v1/chat/completions", .{self.server_port});
-
-        // Prepare JSON payload
-        const json_payload = try std.json.Stringify.valueAlloc(self.allocator, .{
-            .model = self.model_path,
-            .messages = messages,
-            .temperature = 0.7,
-        }, .{});
+        const json_payload = if (max_tokens) |mt|
+            try std.json.Stringify.valueAlloc(self.allocator, .{
+                .model = self.model_path,
+                .messages = messages,
+                .temperature = 0.7,
+                .max_tokens = mt,
+            }, .{})
+        else
+            try std.json.Stringify.valueAlloc(self.allocator, .{
+                .model = self.model_path,
+                .messages = messages,
+                .temperature = 0.7,
+            }, .{});
         defer self.allocator.free(json_payload);
 
         // Retry loop (Wait for server to be ready)

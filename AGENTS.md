@@ -4,6 +4,11 @@
 
 - **KEINE git-destructive Befehle ohne explizite Erlaubnis**: Kein `git push --force`, `git reset`, `git checkout`, `git restore`, `git clean` ohne vorher zu fragen.
 
+## Logging
+
+- Debug-Zeilen nur mit `VULKAN_ED_DEBUG=1` (`logFn` in main.zig filtert zur Laufzeit). Ohne
+  Variable bleiben info/warn/err; vorher waren es tausende Zeilen pro Sitzung.
+
 ## Build Commands
 
 ```bash
@@ -129,6 +134,9 @@ echo -e "open ./README.md\nget-state\nshutdown" | zig build run -- --interactive
   minutenlang). Der Chat zeigt "Pull model with Ollama" → `ai_worker.taskOllamaPull` → nach
   `ai_download_done` erneutes `initAgent`. Alternative ohne Download, wenn das GGUF lokal liegt:
   `printf 'FROM /abs/pfad/model.gguf\n' > Modelfile && ollama create gemma4:e2b -f Modelfile`.
+- Warmup schickt "ping" mit `max_tokens = 1`. Ohne Limit schrieb das Modell eine ganze Antwort;
+  auf einer 4-GB-GPU (Quadro P1000, Modell 5,2 GB, teilweise CPU) hieß das "Initializing..."
+  über Minuten. Erwartung: kaltes Modell ~10–30 s (Laden), warm < 1 s.
 - RPC `chat_state`: Status, Detail, loading/initializing/downloading und alle Nachrichten.
 - E2E: `python3 scripts/e2e_ai_chat.py` (braucht laufendes Ollama mit installiertem Modell;
   `--only-off` prüft nur den `--ai=off`-Pfad). Warmup lädt das Modell, das kann bis ~1 min dauern.
