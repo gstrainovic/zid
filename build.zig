@@ -71,6 +71,14 @@ pub fn build(b: *std.Build) void {
 
     // Module importieren
     exe_mod.addImport("clay", clay_dep.module("zclay"));
+    // Zentrale Kürzel-Tabelle: eigenes Modul, weil sowohl ui/mod.zig als auch
+    // editor/code_editor.zig (eigenes Test-Root) sie brauchen.
+    const shortcuts_mod = b.createModule(.{
+        .root_source_file = b.path("src/ui/shortcuts.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    exe_mod.addImport("shortcuts", shortcuts_mod);
     exe_mod.addImport("wio", wio_dep.module("wio"));
     exe_mod.addImport("wgpu", wgpu_dep.module("wgpu"));
     exe_mod.addImport("zigimg", zigimg_dep.module("zigimg"));
@@ -200,6 +208,7 @@ pub fn build(b: *std.Build) void {
     });
     code_editor_mod.addImport("flow_core", flow_core_dep.module("flow-core"));
     code_editor_mod.addImport("syntax", syntax_mod);
+    code_editor_mod.addImport("shortcuts", shortcuts_mod);
 
 
     // Tests IN code_editor.zig laufen nur, wenn die Datei selbst Test-Root ist:
@@ -313,11 +322,7 @@ pub fn build(b: *std.Build) void {
     const run_folder_ops_tests = b.addRunArtifact(folder_ops_tests);
     run_folder_ops_tests.has_side_effects = true;
 
-    const shortcuts_tests = b.addTest(.{ .root_module = b.createModule(.{
-        .root_source_file = b.path("src/ui/shortcuts.zig"),
-        .target = target,
-        .optimize = optimize,
-    }) });
+    const shortcuts_tests = b.addTest(.{ .root_module = shortcuts_mod });
     const run_shortcuts_tests = b.addRunArtifact(shortcuts_tests);
     run_shortcuts_tests.has_side_effects = true;
 

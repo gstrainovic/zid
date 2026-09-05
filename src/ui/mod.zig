@@ -21,7 +21,7 @@ const markdown_view_mod = @import("markdown_view.zig");
 const pane_mod = @import("pane.zig");
 const dialog_mod = @import("dialog.zig");
 const folder_picker_mod = @import("folder_picker.zig");
-const shortcuts = @import("shortcuts.zig");
+const shortcuts = @import("shortcuts");
 const ai_chat_mod = @import("ai_chat.zig");
 const agent_mod = @import("agent");
 const textarea_mod = @import("components/textarea.zig");
@@ -1039,7 +1039,7 @@ pub const UI = struct {
                 clay.UI()(.{
                     .id = item_id,
                     .layout = .{
-                        .sizing = .{ .w = .fixed(340), .h = .fit },
+                        .sizing = .{ .w = .fixed(380), .h = .fit },
                         .padding = .{ .left = 12, .right = 12, .top = 6, .bottom = 6 },
                         .direction = .left_to_right,
                         .child_alignment = .{ .y = .center },
