@@ -54,6 +54,7 @@ pub fn createDispatcher(alloc: std.mem.Allocator, ctx: *E2EContext) !*zigjr.RpcD
     try rpc_dispatcher.addWithCtx("open_chat", ctx, openChatRpc);
     try rpc_dispatcher.addWithCtx("get_chat_input", ctx, getChatInput);
     try rpc_dispatcher.addWithCtx("get_active_tab", ctx, getActiveTabDebug);
+    try rpc_dispatcher.addWithCtx("explorer_open", ctx, explorerOpen);
     try rpc_dispatcher.addWithCtx("save_file", ctx, saveFile);
     try rpc_dispatcher.addWithCtx("get_state", ctx, getState);
     try rpc_dispatcher.addWithCtx("benchmark_open_file", ctx, benchmarkOpenFile);
@@ -352,11 +353,24 @@ fn getActiveTabDebug(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     for (tab_bar.tabs.items, 0..) |tab, i| {
         if (i > 0) try buf.writer.writeAll(", ");
         try buf.writer.print(
-            \\{{"index": {d}, "kind": "{s}", "name": "{s}", "is_active": {}}}
-        , .{ i, @tagName(tab.kind), tab.display_name, tab.is_active });
+            \\{{"index": {d}, "kind": "{s}", "name": "{s}", "is_active": {}, "modified": {}}}
+        , .{ i, @tagName(tab.kind), tab.display_name, tab.is_active, tab.modified });
     }
-    try buf.writer.writeAll("]}");
+    const ed = ctx.ui_system.getActiveEditor();
+    try buf.writer.print("], \"editor_modified\": {}, \"editor_file\": \"{s}\"}}", .{ ed.is_modified, ed.buffer.get_file_path() });
     return buf.written();
+}
+
+/// Simuliert einen Klick im File-Explorer (setzt file_to_open, wie ein echter Klick).
+/// Anders als open_file läuft das durch den Explorer-Pfad in main.zig.
+var explorer_open_buf: [std.fs.max_path_bytes]u8 = undefined;
+fn explorerOpen(ctx: *E2EContext, _: *zigjr.DispatchCtx, path: []const u8) ![]const u8 {
+    log.info("RPC: explorer_open('{s}')", .{path});
+    if (path.len > explorer_open_buf.len) return "error: path too long";
+    @memcpy(explorer_open_buf[0..path.len], path);
+    ctx.ui_system.file_explorer.file_to_open = explorer_open_buf[0..path.len];
+    @import("wio").cancelWait();
+    return "ok";
 }
 
 /// App-State zurückgeben (JSON)
@@ -403,7 +417,12 @@ fn closeActiveTabRpc(ctx: *E2EContext, _: *zigjr.DispatchCtx) !void {
     log.info("RPC: close_active_tab()", .{});
     const tb = ctx.ui_system.getActiveTabBar();
     if (tb.active_index) |idx| {
-        tb.closeTab(idx);
+        // Nicht direkt schließen: im Fenstermodus rendert der Main-Thread gerade
+        // mit dieser Tab-Liste. Wie das UI selbst über pending_tab_closes gehen.
+        try ctx.ui_system.pending_tab_closes.append(ctx.ui_system.allocator, .{
+            .pane = ctx.ui_system.active_pane,
+            .index = idx,
+        });
     }
     @import("wio").cancelWait();
 }
