@@ -113,7 +113,50 @@ def item2_explorer_f2_delete():
     os.rmdir(fixture_dir)
 
 
-STEPS = [item1_table_drives_ctrl_o, item2_explorer_f2_delete]
+def item3_tabs():
+    print("--- 3. Tabs: Ctrl+N neue Datei, Ctrl+Tab/Ctrl+Shift+Tab wechseln, Ctrl+W schließen")
+    rpc("click", [1100, 400])  # Fokus in den Editor-Bereich
+    settle()
+    n0 = ui_state()["tab_count"]
+    key("n", ctrl=True)
+    st = ui_state()
+    check(st["tab_count"] == n0 + 1 and st["tabs"][st["active_tab"]]["path"].endswith("New File.txt"),
+          f"Ctrl+N öffnet 'New File.txt' als aktiven Tab ({st['tab_count']} Tabs)")
+
+    rpc("explorer_open", [os.path.join(ROOT, "README.md")])
+    settle(10)
+    st = ui_state()
+    n = st["tab_count"]
+    check(n == n0 + 2, f"Zweite Datei geöffnet, {n} Tabs")
+    active = st["active_tab"]
+    key("tab", ctrl=True)
+    st = ui_state()
+    check(st["active_tab"] == (active + 1) % n, f"Ctrl+Tab wechselt zyklisch ({active} → {st['active_tab']})")
+    key("tab", ctrl=True, shift=True)
+    st = ui_state()
+    check(st["active_tab"] == active, "Ctrl+Shift+Tab wechselt zurück")
+
+    key("w", ctrl=True)
+    settle(5)
+    st = ui_state()
+    check(st["tab_count"] == n - 1 and st["dialog"] is None, f"Ctrl+W schließt den ungeänderten aktiven Tab ({st['tab_count']} Tabs)")
+
+    # Geänderter Tab: Ctrl+W fragt nach, Cancel behält ihn
+    while not ui_state()["tabs"][ui_state()["active_tab"]]["path"].endswith("New File.txt"):
+        key("tab", ctrl=True)
+    rpc("click", [700, 400])
+    settle()
+    rpc("type_text", ["abc"])
+    settle(10)
+    check(ui_state()["tabs"][ui_state()["active_tab"]]["modified"], "Tippen markiert den Tab als geändert")
+    n = ui_state()["tab_count"]
+    key("w", ctrl=True)
+    check(ui_state()["dialog"] is not None, "Ctrl+W auf geändertem Tab öffnet die Speichern-Nachfrage")
+    click_center("Cancel")
+    check(ui_state()["dialog"] is None and ui_state()["tab_count"] == n, "Cancel behält den Tab")
+
+
+STEPS = [item1_table_drives_ctrl_o, item2_explorer_f2_delete, item3_tabs]
 
 
 def main():

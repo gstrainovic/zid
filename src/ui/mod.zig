@@ -837,6 +837,10 @@ pub const UI = struct {
         self.file_menu_open = false;
         switch (cmd) {
             .open_folder => self.openFolderPicker(),
+            .new_file => self.getActiveTabBar().openFile("New File.txt") catch |err| log.warn("new file failed: {}", .{err}),
+            .close_tab => self.requestCloseActiveTab(),
+            .next_tab => self.cycleTab(1),
+            .prev_tab => self.cycleTab(-1),
             .rename_entry => {
                 if (self.file_explorer.selectedNodeIndex()) |node| self.file_explorer.startRename(node);
             },
@@ -845,6 +849,29 @@ pub const UI = struct {
             },
             else => log.warn("command {s} not implemented yet", .{@tagName(cmd)}),
         }
+    }
+
+    /// Aktiven Tab schließen wie über das × in der Tab-Leiste: geänderte Tabs
+    /// fragen nach, alle anderen werden nach dem Layout geschlossen.
+    fn requestCloseActiveTab(self: *Self) void {
+        const tb = self.getActiveTabBar();
+        const idx = tb.active_index orelse return;
+        if (idx >= tb.tabs.items.len) return;
+        if (tb.tabs.items[idx].modified) {
+            self.showSaveConfirmationDialog(self.active_pane, idx);
+        } else {
+            self.pending_tab_closes.append(self.allocator, .{ .pane = self.active_pane, .index = idx }) catch {};
+        }
+    }
+
+    /// Nächsten (+1) oder vorherigen (-1) Tab im aktiven Pane aktivieren, zyklisch.
+    fn cycleTab(self: *Self, direction: i32) void {
+        const tb = self.getActiveTabBar();
+        const n = tb.tabs.items.len;
+        if (n < 2) return;
+        const cur: i32 = @intCast(tb.active_index orelse 0);
+        const next: usize = @intCast(@mod(cur + direction, @as(i32, @intCast(n))));
+        tb.setActive(next);
     }
 
     /// "Open Folder…"-Dialog im aktuellen Projektordner öffnen (Menü, Ctrl+O).
