@@ -125,7 +125,8 @@ pub fn taskWarmup(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.TaskRe
             .allocator = alloc,
         };
 
-        if (params.agent.sendChatCompletionWithStop(ping_msg, params.should_stop)) |resp| {
+        // Ein Token reicht: es geht nur darum, dass der Server das Modell lädt.
+        if (params.agent.sendChatCompletionOpts(ping_msg, params.should_stop, 1)) |resp| {
             alloc.free(resp);
             return .{
                 .tag = .ai_warmup_done,

@@ -34,6 +34,9 @@ fn logFn(
     if (scope == .stream or scope == .terminal) {
         if (level == .debug) return;
     }
+    // Debug-Zeilen nur mit VULKAN_ED_DEBUG=1: ohne Filter sind es tausende Zeilen
+    // pro Sitzung (jeder Tastendruck, jedes Resize, jeder Frame-Klick).
+    if (level == .debug and !debugLogEnabled()) return;
 
     const level_txt = comptime level.asText();
     const prefix = if (scope == .default) level_txt else level_txt ++ "(" ++ @tagName(scope) ++ ")";
@@ -53,6 +56,15 @@ fn logFn(
 }
 
 const log = std.log.scoped(.main);
+
+var debug_log_state: enum { unknown, off, on } = .unknown;
+
+fn debugLogEnabled() bool {
+    if (debug_log_state == .unknown) {
+        debug_log_state = if (std.posix.getenv("VULKAN_ED_DEBUG")) |v| (if (v.len > 0 and v[0] != '0') .on else .off) else .off;
+    }
+    return debug_log_state == .on;
+}
 
 pub fn main() !void {
     // Allocator setup
@@ -111,6 +123,10 @@ pub fn main() !void {
             try w.writeAll("  --interactive         Interactive mode (stdin/stdout command interface)\n");
             try w.writeAll("  --ai=off              Disable AI chat (llama-server)\n");
             try w.writeAll("  --help, -h            Show this help\n");
+            try w.writeAll("\nEnvironment:\n");
+            try w.writeAll("  VULKAN_ED_DEBUG=1     Enable debug log lines\n");
+            try w.writeAll("  LLAMA_SERVER_PATH     llama-server binary (default: ollama)\n");
+            try w.writeAll("  LLAMA_MODEL_PATH      GGUF path or Ollama model (default: gemma4:e2b)\n");
             try w.flush();
             return;
         } else if (default_file_path == null) {
