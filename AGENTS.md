@@ -39,3 +39,12 @@ echo -e "open ./README.md\nget-state\nshutdown" | zig build run -- --interactive
 ### Headless Screenshots
 - Pfad: `./tmp/vulkan-screenshot.ppm`
 - RPC: `echo '{"jsonrpc":"2.0","method":"screenshot","id":1}' | nc --send-only localhost 9999`
+
+## Bekannte Grenzen (kein Todo, bewusst so)
+
+- **Durchgestrichen in Markdown:** `~~text~~` toggelt zigdown zweimal und bleibt ungestylt,
+  `~text~` funktioniert. Upstream-Verhalten in zigdown.
+- **Fett/Kursiv nur über Farbe:** Es gibt eine einzige Font-Face (JetBrainsMono-Regular).
+  Echte Schnitte bräuchten Font-IDs im Text-Renderer und eine zweite geladene Face.
+  MarkdownView zeigt Styles deshalb als Theme-Farben (fett=primary, kursiv=accent,
+  Code=warning, Link=blau, durchgestrichen=muted).

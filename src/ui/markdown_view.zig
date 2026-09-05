@@ -51,6 +51,12 @@ pub const MarkdownView = struct {
     pending_split_v: bool = false,
     pending_split_h: bool = false,
 
+    /// Geparster Dokumentbaum, einmal pro View erzeugt. Arena und Ergebnis
+    /// liegen auf dem Heap: Views leben in ArrayLists und dürfen wandern,
+    /// der Parser hält aber einen Pointer auf seinen Allocator.
+    doc_arena: ?*std.heap.ArenaAllocator = null,
+    parsed: ?*zigdown.parser.ParseResult = null,
+
     /// Code block highlighter (cached per language)
     code_highlighter: ?*flow_core.highlight.SyntaxHighlighter = null,
     code_highlighter_lang: []const u8 = "",
@@ -81,6 +87,15 @@ pub const MarkdownView = struct {
     }
 
     pub fn deinit(self: *Self) void {
+        if (self.parsed) |pr| {
+            self.allocator.destroy(pr);
+            self.parsed = null;
+        }
+        if (self.doc_arena) |arena| {
+            arena.deinit();
+            self.allocator.destroy(arena);
+            self.doc_arena = null;
+        }
         if (self.code_highlighter) |hl| {
             hl.destroy();
         }
@@ -242,15 +257,36 @@ pub const MarkdownView = struct {
 
     /// Parst self.text und rendert die Blöcke ohne Root-, Scroll- oder
     /// Kontextmenü-Container. Für eingebettetes Markdown, z.B. Chat-Nachrichten.
-    pub fn renderDocument(self: *Self, arena: std.mem.Allocator, theme: Theme, ui_ptr: *ui_mod.UI) void {
-        var result = zigdown.parser.timedParse(arena, self.text, false) catch |err| {
-            std.log.scoped(.markdown).err("Failed to parse markdown: {any}", .{err});
-            return;
+    /// Liefert den geparsten Baum, beim ersten Aufruf wird geparst.
+    fn cachedDocument(self: *Self) ?*Block {
+        if (self.parsed) |pr| return &pr.parser.document;
+
+        const arena = self.allocator.create(std.heap.ArenaAllocator) catch return null;
+        arena.* = std.heap.ArenaAllocator.init(self.allocator);
+        const pr = self.allocator.create(zigdown.parser.ParseResult) catch {
+            arena.deinit();
+            self.allocator.destroy(arena);
+            return null;
         };
+        pr.* = zigdown.parser.timedParse(arena.allocator(), self.text, false) catch |err| {
+            std.log.scoped(.markdown).err("Failed to parse markdown: {any}", .{err});
+            self.allocator.destroy(pr);
+            arena.deinit();
+            self.allocator.destroy(arena);
+            return null;
+        };
+        std.log.scoped(.markdown).debug("parsed markdown once: {d} bytes in {d:.2} ms", .{ self.text.len, pr.time_s * 1000.0 });
+        self.doc_arena = arena;
+        self.parsed = pr;
+        return &pr.parser.document;
+    }
+
+    pub fn renderDocument(self: *Self, arena: std.mem.Allocator, theme: Theme, ui_ptr: *ui_mod.UI) void {
+        const doc = self.cachedDocument() orelse return;
         var effective_theme = theme;
         if (self.text_color) |c| effective_theme.text = c;
         self.run_counter = 0;
-        self.renderBlock(&result.parser.document, arena, effective_theme, ui_ptr);
+        self.renderBlock(doc, arena, effective_theme, ui_ptr);
     }
 
     pub fn render(self: *Self, arena: std.mem.Allocator, theme: Theme, ui_ptr: *ui_mod.UI) void {

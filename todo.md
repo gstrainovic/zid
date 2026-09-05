@@ -1,4 +1,7 @@
-# Offene Punkte
+# Todo
+
+Keine offenen Punkte (Stand 2026-09-05). Bekannte Grenzen stehen in AGENTS.md.
+Erledigt-Log:
 
 ## AI Chat Markdown Rendering — umgesetzt (2026-09-05)
 
@@ -13,10 +16,9 @@ fett = primary, kursiv = accent, Codespan = warning, Link = blau, durchgestriche
 Umbruch mit Per-Wort-Farben läuft über `src/ui/word_wrap.zig` (gemessene Stücke,
 greedy-Zeilen), Chat und Vorschau nutzen denselben Pfad.
 
-### Bekannte Grenzen
-- `~~text~~` wird von zigdown als zwei Tilden getoggelt und bleibt ungestylt; `~text~` funktioniert.
-- Echte Fett-/Kursiv-Schnitte bräuchten Font-IDs im Text-Renderer (zweite Face laden).
-- Jede Nachricht parst ihr Markdown pro Frame neu (gleiches Verhalten wie die Vorschau).
+### Parse-Cache — umgesetzt (2026-09-05)
+Jede MarkdownView parst ihren Text genau einmal (Heap-Arena + ParseResult) und rendert
+danach nur noch den gecachten Baum. Grenzen von zigdown und Font-Renderer stehen in AGENTS.md.
 
 ## File-Watcher-Flut — behoben (2026-09-05)
 
