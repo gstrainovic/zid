@@ -368,6 +368,12 @@ pub const UI = struct {
 
     /// Keyboard Input verarbeiten
     pub fn handleKeyPress(self: *Self, key: @import("wio").Button) void {
+        // Inline-Umbenennen im Explorer fängt alle Tasten ab
+        if (self.show_file_explorer and self.file_explorer.isRenaming()) {
+            self.file_explorer.handleRenameKey(key);
+            return;
+        }
+
         // If a chat tab is active, handle chat input
         if (self.isChatTabActive()) {
             if (self.ai_chat.handleKeyPress(key)) return;
@@ -446,6 +452,11 @@ pub const UI = struct {
 
     /// Text Input verarbeiten
     pub fn handleChar(self: *Self, char_code: u21) void {
+        if (self.show_file_explorer and self.file_explorer.isRenaming()) {
+            self.file_explorer.handleRenameChar(char_code);
+            return;
+        }
+
         // Forward to chat tab if active
         if (self.isChatTabActive()) {
             self.ai_chat.handleChar(char_code);
@@ -527,11 +538,19 @@ pub const UI = struct {
     /// Maus-Events an Editor oder Terminal weiterleiten
     pub fn handleMouseDown(self: *Self, x: f32, y: f32, button: wio.Button) void {
         log.debug("handleMouseDown: x={} y={} button={}", .{ x, y, button });
-        self.mouse_pressed_this_frame = true;
-        self.is_mouse_down = true;
+        // Nur Linksklicks zählen als "Press" für hover-basierte Klick-Handler im
+        // Layout (Explorer-Zeilen, Tab-Leiste, Dialog-Buttons). Rechtsklick öffnet
+        // Kontextmenüs und darf z.B. keine Datei öffnen.
+        self.mouse_pressed_this_frame = (button == .mouse_left);
+        self.is_mouse_down = (button == .mouse_left);
 
         if (self.show_file_explorer) {
-            if (self.file_explorer.handleMouseDown(x, y)) return;
+            if (self.file_explorer.handleMouseDown(x, y, button)) {
+                if (self.file_explorer.takePendingDelete()) |node_index| {
+                    self.showDeleteConfirmationDialog(node_index);
+                }
+                return;
+            }
         }
 
         // Priority: If a context menu is open, it must handle the click first (to either trigger an action or close)
@@ -710,6 +729,8 @@ pub const UI = struct {
 
     /// UI updaten (pro Frame)
     pub fn update(self: *Self, delta_ms: f32) void {
+        // Bestätigtes Löschen im Explorer: vor dem Layout, nie im Dialog-Callback
+        self.file_explorer.processPending();
         self.anim_manager.update(delta_ms);
         self.getActiveEditor().time_ms += delta_ms;
         self.ai_chat.updateTimeMs(delta_ms);
@@ -1379,6 +1400,34 @@ pub const UI = struct {
         self.active_pane = new_split_leaf;
         
         wio.cancelWait();
+    }
+
+    fn showDeleteConfirmationDialog(self: *Self, node_index: u32) void {
+        if (node_index >= self.file_explorer.nodes.items.len) return;
+        const node = self.file_explorer.nodes.items[node_index];
+        const msg = std.fmt.allocPrint(self.allocator, "Delete '{s}'{s}? This cannot be undone.", .{
+            node.name,
+            if (node.is_folder) " and everything inside it" else "",
+        }) catch return;
+        self.active_dialog = .{
+            .dialog = .{
+                .title = "Delete",
+                .message = msg,
+                .actions = &.{
+                    .{ .label = "Delete", .result = .yes },
+                    .{ .label = "Cancel", .result = .cancel },
+                },
+            },
+            .context_usize = node_index,
+            .context_ptr = null,
+            .callback = handleDeleteConfirmation,
+            .message_needs_free = true,
+        };
+    }
+
+    fn handleDeleteConfirmation(ui: *UI, res: dialog_mod.DialogResult, idx: usize, _: ?*anyopaque) void {
+        // Nicht hier löschen: Render-Commands dieses Frames zeigen noch auf Knotennamen.
+        if (res == .yes) ui.file_explorer.confirmDelete(@intCast(idx));
     }
 
     fn showSaveConfirmationDialog(self: *Self, pane: *pane_mod.Pane, tab_index: usize) void {

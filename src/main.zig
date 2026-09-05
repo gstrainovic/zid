@@ -524,7 +524,9 @@ pub fn main() !void {
             }
         }
 
-        ui_system.setPointerState(mouse_x, mouse_y, mouse_down);
+        // Pointer-Position aus der UI: enthält auch Positionen aus gepufferten
+        // RPC-Eingaben (headless), nicht nur aus Fenster-Events.
+        ui_system.setPointerState(ui_system.mouse_x, ui_system.mouse_y, mouse_down or ui_system.is_mouse_down);
         ui_system.updateScroll(0, scroll_delta_y * 10.0, delta_time_ms);
 
         var render_commands = ui_system.renderExample(&logo_texture);

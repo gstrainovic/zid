@@ -30,6 +30,8 @@ pub const InputEvent = union(enum) {
     move: Point,
     key: struct { btn: @import("wio").Button, ctrl: bool },
     char: u21,
+    /// Mausrad an Position: lines > 0 hoch, < 0 runter
+    scroll: struct { x: f32, y: f32, lines: i32 },
 };
 
 /// E2E Server Context - teilt State mit Main Thread
@@ -115,6 +117,11 @@ fn applyInput(ui: *ui_mod.UI, ev: InputEvent) void {
             ui.handleKeyPress(k.btn);
         },
         .char => |cp| ui.handleChar(cp),
+        .scroll => |sc| {
+            ui.setPointerState(sc.x, sc.y, false);
+            ui.handleMouseMove(sc.x, sc.y);
+            ui.handleScroll(sc.lines);
+        },
     }
 }
 
@@ -129,6 +136,7 @@ pub fn createDispatcher(alloc: std.mem.Allocator, ctx: *E2EContext) !*zigjr.RpcD
     try rpc_dispatcher.addWithCtx("setActiveTab", ctx, setActiveTab);
     try rpc_dispatcher.addWithCtx("click", ctx, click);
     try rpc_dispatcher.addWithCtx("right_click", ctx, rightClick);
+    try rpc_dispatcher.addWithCtx("scroll", ctx, scrollAt);
     try rpc_dispatcher.addWithCtx("move_mouse", ctx, moveMouse);
     try rpc_dispatcher.addWithCtx("type_text", ctx, typeText);
     try rpc_dispatcher.addWithCtx("key_press", ctx, keyPress);
@@ -137,6 +145,7 @@ pub fn createDispatcher(alloc: std.mem.Allocator, ctx: *E2EContext) !*zigjr.RpcD
     try rpc_dispatcher.addWithCtx("get_chat_input", ctx, getChatInput);
     try rpc_dispatcher.addWithCtx("get_active_tab", ctx, getActiveTabDebug);
     try rpc_dispatcher.addWithCtx("explorer_open", ctx, explorerOpen);
+    try rpc_dispatcher.addWithCtx("explorer_entries", ctx, explorerEntries);
     try rpc_dispatcher.addWithCtx("save_file", ctx, saveFile);
     try rpc_dispatcher.addWithCtx("get_state", ctx, getState);
     try rpc_dispatcher.addWithCtx("benchmark_open_file", ctx, benchmarkOpenFile);
@@ -303,6 +312,13 @@ pub fn rightClick(ctx: *E2EContext, _: *zigjr.DispatchCtx, x: f64, y: f64) ![]co
     return "ok";
 }
 
+/// Mausrad an Koordinate: lines > 0 hoch, < 0 runter
+fn scrollAt(ctx: *E2EContext, _: *zigjr.DispatchCtx, x: f64, y: f64, lines: i64) ![]const u8 {
+    log.info("RPC: scroll({d}, {d}, {d})", .{ x, y, lines });
+    dispatchInput(ctx, .{ .scroll = .{ .x = @floatCast(x), .y = @floatCast(y), .lines = @intCast(lines) } });
+    return "ok";
+}
+
 /// Maus-Bewegung zu Koordinate (simuliert)
 fn moveMouse(ctx: *E2EContext, _: *zigjr.DispatchCtx, x: f64, y: f64) ![]const u8 {
     log.info("RPC: move_mouse({d}, {d})", .{ x, y });
@@ -322,7 +338,10 @@ pub fn keyPress(ctx: *E2EContext, _: *zigjr.DispatchCtx, key_name: []const u8, i
     else if (std.mem.eql(u8, key_name, "x")) btn = .x
     else if (std.mem.eql(u8, key_name, "k")) btn = .k
     else if (std.mem.eql(u8, key_name, "y")) btn = .y
-    else if (std.mem.eql(u8, key_name, "n")) btn = .n;
+    else if (std.mem.eql(u8, key_name, "n")) btn = .n
+    else if (std.mem.eql(u8, key_name, "escape")) btn = .escape
+    else if (std.mem.eql(u8, key_name, "delete")) btn = .delete
+    else if (std.mem.eql(u8, key_name, "f2")) btn = .f2;
 
     const b = btn orelse return "error: unknown key";
     dispatchInput(ctx, .{ .key = .{ .btn = b, .ctrl = is_ctrl } });
@@ -395,6 +414,30 @@ fn getActiveTabDebug(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     }
     const ed = ctx.ui_system.getActiveEditor();
     try buf.writer.print("], \"editor_modified\": {}, \"editor_file\": \"{s}\"}}", .{ ed.is_modified, ed.buffer.get_file_path() });
+    return buf.written();
+}
+
+/// Sichtbare Explorer-Einträge mit Viewport-Bounds, damit Tests Zeilen anklicken können.
+fn explorerEntries(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
+    const fx = &ctx.ui_system.file_explorer;
+    var buf = std.Io.Writer.Allocating.init(dc.arena());
+    try buf.writer.print(
+        \\{{"viewport": {{"x": {d:.1}, "y": {d:.1}, "w": {d:.1}, "h": {d:.1}}}, "row_height": {d:.1}, "scroll": {d:.1}, "renaming": {}, "menu_open": {}, "menu_x": {d:.1}, "menu_y": {d:.1}, "entries": [
+    , .{
+        fx.viewport_x,                                     fx.viewport_y,
+        fx.viewport_width,                                 fx.viewport_height,
+        @import("ui/file_explorer.zig").ROW_HEIGHT,        fx.scroll_offset_y,
+        fx.isRenaming(),                                   fx.context_menu != null,
+        if (fx.context_menu) |m| m.x else @as(f32, 0),     if (fx.context_menu) |m| m.y else @as(f32, 0),
+    });
+    for (fx.visible_entries.items, 0..) |e, i| {
+        const node = fx.nodes.items[e.node_index];
+        if (i > 0) try buf.writer.writeAll(", ");
+        try buf.writer.print(
+            \\{{"index": {d}, "name": "{s}", "path": "{s}", "is_folder": {}, "expanded": {}, "depth": {d}}}
+        , .{ i, node.name, node.path, node.is_folder, e.is_expanded, e.depth });
+    }
+    try buf.writer.writeAll("]}");
     return buf.written();
 }
 

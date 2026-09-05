@@ -5,6 +5,8 @@
 
 const std = @import("std");
 const clay = @import("clay");
+const wio = @import("wio");
+const explorer_ops = @import("explorer_ops.zig");
 const ui = @import("../ui/mod.zig");
 const Theme = ui.Theme;
 
@@ -14,6 +16,15 @@ const log = std.log.scoped(.file_explorer);
 const MAX_TREE_DEPTH = 32;
 /// Standard-Einrückung pro Ebene in Pixeln
 const DEFAULT_INDENT_PX = 16.0;
+
+/// Zeilenhöhe eines Eintrags in Pixeln (Hit-Test und Rendering)
+pub const ROW_HEIGHT: f32 = 36;
+
+/// Rechtsklick-Menü auf einem Eintrag
+pub const ContextMenu = struct { x: f32, y: f32, node_index: u32 };
+
+/// Laufendes Inline-Umbenennen
+pub const RenameState = struct { node_index: u32, edit: explorer_ops.RenameEdit };
 
 /// Ein Knoten im Dateibaum
 pub const TreeNode = struct {
@@ -62,6 +73,18 @@ pub const FileExplorerState = struct {
     file_to_open: ?[]const u8 = null,
     /// Deferred Action: Folder-Toggle pending (wird nach Rendering ausgeführt)
     pending_toggle: ?u32 = null,
+    /// Kontextmenü (Rechtsklick auf Eintrag)
+    context_menu: ?ContextMenu = null,
+    /// Inline-Umbenennen
+    rename: ?RenameState = null,
+    /// Vom Kontextmenü angefordert; UI zeigt den Bestätigungsdialog
+    pending_delete: ?u32 = null,
+    /// Vom Dialog bestätigt; wird im nächsten Frame vor dem Layout ausgeführt
+    confirmed_delete: ?u32 = null,
+    /// Viewport-Bounds des letzten Frames (Hit-Test für Einträge)
+    viewport_x: f32 = 0,
+    viewport_y: f32 = 0,
+    viewport_width: f32 = 0,
 
     /// Aktuelle Breite der Sidebar
     width: f32 = 250.0,
@@ -327,7 +350,186 @@ pub const FileExplorerState = struct {
         }
     }
 
-    pub fn handleMouseDown(self: *Self, x: f32, y: f32) bool {
+    /// Sichtbarer Eintrag unter (x, y), anhand der Viewport-Bounds des letzten Frames.
+    pub fn entryAt(self: *const Self, x: f32, y: f32) ?usize {
+        if (self.viewport_width <= 0 or self.viewport_height <= 0) return null;
+        if (x < self.viewport_x or x >= self.viewport_x + self.viewport_width) return null;
+        if (y < self.viewport_y or y >= self.viewport_y + self.viewport_height) return null;
+        const rel = y - self.viewport_y + self.scroll_offset_y;
+        if (rel < 0) return null;
+        const idx: usize = @intFromFloat(rel / ROW_HEIGHT);
+        if (idx >= self.visible_entries.items.len) return null;
+        return idx;
+    }
+
+    fn inSidebar(self: *const Self, x: f32) bool {
+        return self.viewport_width > 0 and x >= self.viewport_x and x < self.viewport_x + self.viewport_width;
+    }
+
+    /// Höhe des Kontextmenüs (2 Einträge à ~42px + Padding, mit Reserve), zum Einpassen am unteren Rand
+    const context_menu_height: f32 = 2 * 42 + 16;
+
+    pub fn openContextMenu(self: *Self, x: f32, y: f32, entry_index: usize) void {
+        if (entry_index >= self.visible_entries.items.len) return;
+        self.selectEntry(entry_index);
+        // Am unteren Rand nach oben verschieben, damit das Menü sichtbar bleibt
+        const bottom = self.viewport_y + self.viewport_height;
+        const menu_y = if (y + context_menu_height > bottom) @max(self.viewport_y, bottom - context_menu_height) else y;
+        self.context_menu = .{ .x = x, .y = menu_y, .node_index = self.visible_entries.items[entry_index].node_index };
+    }
+
+    pub fn startRename(self: *Self, node_index: u32) void {
+        if (node_index >= self.nodes.items.len) return;
+        self.rename = .{ .node_index = node_index, .edit = explorer_ops.RenameEdit.init(self.nodes.items[node_index].name) };
+    }
+
+    pub fn isRenaming(self: *const Self) bool {
+        return self.rename != null;
+    }
+
+    pub fn handleRenameKey(self: *Self, key: wio.Button) void {
+        const st = &(self.rename orelse return);
+        switch (key) {
+            .enter, .kp_enter => self.commitRename(),
+            .escape => self.rename = null,
+            .backspace => st.edit.backspace(),
+            else => {},
+        }
+    }
+
+    pub fn handleRenameChar(self: *Self, cp: u21) void {
+        if (cp < 32 or cp == 127) return;
+        if (self.rename) |*st| st.edit.insertCodepoint(cp);
+    }
+
+    fn commitRename(self: *Self) void {
+        const st = self.rename orelse return;
+        self.rename = null;
+        if (st.node_index >= self.nodes.items.len) return;
+        const node = self.nodes.items[st.node_index];
+        const new_path = explorer_ops.renamePath(self.allocator, node.path, st.edit.text()) catch |err| {
+            log.err("rename '{s}' -> '{s}' failed: {}", .{ node.path, st.edit.text(), err });
+            return;
+        };
+        defer self.allocator.free(new_path);
+        log.info("renamed '{s}' -> '{s}'", .{ node.path, new_path });
+        self.refresh(new_path);
+    }
+
+    /// Vom Dialog-Callback: Löschen vormerken (Ausführung im nächsten Frame vor dem Layout,
+    /// weil Render-Commands noch auf Knotennamen zeigen).
+    pub fn takePendingDelete(self: *Self) ?u32 {
+        const v = self.pending_delete;
+        self.pending_delete = null;
+        return v;
+    }
+
+    pub fn confirmDelete(self: *Self, node_index: u32) void {
+        self.confirmed_delete = node_index;
+    }
+
+    /// Einmal pro Frame vor dem Layout aufrufen.
+    pub fn processPending(self: *Self) void {
+        if (self.confirmed_delete) |idx| {
+            self.confirmed_delete = null;
+            self.deleteNode(idx);
+        }
+    }
+
+    pub fn deleteNode(self: *Self, node_index: u32) void {
+        if (node_index == 0 or node_index >= self.nodes.items.len) return;
+        const node = self.nodes.items[node_index];
+        explorer_ops.deletePath(node.path, node.is_folder) catch |err| {
+            log.err("delete '{s}' failed: {}", .{ node.path, err });
+            return;
+        };
+        log.info("deleted '{s}'", .{node.path});
+        self.refresh(null);
+    }
+
+    /// Baum neu laden, zuvor offene Ordner anhand ihrer Pfade wieder aufklappen,
+    /// Scroll-Position behalten und optional den Eintrag mit `select_path` selektieren.
+    pub fn refresh(self: *Self, select_path: ?[]const u8) void {
+        if (self.nodes.items.len == 0) return;
+
+        var expanded_paths: std.ArrayList([]u8) = .empty;
+        defer {
+            for (expanded_paths.items) |p| self.allocator.free(p);
+            expanded_paths.deinit(self.allocator);
+        }
+        var it = self.expanded_nodes.keyIterator();
+        while (it.next()) |k| {
+            if (k.* >= self.nodes.items.len) continue;
+            const dup = self.allocator.dupe(u8, self.nodes.items[k.*].path) catch continue;
+            expanded_paths.append(self.allocator, dup) catch {
+                self.allocator.free(dup);
+            };
+        }
+        // Alles, was in Knotenspeicher zeigt, vor loadDirectory kopieren
+        const root = self.allocator.dupe(u8, self.nodes.items[0].path) catch return;
+        defer self.allocator.free(root);
+        const sel: ?[]u8 = if (select_path) |p| (self.allocator.dupe(u8, p) catch null) else null;
+        defer if (sel) |p| self.allocator.free(p);
+        const scroll = self.scroll_offset_y;
+
+        self.loadDirectory(root) catch |err| {
+            log.err("refresh: reload '{s}' failed: {}", .{ root, err });
+            return;
+        };
+
+        // Ordner wieder aufklappen: Kinder existieren erst nach dem Aufklappen des
+        // Elternknotens, daher wiederholen bis nichts mehr dazukommt.
+        var changed = true;
+        while (changed) {
+            changed = false;
+            var i: u32 = 0;
+            while (i < self.nodes.items.len) : (i += 1) {
+                const n = self.nodes.items[i];
+                if (!n.is_folder or self.expanded_nodes.contains(i)) continue;
+                for (expanded_paths.items) |p| {
+                    if (std.mem.eql(u8, p, n.path)) {
+                        self.expandNode(i, n.path) catch {};
+                        changed = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        self.scroll_offset_y = scroll;
+        self.selected_index = null;
+        if (sel) |p| {
+            for (self.visible_entries.items, 0..) |e, idx| {
+                if (std.mem.eql(u8, self.nodes.items[e.node_index].path, p)) {
+                    self.selected_index = idx;
+                    break;
+                }
+            }
+        }
+    }
+
+    pub fn handleMouseDown(self: *Self, x: f32, y: f32, button: wio.Button) bool {
+        // Offenes Kontextmenü: Eintrag ausführen oder Menü schließen
+        if (self.context_menu) |menu| {
+            self.context_menu = null;
+            if (clay.pointerOver(clay.ElementId.ID("fx_menu_rename"))) {
+                self.startRename(menu.node_index);
+                return true;
+            }
+            if (clay.pointerOver(clay.ElementId.ID("fx_menu_delete"))) {
+                self.pending_delete = menu.node_index;
+                return true;
+            }
+            return true;
+        }
+        // Laufendes Umbenennen: jeder Klick bricht ab
+        if (self.rename != null) self.rename = null;
+
+        if (button == .mouse_right) {
+            if (self.entryAt(x, y)) |idx| self.openContextMenu(x, y, idx);
+            return self.inSidebar(x);
+        }
+
         if (self.content_height <= self.viewport_height) return false;
 
         if (x < self.scrollbar_track_x) return false;
@@ -408,6 +610,9 @@ pub fn renderFileExplorer(
     const content_data = clay.getElementData(clay.ElementId.ID("file_tree_content"));
     if (clip_data.found) {
         state.viewport_height = clip_data.bounding_box.height;
+        state.viewport_x = clip_data.bounding_box.x;
+        state.viewport_y = clip_data.bounding_box.y;
+        state.viewport_width = clip_data.bounding_box.width;
         state.scrollbar_track_x = clip_data.bounding_box.x + clip_data.bounding_box.width - state.scrollbar_width;
         state.scrollbar_track_y = clip_data.bounding_box.y;
     }
@@ -459,6 +664,53 @@ pub fn renderFileExplorer(
         if (state.content_height > state.viewport_height) {
             renderScrollbar(state, theme);
         }
+    });
+
+    if (state.context_menu) |menu| renderContextMenu(menu, theme);
+}
+
+fn renderContextMenu(menu: ContextMenu, theme: Theme) void {
+    clay.UI()(.{
+        .id = clay.ElementId.ID("fx_menu_anchor"),
+        .layout = .{ .sizing = .{ .w = .fixed(0), .h = .fixed(0) } },
+        .floating = .{
+            .attach_to = .to_root,
+            .attach_points = .{ .element = .left_top, .parent = .left_top },
+            .offset = .{ .x = menu.x, .y = menu.y },
+            .z_index = 1000,
+        },
+    })({
+        clay.UI()(.{
+            .id = clay.ElementId.ID("fx_menu_container"),
+            .layout = .{
+                .sizing = .{ .w = .fit, .h = .fit },
+                .direction = .top_to_bottom,
+                .padding = .all(4),
+                .child_gap = 2,
+            },
+            .background_color = theme.overlay,
+            .border = .{ .width = .all(1), .color = theme.border },
+            .corner_radius = .all(4),
+        })({
+            renderContextMenuItem("Rename", "fx_menu_rename", theme);
+            renderContextMenuItem("Delete", "fx_menu_delete", theme);
+        });
+    });
+}
+
+fn renderContextMenuItem(label: []const u8, id: []const u8, theme: Theme) void {
+    const item_id = clay.ElementId.ID(id);
+    const hovered = clay.pointerOver(item_id);
+    clay.UI()(.{
+        .id = item_id,
+        .layout = .{
+            .sizing = .{ .w = .fixed(180), .h = .fit },
+            .padding = .{ .left = 12, .right = 12, .top = 6, .bottom = 6 },
+        },
+        .background_color = if (hovered) theme.primary else .{ 0, 0, 0, 0 },
+        .corner_radius = .all(3),
+    })({
+        clay.text(label, .{ .font_size = 20, .color = if (hovered) theme.text_on_primary else theme.text });
     });
 }
 
@@ -537,7 +789,7 @@ fn renderTreeEntry(
     clay.UI()(.{
         .id = element_id,
         .layout = .{
-            .sizing = .{ .w = .grow, .h = .fixed(36) },
+            .sizing = .{ .w = .grow, .h = .fixed(ROW_HEIGHT) },
             .direction = .left_to_right,
             .child_alignment = .{ .x = .left, .y = .center },
             .child_gap = 4,
@@ -600,11 +852,30 @@ fn renderTreeEntry(
             });
         }
 
-        // Dateiname
-        clay.text(node.name, .{
-            .font_size = 24,
-            .color = if (is_selected) theme.text_on_primary else theme.text,
-        });
+        // Dateiname oder Umbenennen-Feld
+        const renaming = if (state.rename) |st| st.node_index == entry.node_index else false;
+        if (renaming) {
+            const edit_text = state.rename.?.edit.text();
+            clay.UI()(.{
+                .id = clay.ElementId.ID("fx_rename_box"),
+                .layout = .{
+                    .sizing = .{ .w = .grow, .h = .fixed(30) },
+                    .padding = .{ .left = 6, .right = 6 },
+                    .child_alignment = .{ .x = .left, .y = .center },
+                },
+                .background_color = theme.overlay,
+                .border = .{ .width = .all(1), .color = theme.border_focus },
+                .corner_radius = .all(3),
+            })({
+                const shown = std.fmt.allocPrint(arena, "{s}|", .{edit_text}) catch edit_text;
+                clay.text(shown, .{ .font_size = 22, .color = theme.text });
+            });
+        } else {
+            clay.text(node.name, .{
+                .font_size = 24,
+                .color = if (is_selected) theme.text_on_primary else theme.text,
+            });
+        }
     });
 }
 
