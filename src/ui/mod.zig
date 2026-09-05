@@ -583,6 +583,20 @@ pub const UI = struct {
             }
         }
 
+        // Rechtsklick auf die Tab-Leiste des aktiven Panes öffnet das Editor-Kontextmenü
+        // (MD-Preview, Split …) an der Klickposition, wie im Textbereich selbst.
+        if (button == .mouse_right) {
+            const tb_id = clay.ElementId.IDI("tab_bar_container", @as(u32, @truncate(@intFromPtr(tab_bar))));
+            const tb_data = clay.getElementData(tb_id);
+            if (tb_data.found) {
+                const tb = tb_data.bounding_box;
+                if (x >= tb.x and x < tb.x + tb.width and y >= tb.y and y < tb.y + tb.height) {
+                    editor.handleMouseDown(x, y, button);
+                    return;
+                }
+            }
+        }
+
         // Nur an Editor weitergeben wenn Klick innerhalb der code_editor-BBox
         // oder wenn Menü offen ist (damit Klicks auf das Menü ankommen)
         const editor_id = clay.ElementId.IDI("code_editor", @truncate(@intFromPtr(editor)));

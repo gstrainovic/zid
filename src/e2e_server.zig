@@ -11,6 +11,7 @@
 
 const std = @import("std");
 const zigjr = @import("zigjr");
+const clay = @import("clay");
 // const zigimg = @import("zigimg");
 const ui_mod = @import("ui/mod.zig");
 
@@ -18,12 +19,33 @@ const log = std.log.scoped(.e2e_server);
 
 const PORT = 9999;
 
+const Point = struct { x: f32, y: f32 };
+
+/// Eingabe-Ereignis aus einem RPC. Im Fenstermodus wird es nicht im Server-Thread
+/// angewendet, sondern vom Main-Thread vor dem Rendern (drainInputs), sonst
+/// rennt der Handler in einen laufenden Clay-Layout-Durchgang (Absturz).
+pub const InputEvent = union(enum) {
+    click: Point,
+    right_click: Point,
+    move: Point,
+    key: struct { btn: @import("wio").Button, ctrl: bool },
+    char: u21,
+};
+
 /// E2E Server Context - teilt State mit Main Thread
 pub const E2EContext = struct {
     allocator: std.mem.Allocator,
     ui_system: *ui_mod.UI,
     shutdown_flag: std.atomic.Value(bool),
     server: std.net.Server,
+    /// true im Fenstermodus: Eingaben werden gepuffert statt direkt angewendet.
+    defer_input: bool = false,
+    input_mutex: std.Thread.Mutex = .{},
+    pending_inputs: std.ArrayListUnmanaged(InputEvent) = .empty,
+    /// Fenstermodus: Screenshot wird vom Main-Thread nach dem nächsten Frame geschrieben.
+    screenshot_requested: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+    screenshot_done: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+    screenshot_failed: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
 
     const Self = @This();
 
@@ -35,7 +57,66 @@ pub const E2EContext = struct {
             .server = server,
         };
     }
+
+    pub fn deinit(self: *Self) void {
+        self.pending_inputs.deinit(self.allocator);
+    }
 };
+
+/// Ereignis anwenden oder (Fenstermodus) für den Main-Thread puffern.
+fn dispatchInput(ctx: *E2EContext, ev: InputEvent) void {
+    if (!ctx.defer_input) {
+        applyInput(ctx.ui_system, ev);
+        return;
+    }
+    ctx.input_mutex.lock();
+    ctx.pending_inputs.append(ctx.allocator, ev) catch {
+        log.warn("input queue: out of memory, event dropped", .{});
+    };
+    ctx.input_mutex.unlock();
+    @import("wio").cancelWait();
+}
+
+/// Vom Main-Thread pro Frame aufrufen: gepufferte Eingaben anwenden.
+pub fn drainInputs(ctx: *E2EContext) void {
+    var batch: [64]InputEvent = undefined;
+    while (true) {
+        ctx.input_mutex.lock();
+        const n = @min(ctx.pending_inputs.items.len, batch.len);
+        @memcpy(batch[0..n], ctx.pending_inputs.items[0..n]);
+        ctx.pending_inputs.replaceRangeAssumeCapacity(0, n, &.{});
+        ctx.input_mutex.unlock();
+        if (n == 0) return;
+        for (batch[0..n]) |ev| applyInput(ctx.ui_system, ev);
+    }
+}
+
+fn applyInput(ui: *ui_mod.UI, ev: InputEvent) void {
+    switch (ev) {
+        .click => |p| {
+            ui.setPointerState(p.x, p.y, true);
+            ui.handleMouseMove(p.x, p.y);
+            ui.handleMouseDown(p.x, p.y, .mouse_left);
+            ui.handleMouseUp();
+            ui.setPointerState(p.x, p.y, false);
+        },
+        .right_click => |p| {
+            ui.setPointerState(p.x, p.y, true);
+            ui.handleMouseDown(p.x, p.y, .mouse_right);
+            ui.handleMouseUp();
+            ui.setPointerState(p.x, p.y, false);
+        },
+        .move => |p| {
+            ui.setPointerState(p.x, p.y, false);
+            ui.handleMouseMove(p.x, p.y);
+        },
+        .key => |k| {
+            ui.setCtrlState(k.ctrl);
+            ui.handleKeyPress(k.btn);
+        },
+        .char => |cp| ui.handleChar(cp),
+    }
+}
 
 /// Dispatcher mit allen E2E-Handlern erstellen
 pub fn createDispatcher(alloc: std.mem.Allocator, ctx: *E2EContext) !*zigjr.RpcDispatcher {
@@ -47,6 +128,7 @@ pub fn createDispatcher(alloc: std.mem.Allocator, ctx: *E2EContext) !*zigjr.RpcD
     try rpc_dispatcher.addWithCtx("close_tab", ctx, closeTab);
     try rpc_dispatcher.addWithCtx("setActiveTab", ctx, setActiveTab);
     try rpc_dispatcher.addWithCtx("click", ctx, click);
+    try rpc_dispatcher.addWithCtx("right_click", ctx, rightClick);
     try rpc_dispatcher.addWithCtx("move_mouse", ctx, moveMouse);
     try rpc_dispatcher.addWithCtx("type_text", ctx, typeText);
     try rpc_dispatcher.addWithCtx("key_press", ctx, keyPress);
@@ -210,61 +292,26 @@ pub fn setActiveTab(ctx: *E2EContext, dc: *zigjr.DispatchCtx, index: i64) ![]con
 /// Maus-Klick an Koordinate (simuliert)
 pub fn click(ctx: *E2EContext, _: *zigjr.DispatchCtx, x: f64, y: f64) ![]const u8 {
     log.info("RPC: click({d}, {d})", .{ x, y });
-
-    // Pointer State für Clay setzen (Hover/Press)
-    ctx.ui_system.setPointerState(@floatCast(x), @floatCast(y), true);
-    
-    // Legacy Handler (für Editor-Interna)
-    ctx.ui_system.handleMouseMove(@floatCast(x), @floatCast(y));
-    ctx.ui_system.handleMouseDown(@floatCast(x), @floatCast(y), .mouse_left);
-    ctx.ui_system.handleMouseUp();
-    
-    // Pointer State zurücksetzen
-    ctx.ui_system.setPointerState(@floatCast(x), @floatCast(y), false);
-
-    // Event Loop aufwecken
-    const wio = @import("wio");
-    wio.cancelWait();
-
+    dispatchInput(ctx, .{ .click = .{ .x = @floatCast(x), .y = @floatCast(y) } });
     return "ok";
 }
 
 /// Maus-Rechtsklick an Koordinate
 pub fn rightClick(ctx: *E2EContext, _: *zigjr.DispatchCtx, x: f64, y: f64) ![]const u8 {
     log.info("RPC: right_click({d}, {d})", .{ x, y });
-
-    // Pointer position setzen
-    ctx.ui_system.setPointerState(@floatCast(x), @floatCast(y), true);
-    ctx.ui_system.handleMouseDown(@floatCast(x), @floatCast(y), .mouse_right);
-    ctx.ui_system.handleMouseUp();
-    ctx.ui_system.setPointerState(@floatCast(x), @floatCast(y), false);
-
-    // Event Loop aufwecken
-    const wio = @import("wio");
-    wio.cancelWait();
-
+    dispatchInput(ctx, .{ .right_click = .{ .x = @floatCast(x), .y = @floatCast(y) } });
     return "ok";
 }
 
 /// Maus-Bewegung zu Koordinate (simuliert)
 fn moveMouse(ctx: *E2EContext, _: *zigjr.DispatchCtx, x: f64, y: f64) ![]const u8 {
     log.info("RPC: move_mouse({d}, {d})", .{ x, y });
-
-    // Pointer State für Clay setzen (Hover)
-    ctx.ui_system.setPointerState(@floatCast(x), @floatCast(y), false);
-    ctx.ui_system.handleMouseMove(@floatCast(x), @floatCast(y));
-
-    // Event Loop aufwecken
-    const wio = @import("wio");
-    wio.cancelWait();
-
+    dispatchInput(ctx, .{ .move = .{ .x = @floatCast(x), .y = @floatCast(y) } });
     return "ok";
 }
 
 pub fn keyPress(ctx: *E2EContext, _: *zigjr.DispatchCtx, key_name: []const u8, is_ctrl: bool) ![]const u8 {
     log.info("RPC: key_press('{s}', ctrl={})", .{ key_name, is_ctrl });
-
-    ctx.ui_system.setCtrlState(is_ctrl);
 
     var btn: ?@import("wio").Button = null;
     if (std.mem.eql(u8, key_name, "enter")) btn = .enter
@@ -277,28 +324,18 @@ pub fn keyPress(ctx: *E2EContext, _: *zigjr.DispatchCtx, key_name: []const u8, i
     else if (std.mem.eql(u8, key_name, "y")) btn = .y
     else if (std.mem.eql(u8, key_name, "n")) btn = .n;
 
-    if (btn) |b| {
-        ctx.ui_system.handleKeyPress(b);
-        @import("wio").cancelWait();
-        return "ok";
-    }
-
-    return "error: unknown key";
+    const b = btn orelse return "error: unknown key";
+    dispatchInput(ctx, .{ .key = .{ .btn = b, .ctrl = is_ctrl } });
+    return "ok";
 }
 
 pub fn typeText(ctx: *E2EContext, _: *zigjr.DispatchCtx, text: []const u8) ![]const u8 {
     log.info("RPC: type_text('{s}')", .{text});
-
-    // Wir iterieren über UTF-8 Zeichen
     var view = std.unicode.Utf8View.init(text) catch return "error: invalid utf8";
     var iter = view.iterator();
     while (iter.nextCodepoint()) |cp| {
-        ctx.ui_system.handleChar(cp);
-        // Kurze Pause simulieren (optional, aber realistischer)
-        std.Thread.sleep(10 * std.time.ns_per_ms);
+        dispatchInput(ctx, .{ .char = cp });
     }
-    @import("wio").cancelWait();
-
     return "ok";
 }
 
@@ -428,17 +465,47 @@ fn closeActiveTabRpc(ctx: *E2EContext, _: *zigjr.DispatchCtx) !void {
 }
 
 /// Screenshot: rendert aktuellen Frame und speichert als PPM nach ./tmp/vulkan-screenshot.ppm
+const screenshot_path = "./tmp/vulkan-screenshot.ppm";
+
 pub fn screenshot(ctx: *E2EContext, _: *zigjr.DispatchCtx) ![]const u8 {
     log.info("=== SCREENSHOT RPC CALLED ===", .{});
 
+    if (ctx.defer_input) {
+        // Fenstermodus: nicht hier rendern (Main-Thread rendert gerade), sondern
+        // anfordern und auf den nächsten Frame warten.
+        ctx.screenshot_done.store(false, .seq_cst);
+        ctx.screenshot_failed.store(false, .seq_cst);
+        ctx.screenshot_requested.store(true, .seq_cst);
+        @import("wio").cancelWait();
+        var waited_ms: u32 = 0;
+        while (!ctx.screenshot_done.load(.seq_cst)) : (waited_ms += 10) {
+            if (waited_ms > 5000) return "error: screenshot timeout";
+            std.Thread.sleep(10 * std.time.ns_per_ms);
+        }
+        return if (ctx.screenshot_failed.load(.seq_cst)) "error: screenshot failed" else screenshot_path;
+    }
+
+    // Headless: UI hier rendern, es gibt keinen konkurrierenden Frame.
+    const commands = ctx.ui_system.renderExample(null);
+    return writeScreenshot(ctx, commands);
+}
+
+/// Vom Main-Thread nach renderExample() aufrufen: schreibt den angeforderten Screenshot
+/// aus den Render-Commands des aktuellen Frames.
+pub fn serviceScreenshot(ctx: *E2EContext, commands: []clay.RenderCommand) void {
+    if (!ctx.screenshot_requested.swap(false, .seq_cst)) return;
+    _ = writeScreenshot(ctx, commands) catch |err| {
+        log.err("screenshot failed: {}", .{err});
+        ctx.screenshot_failed.store(true, .seq_cst);
+    };
+    ctx.screenshot_done.store(true, .seq_cst);
+}
+
+fn writeScreenshot(ctx: *E2EContext, commands: []clay.RenderCommand) ![]const u8 {
     const renderer_ptr = @import("rendering/mod.zig").Renderer.g_renderer_ptr orelse return "error: no renderer";
     const renderer = renderer_ptr;
     const mod = @import("rendering/mod.zig").Renderer;
-
-    const path = "./tmp/vulkan-screenshot.ppm";
-
-    // Headless: UI rendern mit Clay
-    const commands = ctx.ui_system.renderExample(null);
+    const path = screenshot_path;
     log.info("screenshot: got {d} commands", .{commands.len});
 
     // Debug: count command types
@@ -483,17 +550,18 @@ pub fn screenshot(ctx: *E2EContext, _: *zigjr.DispatchCtx) ![]const u8 {
     const header_slice = std.fmt.bufPrint(&header, "P6\n{d} {d}\n255\n", .{ w, h }) catch unreachable;
     try file.writeAll(header_slice);
 
-    // WGPU liefert RGBA -> PPM braucht R,G,B
-    var src_idx: usize = 0;
-    var pixel_count: usize = 0;
-    var rgb_pixel: [3]u8 = undefined;
-    while (pixel_count < w * h) : (pixel_count += 1) {
-        rgb_pixel[0] = rgba[src_idx + 0]; // R
-        rgb_pixel[1] = rgba[src_idx + 1]; // G
-        rgb_pixel[2] = rgba[src_idx + 2]; // B
-        try file.writeAll(&rgb_pixel);
-        src_idx += 4;
+    // WGPU liefert RGBA -> PPM braucht R,G,B. Erst komplett in den Speicher,
+    // dann ein writeAll: pro Pixel ein Syscall dauerte bei 2M Pixeln Sekunden.
+    const pixel_total: usize = @as(usize, w) * @as(usize, h);
+    const rgb = try ctx.allocator.alloc(u8, pixel_total * 3);
+    defer ctx.allocator.free(rgb);
+    var i: usize = 0;
+    while (i < pixel_total) : (i += 1) {
+        rgb[i * 3 + 0] = rgba[i * 4 + 0];
+        rgb[i * 3 + 1] = rgba[i * 4 + 1];
+        rgb[i * 3 + 2] = rgba[i * 4 + 2];
     }
+    try file.writeAll(rgb);
     try file.sync();
     log.info("screenshot: wrote PPM to {s}", .{path});
 

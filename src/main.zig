@@ -376,8 +376,11 @@ pub fn main() !void {
         const e2e_listen_addr = try std.net.Address.parseIp("127.0.0.1", 9999);
         const e2e_server_sock = try e2e_listen_addr.listen(.{ .reuse_address = true });
         e2e_ctx = e2e_server.E2EContext.init(allocator, &ui_system, e2e_server_sock);
+        // Fenstermodus: RPC-Eingaben puffern, der Main-Loop wendet sie pro Frame an.
+        e2e_ctx.?.defer_input = !headless_mode;
         e2e_thread = try e2e_server.start(&e2e_ctx.?);
     }
+    defer if (e2e_ctx) |*c| c.deinit();
 
     // In headless mode: poll async results + wait for E2E shutdown (no rendering loop)
     if (headless_mode) {
@@ -427,6 +430,7 @@ pub fn main() !void {
     var alt_held: bool = false;
 
     while (plat.isRunning() and (e2e_ctx == null or !e2e_ctx.?.shutdown_flag.load(.seq_cst))) {
+        if (e2e_ctx) |*c| e2e_server.drainInputs(c);
         const delta_time_ms: f32 = 16.0;
 
         wio.update();
@@ -549,6 +553,7 @@ pub fn main() !void {
         ui_system.updateScroll(0, scroll_delta_y * 10.0, delta_time_ms);
 
         var render_commands = ui_system.renderExample(&logo_texture);
+        if (e2e_ctx) |*c| e2e_server.serviceScreenshot(c, render_commands);
         
         // Phase 9: PDF Seitenwechsel verarbeiten
         if (ui_system.pending_pdf_page_change) |change| {
