@@ -499,7 +499,9 @@ fn editorState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
         .end = .{ .row = last, .col = 100_000 },
     }) catch "";
     var buf = std.Io.Writer.Allocating.init(dc.arena());
-    try buf.writer.print("{{\"lines\": {d}, \"row\": {d}, \"col\": {d}, \"text\": ", .{ lines, ed.cursor.row, ed.cursor.col });
+    try buf.writer.print("{{\"lines\": {d}, \"row\": {d}, \"col\": {d}, \"find_open\": {}, \"find_not_found\": {}, \"find_query\": ", .{ lines, ed.cursor.row, ed.cursor.col, ed.find.active, ed.find.not_found });
+    try std.json.Stringify.value(ed.find.text(), .{}, &buf.writer);
+    try buf.writer.writeAll(", \"text\": ");
     try std.json.Stringify.value(text, .{}, &buf.writer);
     try buf.writer.writeAll("}");
     return buf.written();

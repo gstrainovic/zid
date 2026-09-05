@@ -883,13 +883,13 @@ pub const UI = struct {
             .split_vertical => self.getActiveEditor().dispatchAction(.SplitVertical),
             .split_horizontal => self.getActiveEditor().dispatchAction(.SplitHorizontal),
             .md_preview => self.getActiveEditor().dispatchAction(.MdPreview),
+            .find => self.getActiveEditor().dispatchAction(.Search),
             .rename_entry => {
                 if (self.file_explorer.selectedNodeIndex()) |node| self.file_explorer.startRename(node);
             },
             .delete_entry => {
                 if (self.file_explorer.selectedNodeIndex()) |node| self.showDeleteConfirmationDialog(node);
             },
-            else => log.warn("command {s} not implemented yet", .{@tagName(cmd)}),
         }
     }
 

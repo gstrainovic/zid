@@ -100,6 +100,8 @@ pub const Keymap = struct {
 
         // Delete line (wie VS Code Ctrl+Shift+K). Muss zu src/ui/shortcuts.zig passen.
         try km.bind(.k, .{ .ctrl = true, .shift = true }, .DeleteLine);
+        // Suchleiste
+        try km.bind(.f, .{ .ctrl = true }, .Search);
 
         // Context Menu
         try km.bind(.mouse_right, .{}, .ShowContextMenu);

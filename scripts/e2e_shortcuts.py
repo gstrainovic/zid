@@ -260,8 +260,45 @@ def item7_shortcuts_dialog():
     check(not ui_state()["shortcuts_open"], "Close schließt ihn")
 
 
+def editor_state():
+    return result_json("editor_state")
+
+
+def item8_find():
+    print("--- 8. Ctrl+F: Suchleiste, Enter weiter, Shift+Enter zurück, Escape schließt")
+    rpc("explorer_open", [os.path.join(ROOT, "README.md")]); settle(15)
+    rpc("click", [700, 400]); settle()
+    key("home", ctrl=True)
+    key("f", ctrl=True)
+    st = editor_state()
+    check(st["find_open"], "Ctrl+F öffnet die Suchleiste")
+    check(bounds("find_input")["found"], "Suchfeld wird gezeichnet")
+    rpc("type_text", ["vulkan"]); settle(5)
+    st = editor_state()
+    lines = st["text"].split("\n")
+    check(st["find_query"] == "vulkan", f"Suchbegriff im Feld: {st['find_query']!r}")
+    hits = [i for i, l in enumerate(lines) if "vulkan" in l.lower()]
+    check(st["row"] in hits and not st["find_not_found"], f"Tippen springt zum ersten Treffer (Zeile {st['row'] + 1})")
+    first = st["row"]
+    key("enter")
+    st = editor_state()
+    check(st["row"] in hits and (st["row"] != first or len(hits) == 1), f"Enter springt zum nächsten Treffer (Zeile {st['row'] + 1})")
+    key("enter", shift=True)
+    check(editor_state()["row"] == first, "Shift+Enter springt zurück")
+    shot("e2e_find.ppm")
+    for _ in range(6):
+        key("backspace")
+    rpc("type_text", ["qzqzqz"]); settle(5)
+    check(editor_state()["find_not_found"], "Unbekannter Begriff meldet 'No results'")
+    key("escape")
+    check(not editor_state()["find_open"], "Escape schließt die Suchleiste")
+    menu_click("menu_edit", "menu_item_find")
+    check(editor_state()["find_open"], "Edit → Find öffnet sie ebenfalls")
+    key("escape")
+
+
 STEPS = [item1_table_drives_ctrl_o, item2_explorer_f2_delete, item3_tabs, item4_view, item5_menus,
-         item6_editor_context_menu, item7_shortcuts_dialog]
+         item6_editor_context_menu, item7_shortcuts_dialog, item8_find]
 
 
 def main():
