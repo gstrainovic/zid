@@ -264,3 +264,57 @@ fn testTask(allocator: std.mem.Allocator, data: ?*anyopaque) !TaskResult {
         .allocator = allocator,
     };
 }
+
+/// Fasst Ereignis-Bursts zu höchstens einer Aktion pro Zeitfenster zusammen.
+/// mark() beim Ereignis, take() im Loop: liefert einmal true, sobald das Fenster
+/// nach dem ersten Ereignis abgelaufen ist. Weitere Ereignisse im Fenster
+/// verlängern es nicht, sie sind in der einen Aktion enthalten.
+pub const Debounce = struct {
+    delay_ms: i64,
+    due_at: ?i64 = null,
+
+    pub fn mark(self: *Debounce, now_ms: i64) void {
+        if (self.due_at == null) self.due_at = now_ms + self.delay_ms;
+    }
+
+    pub fn take(self: *Debounce, now_ms: i64) bool {
+        const due = self.due_at orelse return false;
+        if (now_ms < due) return false;
+        self.due_at = null;
+        return true;
+    }
+};
+
+test "Debounce: ohne mark liefert take nie true" {
+    var d = Debounce{ .delay_ms = 300 };
+    try std.testing.expect(!d.take(0));
+    try std.testing.expect(!d.take(10_000));
+}
+
+test "Debounce: mark wird erst nach Ablauf des Fensters fällig, dann genau einmal" {
+    var d = Debounce{ .delay_ms = 300 };
+    d.mark(1000);
+    try std.testing.expect(!d.take(1000));
+    try std.testing.expect(!d.take(1299));
+    try std.testing.expect(d.take(1300));
+    try std.testing.expect(!d.take(1300));
+    try std.testing.expect(!d.take(5000));
+}
+
+test "Debounce: viele marks im Fenster ergeben eine Aktion, Fenster wird nicht verlängert" {
+    var d = Debounce{ .delay_ms = 300 };
+    d.mark(1000);
+    var t: i64 = 1000;
+    while (t < 1300) : (t += 10) d.mark(t);
+    try std.testing.expect(d.take(1300));
+    try std.testing.expect(!d.take(1301));
+}
+
+test "Debounce: nach take startet ein neues mark ein neues Fenster" {
+    var d = Debounce{ .delay_ms = 300 };
+    d.mark(1000);
+    try std.testing.expect(d.take(1300));
+    d.mark(1400);
+    try std.testing.expect(!d.take(1600));
+    try std.testing.expect(d.take(1700));
+}
