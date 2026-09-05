@@ -246,7 +246,22 @@ def item6_editor_context_menu():
     rpc("click", [1100, 700]); settle()
 
 
-STEPS = [item1_table_drives_ctrl_o, item2_explorer_f2_delete, item3_tabs, item4_view, item5_menus, item6_editor_context_menu]
+def item7_shortcuts_dialog():
+    print("--- 7. Help → Keyboard Shortcuts: Dialog aus der Tabelle, F1 und Escape")
+    key("f1")
+    check(ui_state()["shortcuts_open"], "F1 öffnet den Shortcut-Dialog")
+    check(bounds("sc_close")["found"], "Dialog hat einen Close-Button")
+    shot("e2e_shortcuts_dialog.ppm")
+    key("escape")
+    check(not ui_state()["shortcuts_open"], "Escape schließt ihn")
+    menu_click("menu_help", "menu_item_show_shortcuts")
+    check(ui_state()["shortcuts_open"], "Help → Keyboard Shortcuts öffnet ihn")
+    click_center("sc_close")
+    check(not ui_state()["shortcuts_open"], "Close schließt ihn")
+
+
+STEPS = [item1_table_drives_ctrl_o, item2_explorer_f2_delete, item3_tabs, item4_view, item5_menus,
+         item6_editor_context_menu, item7_shortcuts_dialog]
 
 
 def main():

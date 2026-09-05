@@ -525,8 +525,8 @@ fn uiState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
         try buf.writer.writeAll("null");
     }
     try buf.writer.print(
-        \\, "explorer_focused": {}, "show_file_explorer": {}, "picker_open": {}, "tab_count": {d}, "active_tab":
-    , .{ ui.explorer_focused, ui.show_file_explorer, ui.folder_picker.visible, tb.count() });
+        \\, "explorer_focused": {}, "show_file_explorer": {}, "picker_open": {}, "shortcuts_open": {}, "tab_count": {d}, "active_tab":
+    , .{ ui.explorer_focused, ui.show_file_explorer, ui.folder_picker.visible, ui.shortcuts_dialog_open, tb.count() });
     if (tb.active_index) |idx| {
         try buf.writer.print("{d}", .{idx});
     } else {
