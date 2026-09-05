@@ -96,9 +96,9 @@ def main():
 
         # 1) Menü "File" öffnen, "Open Folder…" anklicken
         click_center("menu_file")
-        check(bounds("menu_open_folder")["found"], "Dropdown zeigt 'Open Folder…'")
+        check(bounds("menu_item_open_folder")["found"], "Dropdown zeigt 'Open Folder…'")
         shot("e2e_menu.ppm")
-        click_center("menu_open_folder")
+        click_center("menu_item_open_folder")
         check(bounds("fp_input")["found"], "Ordner-Dialog ist offen (Pfadfeld sichtbar)")
         picker = result_json("folder_picker_state")
         check(picker["open"] and picker["path"] == old_root, f"Dialog startet im aktuellen Ordner: {picker['path']}")

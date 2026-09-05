@@ -1281,6 +1281,10 @@ pub const CodeEditor = struct {
 
     /// Delete selected text. Returns true if text was deleted.
     fn deleteSelection(self: *Self) bool {
+        // Jede Eingabe hebt den Anker auf. Ein Klick setzt Anker = Cursor; blieb er
+        // stehen, "markierte" das erste getippte Zeichen sich selbst und das zweite
+        // ersetzte es ("abc" wurde "bc").
+        defer self.selection_anchor = null;
         if (!self.hasSelection()) return false;
         const range = self.selectionRange() orelse return false;
         const del_text = self.getTextInRange(range) catch return false;
@@ -2437,4 +2441,27 @@ test "DeleteLine: getippter Text, letzte Zeile verschwindet" {
     defer std.testing.allocator.free(after);
     try std.testing.expectEqual(@as(usize, 2), t.ed.lineCount());
     try std.testing.expectEqualStrings("abc\nzwei", after);
+}
+
+test "Tippen nach Klick (Anker = Cursor, kein Ziehen) behält jedes Zeichen" {
+    var t = try testEditor(std.testing.allocator, "");
+    defer t.buffer.deinit();
+    defer t.ed.deinit();
+    t.ed.selection_anchor = t.ed.cursor; // wie handleMouseDown ohne Drag
+    for ("abc") |c| t.ed.handleChar(c);
+    const text = try t.ed.getTextInRange(.{ .begin = .{ .row = 0, .col = 0 }, .end = .{ .row = 0, .col = 100 } });
+    defer std.testing.allocator.free(text);
+    try std.testing.expectEqualStrings("abc", text);
+    try std.testing.expect(!t.ed.hasSelection());
+}
+
+test "Enter nach Klick und dann Tippen frisst den Zeilenumbruch nicht" {
+    var t = try testEditor(std.testing.allocator, "");
+    defer t.buffer.deinit();
+    defer t.ed.deinit();
+    t.ed.selection_anchor = t.ed.cursor;
+    t.ed.dispatchAction(.InsertNewline);
+    t.ed.handleChar('x');
+    try std.testing.expectEqual(@as(usize, 2), t.ed.lineCount());
+    try std.testing.expectEqual(@as(usize, 1), t.ed.cursor.row);
 }
