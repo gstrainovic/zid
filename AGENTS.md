@@ -108,7 +108,7 @@ echo -e "open ./README.md\nget-state\nshutdown" | zig build run -- --interactive
   mit `executeCommand` aus; Menüklicks gehen denselben Weg. Editor-Kürzel (Scope `editor`) liegen
   weiterhin in `src/editor/keymap.zig` und müssen zur Tabelle passen (Save, Undo/Redo, Cut/Copy/
   Paste, Select All, Delete Line Ctrl+Shift+K, Find Ctrl+F).
-- Globale Kürzel greifen vor Terminal/Chat/TextArea: Ctrl+W, Ctrl+N, Ctrl+O, Ctrl+B, Ctrl+` und
+- Globale Kürzel greifen vor Terminal/Chat: Ctrl+W, Ctrl+N, Ctrl+O, Ctrl+B, Ctrl+` und
   Ctrl+Tab kommen im Terminal nicht mehr an der Shell an (bewusst, wie in Zed).
 - Suchleiste (`CodeEditor.find`, Logik in `src/editor/find_ops.zig`): inkrementell beim Tippen,
   Enter/Shift+Enter weiter/zurück mit Umbruch, Escape schließt, markierter Text wird Suchbegriff.
@@ -164,6 +164,12 @@ echo -e "open ./README.md\nget-state\nshutdown" | zig build run -- --interactive
   gepatcht). `chat_markdown.finishForParser` hängt deshalb immer einen Zeilenumbruch an und
   schließt einen offenen Zaun; `toDisplayMarkdown`/`wrapToolResult` laufen darüber. Test mit
   echtem zigdown-Parse in `chat_markdown.zig`, E2E `code_only_answer` in `e2e_ai_chat.py`.
+- **Textarea-Komponente nur noch als Chat-Eingabe:** die Tabs „New TextArea“ und „New Chat2“
+  (Prototypen vom 19.04.2026: mehrzeilige Eingabe und Markdown-Verlauf, beides ist seither im
+  echten Chat) wurden am 06.09.2026 samt `FileKind.textarea/chat2` und `textarea_instances`
+  entfernt. `components/textarea.zig` ist eine eigene Kopie der Editor-Logik; Editor-Neuerungen
+  (Mehrfach-Cursor, Word-Wrap) kommen dort nicht an. Sauberer wäre irgendwann der CodeEditor ohne
+  Gutter als Chat-Eingabe.
 - Keine Unit-Tests für `ai_chat.zig`: die Datei importiert `components/textarea.zig`, das
   `../../editor/actions.zig` zieht, also kein eigenes Test-Root möglich. Logik dort klein halten.
 

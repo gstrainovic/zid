@@ -34,8 +34,6 @@ const ai_tools = @import("ai_tools");
 const agent_actions = @import("agent_actions.zig");
 const ai_chat_mod = @import("ai_chat.zig");
 const agent_mod = @import("agent");
-const textarea_mod = @import("components/textarea.zig");
-const TextAreaState = textarea_mod.TextAreaState;
 
 
 const log = std.log.scoped(.ui);
@@ -616,15 +614,6 @@ pub const UI = struct {
             if (self.ai_chat.handleKeyPress(key)) return;
         }
 
-        // If a textarea tab is active, handle textarea input
-        if (self.isTextAreaTabActive()) {
-            log.debug("handleKeyPress: routing to textarea, key={}", .{key});
-            if (self.getActiveTextArea()) |textarea| {
-                textarea.handleKeyPress(key);
-                return;
-            }
-        }
-
         log.debug("handleKeyPress: key={} isTerminalActive={}", .{ key, self.isTerminalActive() });
 
         // If a terminal tab is active, forward input to the terminal
@@ -729,14 +718,6 @@ pub const UI = struct {
             return;
         }
 
-        // Forward to textarea tab if active
-        if (self.isTextAreaTabActive()) {
-            if (self.getActiveTextArea()) |textarea| {
-                textarea.handleChar(char_code);
-            }
-            return;
-        }
-
         // Forward to terminal if active
         if (self.getActiveTerminal()) |term| {
             var buf: [4]u8 = undefined;
@@ -750,36 +731,18 @@ pub const UI = struct {
     /// Modifier-State aktualisieren
     pub fn setShiftState(self: *Self, pressed: bool) void {
         self.is_shift_down = pressed;
-        if (self.isTextAreaTabActive()) {
-            if (self.getActiveTextArea()) |textarea| {
-                textarea.setShiftState(pressed);
-            }
-        } else {
-            self.getActiveEditor().setShiftState(pressed);
-        }
+        self.getActiveEditor().setShiftState(pressed);
     }
 
     pub fn setCtrlState(self: *Self, pressed: bool) void {
         self.is_ctrl_down = pressed;
         if (!pressed) self.commitTabSwitcher();
-        if (self.isTextAreaTabActive()) {
-            if (self.getActiveTextArea()) |textarea| {
-                textarea.setCtrlState(pressed);
-            }
-        } else {
-            self.getActiveEditor().setCtrlState(pressed);
-        }
+        self.getActiveEditor().setCtrlState(pressed);
     }
 
     pub fn setAltState(self: *Self, pressed: bool) void {
         self.is_alt_down = pressed;
-        if (self.isTextAreaTabActive()) {
-            if (self.getActiveTextArea()) |textarea| {
-                textarea.setAltState(pressed);
-            }
-        } else {
-            self.getActiveEditor().setAltState(pressed);
-        }
+        self.getActiveEditor().setAltState(pressed);
     }
 
     fn findPaneAt(self: *Self, pane: *pane_mod.Pane, x: f32, y: f32) ?*pane_mod.Pane {
@@ -924,17 +887,6 @@ pub const UI = struct {
             } else if (tab.kind == .chat) {
                 self.ai_chat.handleMouseDown(x, y, button);
                 return;
-            } else if (tab.kind == .textarea) {
-                if (self.getActiveTextArea()) |textarea| {
-                    if (button == .mouse_right) {
-                        textarea.show_context_menu = true;
-                        textarea.context_menu_x = x;
-                        textarea.context_menu_y = y;
-                        return;
-                    }
-                    textarea.handleMouseDown(x, y, button);
-                    return;
-                }
             }
         }
 
@@ -988,11 +940,6 @@ pub const UI = struct {
             } else if (tab.kind == .chat) {
                 self.ai_chat.handleMouseMove(x, y);
                 return;
-            } else if (tab.kind == .textarea) {
-                if (self.getActiveTextArea()) |textarea| {
-                    textarea.handleMouseMove(x, y);
-                }
-                return;
             }
         }
         self.getActiveEditor().handleMouseMove(x, y);
@@ -1019,11 +966,6 @@ pub const UI = struct {
                 return;
             } else if (tab.kind == .chat) {
                 self.ai_chat.handleMouseUp();
-                return;
-            } else if (tab.kind == .textarea) {
-                if (self.getActiveTextArea()) |textarea| {
-                    textarea.handleMouseUp();
-                }
                 return;
             }
         }
@@ -1066,12 +1008,6 @@ pub const UI = struct {
         if (self.getActiveTabBar().getActiveTab()) |tab| {
             if (tab.kind == .chat) {
                 self.ai_chat.scrollLines(delta);
-                return;
-            }
-            if (tab.kind == .textarea) {
-                if (self.getActiveTextArea()) |textarea| {
-                    textarea.scrollLines(delta);
-                }
                 return;
             }
             if (tab.kind == .terminal) {
@@ -2583,55 +2519,6 @@ pub const UI = struct {
                                     self,
                                 );
                                 special_active = true;
-                            } else if (tab.kind == .textarea) {
-                                if (leaf.tab_bar.textarea_instances.get(tab.path)) |textarea| {
-                                    textarea.setWindow(self.window);
-                                    textarea.render(allocator, self.mouse_pressed_this_frame);
-                                    special_active = true;
-                                }
-                            } else if (tab.kind == .chat2) {
-                                // Chat2: Vertical split with markdown preview on top, textarea on bottom
-                                if (leaf.tab_bar.textarea_instances.get(tab.path)) |textarea| {
-                                    textarea.setWindow(self.window);
-
-                                    // Top: Markdown preview (show placeholder content for now)
-                                    const chat2_content_id = clay.ElementId.IDI("chat2_content", @truncate(@intFromPtr(tab.path.ptr)));
-                                    clay.UI()(.{
-                                        .id = chat2_content_id,
-                                        .layout = .{
-                                            .sizing = .{ .w = .grow, .h = .percent(60) },
-                                            .direction = .top_to_bottom,
-                                        },
-                                        .background_color = t.surface,
-                                    })({
-                                        // Render markdown preview placeholder
-                                        var md_view = self.open_markdown_views.get(tab.path);
-                                        if (md_view == null) {
-                                            const placeholder = self.allocator.dupe(u8, "# Chat2\n\nChat history will appear here...") catch "# Chat2";
-                                            const new_v = self.allocator.create(markdown_view_mod.MarkdownView) catch unreachable;
-                                            new_v.* = markdown_view_mod.MarkdownView.init(self.allocator, placeholder, tab.path);
-                                            self.open_markdown_views.put(self.allocator.dupe(u8, tab.path) catch tab.path, new_v) catch {};
-                                            md_view = new_v;
-                                        }
-                                        if (md_view) |v| {
-                                            v.render(allocator, t, self);
-                                        }
-                                    });
-
-                                    // Bottom: Textarea input
-                                    clay.UI()(.{
-                                        .layout = .{
-                                            .sizing = .{ .w = .grow, .h = .percent(40) },
-                                        },
-                                        .background_color = .{ 28, 28, 34, 255 },
-                                        .border = .{ .width = .all(1), .color = t.border },
-                                        .corner_radius = .all(4),
-                                    })({
-                                        textarea.render(allocator, self.mouse_pressed_this_frame);
-                                    });
-
-                                    special_active = true;
-                                }
                             } else if (tab.kind == .markdown_preview) {
                                 var md_view = self.open_markdown_views.get(tab.path);
                                 if (md_view == null) {
@@ -3128,29 +3015,6 @@ pub const UI = struct {
             }
         }
         return false;
-    }
-
-    pub fn isTextAreaTabActive(self: *Self) bool {
-        const tab_bar = self.getActiveTabBar();
-        if (tab_bar.active_index) |idx| {
-            if (idx < tab_bar.tabs.items.len) {
-                return tab_bar.tabs.items[idx].kind == .textarea;
-            }
-        }
-        return false;
-    }
-
-    fn getActiveTextArea(self: *Self) ?*TextAreaState {
-        const tab_bar = self.getActiveTabBar();
-        if (tab_bar.active_index) |idx| {
-            if (idx < tab_bar.tabs.items.len) {
-                const tab = tab_bar.tabs.items[idx];
-                if (tab.kind == .textarea) {
-                    return tab_bar.textarea_instances.get(tab.path);
-                }
-            }
-        }
-        return null;
     }
 
     fn renderTerminalContentInPane(self: *Self, pane: *pane_mod.Pane, path: []const u8, t: Theme) void {

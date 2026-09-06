@@ -206,7 +206,7 @@ fn executeInner(ui: *UI, alloc: std.mem.Allocator, call: *const ai_tools.ToolCal
 fn isChatActive(ui: *UI) bool {
     if (ui.active_pane.data != .leaf) return false;
     const tab = ui.active_pane.data.leaf.tab_bar.getActiveTab() orelse return false;
-    return tab.kind == .chat or tab.kind == .chat2;
+    return tab.kind == .chat;
 }
 
 fn firstOtherLeaf(pane: *pane_mod.Pane, exclude: *pane_mod.Pane) ?*pane_mod.Pane {
