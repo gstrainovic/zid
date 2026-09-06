@@ -111,6 +111,26 @@ def code_only_answer():
     check(chat()["status"] == "ready", "Chat lebt nach dem Rendern des Codeblocks weiter")
 
 
+def input_newline_and_send():
+    """Eingabefeld ist der CodeEditor: Shift+Enter bricht um, Enter sendet und leert das Feld."""
+    rpc("focus_chat"); settle()
+    rpc("type_text", ["zeile eins"]); settle(5)
+    rpc("key_press_mods", ["enter", False, True]); settle(5)
+    rpc("type_text", ["zeile zwei"]); settle(5)
+    check(rpc("get_chat_input") == "zeile eins\nzeile zwei", f"Shift+Enter macht eine neue Zeile: {rpc('get_chat_input')!r}")
+    # Klick in die erste Zeile des Eingabefelds setzt den Cursor dorthin (Editor kennt seine Box)
+    bx, by, bw, bh = chat()["input_bounds"]
+    rpc("click", [bx + bw - 40, by + 20]); settle(5)
+    check(chat()["input_cursor"] == [0, len("zeile eins")], f"Klick rechts in Zeile 1 setzt den Cursor ans Zeilenende: {chat()['input_cursor']}")
+    key("end")
+    key("down")
+    key("end")
+    before = len(chat()["messages"])
+    key("enter"); settle(10)
+    check(rpc("get_chat_input") == "", "Enter leert das Eingabefeld")
+    check(len(chat()["messages"]) > before and chat()["messages"][before]["content"] == "zeile eins\nzeile zwei", "mehrzeilige Nachricht wurde gesendet")
+
+
 def run_ai_off():
     print("--- B. --ai=off: Senden erklärt sofort, kein endloses Laden")
     proc, log = start(["--ai=off"], "e2e_ai_chat_off.log")
@@ -124,6 +144,7 @@ def run_ai_off():
         check(not st["loading"], "Kein Lade-Zustand ohne Agent")
         last = st["messages"][-1]
         check(last["role"] == "assistant" and "not connected" in last["content"].lower(), f"Erklärung im Chat: {last['content'][:70]!r}")
+        input_newline_and_send()
         shot("e2e_ai_chat_off.ppm")
     finally:
         stop(proc, log)

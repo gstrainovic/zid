@@ -216,6 +216,10 @@ pub const CodeEditor = struct {
     /// Sprung zur Definition über einen Language Server (gesetzt vom UI); liefert true,
     /// wenn die Anfrage unterwegs ist — dann kein lokaler Textmuster-Sprung.
     definition_hook: ?DefinitionHook = null,
+    /// Zeilennummernspalte (aus für Eingabefelder wie den KI-Chat)
+    show_gutter: bool = true,
+    /// Kontextmenü nur Cut/Copy/Paste (Eingabefeld: kein MD-Preview, kein Split)
+    compact_menu: bool = false,
     /// Klammerpaar am Cursor (pro Frame berechnet): Position der Klammer am Cursor und ihres Partners
     bracket_pair: ?[2]flow_core.Cursor = null,
     /// Breite der Minimap-Spalte
@@ -3024,7 +3028,9 @@ pub const CodeEditor = struct {
                     const total = self.lineCount();
                     
                     // Dynamische Gutter-Breite basierend auf maximaler Zeilennummer
-                    if (self.measure_fn) |measure| {
+                    if (!self.show_gutter) {
+                        self.gutter_width = 0;
+                    } else if (self.measure_fn) |measure| {
                         var buf: [16]u8 = undefined;
                         const sample = std.fmt.bufPrint(&buf, "{d}", .{total}) catch "000";
                         // Padding: 8 (links) + 16 (rechts) = 24
@@ -3069,7 +3075,7 @@ pub const CodeEditor = struct {
                                 .child_alignment = .{ .x = .left, .y = .center },
                             },
                         })({
-                            clay.UI()(.{
+                            if (self.show_gutter) clay.UI()(.{
                                 .id = if (k == 0) clay.ElementId.IDI("gutter", @intCast(i)) else clay.ElementId.IDI("gutterw", @intCast(vrow)),
                                 .layout = .{
                                     .sizing = .{ .w = .fixed(self.gutter_width), .h = .fixed(@floatFromInt(self.font_size + 16)) },
@@ -3410,9 +3416,9 @@ pub const CodeEditor = struct {
             }
         }
         
-        var item_count: f32 = 5; // Cut, Copy, Paste + Split V, Split H
+        var item_count: f32 = if (self.compact_menu) 3 else 5; // Cut, Copy, Paste (+ Split V, Split H)
         const path = self.buffer.get_file_path();
-        const is_md = std.mem.endsWith(u8, path, ".md");
+        const is_md = std.mem.endsWith(u8, path, ".md") and !self.compact_menu;
         if (is_md) item_count += 1;
 
         clay.UI()(.{
@@ -3447,10 +3453,12 @@ pub const CodeEditor = struct {
                     self.renderContextMenuItem(.md_preview, "Editor-MD-Preview");
                 }
 
-                clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(1) } }, .background_color = .{ 80, 80, 80, 255 } })({});
+                if (!self.compact_menu) {
+                    clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(1) } }, .background_color = .{ 80, 80, 80, 255 } })({});
 
-                self.renderContextMenuItem(.split_vertical, "Editor-Split-V");
-                self.renderContextMenuItem(.split_horizontal, "Editor-Split-H");
+                    self.renderContextMenuItem(.split_vertical, "Editor-Split-V");
+                    self.renderContextMenuItem(.split_horizontal, "Editor-Split-H");
+                }
             });
         });
     }
@@ -4040,4 +4048,20 @@ test "Word-Wrap: sichtbare Reihen, Treffer je Reihe und Cursor bleibt sichtbar" 
     t.ed.handleMouseDown(50 + 12 + 1, 40 + 5, .mouse_left);
     try std.testing.expectEqual(@as(usize, 0), t.ed.cursor.row);
     try std.testing.expectEqual(@as(usize, 8), t.ed.cursor.col);
+}
+
+test "Eingabefeld-Modus: ohne Gutter zählt die ganze Breite als Text" {
+    var t = try testEditor(std.testing.allocator, "abc");
+    defer t.buffer.deinit();
+    defer t.ed.deinit();
+    t.ed.width = 12 + t.ed.scrollbar_width + 20 * 14.4 + 1; // Platz für 20 Spalten (charWidth 14,4)
+    try std.testing.expectEqual(@as(usize, 16), t.ed.visibleColCount()); // Gutter 50 px kostet ~3,5 Spalten
+    t.ed.show_gutter = false;
+    t.ed.gutter_width = 0;
+    try std.testing.expectEqual(@as(usize, 20), t.ed.visibleColCount());
+    // Klick in Spalte 2 landet ohne Gutter-Versatz richtig
+    t.ed.content_origin_x = 0;
+    t.ed.content_origin_y = 0;
+    t.ed.handleMouseDown(12 + 2 * 14.4 + 1, 5, .mouse_left);
+    try std.testing.expectEqual(@as(usize, 2), t.ed.cursor.col);
 }
