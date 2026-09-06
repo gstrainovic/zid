@@ -556,8 +556,8 @@ fn explorerEntries(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
         const node = fx.nodes.items[e.node_index];
         if (i > 0) try buf.writer.writeAll(", ");
         try buf.writer.print(
-            \\{{"index": {d}, "name": "{s}", "path": "{s}", "is_folder": {}, "expanded": {}, "depth": {d}, "selected": {}, "cursor": {}}}
-        , .{ i, node.name, node.path, node.is_folder, e.is_expanded, e.depth, fx.isNodeSelected(e.node_index), fx.selected_index == i });
+            \\{{"index": {d}, "name": "{s}", "path": "{s}", "is_folder": {}, "expanded": {}, "depth": {d}, "selected": {}, "cursor": {}, "ignored": {}}}
+        , .{ i, node.name, node.path, node.is_folder, e.is_expanded, e.depth, fx.isNodeSelected(e.node_index), fx.selected_index == i, fx.isIgnored(node.path) });
     }
     try buf.writer.writeAll("]}");
     return buf.written();

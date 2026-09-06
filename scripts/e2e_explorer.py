@@ -240,6 +240,15 @@ def step_drag_drop():
     check(not os.path.exists(os.path.join(FX, "gamma copy.txt")), "Quelle ist weg")
 
 
+def step_gitignore():
+    print("--- .gitignore-Einträge ausgegraut (tmp/ ist im Projekt ignoriert)")
+    wait_for(lambda: entry("tmp") is not None and entry("tmp")["ignored"], "tmp gilt als ignoriert", timeout=10)
+    check(entry("src") is not None and not entry("src")["ignored"], "src ist nicht ignoriert")
+    reveal("gamma.txt", ["tmp", "e2e_fx2"])
+    check(entry("gamma.txt")["ignored"], "Datei unter einem ignorierten Ordner ist ignoriert")
+    shot("e2e_explorer_gitignore.ppm")
+
+
 def step_sidebar_width_persist():
     print("--- Sidebar-Breite wird gemerkt, lange Namen mit Tooltip")
     st = explorer()
@@ -261,7 +270,7 @@ def step_sidebar_width_persist():
     check(bounds("fx_tooltip")["found"], "Tooltip mit vollem Pfad nach 700 ms")
 
 
-STEPS = [step_focus_and_letters, step_dialog_keyboard_trash, step_navigation, step_create_rename, step_clipboard, step_multi_select, step_context_menu, step_hidden_and_filter, step_drag_drop, step_sidebar_width_persist]
+STEPS = [step_focus_and_letters, step_dialog_keyboard_trash, step_navigation, step_create_rename, step_clipboard, step_multi_select, step_context_menu, step_hidden_and_filter, step_drag_drop, step_gitignore, step_sidebar_width_persist]
 
 
 def main():

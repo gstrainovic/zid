@@ -234,14 +234,20 @@ pub const FileExplorerState = struct {
         while (it.next()) |key| self.allocator.free(key.*);
         self.git_status.clearRetainingCapacity();
 
+        // "root:<abs>" nennt die Repo-Wurzel; die Pfade sind relativ dazu (Projektordner kann tiefer liegen)
+        var root: []const u8 = repo_root;
+        if (std.mem.startsWith(u8, payload, "root:")) {
+            const end = std.mem.indexOfScalar(u8, payload, '\n') orelse payload.len;
+            root = payload["root:".len..end];
+        }
         var lines = std.mem.splitScalar(u8, payload, '\n');
         while (lines.next()) |line| {
             if (line.len < 3) continue;
             const code = line[0];
-            if (code == 'b') continue; // "branch:..." überspringen
+            if (code == 'b' or code == 'r') continue; // "branch:..." / "root:..." überspringen
             if (line[1] != ':') continue;
             const rel = line[2..];
-            const abs = std.fs.path.join(self.allocator, &.{ repo_root, rel }) catch continue;
+            const abs = std.fs.path.join(self.allocator, &.{ root, rel }) catch continue;
             self.git_status.put(abs, code) catch {
                 self.allocator.free(abs);
             };
@@ -783,13 +789,24 @@ pub const FileExplorerState = struct {
         self.refresh(dst);
     }
 
+    /// Von .gitignore ausgeschlossen: der Eintrag selbst oder ein Vorfahr steht als `I` im Status.
+    pub fn isIgnored(self: *const Self, path: []const u8) bool {
+        var it = self.git_status.iterator();
+        while (it.next()) |kv| {
+            if (kv.value_ptr.* == 'I' and explorer_ops.isPathOrUnder(path, kv.key_ptr.*)) return true;
+        }
+        return false;
+    }
+
     /// Git-Status eines Ordners aus seinen Nachfahren (C > M > A > ?), null wenn nichts.
+    /// Ignorierte Einträge zählen nicht (sie grauen nur ihren eigenen Teilbaum aus).
     pub fn folderStatus(self: *const Self, dir_path: []const u8) ?u8 {
         var best: ?u8 = null;
         var it = self.git_status.iterator();
         while (it.next()) |kv| {
             if (!explorer_ops.isPathOrUnder(kv.key_ptr.*, dir_path) or kv.key_ptr.*.len == dir_path.len) continue;
             const code = kv.value_ptr.*;
+            if (code == 'I') continue;
             const rank_new = statusRank(code);
             if (best == null or rank_new > statusRank(best.?)) best = code;
         }
@@ -1606,7 +1623,8 @@ fn renderTreeEntry(
     const drag_source = if (state.drag) |d| (d.node == entry.node_index and d.moved) else false;
     const drop_target = if (state.drag) |d| (d.moved and d.over == entry.node_index) else false;
 
-    const fg: clay.Color = if (is_selected) theme.text_on_primary else if (is_cut or is_hidden) theme.muted else theme.text;
+    const is_ignored = state.isIgnored(node.path);
+    const fg: clay.Color = if (is_selected) theme.text_on_primary else if (is_cut or is_hidden or is_ignored) theme.muted else theme.text;
     const bg: clay.Color = if (is_selected)
         theme.primary
     else if (drop_target)
@@ -1666,7 +1684,7 @@ fn renderTreeEntry(
 
         // Git-Status Indikator (vorne); Ordner erben den Status ihrer Nachfahren
         const git_code: ?u8 = state.git_status.get(node.path) orelse (if (node.is_folder) state.folderStatus(node.path) else null);
-        if (git_code) |code| {
+        if (git_code) |code| if (code != 'I') {
             const git_color: [4]f32 = switch (code) {
                 'A' => theme.success,
                 'M' => theme.warning,
@@ -1683,7 +1701,7 @@ fn renderTreeEntry(
                 .font_size = 20,
                 .color = fg,
             });
-        }
+        };
 
         // Dateiname oder Umbenennen-Feld
         const renaming = if (state.rename) |st| st.node_index == entry.node_index else false;
