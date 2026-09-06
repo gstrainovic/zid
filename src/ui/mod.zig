@@ -235,13 +235,19 @@ pub const UI = struct {
         // Ohne Agent erklärt der Chat beim Senden, warum nichts passiert.
         var ai_chat = ai_chat_mod.AIChatState.init(allocator) catch |err| @panic(@errorName(err));
         if (!config.ai_disabled) {
-            // Standard: llama.cpp-Vulkan-Build + Qwen3-4B (Testsieger in
-            // ~/projects/bitnet-colibri-bench: 18,8 tok/s auf der P1000, 10/10 Werkzeugwahl).
+            // Standard: llama.cpp-Vulkan-Build + Qwen3-4B (Testsieger in llm-bench/: 18,8 tok/s
+            // auf der P1000, 10/10 Werkzeugwahl), beides im Repo (engines/, models/). Repo-Wurzel
+            // aus dem Ort der ausführbaren Datei (<repo>/zig-out/bin), sonst Arbeitsverzeichnis.
             // Fehlt der Build, fällt es auf Ollama mit gemma4:e2b zurück.
-            const home = std.posix.getenv("HOME") orelse "";
-            const default_engine = try std.fs.path.join(allocator, &.{ home, "projects/ki/llama.cpp-vulkan/build/bin/llama-server" });
+            const ai_paths = @import("ai_paths");
+            const exe_dir = std.fs.selfExeDirPathAlloc(allocator) catch null;
+            defer if (exe_dir) |d| allocator.free(d);
+            const cwd_root = std.fs.cwd().realpathAlloc(allocator, ".") catch try allocator.dupe(u8, ".");
+            defer allocator.free(cwd_root);
+            const repo_root = (if (exe_dir) |d| ai_paths.repoRootFromExeDir(d) else null) orelse cwd_root;
+            const default_engine = try ai_paths.defaultEngine(allocator, repo_root);
             defer allocator.free(default_engine);
-            const default_model = try std.fs.path.join(allocator, &.{ home, "projects/ki/BitNet/models/_compare/Qwen3-4B-Instruct-2507-Q4_K_M.gguf" });
+            const default_model = try ai_paths.defaultModel(allocator, repo_root);
             defer allocator.free(default_model);
             const engine_available = if (std.fs.cwd().access(default_engine, .{})) |_| true else |_| false;
 
