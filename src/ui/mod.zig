@@ -447,7 +447,9 @@ pub const UI = struct {
         // Text messen (mit korrekter Font-Size)
         // Wir fügen einen kleinen Puffer hinzu (1.0px) um Floating-Point Rundungsfehler
         // und Clipping-Probleme in Clay zu vermeiden.
-        const width = (renderer.ts_ptr.measureTextAtSize(text_str, @floatFromInt(config.font_size)) catch 0) + 1.0;
+        // Kleiner Puffer gegen Rundung/Clipping. Vorher 1 px: jedes Highlight-Segment einer Zeile
+        // wurde so 1 px breiter als gerendert, die Zeile driftete gegenüber Cursor und Overlays.
+        const width = (renderer.ts_ptr.measureTextAtSize(text_str, @floatFromInt(config.font_size)) catch 0) + 0.25;
         
         var height: f32 = @floatFromInt(config.font_size);
         if (renderer.ts_ptr.getMetrics()) |metrics| {

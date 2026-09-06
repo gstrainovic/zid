@@ -2089,7 +2089,7 @@ pub const CodeEditor = struct {
                 const x = @as(f32, @floatFromInt(level - first_col)) * cw;
                 clay.UI()(.{
                     .layout = .{ .sizing = .{ .w = .fixed(1), .h = .fixed(row_h) } },
-                    .floating = .{ .attach_to = .to_parent, .attach_points = .{ .element = .left_top, .parent = .left_top }, .offset = .{ .x = x, .y = -8 } },
+                    .floating = .{ .attach_to = .to_parent, .attach_points = .{ .element = .left_top, .parent = .left_top }, .offset = .{ .x = x, .y = 0 } },
                     .background_color = .{ self.line_number_color[0], self.line_number_color[1], self.line_number_color[2], 70 },
                 })({});
             }
@@ -2106,7 +2106,7 @@ pub const CodeEditor = struct {
                     const x = @as(f32, @floatFromInt(col)) * cw + (if (c == ' ') cw / 2 - 1.5 else 2);
                     clay.UI()(.{
                         .layout = .{ .sizing = .{ .w = .fixed(if (c == ' ') 3 else cw * 4 - 6), .h = .fixed(if (c == ' ') 3 else 1) } },
-                        .floating = .{ .attach_to = .to_parent, .attach_points = .{ .element = .left_top, .parent = .left_top }, .offset = .{ .x = x, .y = row_h / 2 - 9 } },
+                        .floating = .{ .attach_to = .to_parent, .attach_points = .{ .element = .left_top, .parent = .left_top }, .offset = .{ .x = x, .y = row_h / 2 - 1.5 } },
                         .background_color = .{ self.line_number_color[0], self.line_number_color[1], self.line_number_color[2], 160 },
                     })({});
                 }
@@ -2121,7 +2121,7 @@ pub const CodeEditor = struct {
                 const x = @as(f32, @floatFromInt(p.col - first_col)) * cw;
                 clay.UI()(.{
                     .layout = .{ .sizing = .{ .w = .fixed(cw), .h = .fixed(row_h - 8) } },
-                    .floating = .{ .attach_to = .to_parent, .attach_points = .{ .element = .left_top, .parent = .left_top }, .offset = .{ .x = x, .y = -4 } },
+                    .floating = .{ .attach_to = .to_parent, .attach_points = .{ .element = .left_top, .parent = .left_top }, .offset = .{ .x = x, .y = 4 } },
                     .border = .{ .width = .all(1), .color = self.current_line_number_color },
                     .corner_radius = .all(2),
                 })({});
