@@ -1,0 +1,13 @@
+0.00.004.634 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)
+0.00.006.363 I srv    load_model: loading model 'models/BitNet-b1.58-2B-4T/ggml-model-i2_s.gguf'
+0.00.905.499 I srv    load_model: initializing, n_slots = 4, n_ctx_slot = 4096, kv_unified = 'true'
+0.00.908.184 I srv  llama_server: model loaded
+0.00.908.197 I srv  llama_server: listening on http://127.0.0.1:8080
+0.01.011.362 I slot get_availabl: id  3 | task -1 | selected slot by LRU, t_last = -1
+0.01.011.416 I slot launch_slot_: id  3 | task 0 | processing task, is_child = 0
+0.04.100.792 I slot print_timing: id  3 | task 0 | prompt eval time =     341.40 ms /    54 tokens (    6.32 ms per token,   158.17 tokens per second)
+0.04.100.800 I slot print_timing: id  3 | task 0 |        eval time =    2747.93 ms /    60 tokens (   45.80 ms per token,    21.83 tokens per second)
+0.04.100.802 I slot print_timing: id  3 | task 0 |       total time =    3089.33 ms /   114 tokens
+0.04.100.806 I slot print_timing: id  3 | task 0 |    graphs reused =         59
+0.04.100.840 I slot      release: id  3 | task 0 | stop processing: n_tokens = 113, truncated = 0
+0.04.173.722 I srv    operator(): operator(): cleaning up before exit...

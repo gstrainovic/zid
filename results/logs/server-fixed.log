@@ -1,0 +1,40 @@
+0.00.004.739 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)
+0.00.006.518 I srv    load_model: loading model 'models/BitNet-b1.58-2B-4T/ggml-model-i2_s.gguf'
+0.00.922.314 I srv    load_model: initializing, n_slots = 4, n_ctx_slot = 4096, kv_unified = 'true'
+0.00.925.382 I srv  llama_server: model loaded
+0.00.925.393 I srv  llama_server: listening on http://127.0.0.1:8080
+0.07.603.641 I slot get_availabl: id  3 | task -1 | selected slot by LRU, t_last = -1
+0.07.603.674 I slot launch_slot_: id  3 | task 0 | processing task, is_child = 0
+0.11.506.169 I slot print_timing: id  3 | task 0 | prompt eval time =     213.03 ms /    29 tokens (    7.35 ms per token,   136.13 tokens per second)
+0.11.506.173 I slot print_timing: id  3 | task 0 |        eval time =    3689.43 ms /    80 tokens (   46.12 ms per token,    21.68 tokens per second)
+0.11.506.174 I slot print_timing: id  3 | task 0 |       total time =    3902.46 ms /   109 tokens
+0.11.506.176 I slot print_timing: id  3 | task 0 |    graphs reused =         79
+0.11.506.229 I slot      release: id  3 | task 0 | stop processing: n_tokens = 108, truncated = 0
+2.45.232.870 I slot get_availabl: id  3 | task -1 | selected slot by LCP similarity, sim_best = 1.000 (> 0.100 thold), f_keep = 0.269
+2.45.237.679 I slot launch_slot_: id  3 | task 82 | processing task, is_child = 0
+2.45.237.703 W slot   operator(): id  3 | task 82 | need to evaluate at least 1 token for each active slot (n_past = 29, task.n_tokens() = 29)
+2.45.237.704 W slot   operator(): id  3 | task 82 | n_past was set to 28
+2.45.807.816 I slot print_timing: id  3 | task 82 | prompt eval time =      49.66 ms /     1 tokens (   49.66 ms per token,    20.14 tokens per second)
+2.45.807.821 I slot print_timing: id  3 | task 82 |        eval time =     519.61 ms /    12 tokens (   43.30 ms per token,    23.09 tokens per second)
+2.45.807.822 I slot print_timing: id  3 | task 82 |       total time =     569.27 ms /    13 tokens
+2.45.807.823 I slot print_timing: id  3 | task 82 |    graphs reused =         91
+2.45.807.841 I slot      release: id  3 | task 82 | stop processing: n_tokens = 40, truncated = 0
+2.53.234.413 I slot get_availabl: id  3 | task -1 | selected slot by LCP similarity, sim_best = 1.000 (> 0.100 thold), f_keep = 0.725
+2.53.234.456 I slot launch_slot_: id  3 | task 95 | processing task, is_child = 0
+2.53.234.476 W slot   operator(): id  3 | task 95 | need to evaluate at least 1 token for each active slot (n_past = 29, task.n_tokens() = 29)
+2.53.234.477 W slot   operator(): id  3 | task 95 | n_past was set to 28
+2.53.610.860 I slot print_timing: id  3 | task 95 | prompt eval time =      51.81 ms /     1 tokens (   51.81 ms per token,    19.30 tokens per second)
+2.53.610.867 I slot print_timing: id  3 | task 95 |        eval time =     324.57 ms /     8 tokens (   40.57 ms per token,    24.65 tokens per second)
+2.53.610.869 I slot print_timing: id  3 | task 95 |       total time =     376.38 ms /     9 tokens
+2.53.610.870 I slot print_timing: id  3 | task 95 |    graphs reused =         99
+2.53.610.892 I slot      release: id  3 | task 95 | stop processing: n_tokens = 36, truncated = 0
+3.05.976.532 I slot get_availabl: id  3 | task -1 | selected slot by LCP similarity, sim_best = 1.000 (> 0.100 thold), f_keep = 0.806
+3.05.976.565 I slot launch_slot_: id  3 | task 104 | processing task, is_child = 0
+3.05.976.631 W slot   operator(): id  3 | task 104 | need to evaluate at least 1 token for each active slot (n_past = 29, task.n_tokens() = 29)
+3.05.976.633 W slot   operator(): id  3 | task 104 | n_past was set to 28
+3.06.351.244 I slot print_timing: id  3 | task 104 | prompt eval time =      46.22 ms /     1 tokens (   46.22 ms per token,    21.63 tokens per second)
+3.06.351.250 I slot print_timing: id  3 | task 104 |        eval time =     327.57 ms /     8 tokens (   40.95 ms per token,    24.42 tokens per second)
+3.06.351.251 I slot print_timing: id  3 | task 104 |       total time =     373.79 ms /     9 tokens
+3.06.351.253 I slot print_timing: id  3 | task 104 |    graphs reused =        107
+3.06.351.275 I slot      release: id  3 | task 104 | stop processing: n_tokens = 36, truncated = 0
+4.03.527.437 I srv    operator(): operator(): cleaning up before exit...

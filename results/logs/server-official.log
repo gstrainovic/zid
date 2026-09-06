@@ -1,0 +1,29 @@
+0.00.004.873 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)
+0.00.006.530 I srv    load_model: loading model 'models/BitNet-b1.58-2B-4T/ggml-model-i2_s.gguf'
+0.00.498.466 W load: missing pre-tokenizer type, using: 'default'
+0.00.498.471 W load:                                             
+0.00.498.471 W load: ************************************        
+0.00.498.471 W load: GENERATION QUALITY WILL BE DEGRADED!        
+0.00.498.472 W load: CONSIDER REGENERATING THE MODEL             
+0.00.498.472 W load: ************************************        
+0.00.498.472 W load:                                             
+0.00.917.920 I srv    load_model: initializing, n_slots = 4, n_ctx_slot = 4096, kv_unified = 'true'
+0.00.921.050 I srv  llama_server: model loaded
+0.00.921.081 I srv  llama_server: listening on http://127.0.0.1:8080
+0.07.613.631 I slot get_availabl: id  3 | task -1 | selected slot by LRU, t_last = -1
+0.07.613.693 I slot launch_slot_: id  3 | task 0 | processing task, is_child = 0
+0.10.552.745 I slot print_timing: id  3 | task 0 | prompt eval time =     219.57 ms /    29 tokens (    7.57 ms per token,   132.07 tokens per second)
+0.10.552.750 I slot print_timing: id  3 | task 0 |        eval time =    2719.44 ms /    60 tokens (   45.32 ms per token,    22.06 tokens per second)
+0.10.552.751 I slot print_timing: id  3 | task 0 |       total time =    2939.02 ms /    89 tokens
+0.10.552.753 I slot print_timing: id  3 | task 0 |    graphs reused =         59
+0.10.552.781 I slot      release: id  3 | task 0 | stop processing: n_tokens = 88, truncated = 0
+0.26.038.074 I slot get_availabl: id  3 | task -1 | selected slot by LCP similarity, sim_best = 1.000 (> 0.100 thold), f_keep = 0.330
+0.26.042.080 I slot launch_slot_: id  3 | task 62 | processing task, is_child = 0
+0.26.042.105 W slot   operator(): id  3 | task 62 | need to evaluate at least 1 token for each active slot (n_past = 29, task.n_tokens() = 29)
+0.26.042.105 W slot   operator(): id  3 | task 62 | n_past was set to 28
+0.28.784.689 I slot print_timing: id  3 | task 62 | prompt eval time =      46.82 ms /     1 tokens (   46.82 ms per token,    21.36 tokens per second)
+0.28.784.699 I slot print_timing: id  3 | task 62 |        eval time =    2695.75 ms /    60 tokens (   44.93 ms per token,    22.26 tokens per second)
+0.28.784.701 I slot print_timing: id  3 | task 62 |       total time =    2742.57 ms /    61 tokens
+0.28.784.702 I slot print_timing: id  3 | task 62 |    graphs reused =        119
+0.28.784.741 I slot      release: id  3 | task 62 | stop processing: n_tokens = 88, truncated = 0
+1.12.307.293 I srv    operator(): operator(): cleaning up before exit...
