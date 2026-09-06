@@ -40,6 +40,7 @@ def tab_center(name):
 
 def setup():
     shutil.rmtree(FX, ignore_errors=True)
+    shutil.rmtree(os.path.join(ROOT, "tmp", "xdg-config"), ignore_errors=True)  # gemerkte Optionen (preview_tabs) zurücksetzen
     os.makedirs(os.path.join(FX, "a"))
     os.makedirs(os.path.join(FX, "b"))
     for n in ("one.txt", "two.txt", "three.txt", "four.txt", "five.txt"):
@@ -58,8 +59,31 @@ def reveal_fixture():
         explorer_click("e2e_tabs")
 
 
+def step_default_own_tab():
+    print("--- Standard: jede Datei bekommt ihren eigenen Tab, kein Vorschau-Ersetzen")
+    reveal_fixture()
+    check(not ui_state()["preview_tabs"], "Vorschau-Tabs sind standardmäßig aus")
+    explorer_click("five.txt")
+    check(not [t for t in tabs() if t["name"] == "five.txt"][0]["preview"], "Einfachklick öffnet five.txt als festen Tab")
+    explorer_click("one.txt")
+    names = tab_names()
+    check("five.txt" in names and "one.txt" in names, "zweiter Einfachklick öffnet one.txt zusätzlich (five.txt bleibt)")
+    explorer_click("five.txt")
+    check(tab_names().count("five.txt") == 1 and active_name() == "five.txt", "erneuter Klick wechselt zum offenen Tab statt einen zweiten zu öffnen")
+    # "+" (Neu-Menü) sitzt ganz links vor dem ersten Tab
+    b0 = tab_bounds(0)
+    check(b0["x"] >= explorer()["width"] + 32, f"erster Tab beginnt rechts vom +-Knopf (x={b0['x']:.0f})")
+    for name in ("five.txt", "one.txt"):
+        rpc("middle_click", [*tab_center(name)]); settle(5)
+    check("five.txt" not in tab_names() and "one.txt" not in tab_names(), "aufgeräumt")
+
+
 def step_preview():
-    print("--- Vorschau-Tabs: Einfachklick ersetzt, Doppelklick macht fest")
+    print("--- Vorschau-Tabs (eingeschaltet): Einfachklick ersetzt, Doppelklick macht fest")
+    key("p", ctrl=True, shift=True); settle()
+    rpc("type_text", ["toggle preview tabs"]); settle(10)
+    key("enter"); settle(10)
+    check(ui_state()["preview_tabs"], "Toggle Preview Tabs schaltet ein")
     reveal_fixture()
     explorer_click("one.txt")
     t = [t for t in tabs() if t["name"] == "one.txt"][0]
@@ -180,7 +204,7 @@ def step_reveal():
     check(sel and sel[0]["name"] == tab_names()[0], f"Reveal markiert {tab_names()[0]} im Explorer")
 
 
-STEPS = [step_preview, step_dot_and_middle_click, step_context_menu_and_reopen, step_drag_reorder, step_scroll_active_into_view, step_reveal]
+STEPS = [step_default_own_tab, step_preview, step_dot_and_middle_click, step_context_menu_and_reopen, step_drag_reorder, step_scroll_active_into_view, step_reveal]
 
 
 def main():

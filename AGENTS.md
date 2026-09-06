@@ -433,6 +433,16 @@ Seit 06.09.2026 liegt alles im Repo; `~/projects/ki` und das separate Bench-Repo
 
 ## Tab-Leiste
 
+- **„+“ (Neu-Menü) sitzt ganz links** vor dem scrollenden Tab-Streifen. Der Streifen hat `.w = .grow`
+  mit Clip; stand der Knopf dahinter, wanderte er an den Fensterrand und sein Dropdown wurde
+  abgeschnitten (aufgefallen 06.09.2026).
+- **Vorschau-Tabs sind standardmäßig aus** (`UI.preview_tabs`, View → Toggle Preview Tabs,
+  gemerkt in `user_state` als `preview_tabs`). Aus: jede per Einfachklick geöffnete Datei bekommt
+  einen eigenen Tab, ein Klick auf eine schon offene Datei wechselt nur dorthin. An: Verhalten
+  wie VS Code/Zed (Einfachklick = Vorschau, die der nächste Einfachklick ersetzt; Doppelklick,
+  Tippen oder Enter machen fest). main.zig entscheidet mit `file_to_open_preview and preview_tabs`.
+  RPC `ui_state.preview_tabs`; `e2e_tabs.py` prüft beide Zustände.
+
 - **Vorschau-Tabs** (`Tab.preview`): Einfachklick oder Space im Explorer öffnet als Vorschau (Text in
   `subtext`-Farbe), der nächste Vorschau-Klick ersetzt sie an derselben Stelle; Doppelklick (< 400 ms,
   `FileExplorerState.now_ms`), Enter, Änderung oder festes Öffnen macht sie fest. `openFileAs(path,

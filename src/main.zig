@@ -583,7 +583,7 @@ pub fn main() !void {
 
         // Phase 9: Datei öffnen verarbeiten
         if (ui_system.file_explorer.file_to_open) |path| {
-            ui_system.getActiveTabBar().openFileAs(path, ui_system.file_explorer.file_to_open_preview) catch {};
+            ui_system.getActiveTabBar().openFileAs(path, ui_system.file_explorer.file_to_open_preview and ui_system.preview_tabs) catch {};
             ui_system.file_explorer.file_to_open_preview = false;
 
             // Dateityp prüfen

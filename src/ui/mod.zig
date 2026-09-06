@@ -181,6 +181,8 @@ pub const UI = struct {
     is_alt_down: bool,
     /// Language Server (zls) — wird beim ersten Sprung zur Definition in einer .zig-Datei gestartet
     scheduler: ?*@import("scheduler").Scheduler = null,
+    /// Einfachklick im Explorer öffnet Vorschau-Tabs (gemerkt in user_state; Standard aus)
+    preview_tabs: bool = false,
     lsp: ?*lsp_client.LspClient = null,
     lsp_failed: bool = false,
     lsp_pending: ?LspPending = null,
@@ -1432,6 +1434,11 @@ pub const UI = struct {
             .toggle_minimap => self.toggleEditorOption(.minimap),
             .toggle_whitespace => self.toggleEditorOption(.whitespace),
             .toggle_word_wrap => self.toggleEditorOption(.word_wrap),
+            .toggle_preview_tabs => {
+                self.preview_tabs = !self.preview_tabs;
+                self.showToast("Preview tabs {s}", .{if (self.preview_tabs) "on" else "off"});
+                self.saveUserState();
+            },
             .toggle_indent_guides => self.toggleEditorOption(.indent_guides),
         }
     }
@@ -1923,6 +1930,7 @@ pub const UI = struct {
             .whitespace = self.getActiveEditor().show_whitespace,
             .indent_guides = self.getActiveEditor().show_indent_guides,
             .word_wrap = self.getActiveEditor().word_wrap,
+            .preview_tabs = self.preview_tabs,
         }) catch |err| log.warn("state save '{s}' failed: {}", .{ path, err });
     }
 
@@ -1934,6 +1942,7 @@ pub const UI = struct {
         self.file_explorer.width = st.sidebar_width;
         self.file_explorer.show_hidden = st.show_hidden;
         self.autosave = st.autosave;
+        self.preview_tabs = st.preview_tabs;
         self.theme = if (st.light_theme) Theme.light() else Theme.dark();
         self.applyThemeToEditors();
         var buf: [32]*pane_mod.Pane = undefined;

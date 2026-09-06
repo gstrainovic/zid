@@ -604,11 +604,29 @@ pub fn renderTabBar(
         .layout = .{
             .sizing = .{ .w = .grow, .h = .fixed(44) },
             .direction = .left_to_right,
-            .child_gap = 0,
-            .padding = .{ .left = 0, .right = 8, .top = 4, .bottom = 4 },
+            .child_gap = 4,
+            .padding = .{ .left = 4, .right = 8, .top = 4, .bottom = 4 },
         },
         .background_color = theme.surface,
     })({
+        // "+" (Neu-Menü) ganz links, vor dem scrollenden Tab-Streifen; rechts wanderte es mit
+        // dem wachsenden Streifen an den Fensterrand, wo das Dropdown abgeschnitten wurde.
+        const add_btn_id = clay.ElementId.IDI("add_tab_btn", @truncate(@intFromPtr(state)));
+        clay.UI()(.{
+            .id = add_btn_id,
+            .layout = .{
+                .sizing = .{ .w = .fixed(32), .h = .fixed(32) },
+                .child_alignment = .{ .x = .center, .y = .center },
+            },
+            .background_color = theme.surface,
+            .corner_radius = .{ .top_left = 4, .top_right = 4, .bottom_left = 4, .bottom_right = 4 },
+        })({
+            clay.text("+", .{
+                .font_size = 24,
+                .color = theme.muted,
+                .wrap_mode = .none,
+            });
+        });
         clay.UI()(.{
             .id = strip_id,
             .layout = .{ .sizing = .{ .w = .grow, .h = .grow }, .direction = .left_to_right, .child_gap = 0 },
@@ -635,23 +653,6 @@ pub fn renderTabBar(
             }
         });
 
-        const add_btn_id = clay.ElementId.IDI("add_tab_btn", @truncate(@intFromPtr(state)));
-
-        clay.UI()(.{
-            .id = add_btn_id,
-            .layout = .{
-                .sizing = .{ .w = .fixed(32), .h = .fixed(32) },
-                .child_alignment = .{ .x = .center, .y = .center },
-            },
-            .background_color = theme.surface,
-            .corner_radius = .{ .top_left = 4, .top_right = 4, .bottom_left = 4, .bottom_right = 4 },
-        })({
-            clay.text("+", .{
-                .font_size = 24,
-                .color = theme.muted,
-                .wrap_mode = .none,
-            });
-        });
     });
 
     // Bounding-Box Check für add_btn (nach clay.UI())
