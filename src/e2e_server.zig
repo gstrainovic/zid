@@ -774,7 +774,7 @@ fn uiState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     try buf.writer.print(", \"clipboard_text\": \"{s}\", \"explorer_selection_count\": {d}, \"dialog_focused\": {d}", .{
         ui.last_clipboard_text orelse "", ui.file_explorer.selectionCount(), if (ui.active_dialog) |ad| ad.focused else 0,
     });
-    try buf.writer.print(", \"last_frame_ms\": {d:.2}, \"max_frame_ms\": {d:.2}", .{ ui.last_frame_ms, ui.takeMaxFrameMs() });
+    try buf.writer.print(", \"last_frame_ms\": {d:.2}, \"max_frame_ms\": {d:.2}, \"lsp\": \"{s}\"", .{ ui.last_frame_ms, ui.takeMaxFrameMs(), ui.lspStatus() });
     try buf.writer.print(", \"active_pane_index\": {d}, \"light_theme\": {}, \"font_size\": {d}, \"autosave\": {}, \"menu_highlight\": {d}, \"shortcuts_scroll\": {d:.0}, \"toast\": ", .{
         activePaneIndex(ui), ui.isLightTheme(), ui.getActiveEditor().font_size, ui.autosave, ui.menu_highlight orelse 999, ui.shortcuts_scroll_y,
     });

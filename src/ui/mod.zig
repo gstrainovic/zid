@@ -12,6 +12,8 @@ const AnimationManager = animation.AnimationManager;
 const PdfHandler = @import("../rendering/pdf_handler.zig").PdfHandler;
 const PdfViewState = @import("pdf_view.zig").PdfViewState;
 const editor_mod = @import("../editor/mod.zig");
+const lsp_client = @import("lsp_client");
+const lsp_proto = @import("lsp_proto");
 const wio = @import("wio");
 const tab_bar_mod = @import("tab_bar.zig");
 const file_explorer_mod = @import("file_explorer.zig");
@@ -177,6 +179,12 @@ pub const UI = struct {
     is_ctrl_down: bool,
     is_shift_down: bool,
     is_alt_down: bool,
+    /// Language Server (zls) — wird beim ersten Sprung zur Definition in einer .zig-Datei gestartet
+    scheduler: ?*@import("scheduler").Scheduler = null,
+    lsp: ?*lsp_client.LspClient = null,
+    lsp_failed: bool = false,
+    lsp_pending: ?LspPending = null,
+    lsp_goto: ?LspGoto = null,
 
     /// Git-Branch Name (leer = unbekannt)
     git_branch: []const u8,
@@ -297,6 +305,10 @@ pub const UI = struct {
     /// UI aufräumen
     pub fn deinit(self: *Self) void {
         log.debug("UI.deinit: start", .{});
+        if (self.lsp) |l| l.deinit();
+        self.lsp = null;
+        if (self.lsp_goto) |g| self.allocator.free(g.path);
+        self.lsp_goto = null;
 
         if (self.active_dialog) |ad| {
             if (ad.message_needs_free) {
@@ -379,6 +391,7 @@ pub const UI = struct {
     }
 
     pub fn setAIScheduler(self: *Self, sched: *@import("scheduler").Scheduler) void {
+        self.scheduler = sched;
         self.ai_chat.setScheduler(sched);
     }
 
@@ -1068,6 +1081,8 @@ pub const UI = struct {
 
     /// UI updaten (pro Frame)
     pub fn update(self: *Self, delta_ms: f32) void {
+        self.ensureEditorHooks();
+        self.applyLspGoto();
         // Bestätigtes Löschen im Explorer: vor dem Layout, nie im Dialog-Callback
         self.file_explorer.processPending();
         while (self.file_explorer.takeFsChange()) |change| {
@@ -1447,6 +1462,137 @@ pub const UI = struct {
 
     pub fn isLightTheme(self: *const Self) bool {
         return self.theme.bg[0] > 128;
+    }
+
+    // ───────────────────────── LSP (zls): Sprung zur Definition ─────────────────────────
+
+    const LspPending = struct { editor: *editor_mod.CodeEditor, row: usize, col: usize };
+    const LspGoto = struct { path: []u8, row: usize, col: usize, frames_left: u32 };
+
+    /// Jeder Editor bekommt den Definition-Hook (UI-Zeiger ist erst nach init stabil, deshalb hier).
+    fn ensureEditorHooks(self: *Self) void {
+        var buf: [32]*pane_mod.Pane = undefined;
+        var n: usize = 0;
+        collectLeaves(self.root_pane, &buf, &n);
+        for (buf[0..n]) |p| {
+            const e = p.data.leaf.code_editor;
+            if (e.definition_hook == null) e.definition_hook = .{ .ctx = self, .func = lspDefinitionHookFn };
+        }
+    }
+
+    fn lspDefinitionHookFn(ctx: *anyopaque, editor: *editor_mod.CodeEditor, row: usize, col: usize) bool {
+        const self: *Self = @ptrCast(@alignCast(ctx));
+        return self.lspGotoDefinition(editor, row, col);
+    }
+
+    pub fn lspStatus(self: *const Self) []const u8 {
+        const l = self.lsp orelse return if (self.lsp_failed) "failed" else "off";
+        return if (l.isReady()) "ready" else "starting";
+    }
+
+    /// zls starten, falls möglich: `ZLS_PATH`, sonst `~/.local/bin/zls`, sonst `zls` im PATH.
+    /// `VULKAN_ED_LSP=off` schaltet ab.
+    fn ensureLsp(self: *Self) ?*lsp_client.LspClient {
+        if (self.lsp) |l| return l;
+        if (self.lsp_failed) return null;
+        if (std.posix.getenv("VULKAN_ED_LSP")) |v| {
+            if (std.mem.eql(u8, v, "off")) {
+                self.lsp_failed = true;
+                return null;
+            }
+        }
+        const sched = self.scheduler orelse {
+            self.lsp_failed = true;
+            return null;
+        };
+        var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const zls: []const u8 = std.posix.getenv("ZLS_PATH") orelse blk: {
+            if (std.posix.getenv("HOME")) |home| {
+                const candidate = std.fmt.bufPrint(&path_buf, "{s}/.local/bin/zls", .{home}) catch break :blk "zls";
+                std.fs.accessAbsolute(candidate, .{}) catch break :blk "zls";
+                break :blk candidate;
+            }
+            break :blk "zls";
+        };
+        const root = self.current_directory orelse ".";
+        const abs_root = std.fs.cwd().realpathAlloc(self.allocator, root) catch {
+            self.lsp_failed = true;
+            return null;
+        };
+        defer self.allocator.free(abs_root);
+        const client = lsp_client.LspClient.start(self.allocator, sched, &.{zls}, abs_root) catch |err| {
+            log.warn("LSP: zls konnte nicht gestartet werden ({s}): {}", .{ zls, err });
+            self.lsp_failed = true;
+            return null;
+        };
+        log.info("LSP: zls gestartet ({s}) für {s}", .{ zls, abs_root });
+        self.lsp = client;
+        return client;
+    }
+
+    /// true = Anfrage an zls unterwegs; false = Editor sucht selbst per Textmuster.
+    fn lspGotoDefinition(self: *Self, editor: *editor_mod.CodeEditor, row: usize, col: usize) bool {
+        const rel = editor.buffer.get_file_path();
+        if (!std.mem.endsWith(u8, rel, ".zig")) return false;
+        const client = self.ensureLsp() orelse return false;
+        if (!client.isReady()) return false;
+        const path = std.fs.cwd().realpathAlloc(self.allocator, rel) catch return false;
+        defer self.allocator.free(path);
+        const text = editor.allTextAlloc() catch return false;
+        defer self.allocator.free(text);
+        client.syncDocument(path, "zig", text) catch return false;
+        client.definition(path, @intCast(row), editor.charIndexAt(row, col)) catch return false;
+        self.lsp_pending = .{ .editor = editor, .row = row, .col = col };
+        return true;
+    }
+
+    /// Antwort auf `textDocument/definition`: gleiche Datei → Cursor setzen, andere Datei →
+    /// Tab öffnen und den Sprung nachholen, sobald der Buffer geladen ist. Nichts gefunden →
+    /// lokale Textmuster-Suche als Rückfall.
+    pub fn handleLspDefinition(self: *Self, payload: []const u8) void {
+        const pending = self.lsp_pending orelse return;
+        self.lsp_pending = null;
+        const loc = (lsp_proto.firstLocation(self.allocator, payload) catch null) orelse {
+            pending.editor.gotoDefinitionLocal(pending.row, pending.col);
+            return;
+        };
+        defer loc.deinit(self.allocator);
+        const target = (lsp_proto.uriToPath(self.allocator, loc.uri) catch null) orelse {
+            pending.editor.gotoDefinitionLocal(pending.row, pending.col);
+            return;
+        };
+        defer self.allocator.free(target);
+        const current = std.fs.cwd().realpathAlloc(self.allocator, pending.editor.buffer.get_file_path()) catch null;
+        defer if (current) |c| self.allocator.free(c);
+        if (current != null and std.mem.eql(u8, current.?, target)) {
+            pending.editor.jumpTo(loc.line, loc.character);
+            return;
+        }
+        const tab_bar = self.getActiveTabBar();
+        tab_bar.openFileAs(target, false) catch {
+            pending.editor.gotoDefinitionLocal(pending.row, pending.col);
+            return;
+        };
+        if (self.lsp_goto) |g| self.allocator.free(g.path);
+        self.lsp_goto = .{ .path = self.allocator.dupe(u8, target) catch return, .row = loc.line, .col = loc.character, .frames_left = 240 };
+    }
+
+    fn applyLspGoto(self: *Self) void {
+        const g = &(self.lsp_goto orelse return);
+        const tab_bar = self.getActiveTabBar();
+        const loaded = tab_bar.pending_switch_path == null and blk: {
+            const idx = tab_bar.active_index orelse break :blk false;
+            if (idx >= tab_bar.tabs.items.len) break :blk false;
+            break :blk std.mem.eql(u8, tab_bar.tabs.items[idx].path, g.path);
+        };
+        if (loaded) {
+            self.getActiveEditor().jumpTo(g.row, g.col);
+        } else if (g.frames_left > 0) {
+            g.frames_left -= 1;
+            return;
+        }
+        self.allocator.free(g.path);
+        self.lsp_goto = null;
     }
 
     /// Neue Editoren (Split) übernehmen Anzeigeoptionen, Schriftgröße und Theme des Ausgangs-Editors;

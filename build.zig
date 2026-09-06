@@ -281,12 +281,20 @@ pub fn build(b: *std.Build) void {
     file_watcher_mod.addImport("scheduler", scheduler_mod);
     exe_mod.addImport("file_watcher", file_watcher_mod);
 
+    const lsp_proto_mod = b.createModule(.{
+        .root_source_file = b.path("src/lsp/lsp_proto.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    exe_mod.addImport("lsp_proto", lsp_proto_mod);
+
     const lsp_client_mod = b.createModule(.{
         .root_source_file = b.path("src/lsp/lsp_client.zig"),
         .target = target,
         .optimize = optimize,
     });
     lsp_client_mod.addImport("scheduler", scheduler_mod);
+    lsp_client_mod.addImport("lsp_proto", lsp_proto_mod);
     exe_mod.addImport("lsp_client", lsp_client_mod);
 
     const ai_history_mod = b.createModule(.{
@@ -401,6 +409,10 @@ pub fn build(b: *std.Build) void {
     const run_fuzzy_tests = b.addRunArtifact(fuzzy_tests);
     run_fuzzy_tests.has_side_effects = true;
 
+    const lsp_proto_tests = b.addTest(.{ .root_module = lsp_proto_mod });
+    const run_lsp_proto_tests = b.addRunArtifact(lsp_proto_tests);
+    run_lsp_proto_tests.has_side_effects = true;
+
     const wrap_ops_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("src/editor/wrap_ops.zig"),
         .target = target,
@@ -466,6 +478,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_shortcuts_tests.step);
     test_step.dependOn(&run_find_ops_tests.step);
     test_step.dependOn(&run_wrap_ops_tests.step);
+    test_step.dependOn(&run_lsp_proto_tests.step);
     test_step.dependOn(&run_device_select_tests.step);
     test_step.dependOn(&run_ai_history_tests.step);
     test_step.dependOn(&run_ai_tools_tests.step);

@@ -213,6 +213,9 @@ pub const CodeEditor = struct {
     /// Soft-Wrap: lange Zeilen werden in Segmente von `visibleColCount()` Spalten umgebrochen
     /// (Alt+Z). Cursor-Bewegung bleibt zeilenweise (Buffer-Zeilen), gescrollt wird nach Buffer-Zeilen.
     word_wrap: bool = false,
+    /// Sprung zur Definition über einen Language Server (gesetzt vom UI); liefert true,
+    /// wenn die Anfrage unterwegs ist — dann kein lokaler Textmuster-Sprung.
+    definition_hook: ?DefinitionHook = null,
     /// Klammerpaar am Cursor (pro Frame berechnet): Position der Klammer am Cursor und ihres Partners
     bracket_pair: ?[2]flow_core.Cursor = null,
     /// Breite der Minimap-Spalte
@@ -2446,7 +2449,49 @@ pub const CodeEditor = struct {
     }
 
     /// Wort unter (row, col) im Text suchen: erste Zeile, die wie eine Definition aussieht.
+    pub const DefinitionHook = struct {
+        ctx: *anyopaque,
+        func: *const fn (ctx: *anyopaque, editor: *CodeEditor, row: usize, col: usize) bool,
+    };
+
     pub fn gotoDefinition(self: *Self, row: usize, col: usize) void {
+        if (self.definition_hook) |h| {
+            if (h.func(h.ctx, self, row, col)) return;
+        }
+        self.gotoDefinitionLocal(row, col);
+    }
+
+    /// Cursor setzen und sichtbar machen (Zeile/Spalte werden geklemmt).
+    pub fn jumpTo(self: *Self, row: usize, col: usize) void {
+        const r = @min(row, self.lineCount() -| 1);
+        const c = @min(col, self.lineWidth(r));
+        self.selection_anchor = null;
+        self.clearExtraCursors();
+        self.cursor = .{ .row = r, .col = c, .target = c };
+        self.ensureCursorVisible();
+        self.recordCursorMovement();
+        self.current_line = r + 1;
+    }
+
+    /// Gesamter Text des Buffers (owned).
+    pub fn allTextAlloc(self: *const Self) ![]u8 {
+        const last = self.lineCount() -| 1;
+        return self.getTextInRange(.{ .begin = .{ .row = 0, .col = 0 }, .end = .{ .row = last, .col = self.lineWidth(last) } });
+    }
+
+    /// Byte-Position in der Zeile → Zeichenindex (Codepoints; für LSP-Positionen).
+    pub fn charIndexAt(self: *Self, row: usize, col: usize) u32 {
+        const line_text = self.getLine(row);
+        const byte = @min(self.buffer.root.get_line_width_to_pos(row, col, self.metrics()) catch line_text.len, line_text.len);
+        var n: u32 = 0;
+        for (line_text[0..byte]) |c| {
+            if ((c & 0xC0) != 0x80) n += 1;
+        }
+        return n;
+    }
+
+    /// Sprung per Textmuster innerhalb der Datei (ohne Language Server).
+    pub fn gotoDefinitionLocal(self: *Self, row: usize, col: usize) void {
         const m = self.metrics();
         const line_text = self.getLine(row);
         const byte = @min(self.buffer.root.get_line_width_to_pos(row, col, m) catch line_text.len, line_text.len);
