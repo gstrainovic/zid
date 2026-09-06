@@ -43,7 +43,7 @@ def setup():
     shutil.rmtree(os.path.join(ROOT, "tmp", "xdg-config"), ignore_errors=True)  # gemerkte Optionen zurücksetzen
     os.makedirs(os.path.join(FX, "a"))
     os.makedirs(os.path.join(FX, "b"))
-    for n in ("one.txt", "two.txt", "three.txt", "four.txt", "five.txt"):
+    for n in ("one.txt", "two.txt", "three.txt", "four.txt", "five.txt", "notes.md"):
         with open(os.path.join(FX, n), "w") as f:
             f.write(n + "\n")
     for d in ("a", "b"):
@@ -218,7 +218,43 @@ def step_reveal():
     check(sel and sel[0]["name"] == tab_names()[0], f"Reveal markiert {tab_names()[0]} im Explorer")
 
 
-STEPS = [step_default_own_tab, step_recent_switch_and_picker, step_dot_and_middle_click, step_context_menu_and_reopen, step_drag_reorder, step_scroll_active_into_view, step_reveal]
+def step_md_preview_from_tab_menu():
+    print("--- Tab-Kontextmenü: Markdown Preview nur bei .md, öffnet die Vorschau des angeklickten Tabs")
+    # Erst aufräumen: mit vielen Tabs liegt der Zieltab sonst außerhalb der gescrollten Leiste
+    # (tab_bounds liefert dann die alte Geometrie und der Rechtsklick trifft einen anderen Tab)
+    st = result_json("get_active_tab")
+    if st["active_index"] is not None:
+        b = tab_bounds(st["active_index"])
+        rpc("right_click", [b["x"] + b["w"] / 2, b["y"] + b["h"] / 2]); settle()
+        click_center("tab_menu_close_all_tabs"); settle(10)
+    check(len(tabs()) == 0, f"alle Tabs zu: {tab_names()}")
+    reveal_fixture()
+    explorer_click("notes.md"); explorer_click("notes.md")
+    explorer_click("one.txt"); explorer_click("one.txt")
+    key("escape")
+    check(active_name() == "one.txt", "one.txt aktiv")
+    # Textdatei zuerst: der Eintrag wurde in diesem Lauf noch nie gezeichnet, „nicht gefunden“ ist hier belastbar
+    x, y = tab_center("one.txt")
+    rpc("right_click", [x, y]); settle()
+    check(bounds("tab_menu_close_tab")["found"], "Menü der Textdatei offen")
+    check(not result_json("element_bounds", ["tab_menu_md_preview"])["found"], "Textdatei: kein Markdown Preview im Tab-Menü")
+    key("escape")
+    x, y = tab_center("notes.md")
+    rpc("right_click", [x, y]); settle()
+    check(bounds("tab_menu_md_preview")["found"], "Markdown-Tab: Menü zeigt Markdown Preview")
+    check(abs(bounds("tab_menu_md_preview")["h"] - 30) < 0.5, "Menüzeile ist 30 px hoch wie im Editor- und Explorer-Menü")
+    shot("e2e_tabs_menu_md.ppm")
+    click_center("tab_menu_md_preview"); settle(10)
+    previews = [t for t in tabs() if t["kind"] == "markdown_preview"]
+    check(len(previews) == 1 and previews[0]["name"] == "notes.md", f"Vorschau-Tab für notes.md offen (nicht für den aktiven one.txt): {tab_names()}")
+    for t in sorted(tabs(), key=lambda t: -t["index"]):
+        if t["name"] in ("notes.md", "one.txt"):
+            b = tab_bounds(t["index"])
+            rpc("middle_click", [b["x"] + b["w"] / 2, b["y"] + b["h"] / 2]); settle(5)
+    check("notes.md" not in tab_names(), "aufgeräumt")
+
+
+STEPS = [step_default_own_tab, step_recent_switch_and_picker, step_dot_and_middle_click, step_context_menu_and_reopen, step_drag_reorder, step_scroll_active_into_view, step_reveal, step_md_preview_from_tab_menu]
 
 
 def main():

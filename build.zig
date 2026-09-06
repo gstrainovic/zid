@@ -79,6 +79,16 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     exe_mod.addImport("shortcuts", shortcuts_mod);
+    // Gemeinsames Kontextmenü (Tab, Editor, Markdown, Terminal, Explorer): eigenes Modul
+    // aus demselben Grund wie die Kürzel-Tabelle.
+    const context_menu_mod = b.createModule(.{
+        .root_source_file = b.path("src/ui/context_menu.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    context_menu_mod.addImport("clay", clay_dep.module("zclay"));
+    context_menu_mod.addImport("shortcuts", shortcuts_mod);
+    exe_mod.addImport("context_menu", context_menu_mod);
     // Agent-Werkzeuge: eigenes Modul (Tests ohne UI), braucht die Kürzel-Tabelle
     const ai_tools_mod = b.createModule(.{
         .root_source_file = b.path("src/ai/tools.zig"),
@@ -217,6 +227,7 @@ pub fn build(b: *std.Build) void {
     code_editor_mod.addImport("flow_core", flow_core_dep.module("flow-core"));
     code_editor_mod.addImport("syntax", syntax_mod);
     code_editor_mod.addImport("shortcuts", shortcuts_mod);
+    code_editor_mod.addImport("context_menu", context_menu_mod);
 
 
     // Tests IN code_editor.zig laufen nur, wenn die Datei selbst Test-Root ist:
@@ -360,6 +371,10 @@ pub fn build(b: *std.Build) void {
     const run_shortcuts_tests = b.addRunArtifact(shortcuts_tests);
     run_shortcuts_tests.has_side_effects = true;
 
+    const context_menu_tests = b.addTest(.{ .root_module = context_menu_mod });
+    const run_context_menu_tests = b.addRunArtifact(context_menu_tests);
+    run_context_menu_tests.has_side_effects = true;
+
     const find_ops_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("src/editor/find_ops.zig"),
         .target = target,
@@ -495,6 +510,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_explorer_ops_tests.step);
     test_step.dependOn(&run_folder_ops_tests.step);
     test_step.dependOn(&run_shortcuts_tests.step);
+    test_step.dependOn(&run_context_menu_tests.step);
     test_step.dependOn(&run_find_ops_tests.step);
     test_step.dependOn(&run_wrap_ops_tests.step);
     test_step.dependOn(&run_tab_mru_tests.step);

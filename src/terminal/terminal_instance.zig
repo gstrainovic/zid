@@ -12,6 +12,8 @@ const builtin = @import("builtin");
 const ghostty_vt = @import("ghostty-vt");
 const ConPty = @import("conpty.zig");
 const clay = @import("clay");
+const shortcuts = @import("shortcuts");
+const ctx_menu = @import("context_menu");
 
 const log = std.log.scoped(.terminal_instance);
 
@@ -179,17 +181,15 @@ pub const TerminalInstance = struct {
         if (self.handleScrollbarMouseDown(x, y)) return true;
 
         if (self.show_context_menu) {
-            if (clay.pointerOver(clay.getElementId("TermCopy"))) {
-                self.copyToClipboard() catch |err| log.err("Copy failed: {}", .{err});
-                self.show_context_menu = false;
-                return true;
-            }
-            if (clay.pointerOver(clay.getElementId("TermPaste"))) {
-                self.pasteFromClipboard() catch |err| log.err("Paste failed: {}", .{err});
-                self.show_context_menu = false;
-                return true;
-            }
             self.show_context_menu = false;
+            if (ctx_menu.hit("term_menu", &shortcuts.terminal_menu_items, ctx_menu.none)) |cmd| {
+                switch (cmd) {
+                    .terminal_copy => self.copyToClipboard() catch |err| log.err("Copy failed: {}", .{err}),
+                    .terminal_paste => self.pasteFromClipboard() catch |err| log.err("Paste failed: {}", .{err}),
+                    else => {},
+                }
+                return true;
+            }
         }
 
         self.mutex.lock();
@@ -306,55 +306,10 @@ pub const TerminalInstance = struct {
         try self.sendInput(text);
     }
 
-    pub fn renderContextMenu(self: *Self) void {
+    /// Kontextmenü (`shortcuts.terminal_menu_items`, IDs `term_menu_<command>`) im gemeinsamen Stil.
+    pub fn renderContextMenu(self: *Self, colors: ctx_menu.Colors) void {
         if (!self.show_context_menu) return;
-
-        const font_size: f32 = 16.0;
-
-        clay.UI()(.{
-            .id = clay.ElementId.ID("term-context-menu-anchor"),
-            .layout = .{ .sizing = .{ .w = .fixed(0), .h = .fixed(0) } },
-            .floating = .{
-                .attach_to = .to_root,
-                .attach_points = .{ .element = .left_top, .parent = .left_top },
-                .offset = .{ .x = self.context_menu_x, .y = self.context_menu_y },
-                .z_index = 1000,
-            },
-        })({
-            clay.UI()(.{
-                .id = clay.ElementId.ID("term-context-menu-container"),
-                .layout = .{
-                    .sizing = .{ .w = .fit, .h = .fit },
-                    .direction = .top_to_bottom,
-                    .padding = .all(4),
-                },
-                .background_color = .{ 45, 45, 60, 255 },
-                .border = .{ .width = .all(1), .color = .{ 100, 100, 120, 255 } },
-                .corner_radius = .all(4),
-            })({
-                self.renderContextMenuItem("Copy", "TermCopy", font_size);
-                self.renderContextMenuItem("Paste", "TermPaste", font_size);
-            });
-        });
-    }
-
-    fn renderContextMenuItem(self: *Self, label: []const u8, id: []const u8, font_size: f32) void {
-        _ = self;
-        const item_id = clay.getElementId(id);
-        const is_hovered = clay.pointerOver(item_id);
-
-        clay.UI()(.{
-            .id = item_id,
-            .layout = .{
-                .sizing = .{ .w = .fit, .h = .fixed(font_size + 12) },
-                .padding = .{ .left = 8, .right = 8 },
-                .child_alignment = .{ .x = .left, .y = .center },
-            },
-            .background_color = if (is_hovered) .{ 80, 80, 100, 255 } else .{ 0, 0, 0, 0 },
-            .corner_radius = .all(2),
-        })({
-            clay.text(label, .{ .font_size = @intFromFloat(font_size), .color = .{ 220, 220, 220, 255 } });
-        });
+        _ = ctx_menu.render("term_menu", &shortcuts.terminal_menu_items, self.context_menu_x, self.context_menu_y, ctx_menu.none, colors);
     }
 
 

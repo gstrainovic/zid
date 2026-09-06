@@ -9,6 +9,7 @@ const clay = @import("clay");
 const wio = @import("wio");
 const explorer_ops = @import("explorer_ops.zig");
 const shortcuts = @import("shortcuts");
+const ctx_menu = @import("context_menu");
 const ui = @import("../ui/mod.zig");
 const Theme = ui.Theme;
 
@@ -32,8 +33,7 @@ pub const context_menu_items = [_]shortcuts.Command{
     .copy_path,        .copy_relative_path, .reveal_in_file_manager, .open_in_terminal,
     .collapse_all,     .toggle_hidden_files, .filter_explorer,
 };
-const context_menu_row: f32 = 30;
-const context_menu_height: f32 = context_menu_items.len * (context_menu_row + 2) + 8;
+const context_menu_height: f32 = ctx_menu.height(context_menu_items.len);
 
 /// Laufendes Inline-Umbenennen
 pub const RenameState = struct { node_index: u32, edit: explorer_ops.RenameEdit };
@@ -1191,12 +1191,7 @@ pub const FileExplorerState = struct {
         // Offenes Kontextmenü: Eintrag ausführen oder Menü schließen
         if (self.context_menu) |_| {
             self.context_menu = null;
-            inline for (context_menu_items) |cmd| {
-                if (clay.pointerOver(contextItemId(cmd))) {
-                    self.pending_command = cmd;
-                    return true;
-                }
-            }
+            if (ctx_menu.hit("fx_menu", &context_menu_items, ctx_menu.none)) |cmd| self.pending_command = cmd;
             return true;
         }
         // Laufendes Umbenennen/Anlegen: jeder Klick bricht ab
@@ -1429,57 +1424,9 @@ fn ellipsize(arena: std.mem.Allocator, name: []const u8, font_size: f32, max_wid
     return std.fmt.allocPrint(arena, "{s}…", .{name[0..last_fit]}) catch name;
 }
 
-fn contextItemId(comptime cmd: shortcuts.Command) clay.ElementId {
-    return clay.ElementId.ID("fx_menu_" ++ @tagName(cmd));
-}
-
+/// Kontextmenü (`context_menu_items`, IDs `fx_menu_<command>`) im gemeinsamen Stil.
 fn renderContextMenu(menu: ContextMenu, theme: Theme) void {
-    clay.UI()(.{
-        .id = clay.ElementId.ID("fx_menu_anchor"),
-        .layout = .{ .sizing = .{ .w = .fixed(0), .h = .fixed(0) } },
-        .floating = .{
-            .attach_to = .to_root,
-            .attach_points = .{ .element = .left_top, .parent = .left_top },
-            .offset = .{ .x = menu.x, .y = menu.y },
-            .z_index = 1000,
-        },
-    })({
-        clay.UI()(.{
-            .id = clay.ElementId.ID("fx_menu_container"),
-            .layout = .{
-                .sizing = .{ .w = .fit, .h = .fit },
-                .direction = .top_to_bottom,
-                .padding = .all(4),
-                .child_gap = 2,
-            },
-            .background_color = theme.overlay,
-            .border = .{ .width = .all(1), .color = theme.border },
-            .corner_radius = .all(4),
-        })({
-            inline for (context_menu_items) |cmd| {
-                renderContextMenuItem(shortcuts.label(cmd), shortcuts.shortcutText(cmd), contextItemId(cmd), theme);
-            }
-        });
-    });
-}
-
-fn renderContextMenuItem(label: []const u8, shortcut: []const u8, item_id: clay.ElementId, theme: Theme) void {
-    const hovered = clay.pointerOver(item_id);
-    clay.UI()(.{
-        .id = item_id,
-        .layout = .{
-            .sizing = .{ .w = .fixed(330), .h = .fixed(context_menu_row) },
-            .padding = .{ .left = 12, .right = 12 },
-            .child_alignment = .{ .x = .left, .y = .center },
-            .child_gap = 8,
-        },
-        .background_color = if (hovered) theme.primary else .{ 0, 0, 0, 0 },
-        .corner_radius = .all(3),
-    })({
-        clay.text(label, .{ .font_size = 18, .color = if (hovered) theme.text_on_primary else theme.text, .wrap_mode = .none });
-        clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow } } })({});
-        clay.text(shortcut, .{ .font_size = 14, .color = if (hovered) theme.text_on_primary else theme.muted, .wrap_mode = .none });
-    });
+    _ = ctx_menu.render("fx_menu", &context_menu_items, menu.x, menu.y, ctx_menu.none, ctx_menu.Colors.fromTheme(theme));
 }
 
 fn renderScrollbar(state: *FileExplorerState, theme: Theme) void {

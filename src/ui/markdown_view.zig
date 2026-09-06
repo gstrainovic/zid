@@ -3,6 +3,8 @@ const clay = @import("clay");
 const zigdown = @import("zigdown");
 const word_wrap = @import("word_wrap.zig");
 const ui_mod = @import("mod.zig");
+const shortcuts = @import("shortcuts");
+const ctx_menu = @import("context_menu");
 const Theme = ui_mod.Theme;
 const ImageTexture = @import("../clay_renderer/image_renderer.zig").ImageTexture;
 const flow_core = @import("flow_core");
@@ -127,17 +129,15 @@ pub const MarkdownView = struct {
 
     pub fn handleMouseDown(self: *Self, x: f32, y: f32) bool {
         if (self.show_context_menu) {
-            if (clay.pointerOver(clay.getElementId("MDSplitV"))) {
-                self.pending_split_v = true;
-                self.show_context_menu = false;
-                return true;
-            }
-            if (clay.pointerOver(clay.getElementId("MDSplitH"))) {
-                self.pending_split_h = true;
-                self.show_context_menu = false;
-                return true;
-            }
             self.show_context_menu = false;
+            if (ctx_menu.hit("md_menu", &shortcuts.markdown_menu_items, ctx_menu.none)) |cmd| {
+                switch (cmd) {
+                    .split_vertical => self.pending_split_v = true,
+                    .split_horizontal => self.pending_split_h = true,
+                    else => {},
+                }
+                return true;
+            }
         }
 
         if (self.content_height <= self.viewport_height) return false;
@@ -203,58 +203,10 @@ pub const MarkdownView = struct {
         self.context_menu_y = y;
     }
 
-    fn renderContextMenu(self: *Self) void {
+    /// Kontextmenü (`shortcuts.markdown_menu_items`, IDs `md_menu_<command>`) im gemeinsamen Stil.
+    fn renderContextMenu(self: *Self, theme: Theme) void {
         if (!self.show_context_menu) return;
-
-        const font_size_f: f32 = @floatFromInt(self.font_size);
-
-        clay.UI()(.{
-            .id = clay.ElementId.ID("md-context-menu-anchor"),
-            .layout = .{ .sizing = .{ .w = .fixed(0), .h = .fixed(0) } },
-            .floating = .{
-                .attach_to = .to_root,
-                .attach_points = .{ .element = .left_top, .parent = .left_top },
-                .offset = .{ .x = self.context_menu_x, .y = self.context_menu_y },
-                .z_index = 1000,
-            },
-        })({
-            clay.UI()(.{
-                .id = clay.ElementId.ID("md-context-menu-container"),
-                .layout = .{
-                    .sizing = .{ .w = .fit, .h = .fit },
-                    .direction = .top_to_bottom,
-                    .padding = .all(8),
-                    .child_gap = 4,
-                },
-                .background_color = .{ 45, 45, 60, 255 },
-                .border = .{ .width = .all(1), .color = .{ 100, 100, 120, 255 } },
-                .corner_radius = .all(4),
-            })({
-                clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(1) } }, .background_color = .{ 80, 80, 80, 255 } })({});
-
-                self.renderContextMenuItem("Split-Vertically", "MDSplitV", font_size_f);
-                self.renderContextMenuItem("Split-Horizontally", "MDSplitH", font_size_f);
-            });
-        });
-    }
-
-    fn renderContextMenuItem(self: *Self, label: []const u8, id: []const u8, item_font_size: f32) void {
-        _ = self;
-        const item_id = clay.getElementId(id);
-        const is_hovered = clay.pointerOver(item_id);
-
-        clay.UI()(.{
-            .id = item_id,
-            .layout = .{
-                .sizing = .{ .w = .fit, .h = .fixed(item_font_size + 12) },
-                .padding = .{ .left = 8, .right = 8 },
-                .child_alignment = .{ .x = .left, .y = .center },
-            },
-            .background_color = if (is_hovered) .{ 80, 80, 100, 255 } else .{ 0, 0, 0, 0 },
-            .corner_radius = .all(2),
-        })({
-            clay.text(label, .{ .font_size = @intFromFloat(item_font_size), .color = .{ 220, 220, 220, 255 } });
-        });
+        _ = ctx_menu.render("md_menu", &shortcuts.markdown_menu_items, self.context_menu_x, self.context_menu_y, ctx_menu.none, ctx_menu.Colors.fromTheme(theme));
     }
 
     /// Parst self.text und rendert die Blöcke ohne Root-, Scroll- oder
@@ -339,8 +291,7 @@ pub const MarkdownView = struct {
             }
         });
 
-        // Context Menu
-        self.renderContextMenu();
+        self.renderContextMenu(theme);
     }
 
     fn renderScrollbar(self: *Self) void {

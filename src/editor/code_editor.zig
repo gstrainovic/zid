@@ -9,6 +9,7 @@ const flow_core = @import("flow_core");
 const syntax = @import("syntax");
 const wio = @import("wio");
 const shortcuts = @import("shortcuts");
+const ctx_menu = @import("context_menu");
 const find_ops = @import("find_ops.zig");
 
 const actions = @import("actions.zig");
@@ -236,6 +237,8 @@ pub const CodeEditor = struct {
     show_context_menu: bool = false,
     context_menu_x: f32 = 0,
     context_menu_y: f32 = 0,
+    /// Menüfarben aus dem UI-Theme (applyTheme), bis dahin Dark
+    menu_colors: ctx_menu.Colors = ctx_menu.Colors.dark,
 
     last_frame_hovered: bool = false,
     desired_cursor: wio.Cursor = .arrow,
@@ -329,6 +332,7 @@ pub const CodeEditor = struct {
         self.cursor_color = t.accent;
         self.selection_color = .{ t.primary[0], t.primary[1], t.primary[2], 110 };
         self.text_color = t.text;
+        self.menu_colors = ctx_menu.Colors.fromTheme(t);
     }
 
     /// Schriftgröße setzen (Zoom), 10–48.
@@ -2081,38 +2085,19 @@ pub const CodeEditor = struct {
         // Kontextmenü und darf beim Ziehen keine Selektion vom alten Anker erweitern.
 
         if (self.show_context_menu) {
-            if (clay.pointerOver(clay.getElementId("Editor-Cut"))) {
-                self.dispatchAction(.Cut);
-                self.show_context_menu = false;
-                return;
-            }
-            if (clay.pointerOver(clay.getElementId("Editor-Copy"))) {
-                self.dispatchAction(.Copy);
-                self.show_context_menu = false;
-                return;
-            }
-            if (clay.pointerOver(clay.getElementId("Editor-Paste"))) {
-                self.dispatchAction(.Paste);
-                self.show_context_menu = false;
-                return;
-            }
-            if (clay.pointerOver(clay.getElementId("Editor-MD-Preview"))) {
-                std.log.scoped(.editor).info("Context Menu: MD-Preview clicked", .{});
-                self.dispatchAction(.MdPreview);
-                self.show_context_menu = false;
-                return;
-            }
-            if (clay.pointerOver(clay.getElementId("Editor-Split-V"))) {
-                self.dispatchAction(.SplitVertical);
-                self.show_context_menu = false;
-                return;
-            }
-            if (clay.pointerOver(clay.getElementId("Editor-Split-H"))) {
-                self.dispatchAction(.SplitHorizontal);
-                self.show_context_menu = false;
-                return;
-            }
             self.show_context_menu = false;
+            if (ctx_menu.hit("editor_menu", &shortcuts.editor_menu_items, self.menuHidden())) |cmd| {
+                switch (cmd) {
+                    .cut => self.dispatchAction(.Cut),
+                    .copy => self.dispatchAction(.Copy),
+                    .paste => self.dispatchAction(.Paste),
+                    .md_preview => self.dispatchAction(.MdPreview),
+                    .split_vertical => self.dispatchAction(.SplitVertical),
+                    .split_horizontal => self.dispatchAction(.SplitHorizontal),
+                    else => {},
+                }
+                return;
+            }
         }
 
         if (button == .mouse_right) {
@@ -3120,9 +3105,7 @@ pub const CodeEditor = struct {
             if (self.show_minimap) self.renderMinimap(mouse_pressed);
         });
 
-        if (self.show_context_menu) {
-            self.renderContextMenu(arena, mouse_pressed);
-        }
+        if (self.show_context_menu) self.renderContextMenu();
     }
 
     /// `line` ist das sichtbare Stück (ab Byte `offset`, Anzeigespalte `first_col`) der Zeile
@@ -3406,107 +3389,24 @@ pub const CodeEditor = struct {
         self.view.row = @as(usize, @intCast(new_offset));
     }
 
-    fn renderContextMenu(self: *Self, arena: std.mem.Allocator, mouse_pressed: bool) void {
-        _ = mouse_pressed;
-        if (std.process.getEnvVarOwned(arena, "FORCE_SHOW_MENU") catch null) |_| {
-            if (!self.show_context_menu) {
-                self.show_context_menu = true;
-                self.context_menu_x = 100;
-                self.context_menu_y = 100;
-            }
+    /// Ausgeblendete Menüeinträge: Markdown Preview nur bei .md, im Eingabefeld
+    /// (compact_menu) weder Preview noch Split.
+    fn menuHidden(self: *Self) ctx_menu.Hidden {
+        var hidden = ctx_menu.none;
+        const is_md = std.mem.endsWith(u8, self.buffer.get_file_path(), ".md");
+        if (!is_md or self.compact_menu) hidden.insert(.md_preview);
+        if (self.compact_menu) {
+            hidden.insert(.split_vertical);
+            hidden.insert(.split_horizontal);
         }
-        
-        var item_count: f32 = if (self.compact_menu) 3 else 5; // Cut, Copy, Paste (+ Split V, Split H)
-        const path = self.buffer.get_file_path();
-        const is_md = std.mem.endsWith(u8, path, ".md") and !self.compact_menu;
-        if (is_md) item_count += 1;
-
-        clay.UI()(.{
-            .id = clay.ElementId.ID("context-menu-anchor"),
-            .layout = .{ .sizing = .{ .w = .fixed(0), .h = .fixed(0) } },
-            .floating = .{
-                .attach_to = .to_root,
-                .attach_points = .{ .element = .left_top, .parent = .left_top },
-                .offset = .{ .x = self.context_menu_x, .y = self.context_menu_y },
-                .z_index = 1000,
-            },
-        })({
-            clay.UI()(.{
-                .id = clay.ElementId.ID("context-menu-container"),
-                .layout = .{
-                    .sizing = .{ .w = .fit, .h = .fit },
-                    .direction = .top_to_bottom,
-                    .padding = .all(8),
-                    .child_gap = 4,
-                },
-                .background_color = .{ 45, 45, 60, 255 },
-                .border = .{ .width = .all(1), .color = .{ 100, 100, 120, 255 } },
-                .corner_radius = .all(4),
-            })({
-                if (clay.hovered()) {
-                    self.desired_cursor = .arrow;
-                }
-                self.renderContextMenuItem(.cut, "Editor-Cut");
-                self.renderContextMenuItem(.copy, "Editor-Copy");
-                self.renderContextMenuItem(.paste, "Editor-Paste");
-                if (is_md) {
-                    self.renderContextMenuItem(.md_preview, "Editor-MD-Preview");
-                }
-
-                if (!self.compact_menu) {
-                    clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(1) } }, .background_color = .{ 80, 80, 80, 255 } })({});
-
-                    self.renderContextMenuItem(.split_vertical, "Editor-Split-V");
-                    self.renderContextMenuItem(.split_horizontal, "Editor-Split-H");
-                }
-            });
-        });
+        return hidden;
     }
 
-    fn renderContextMenuItemClickable(self: *Self, label: []const u8, id: []const u8, arena: std.mem.Allocator, mouse_pressed: bool) bool {
-        _ = arena;
-        const item_id = clay.getElementId(id);
-        const is_hovered = clay.pointerOver(item_id);
-        
-        clay.UI()(.{
-            .id = item_id,
-            .layout = .{
-                .sizing = .{ .w = .grow, .h = .fixed(@as(f32, @floatFromInt(self.font_size)) + 12) },
-                .padding = .{ .left = 8, .right = 8 },
-                .child_alignment = .{ .x = .left, .y = .center },
-            },
-            .background_color = if (is_hovered) .{ 70, 70, 90, 255 } else .{ 0, 0, 0, 0 },
-            .corner_radius = .all(2),
-        })({
-            clay.text(label, .{ .font_size = self.font_size, .color = .{ 220, 220, 220, 255 }, .wrap_mode = .none });
-        });
-
-        return is_hovered and mouse_pressed;
-    }
-
-    /// Kontextmenü-Eintrag: Label links, Kürzel rechts, beides aus shortcuts.zig.
-    /// Die ID bleibt stabil (Klick-Erkennung in handleMouseDown und E2E-Tests).
-    fn renderContextMenuItem(self: *Self, cmd: shortcuts.Command, id: []const u8) void {
-        const item_id = clay.getElementId(id);
-        const is_hovered = clay.pointerOver(item_id);
-        if (is_hovered) self.desired_cursor = .arrow;
-
-        clay.UI()(.{
-            .id = item_id,
-            .layout = .{
-                .sizing = .{ .w = .fixed(360), .h = .fixed(@floatFromInt(self.font_size + 12)) },
-                .padding = .{ .left = 12, .right = 12, .top = 6, .bottom = 6 },
-                .direction = .left_to_right,
-                .child_alignment = .{ .x = .left, .y = .center },
-            },
-            .background_color = if (is_hovered) .{ 80, 80, 100, 255 } else .{ 0, 0, 0, 0 },
-            .corner_radius = .all(2),
-        })({
-            clay.text(shortcuts.label(cmd), .{ .font_size = self.font_size - 2, .color = .{ 220, 220, 240, 255 }, .wrap_mode = .none });
-            clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow } } })({});
-            const sc = shortcuts.shortcutText(cmd);
-            if (sc.len > 0) clay.text(sc, .{ .font_size = self.font_size - 6, .color = .{ 150, 150, 170, 255 }, .wrap_mode = .none });
-        });
+    /// Kontextmenü (`shortcuts.editor_menu_items`, IDs `editor_menu_<command>`) im gemeinsamen Stil.
+    fn renderContextMenu(self: *Self) void {
+        if (ctx_menu.render("editor_menu", &shortcuts.editor_menu_items, self.context_menu_x, self.context_menu_y, self.menuHidden(), self.menu_colors)) {
+            self.desired_cursor = .arrow;
+        }
     }
 
     pub fn getLineByteLen(self: *Self, line_idx: usize) usize {
