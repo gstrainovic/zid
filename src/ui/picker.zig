@@ -21,7 +21,7 @@ const BOX_WIDTH: f32 = 720;
 const MAX_FILES: usize = 100_000;
 const MAX_MATCHES: usize = 200;
 
-pub const Mode = enum { files, commands };
+pub const Mode = enum { files, commands, tabs };
 
 pub const Item = struct {
     /// Anzeige (Dateipfad relativ zum Root bzw. Kommando-Label); bei Dateien owned
@@ -29,6 +29,8 @@ pub const Item = struct {
     /// Rechts: Kürzel-Text (Kommandos)
     detail: []const u8 = "",
     command: ?shortcuts.Command = null,
+    /// Offener Tab (Modus tabs): Index in der Tab-Leiste
+    tab_index: ?usize = null,
 };
 
 /// Ordner, die beim Sammeln der Projektdateien übersprungen werden (plus alle `.`-Ordner)
@@ -47,6 +49,7 @@ pub const Picker = struct {
     /// Ergebnis: gewählte Datei (Pfad relativ zum Root, owned) bzw. Kommando; die UI holt es ab
     pending_file: ?[]u8 = null,
     pending_command: ?shortcuts.Command = null,
+    pending_tab: ?usize = null,
     /// Root der Dateiliste (owned)
     root: ?[]u8 = null,
     /// Labels der Dateiliste liegen in einer Arena: 30 000 einzelne free() dauern mit dem
@@ -242,6 +245,22 @@ pub const Picker = struct {
         self.show();
     }
 
+    /// Ctrl+E: offene Tabs der aktiven Leiste in „zuletzt benutzt“-Reihenfolge.
+    /// `labels[i]` gehört zu Tab `indices[i]`; die Labels werden kopiert.
+    pub fn openTabs(self: *Self, labels: []const []const u8, details: []const []const u8, indices: []const usize) void {
+        if (self.mode == .files) self.last_scan_ms = 0;
+        self.clearItems();
+        self.mode = .tabs;
+        const arena = self.alloc.create(std.heap.ArenaAllocator) catch return;
+        arena.* = std.heap.ArenaAllocator.init(self.alloc);
+        self.file_arena = arena;
+        const a = arena.allocator();
+        for (labels, details, indices) |l, d, i| {
+            self.items.append(self.alloc, .{ .label = a.dupe(u8, l) catch continue, .detail = a.dupe(u8, d) catch "", .tab_index = i }) catch {};
+        }
+        self.show();
+    }
+
     fn show(self: *Self) void {
         self.edit = .{};
         self.selected = 0;
@@ -291,6 +310,7 @@ pub const Picker = struct {
                 self.pending_file = self.alloc.dupe(u8, item.label) catch null;
             },
             .commands => self.pending_command = item.command,
+            .tabs => self.pending_tab = item.tab_index,
         }
         self.visible = false;
     }
@@ -299,6 +319,12 @@ pub const Picker = struct {
         const p = self.pending_file orelse return null;
         self.pending_file = null;
         return p;
+    }
+
+    pub fn takeTab(self: *Self) ?usize {
+        const t = self.pending_tab;
+        self.pending_tab = null;
+        return t;
     }
 
     pub fn takeCommand(self: *Self) ?shortcuts.Command {
@@ -420,7 +446,11 @@ pub const Picker = struct {
                     .border = .{ .width = .all(1), .color = t.border_focus },
                     .corner_radius = .all(4),
                 })({
-                    const prefix: []const u8 = if (self.mode == .commands) ">" else "";
+                    const prefix: []const u8 = switch (self.mode) {
+                        .commands => ">",
+                        .tabs => "tabs:",
+                        .files => "",
+                    };
                     if (prefix.len > 0) clay.text(prefix, .{ .font_size = 20, .color = t.muted });
                     const shown = std.fmt.allocPrint(arena, "{s}|", .{self.query()}) catch self.query();
                     clay.text(shown, .{ .font_size = 20, .color = t.text, .wrap_mode = .none });

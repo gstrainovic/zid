@@ -38,7 +38,9 @@ pub const InputEvent = union(enum) {
     press: Point,
     release: Point,
     move: Point,
-    key: struct { btn: @import("wio").Button, ctrl: bool, shift: bool = false, alt: bool = false },
+    /// hold: Modifier nach der Taste gedrückt lassen (Ctrl+Tab-Umschalter), bis `mods_release`
+    key: struct { btn: @import("wio").Button, ctrl: bool, shift: bool = false, alt: bool = false, hold: bool = false },
+    mods_release,
     char: u21,
     /// Mausrad an Position: lines > 0 hoch, < 0 runter
     scroll: struct { x: f32, y: f32, lines: i32 },
@@ -155,6 +157,13 @@ fn applyInput(ui: *ui_mod.UI, ev: InputEvent) void {
             ui.setShiftState(k.shift);
             ui.setAltState(k.alt);
             ui.handleKeyPress(k.btn);
+            if (!k.hold) {
+                ui.setCtrlState(false);
+                ui.setShiftState(false);
+                ui.setAltState(false);
+            }
+        },
+        .mods_release => {
             ui.setCtrlState(false);
             ui.setShiftState(false);
             ui.setAltState(false);
@@ -191,6 +200,8 @@ pub fn createDispatcher(alloc: std.mem.Allocator, ctx: *E2EContext) !*zigjr.RpcD
     try rpc_dispatcher.addWithCtx("key_press", ctx, keyPress);
     try rpc_dispatcher.addWithCtx("key_press_mods", ctx, keyPressMods);
     try rpc_dispatcher.addWithCtx("key_press_alt", ctx, keyPressAlt);
+    try rpc_dispatcher.addWithCtx("key_press_hold", ctx, keyPressHold);
+    try rpc_dispatcher.addWithCtx("mods_release", ctx, modsRelease);
     try rpc_dispatcher.addWithCtx("open_terminal", ctx, openTerminalRpc);
     try rpc_dispatcher.addWithCtx("open_chat", ctx, openChatRpc);
     try rpc_dispatcher.addWithCtx("get_chat_input", ctx, getChatInput);
@@ -405,6 +416,18 @@ pub fn keyPressAlt(ctx: *E2EContext, _: *zigjr.DispatchCtx, key_name: []const u8
     return "ok";
 }
 
+/// Wie key_press_alt, aber die Modifier bleiben gedrückt (bis mods_release).
+pub fn keyPressHold(ctx: *E2EContext, _: *zigjr.DispatchCtx, key_name: []const u8, is_ctrl: bool, is_shift: bool, is_alt: bool) ![]const u8 {
+    const b = buttonFromName(key_name) orelse return "error: unknown key";
+    dispatchInput(ctx, .{ .key = .{ .btn = b, .ctrl = is_ctrl, .shift = is_shift, .alt = is_alt, .hold = true } });
+    return "ok";
+}
+
+pub fn modsRelease(ctx: *E2EContext, _: *zigjr.DispatchCtx) ![]const u8 {
+    dispatchInput(ctx, .mods_release);
+    return "ok";
+}
+
 fn buttonFromName(name: []const u8) ?@import("wio").Button {
     const Button = @import("wio").Button;
     const named = [_]struct { []const u8, Button }{
@@ -528,8 +551,8 @@ fn getActiveTabDebug(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     for (tab_bar.tabs.items, 0..) |tab, i| {
         if (i > 0) try buf.writer.writeAll(", ");
         try buf.writer.print(
-            \\{{"index": {d}, "kind": "{s}", "name": "{s}", "is_active": {}, "modified": {}, "preview": {}, "pinned": {}}}
-        , .{ i, @tagName(tab.kind), tab.display_name, tab.is_active, tab.modified, tab.preview, tab.pinned });
+            \\{{"index": {d}, "kind": "{s}", "name": "{s}", "is_active": {}, "modified": {}, "pinned": {}}}
+        , .{ i, @tagName(tab.kind), tab.display_name, tab.is_active, tab.modified, tab.pinned });
     }
     const ed = ctx.ui_system.getActiveEditor();
     try buf.writer.print("], \"editor_modified\": {}, \"editor_file\": \"{s}\"}}", .{ ed.is_modified, ed.buffer.get_file_path() });
@@ -774,7 +797,7 @@ fn uiState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     try buf.writer.print(", \"clipboard_text\": \"{s}\", \"explorer_selection_count\": {d}, \"dialog_focused\": {d}", .{
         ui.last_clipboard_text orelse "", ui.file_explorer.selectionCount(), if (ui.active_dialog) |ad| ad.focused else 0,
     });
-    try buf.writer.print(", \"last_frame_ms\": {d:.2}, \"max_frame_ms\": {d:.2}, \"lsp\": \"{s}\", \"preview_tabs\": {}", .{ ui.last_frame_ms, ui.takeMaxFrameMs(), ui.lspStatus(), ui.preview_tabs });
+    try buf.writer.print(", \"last_frame_ms\": {d:.2}, \"max_frame_ms\": {d:.2}, \"lsp\": \"{s}\", \"tab_switcher\": {d}", .{ ui.last_frame_ms, ui.takeMaxFrameMs(), ui.lspStatus(), if (ui.tab_switcher) |p| @as(i64, @intCast(p)) else @as(i64, -1) });
     try buf.writer.print(", \"active_pane_index\": {d}, \"light_theme\": {}, \"font_size\": {d}, \"autosave\": {}, \"menu_highlight\": {d}, \"shortcuts_scroll\": {d:.0}, \"toast\": ", .{
         activePaneIndex(ui), ui.isLightTheme(), ui.getActiveEditor().font_size, ui.autosave, ui.menu_highlight orelse 999, ui.shortcuts_scroll_y,
     });
