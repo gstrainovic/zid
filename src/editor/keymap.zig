@@ -111,6 +111,10 @@ pub const Keymap = struct {
         try km.bind(.down, .{ .alt = true }, .MoveLineDown);
         try km.bind(.d, .{ .ctrl = true, .shift = true }, .DuplicateLine);
         try km.bind(.f12, .{}, .GotoDefinition);
+        // Mehrfach-Cursor (wie VS Code)
+        try km.bind(.d, .{ .ctrl = true }, .SelectNextOccurrence);
+        try km.bind(.up, .{ .ctrl = true, .alt = true }, .AddCursorAbove);
+        try km.bind(.down, .{ .ctrl = true, .alt = true }, .AddCursorBelow);
 
         // Context Menu
         try km.bind(.mouse_right, .{}, .ShowContextMenu);

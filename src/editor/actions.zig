@@ -88,6 +88,10 @@ pub const Action = enum {
     GotoLine,
     Replace,
     GotoDefinition,
+    // Mehrfach-Cursor
+    SelectNextOccurrence,
+    AddCursorAbove,
+    AddCursorBelow,
 };
 
 pub const KeyEvent = struct {

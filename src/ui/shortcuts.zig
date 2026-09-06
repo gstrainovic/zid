@@ -87,6 +87,9 @@ pub const Command = enum {
     replace,
     outdent_lines,
     goto_definition,
+    select_next_occurrence,
+    add_cursor_above,
+    add_cursor_below,
     // Panes / Fokus
     focus_pane_left,
     focus_pane_right,
@@ -173,12 +176,13 @@ pub const bindings = [_]Binding{
     .{ .command = .replace, .key = .h, .mods = .{ .ctrl = true }, .scope = .editor },
     .{ .command = .outdent_lines, .key = .tab, .mods = .{ .shift = true }, .scope = .editor },
     .{ .command = .goto_definition, .key = .f12, .scope = .editor },
+    .{ .command = .select_next_occurrence, .key = .d, .mods = .{ .ctrl = true }, .scope = .editor },
+    .{ .command = .add_cursor_above, .key = .up, .mods = .{ .ctrl = true, .alt = true }, .scope = .editor },
+    .{ .command = .add_cursor_below, .key = .down, .mods = .{ .ctrl = true, .alt = true }, .scope = .editor },
     // Panes / Fokus (Ctrl+K + Pfeil geht zusätzlich als Chord, siehe UI.handleKeyPress)
     .{ .command = .split_vertical, .key = .backslash, .mods = .{ .ctrl = true } },
     .{ .command = .focus_pane_left, .key = .left, .mods = .{ .ctrl = true, .alt = true } },
     .{ .command = .focus_pane_right, .key = .right, .mods = .{ .ctrl = true, .alt = true } },
-    .{ .command = .focus_pane_up, .key = .up, .mods = .{ .ctrl = true, .alt = true } },
-    .{ .command = .focus_pane_down, .key = .down, .mods = .{ .ctrl = true, .alt = true } },
     .{ .command = .focus_explorer, .key = .e, .mods = .{ .ctrl = true, .shift = true } },
     .{ .command = .toggle_terminal, .key = .j, .mods = .{ .ctrl = true } },
     .{ .command = .quick_open, .key = .p, .mods = .{ .ctrl = true } },
@@ -200,7 +204,7 @@ pub const Menu = struct { title: []const u8, items: []const Command };
 /// Menüleiste im Header, in dieser Reihenfolge.
 pub const menus = [_]Menu{
     .{ .title = "File", .items = &.{ .new_file, .quick_open, .save, .toggle_autosave, .open_folder, .close_tab, .close_all_tabs, .reopen_closed_tab } },
-    .{ .title = "Edit", .items = &.{ .undo, .redo, .cut, .copy, .paste, .select_all, .delete_line, .duplicate_line, .move_line_up, .move_line_down, .toggle_comment, .find, .replace, .goto_line, .goto_definition } },
+    .{ .title = "Edit", .items = &.{ .undo, .redo, .cut, .copy, .paste, .select_all, .delete_line, .duplicate_line, .move_line_up, .move_line_down, .toggle_comment, .find, .replace, .goto_line, .goto_definition, .select_next_occurrence, .add_cursor_above, .add_cursor_below } },
     .{ .title = "View", .items = &.{ .toggle_explorer, .focus_explorer, .split_vertical, .split_horizontal, .md_preview, .new_terminal, .toggle_terminal, .toggle_theme, .zoom_in, .zoom_out, .zoom_reset, .toggle_minimap, .toggle_whitespace, .toggle_indent_guides } },
     .{ .title = "Help", .items = &.{ .command_palette, .show_shortcuts } },
 };
@@ -282,6 +286,9 @@ pub fn label(command: Command) []const u8 {
         .replace => "Replace",
         .outdent_lines => "Outdent Lines",
         .goto_definition => "Go to Definition",
+        .select_next_occurrence => "Add Next Occurrence to Selection",
+        .add_cursor_above => "Add Cursor Above",
+        .add_cursor_below => "Add Cursor Below",
         .focus_pane_left => "Focus Pane Left",
         .focus_pane_right => "Focus Pane Right",
         .focus_pane_up => "Focus Pane Up",
