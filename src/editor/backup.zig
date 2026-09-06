@@ -22,11 +22,13 @@ pub fn defaultDataHome(alloc: std.mem.Allocator) ![]u8 {
 
 /// Vorhandene Datei nach `data_home` sichern; fehlt sie, gibt es nichts zu sichern.
 pub fn backupInto(alloc: std.mem.Allocator, data_home: []const u8, file_path: []const u8) !void {
-    std.fs.accessAbsolute(file_path, .{}) catch return;
-    const dest = try backupPathFor(alloc, data_home, file_path);
+    // Relative Pfade (Standarddatei, „New File.txt“) auflösen; fehlt die Datei, gibt es nichts zu sichern
+    const abs = std.fs.cwd().realpathAlloc(alloc, file_path) catch return;
+    defer alloc.free(abs);
+    const dest = try backupPathFor(alloc, data_home, abs);
     defer alloc.free(dest);
     if (std.fs.path.dirname(dest)) |dir| try std.fs.cwd().makePath(dir);
-    try std.fs.copyFileAbsolute(file_path, dest, .{});
+    try std.fs.cwd().copyFile(abs, std.fs.cwd(), dest, .{});
 }
 
 /// Wie backupInto mit dem Standard-Datenordner.
@@ -69,4 +71,6 @@ test "backupInto: kopiert die alte Version, fehlende Datei ist kein Fehler" {
     const missing = try std.fs.path.join(a, &.{ root, "nope.txt" });
     defer a.free(missing);
     try backupInto(a, root, missing);
+    // Relativer Pfad darf nicht abstürzen (accessAbsolute verlangte absolute Pfade)
+    try backupInto(a, root, "relative/does-not-exist.txt");
 }

@@ -1403,7 +1403,35 @@ pub const UI = struct {
                 self.showToast("Autosave {s}", .{if (self.autosave) "on" else "off"});
                 self.saveUserState();
             },
+            .toggle_minimap => self.toggleEditorOption(.minimap),
+            .toggle_whitespace => self.toggleEditorOption(.whitespace),
+            .toggle_indent_guides => self.toggleEditorOption(.indent_guides),
         }
+    }
+
+    pub const EditorOption = enum { minimap, whitespace, indent_guides };
+
+    /// Anzeigeoption in allen Editoren umschalten (gemerkt).
+    fn toggleEditorOption(self: *Self, opt: EditorOption) void {
+        const ed = self.getActiveEditor();
+        const new_value = switch (opt) {
+            .minimap => !ed.show_minimap,
+            .whitespace => !ed.show_whitespace,
+            .indent_guides => !ed.show_indent_guides,
+        };
+        var buf: [32]*pane_mod.Pane = undefined;
+        var n: usize = 0;
+        collectLeaves(self.root_pane, &buf, &n);
+        for (buf[0..n]) |p| {
+            const e = p.data.leaf.code_editor;
+            switch (opt) {
+                .minimap => e.show_minimap = new_value,
+                .whitespace => e.show_whitespace = new_value,
+                .indent_guides => e.show_indent_guides = new_value,
+            }
+        }
+        self.showToast("{s} {s}", .{ @tagName(opt), if (new_value) "on" else "off" });
+        self.saveUserState();
     }
 
     pub fn isLightTheme(self: *const Self) bool {
@@ -1717,6 +1745,9 @@ pub const UI = struct {
             .light_theme = self.isLightTheme(),
             .font_size = self.getActiveEditor().font_size,
             .autosave = self.autosave,
+            .minimap = self.getActiveEditor().show_minimap,
+            .whitespace = self.getActiveEditor().show_whitespace,
+            .indent_guides = self.getActiveEditor().show_indent_guides,
         }) catch |err| log.warn("state save '{s}' failed: {}", .{ path, err });
     }
 
@@ -1733,7 +1764,13 @@ pub const UI = struct {
         var buf: [32]*pane_mod.Pane = undefined;
         var n: usize = 0;
         collectLeaves(self.root_pane, &buf, &n);
-        for (buf[0..n]) |p| p.data.leaf.code_editor.setFontSize(st.font_size);
+        for (buf[0..n]) |p| {
+            const e = p.data.leaf.code_editor;
+            e.setFontSize(st.font_size);
+            e.show_minimap = st.minimap;
+            e.show_whitespace = st.whitespace;
+            e.show_indent_guides = st.indent_guides;
+        }
     }
 
     /// Text in die System-Zwischenablage (Fenster) legen; headless nur merken (RPC ui_state).

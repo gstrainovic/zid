@@ -638,6 +638,12 @@ fn editorState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     var buf = std.Io.Writer.Allocating.init(dc.arena());
     try buf.writer.print("{{\"lines\": {d}, \"row\": {d}, \"col\": {d}, \"view_row\": {d}, \"view_col\": {d}, \"view_cols\": {d}, \"find_open\": {}, \"find_not_found\": {}, \"find_query\": ", .{ lines, ed.cursor.row, ed.cursor.col, ed.view.row, ed.view.col, ed.view.cols, ed.find.active, ed.find.not_found });
     try std.json.Stringify.value(ed.find.text(), .{}, &buf.writer);
+    try buf.writer.print(", \"minimap\": {}, \"whitespace\": {}, \"indent_guides\": {}, \"bracket_pair\": ", .{ ed.show_minimap, ed.show_whitespace, ed.show_indent_guides });
+    if (ed.bracket_pair) |bp| {
+        try buf.writer.print("[[{d}, {d}], [{d}, {d}]]", .{ bp[0].row, bp[0].col, bp[1].row, bp[1].col });
+    } else {
+        try buf.writer.writeAll("null");
+    }
     try buf.writer.writeAll(", \"selection\": ");
     if (ed.selectionRange()) |r| {
         try buf.writer.print("{{\"begin\": [{d}, {d}], \"end\": [{d}, {d}]}}", .{ r.begin.row, r.begin.col, r.end.row, r.end.col });

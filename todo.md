@@ -5,7 +5,7 @@ Belege aus der Sitzung vom 06.09.2026 (Log mit Panic in `gpu_renderer.zig:305`) 
 
 ## Robustheit bei großen und merkwürdigen Dateien
 
-- [ ] **P3 Horizontale Scrollbar und Word-Wrap-Umschalter** im Editor (Shift+Mausrad und
+- [ ] **P3 Word-Wrap-Umschalter** im Editor (horizontale Scrollbar, Shift+Mausrad und
       Cursor-Folgen gibt es seit 06.09.2026).
 ## Explorer
 
@@ -19,9 +19,8 @@ Belege aus der Sitzung vom 06.09.2026 (Log mit Panic in `gpu_renderer.zig:305`) 
 - [ ] **P3 LSP anbinden**: `lsp_client.zig` kann definition/hover/completion, wird aber nirgends
       gestartet; Ctrl+Klick/F12 springen heute per Textmuster (`edit_ops.looksLikeDefinition`) nur
       innerhalb der Datei.
-- [ ] **P3 Klammern hervorheben**, Einrück-Guides, Whitespace anzeigen, Minimap, Mehrfach-Cursor
-      (Ctrl+D nächstes Vorkommen, Ctrl+Alt+↑/↓). (Schriftgröße Ctrl+±/0, Theme-Umschalter und die
-      aktuelle Zeile im Gutter gibt es seit 06.09.2026.)
+- [ ] **P3 Mehrfach-Cursor** (Ctrl+D nächstes Vorkommen, Ctrl+Alt+↑/↓). (Klammern, Guides,
+      Whitespace, Minimap, Zoom, Theme gibt es seit 06.09.2026.)
 ## Fenster, Splits, Menüs
 
 ## KI-Agent (aus `~/projects/bitnet-colibri-bench/HANDOFF-vulkan-ed.md`, 06.09.2026)

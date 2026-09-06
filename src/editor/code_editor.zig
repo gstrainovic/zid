@@ -203,6 +203,14 @@ pub const CodeEditor = struct {
     /// Zeitpunkt der letzten Änderung (Autosave nach Ruhe) und Zähler gespeicherter Dateien (Toast)
     last_edit_ms: f32 = 0,
     saved_event: bool = false,
+    /// Anzeigeoptionen (View-Menü, gemerkt)
+    show_indent_guides: bool = true,
+    show_whitespace: bool = false,
+    show_minimap: bool = true,
+    /// Klammerpaar am Cursor (pro Frame berechnet): Position der Klammer am Cursor und ihres Partners
+    bracket_pair: ?[2]flow_core.Cursor = null,
+    /// Breite der Minimap-Spalte
+    minimap_width: f32 = 84,
 
     /// Referenz auf das Fenster
     window: ?*wio.Window = null,
@@ -1994,6 +2002,213 @@ pub const CodeEditor = struct {
         self.current_line = self.cursor.row + 1;
     }
 
+    fn bracketPartner(c: u8) ?u8 {
+        return switch (c) {
+            '(' => ')',
+            '[' => ']',
+            '{' => '}',
+            ')' => '(',
+            ']' => '[',
+            '}' => '{',
+            else => null,
+        };
+    }
+
+    fn isOpenBracket(c: u8) bool {
+        return c == '(' or c == '[' or c == '{';
+    }
+
+    /// Klammer direkt am Cursor (davor oder danach) und ihr Partner; höchstens 2000 Zeilen weit.
+    pub fn findBracketPair(self: *Self) ?[2]flow_core.Cursor {
+        const m = self.metrics();
+        const row = self.cursor.row;
+        const line = self.getLine(row);
+        const byte = @min(self.buffer.root.get_line_width_to_pos(row, self.cursor.col, m) catch line.len, line.len);
+        var at: ?usize = null;
+        if (byte < line.len and bracketPartner(line[byte]) != null) at = byte;
+        if (at == null and byte > 0 and bracketPartner(line[byte - 1]) != null) at = byte - 1;
+        const here = at orelse return null;
+        const ch = line[here];
+        const partner = bracketPartner(ch).?;
+        const forward = isOpenBracket(ch);
+        const here_col = self.buffer.root.pos_to_width(row, here, m) catch return null;
+
+        var depth: usize = 0;
+        var r = row;
+        var scanned: usize = 0;
+        var b: isize = @intCast(here);
+        while (scanned < 2000) : (scanned += 1) {
+            const l = self.getLine(r);
+            while (true) {
+                if (forward) {
+                    b += 1;
+                    if (b >= @as(isize, @intCast(l.len))) break;
+                } else {
+                    b -= 1;
+                    if (b < 0) break;
+                }
+                const c = l[@intCast(b)];
+                if (c == ch) depth += 1;
+                if (c == partner) {
+                    if (depth == 0) {
+                        const col = self.buffer.root.pos_to_width(r, @intCast(b), m) catch return null;
+                        return .{ .{ .row = row, .col = here_col, .target = here_col }, .{ .row = r, .col = col, .target = col } };
+                    }
+                    depth -= 1;
+                }
+            }
+            if (forward) {
+                r += 1;
+                if (r >= self.lineCount()) break;
+                b = -1;
+            } else {
+                if (r == 0) break;
+                r -= 1;
+                b = @intCast(self.getLine(r).len);
+            }
+        }
+        return null;
+    }
+
+    /// Einrück-Guides, Whitespace-Punkte und Klammer-Rahmen einer Zeile (über den Text gelegt).
+    fn renderRowOverlays(self: *Self, arena: std.mem.Allocator, line_idx: usize, slice: []const u8, full_line: []const u8) void {
+        _ = arena;
+        const cw = self.charWidth();
+        const row_h: f32 = @floatFromInt(self.font_size + 16);
+        const first_col = self.view.col;
+
+        // Einrück-Guides: eine Linie je 4 Spalten führenden Whitespace (Tabs zählen 4)
+        if (self.show_indent_guides) {
+            var indent_cols: usize = 0;
+            for (full_line) |c| {
+                if (c == ' ') indent_cols += 1 else if (c == '\t') indent_cols += 4 else break;
+            }
+            var level: usize = 4;
+            while (level <= indent_cols and level < 400) : (level += 4) {
+                if (level < first_col) continue;
+                const x = @as(f32, @floatFromInt(level - first_col)) * cw;
+                clay.UI()(.{
+                    .layout = .{ .sizing = .{ .w = .fixed(1), .h = .fixed(row_h) } },
+                    .floating = .{ .attach_to = .to_parent, .attach_points = .{ .element = .left_top, .parent = .left_top }, .offset = .{ .x = x, .y = -8 } },
+                    .background_color = .{ self.line_number_color[0], self.line_number_color[1], self.line_number_color[2], 70 },
+                })({});
+            }
+        }
+
+        // Whitespace: Punkt je Leerzeichen, Pfeil je Tab im sichtbaren Ausschnitt
+        if (self.show_whitespace) {
+            var col: usize = 0;
+            var i: usize = 0;
+            while (i < slice.len and col < 400) : (i += 1) {
+                const c = slice[i];
+                if ((c & 0xC0) == 0x80) continue;
+                if (c == ' ' or c == '\t') {
+                    const x = @as(f32, @floatFromInt(col)) * cw + (if (c == ' ') cw / 2 - 1.5 else 2);
+                    clay.UI()(.{
+                        .layout = .{ .sizing = .{ .w = .fixed(if (c == ' ') 3 else cw * 4 - 6), .h = .fixed(if (c == ' ') 3 else 1) } },
+                        .floating = .{ .attach_to = .to_parent, .attach_points = .{ .element = .left_top, .parent = .left_top }, .offset = .{ .x = x, .y = row_h / 2 - 9 } },
+                        .background_color = .{ self.line_number_color[0], self.line_number_color[1], self.line_number_color[2], 160 },
+                    })({});
+                }
+                col += if (c == '\t') 4 else 1;
+            }
+        }
+
+        // Klammerpaar: Rahmen um beide Klammern
+        if (self.bracket_pair) |pair| {
+            for (pair) |p| {
+                if (p.row != line_idx or p.col < first_col) continue;
+                const x = @as(f32, @floatFromInt(p.col - first_col)) * cw;
+                clay.UI()(.{
+                    .layout = .{ .sizing = .{ .w = .fixed(cw), .h = .fixed(row_h - 8) } },
+                    .floating = .{ .attach_to = .to_parent, .attach_points = .{ .element = .left_top, .parent = .left_top }, .offset = .{ .x = x, .y = -4 } },
+                    .border = .{ .width = .all(1), .color = self.current_line_number_color },
+                    .corner_radius = .all(2),
+                })({});
+            }
+        }
+    }
+
+    /// Minimap rechts: je Zeile ein Balken (Länge ∝ Zeilenlänge), Fenster um den Viewport,
+    /// sichtbarer Bereich hinterlegt. Klick springt dorthin.
+    fn renderMinimap(self: *Self, mouse_pressed: bool) void {
+        const total = self.lineCount();
+        const visible = self.visibleLineCount();
+        const line_px: f32 = 2;
+        const rows_fit: usize = @max(1, @as(usize, @intFromFloat(@max(0, self.height) / line_px)));
+        // Fenster: Viewport möglichst mittig
+        const half = rows_fit / 2;
+        var start: usize = if (self.view.row + visible / 2 > half) self.view.row + visible / 2 - half else 0;
+        if (start + rows_fit > total) start = if (total > rows_fit) total - rows_fit else 0;
+        const end = @min(start + rows_fit, total);
+        const mm_id = clay.ElementId.IDI("minimap", @truncate(@intFromPtr(self)));
+        const data = clay.getElementData(mm_id);
+        if (data.found and mouse_pressed and clay.pointerOver(mm_id)) {
+            const rel = (self.mouse_y - data.bounding_box.y) / line_px;
+            const target = start + @as(usize, @intFromFloat(@max(0, rel)));
+            const max_off = if (total > visible) total - visible else 0;
+            self.view.row = @min(target -| visible / 2, max_off);
+        }
+        clay.UI()(.{
+            .id = mm_id,
+            .layout = .{ .sizing = .{ .w = .fixed(self.minimap_width), .h = .grow }, .direction = .top_to_bottom, .padding = .{ .left = 4, .top = 2 } },
+            .background_color = self.gutter_color,
+            .border = .{ .width = .{ .left = 1 }, .color = .{ self.line_number_color[0], self.line_number_color[1], self.line_number_color[2], 60 } },
+        })({
+            var i = start;
+            while (i < end) : (i += 1) {
+                const len = self.getLine(i).len;
+                const in_view = i >= self.view.row and i < self.view.row + visible;
+                const w: f32 = @min(self.minimap_width - 10, @as(f32, @floatFromInt(len)) * 0.6);
+                clay.UI()(.{
+                    .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(line_px) } },
+                    .background_color = if (in_view) .{ self.current_line_highlight[0], self.current_line_highlight[1], self.current_line_highlight[2], 120 } else .{ 0, 0, 0, 0 },
+                })({
+                    if (w > 0) clay.UI()(.{
+                        .layout = .{ .sizing = .{ .w = .fixed(w), .h = .fixed(1) } },
+                        .background_color = .{ self.text_color[0], self.text_color[1], self.text_color[2], if (i == self.cursor.row) 255 else 110 },
+                    })({});
+                });
+            }
+        });
+    }
+
+    /// Horizontale Scrollbar unten, wenn eine sichtbare Zeile breiter als der Ausschnitt ist. Klick springt.
+    fn renderHScrollbar(self: *Self, mouse_pressed: bool) void {
+        const cols = if (self.view.cols > 0) self.view.cols else self.visibleColCount();
+        var max_w: usize = 0;
+        const total = self.lineCount();
+        const visible = self.visibleLineCount();
+        var i = self.view.row;
+        while (i < @min(self.view.row + visible + 1, total)) : (i += 1) max_w = @max(max_w, self.lineWidth(i));
+        if (max_w <= cols) return;
+        const id = clay.ElementId.IDI("hscroll", @truncate(@intFromPtr(self)));
+        const data = clay.getElementData(id);
+        const track_w = if (data.found) data.bounding_box.width else self.width;
+        const frac_len = @as(f32, @floatFromInt(cols)) / @as(f32, @floatFromInt(max_w + 4));
+        const thumb_w = @max(30, track_w * frac_len);
+        const max_col = max_w + 4 - cols;
+        const frac_pos = @as(f32, @floatFromInt(@min(self.view.col, max_col))) / @as(f32, @floatFromInt(max_col));
+        const thumb_x = frac_pos * (track_w - thumb_w);
+        if (data.found and mouse_pressed and clay.pointerOver(id)) {
+            const rel = (self.mouse_x - data.bounding_box.x - thumb_w / 2) / @max(1, track_w - thumb_w);
+            self.view.col = @intFromFloat(@max(0, @min(1, rel)) * @as(f32, @floatFromInt(max_col)));
+        }
+        clay.UI()(.{
+            .id = id,
+            .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(8) } },
+            .floating = .{ .attach_to = .to_parent, .attach_points = .{ .element = .left_bottom, .parent = .left_bottom }, .offset = .{ .x = self.gutter_width, .y = 0 }, .z_index = 50 },
+            .background_color = .{ 0, 0, 0, 60 },
+        })({
+            clay.UI()(.{
+                .layout = .{ .sizing = .{ .w = .fixed(thumb_w), .h = .grow } },
+                .floating = .{ .attach_to = .to_parent, .attach_points = .{ .element = .left_top, .parent = .left_top }, .offset = .{ .x = thumb_x, .y = 0 } },
+                .background_color = .{ self.line_number_color[0], self.line_number_color[1], self.line_number_color[2], 180 },
+                .corner_radius = .all(3),
+            })({});
+        });
+    }
+
     /// Wort unter (row, col) im Text suchen: erste Zeile, die wie eine Definition aussieht.
     pub fn gotoDefinition(self: *Self, row: usize, col: usize) void {
         const m = self.metrics();
@@ -2403,6 +2618,7 @@ pub const CodeEditor = struct {
             if (self.find.active) self.renderFindWidget(arena, editor_id);
             if (self.goto.active) self.renderGotoWidget(arena, editor_id);
             self.autoScrollWhileDragging();
+            self.bracket_pair = self.findBracketPair();
             // pointerOver must be called INSIDE clay.UI where Clay's internal state is valid
             if (clay.pointerOver(editor_id)) {
                 self.last_frame_hovered = true;
@@ -2521,6 +2737,8 @@ pub const CodeEditor = struct {
             if (self.lineCount() > self.visibleLineCount()) {
                 self.renderScrollbar();
             }
+            self.renderHScrollbar(mouse_pressed);
+            if (self.show_minimap) self.renderMinimap(mouse_pressed);
         });
 
         if (self.show_context_menu) {
@@ -2551,6 +2769,7 @@ pub const CodeEditor = struct {
             if (line_idx == self.cursor.row) {
                 self.renderCursor(arena, offset);
             }
+            self.renderRowOverlays(arena, line_idx, line, self.getLine(line_idx));
         });
     }
 
