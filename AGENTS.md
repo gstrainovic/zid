@@ -158,6 +158,12 @@ echo -e "open ./README.md\nget-state\nshutdown" | zig build run -- --interactive
   alle Nachrichten. E2E: `python3 scripts/e2e_ai_chat.py` (Warmup, erstes Delta < 30 s, Escape,
   kurze Antwort; `--only-off` nur den `--ai=off`-Pfad). Messwerte 05.09.2026: Warmup 2,0 s,
   erstes Delta 2,3 s, PONG 0,8 s.
+- **Codeblock-Antworten brachten zigdown zum Absturz** (06.09.2026): endet der Text genau mit
+  ``` ohne Zeilenumbruch (Antwort nur aus einem Codeblock, oder ein Streaming-Stand), erzeugt
+  `handleLineCode` einen leeren Tag und greift auf `tag[0]` zu (`libs/zigdown`, Submodul, nicht
+  gepatcht). `chat_markdown.finishForParser` hängt deshalb immer einen Zeilenumbruch an und
+  schließt einen offenen Zaun; `toDisplayMarkdown`/`wrapToolResult` laufen darüber. Test mit
+  echtem zigdown-Parse in `chat_markdown.zig`, E2E `code_only_answer` in `e2e_ai_chat.py`.
 - Keine Unit-Tests für `ai_chat.zig`: die Datei importiert `components/textarea.zig`, das
   `../../editor/actions.zig` zieht, also kein eigenes Test-Root möglich. Logik dort klein halten.
 
