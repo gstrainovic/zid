@@ -2415,6 +2415,11 @@ pub const UI = struct {
                                 if (tab.modified) tab.preview = false;
                             }
                         }
+                        // Jeder Editor misst mit dem echten Font (auch Panes, die nach dem Start
+                        // entstanden sind) und in seiner Schriftgröße (Zoom); vorher hatte nur der
+                        // erste Editor eine Messfunktion, die anderen rechneten 0,6 × Schriftgröße.
+                        if (leaf.code_editor.measure_fn == null) leaf.code_editor.measure_fn = cMeasureText;
+                        g_font_size = @floatFromInt(leaf.code_editor.font_size);
                         leaf.code_editor.render(allocator, self.mouse_pressed_this_frame);
                     }
 
