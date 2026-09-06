@@ -7,6 +7,10 @@ const std = @import("std");
 pub const State = struct {
     sidebar_width: f32 = 250,
     show_hidden: bool = false,
+    /// "dark" oder "light"
+    light_theme: bool = false,
+    font_size: u16 = 24,
+    autosave: bool = false,
 };
 
 /// `key=value`-Zeilen lesen; unbekannte Schlüssel und kaputte Werte werden ignoriert.
@@ -24,14 +28,23 @@ pub fn parse(text: []const u8) State {
             if (w >= 100 and w <= 600) st.sidebar_width = w;
         } else if (std.mem.eql(u8, key, "show_hidden")) {
             st.show_hidden = std.mem.eql(u8, value, "true") or std.mem.eql(u8, value, "1");
+        } else if (std.mem.eql(u8, key, "theme")) {
+            st.light_theme = std.mem.eql(u8, value, "light");
+        } else if (std.mem.eql(u8, key, "font_size")) {
+            const f = std.fmt.parseInt(u16, value, 10) catch continue;
+            if (f >= 10 and f <= 48) st.font_size = f;
+        } else if (std.mem.eql(u8, key, "autosave")) {
+            st.autosave = std.mem.eql(u8, value, "true") or std.mem.eql(u8, value, "1");
         }
     }
     return st;
 }
 
 pub fn format(alloc: std.mem.Allocator, st: State) ![]u8 {
-    return std.fmt.allocPrint(alloc, "# vulkan-ed state\nsidebar_width={d}\nshow_hidden={s}\n", .{
+    return std.fmt.allocPrint(alloc, "# vulkan-ed state\nsidebar_width={d}\nshow_hidden={s}\ntheme={s}\nfont_size={d}\nautosave={s}\n", .{
         @as(u32, @intFromFloat(@round(st.sidebar_width))), if (st.show_hidden) "true" else "false",
+        if (st.light_theme) "light" else "dark",                 st.font_size,
+        if (st.autosave) "true" else "false",
     });
 }
 
@@ -75,7 +88,10 @@ test "format und loadFrom/saveTo sind umkehrbar" {
     const a = testing.allocator;
     const text = try format(a, .{ .sidebar_width = 301.4, .show_hidden = true });
     defer a.free(text);
-    try testing.expectEqualStrings("# vulkan-ed state\nsidebar_width=301\nshow_hidden=true\n", text);
+    try testing.expectEqualStrings("# vulkan-ed state\nsidebar_width=301\nshow_hidden=true\ntheme=dark\nfont_size=24\nautosave=false\n", text);
+    const st2 = parse("theme=light\nfont_size=30\nautosave=1\nfont_size=99\n");
+    try testing.expect(st2.light_theme and st2.autosave);
+    try testing.expectEqual(@as(u16, 30), st2.font_size);
 
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();

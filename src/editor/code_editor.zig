@@ -14,6 +14,7 @@ const find_ops = @import("find_ops.zig");
 const actions = @import("actions.zig");
 const keymap = @import("keymap.zig");
 const edit_ops = @import("edit_ops.zig");
+const backup = @import("backup.zig");
 
 /// Measurement function type: returns width of text in pixels.
 pub const MeasureFn = *const fn (ptr: [*c]const u8, len: usize) f32;
@@ -198,6 +199,10 @@ pub const CodeEditor = struct {
     current_line_highlight: clay.Color = .{ 60, 70, 100, 200 },
     cursor_color: clay.Color = .{ 249, 226, 175, 255 },
     selection_color: clay.Color = .{ 100, 120, 200, 160 },
+    text_color: clay.Color = .{ 202, 211, 245, 255 },
+    /// Zeitpunkt der letzten Änderung (Autosave nach Ruhe) und Zähler gespeicherter Dateien (Toast)
+    last_edit_ms: f32 = 0,
+    saved_event: bool = false,
 
     /// Referenz auf das Fenster
     window: ?*wio.Window = null,
@@ -273,10 +278,38 @@ pub const CodeEditor = struct {
         const path = self.buffer.get_file_path();
         if (path.len == 0) return error.NoFilePath;
 
+        // Sicherung der alten Version (eine je Datei unter ~/.local/share/vulkan-ed/backup)
+        backup.backup(self.allocator, path) catch |err| std.log.scoped(.editor).warn("backup for '{s}' failed: {}", .{ path, err });
         try self.buffer.store_to_file_and_clean(path);
 
         self.is_modified = false;
+        self.saved_event = true;
         std.log.scoped(.editor).info("Saved file: {s}", .{path});
+    }
+
+    /// true genau einmal nach jedem erfolgreichen Speichern (Toast in der UI).
+    pub fn takeSaved(self: *Self) bool {
+        const v = self.saved_event;
+        self.saved_event = false;
+        return v;
+    }
+
+    /// Farben aus dem UI-Theme übernehmen (Light/Dark).
+    pub fn applyTheme(self: *Self, t: anytype) void {
+        self.bg_color = t.bg;
+        self.gutter_color = t.surface;
+        self.line_number_color = t.muted;
+        self.current_line_number_color = t.primary;
+        self.current_line_highlight = .{ t.overlay[0], t.overlay[1], t.overlay[2], 140 };
+        self.cursor_color = t.accent;
+        self.selection_color = .{ t.primary[0], t.primary[1], t.primary[2], 110 };
+        self.text_color = t.text;
+    }
+
+    /// Schriftgröße setzen (Zoom), 10–48.
+    pub fn setFontSize(self: *Self, size: u16) void {
+        self.font_size = @max(10, @min(48, size));
+        self.ensureCursorVisible();
     }
 
     fn setError(self: *Self, comptime fmt: []const u8, args: anytype) void {
@@ -666,6 +699,7 @@ pub const CodeEditor = struct {
     /// `new_text` = Text der eingefügt wird ("" bei reinem Delete).
     fn pushEditForChange(self: *Self, row: usize, col: usize, old_text: []const u8, new_text: []const u8) void {
         self.is_modified = true;
+        self.last_edit_ms = self.time_ms;
         const hl = self.highlighter orelse return;
         const m = self.metrics();
         const line_start = self.buffer.root.line_start_byte(row, m);
@@ -2506,7 +2540,7 @@ pub const CodeEditor = struct {
                 self.renderSelection(arena, line_idx);
             }
 
-            const plain_color: clay.Color = .{ 202, 211, 245, 255 };
+            const plain_color: clay.Color = self.text_color;
             if (self.highlighter != null) {
                 renderHighlightedLine(arena, self.highlighter.?, line_idx, line, offset, full_len, self.font_size, plain_color);
             } else {
@@ -3265,4 +3299,15 @@ test "gotoDefinition springt zur fn-Zeile des Worts unter dem Cursor" {
     t.ed.gotoDefinition(3, 6);
     try std.testing.expectEqual(@as(usize, 0), t.ed.cursor.row);
     try std.testing.expectEqual(@as(usize, 7), t.ed.cursor.col);
+}
+
+test "CRLF-Datei bleibt beim Speichern CRLF" {
+    var t = try testEditor(std.testing.allocator, "a\r\nb\r\n");
+    defer t.buffer.deinit();
+    defer t.ed.deinit();
+    try std.testing.expectEqual(flow_core.Buffer.EolMode.crlf, t.buffer.file_eol_mode);
+    t.ed.cursor = .{ .row = 1, .col = 1, .target = 1 };
+    t.ed.handleChar('c');
+    const out = t.buffer.store_to_string_cached(t.buffer.root, t.buffer.file_eol_mode);
+    try std.testing.expectEqualStrings("a\r\nbc\r\n", out);
 }

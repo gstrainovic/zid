@@ -70,6 +70,7 @@ pub const UI = struct {
     pub const TabCloseRequest = struct { pane: *pane_mod.Pane, index: usize };
     pub const PdfPageChange = struct { path: []const u8, delta: i16 };
     pub const TabTarget = struct { pane: *pane_mod.Pane, index: usize };
+    pub const Toast = struct { text: []u8, until_ms: f32 };
     pub const TabMenu = struct { pane: *pane_mod.Pane, index: usize, x: f32, y: f32 };
 
     pub const ActiveDialog = struct {
@@ -140,6 +141,14 @@ pub const UI = struct {
     external_change_path: ?[]u8 = null,
     /// Drag & Drop im Explorer: bestätigungspflichtiges Verschieben
     pending_move: ?file_explorer_mod.PendingMove = null,
+    /// Autosave nach 1 s Ruhe (File → Toggle Autosave, gemerkt)
+    autosave: bool = false,
+    /// Kurze Meldungen unten rechts (Speichern, Papierkorb …), verschwinden nach 3 s
+    toasts: std.ArrayListUnmanaged(Toast) = .empty,
+    /// Per Tastatur markierter Menüeintrag (Alt+F, Pfeile, Enter)
+    menu_highlight: ?usize = null,
+    /// Scroll-Versatz im Kürzel-Dialog
+    shortcuts_scroll_y: f32 = 0,
     /// Tab-Index vor dem letzten Wechsel ins Terminal (Ctrl+J zurück)
     terminal_return_index: ?usize = null,
     /// "Open Folder…"-Dialog
@@ -359,6 +368,8 @@ pub const UI = struct {
         self.closed_tabs.deinit(self.allocator);
         if (self.external_change_path) |p| self.allocator.free(p);
         if (self.pending_move) |m| m.deinit(self.allocator);
+        for (self.toasts.items) |t| self.allocator.free(t.text);
+        self.toasts.deinit(self.allocator);
         self.folder_picker.deinit();
         self.picker.deinit();
         if (self.git_branch.len > 0) self.allocator.free(self.git_branch);
@@ -463,7 +474,56 @@ pub const UI = struct {
         }
         if (self.shortcuts_dialog_open) {
             if (key == .escape or key == .f1) self.shortcuts_dialog_open = false;
+            if (key == .down) self.scrollShortcuts(-3);
+            if (key == .up) self.scrollShortcuts(3);
             return;
+        }
+        // Offenes Menü per Tastatur: ←/→ wechseln, ↑/↓ markieren, Enter führt aus
+        if (self.open_menu) |mi| {
+            const n = shortcuts.menus.len;
+            const items_len = shortcuts.menus[mi].items.len;
+            switch (key) {
+                .left => {
+                    self.open_menu = (mi + n - 1) % n;
+                    self.menu_highlight = 0;
+                    return;
+                },
+                .right => {
+                    self.open_menu = (mi + 1) % n;
+                    self.menu_highlight = 0;
+                    return;
+                },
+                .down => {
+                    self.menu_highlight = if (self.menu_highlight) |h| (h + 1) % items_len else 0;
+                    return;
+                },
+                .up => {
+                    self.menu_highlight = if (self.menu_highlight) |h| (h + items_len - 1) % items_len else items_len - 1;
+                    return;
+                },
+                .enter, .kp_enter => {
+                    if (self.menu_highlight) |h| {
+                        if (h < items_len) self.executeCommand(shortcuts.menus[mi].items[h]);
+                    }
+                    self.open_menu = null;
+                    self.menu_highlight = null;
+                    return;
+                },
+                else => {},
+            }
+        }
+        // Alt+F/E/V/H öffnet das Menü mit diesem Anfangsbuchstaben
+        if (self.is_alt_down and !self.is_ctrl_down and self.active_dialog == null) {
+            const name = @tagName(key);
+            if (name.len == 1) {
+                inline for (shortcuts.menus, 0..) |menu, i| {
+                    if (std.ascii.toLower(menu.title[0]) == name[0]) {
+                        self.open_menu = i;
+                        self.menu_highlight = 0;
+                        return;
+                    }
+                }
+            }
         }
         // Modaler Dialog: alle Tasten gehen an den Dialog, nichts an Editor/Explorer
         if (self.active_dialog) |*ad| {
@@ -472,6 +532,7 @@ pub const UI = struct {
         }
         if (self.open_menu != null and key == .escape) {
             self.open_menu = null;
+            self.menu_highlight = null;
             return;
         }
         if (self.tab_menu != null and key == .escape) {
@@ -954,7 +1015,15 @@ pub const UI = struct {
         self.getActiveEditor().scrollColumns(delta);
     }
 
+    /// Mausrad/Pfeile im Kürzel-Dialog: Versatz an die Inhaltshöhe geklemmt.
+    fn scrollShortcuts(self: *Self, delta: i32) void {
+        const content = clay.getElementData(clay.ElementId.ID(shortcuts_dialog.CONTENT_ID));
+        const max_scroll = if (content.found) @max(0, content.bounding_box.height - shortcuts_dialog.LIST_HEIGHT) else 0;
+        self.shortcuts_scroll_y = std.math.clamp(self.shortcuts_scroll_y - @as(f32, @floatFromInt(delta)) * 40, 0, max_scroll);
+    }
+
     pub fn handleScroll(self: *Self, delta: i32) void {
+        if (self.shortcuts_dialog_open) return self.scrollShortcuts(delta);
         if (self.is_shift_down) return self.handleScrollHorizontal(delta);
         if (self.folder_picker.visible) {
             self.folder_picker.handleScroll(delta);
@@ -1015,6 +1084,27 @@ pub const UI = struct {
         }
         if (self.getActiveEditor().takeError()) |msg| {
             if (self.active_dialog == null) self.showErrorDialog(msg) else self.allocator.free(msg);
+        }
+        if (self.file_explorer.takeInfo()) |msg| {
+            defer self.allocator.free(msg);
+            self.showToast("{s}", .{msg});
+        }
+        {
+            const ed = self.getActiveEditor();
+            if (ed.takeSaved()) self.showToast("Saved {s}", .{std.fs.path.basename(ed.buffer.get_file_path())});
+            // Autosave: 1 s nach der letzten Änderung, nur für Dateien mit Pfad
+            if (self.autosave and ed.is_modified and ed.buffer.get_file_path().len > 0 and (ed.time_ms - ed.last_edit_ms) > 1000) {
+                if (self.getActiveTabBar().getActiveTab()) |tab| {
+                    if (tab.kind == .text) ed.dispatchAction(.Save);
+                }
+            }
+        }
+        // Abgelaufene Toasts entfernen
+        var ti: usize = 0;
+        while (ti < self.toasts.items.len) {
+            if (self.toasts.items[ti].until_ms <= self.ui_time_ms) {
+                self.allocator.free(self.toasts.orderedRemove(ti).text);
+            } else ti += 1;
         }
         self.picker.poll();
         if (self.picker.takeFile()) |rel| {
@@ -1167,6 +1257,7 @@ pub const UI = struct {
             .a => .a, .b => .b, .c => .c, .d => .d, .e => .e, .f => .f, .g => .g, .h => .h, .j => .j,
             .k => .k, .n => .n, .o => .o, .p => .p, .r => .r, .s => .s, .t => .t, .v => .v, .w => .w,
             .x => .x, .y => .y, .z => .z,
+            .@"0" => .n0, .equals => .equals, .minus => .minus,
             .@"1" => .n1, .@"2" => .n2, .@"3" => .n3, .@"4" => .n4, .@"5" => .n5,
             .@"6" => .n6, .@"7" => .n7, .@"8" => .n8, .@"9" => .n9,
             .tab => .tab, .grave => .grave, .backslash => .backslash, .slash => .slash, .dot => .dot, .f1 => .f1, .f2 => .f2, .f5 => .f5, .f12 => .f12,
@@ -1299,7 +1390,78 @@ pub const UI = struct {
                 self.picker.openFiles(root);
             },
             .command_palette => self.picker.openCommands(),
+            .toggle_theme => {
+                self.theme = if (self.theme.bg[0] > 128) Theme.dark() else Theme.light();
+                self.applyThemeToEditors();
+                self.saveUserState();
+            },
+            .zoom_in => self.setFontSizeAll(self.getActiveEditor().font_size + 2),
+            .zoom_out => self.setFontSizeAll(self.getActiveEditor().font_size -| 2),
+            .zoom_reset => self.setFontSizeAll(24),
+            .toggle_autosave => {
+                self.autosave = !self.autosave;
+                self.showToast("Autosave {s}", .{if (self.autosave) "on" else "off"});
+                self.saveUserState();
+            },
         }
+    }
+
+    pub fn isLightTheme(self: *const Self) bool {
+        return self.theme.bg[0] > 128;
+    }
+
+    pub fn applyThemeToEditors(self: *Self) void {
+        var buf: [32]*pane_mod.Pane = undefined;
+        var n: usize = 0;
+        collectLeaves(self.root_pane, &buf, &n);
+        for (buf[0..n]) |p| p.data.leaf.code_editor.applyTheme(self.theme);
+    }
+
+    fn setFontSizeAll(self: *Self, size: u16) void {
+        var buf: [32]*pane_mod.Pane = undefined;
+        var n: usize = 0;
+        collectLeaves(self.root_pane, &buf, &n);
+        for (buf[0..n]) |p| p.data.leaf.code_editor.setFontSize(size);
+        self.showToast("Font size {d}", .{self.getActiveEditor().font_size});
+        self.saveUserState();
+    }
+
+    /// Kurze Meldung unten rechts, 3 s sichtbar.
+    pub fn showToast(self: *Self, comptime fmt: []const u8, args: anytype) void {
+        const text = std.fmt.allocPrint(self.allocator, fmt, args) catch return;
+        self.toasts.append(self.allocator, .{ .text = text, .until_ms = self.ui_time_ms + 3000 }) catch self.allocator.free(text);
+        if (self.toasts.items.len > 4) self.allocator.free(self.toasts.orderedRemove(0).text);
+    }
+
+    /// Text des jüngsten Toasts (Tests).
+    pub fn lastToast(self: *const Self) []const u8 {
+        if (self.toasts.items.len == 0) return "";
+        return self.toasts.items[self.toasts.items.len - 1].text;
+    }
+
+    fn renderToasts(self: *Self, t: Theme) void {
+        if (self.toasts.items.len == 0) return;
+        clay.UI()(.{
+            .id = clay.ElementId.ID("toasts"),
+            .floating = .{
+                .attach_to = .to_root,
+                .attach_points = .{ .element = .right_bottom, .parent = .right_bottom },
+                .offset = .{ .x = -16, .y = -16 },
+                .z_index = 1800,
+            },
+            .layout = .{ .direction = .top_to_bottom, .child_gap = 6, .child_alignment = .{ .x = .right } },
+        })({
+            for (self.toasts.items) |toast| {
+                clay.UI()(.{
+                    .layout = .{ .padding = .{ .left = 12, .right = 12, .top = 6, .bottom = 6 } },
+                    .background_color = t.overlay,
+                    .border = .{ .width = .all(1), .color = t.border },
+                    .corner_radius = .all(4),
+                })({
+                    clay.text(toast.text, .{ .font_size = 16, .color = t.text, .wrap_mode = .none });
+                });
+            }
+        });
     }
 
     pub const Direction = enum { left, right, up, down };
@@ -1552,6 +1714,9 @@ pub const UI = struct {
         user_state.saveTo(self.allocator, path, .{
             .sidebar_width = self.file_explorer.width,
             .show_hidden = self.file_explorer.show_hidden,
+            .light_theme = self.isLightTheme(),
+            .font_size = self.getActiveEditor().font_size,
+            .autosave = self.autosave,
         }) catch |err| log.warn("state save '{s}' failed: {}", .{ path, err });
     }
 
@@ -1562,6 +1727,13 @@ pub const UI = struct {
         const st = user_state.loadFrom(self.allocator, path);
         self.file_explorer.width = st.sidebar_width;
         self.file_explorer.show_hidden = st.show_hidden;
+        self.autosave = st.autosave;
+        self.theme = if (st.light_theme) Theme.light() else Theme.dark();
+        self.applyThemeToEditors();
+        var buf: [32]*pane_mod.Pane = undefined;
+        var n: usize = 0;
+        collectLeaves(self.root_pane, &buf, &n);
+        for (buf[0..n]) |p| p.data.leaf.code_editor.setFontSize(st.font_size);
     }
 
     /// Text in die System-Zwischenablage (Fenster) legen; headless nur merken (RPC ui_state).
@@ -1753,7 +1925,6 @@ pub const UI = struct {
     }
 
     fn renderMenuDropdown(self: *Self, menu: shortcuts.Menu, title_id: clay.ElementId, t: Theme) void {
-        _ = self;
         clay.UI()(.{
             .id = clay.ElementId.ID("menu_dropdown"),
             .floating = .{
@@ -1773,9 +1944,9 @@ pub const UI = struct {
             .border = .{ .width = .all(1), .color = t.border },
             .corner_radius = .all(4),
         })({
-            for (menu.items) |cmd| {
+            for (menu.items, 0..) |cmd, idx| {
                 const item_id = menuItemId(cmd);
-                const item_hover = clay.pointerOver(item_id);
+                const item_hover = clay.pointerOver(item_id) or (self.menu_highlight != null and self.menu_highlight.? == idx);
                 const fg = if (item_hover) t.text_on_primary else t.text;
                 clay.UI()(.{
                     .id = item_id,
@@ -1925,7 +2096,8 @@ pub const UI = struct {
         // "Open Folder…"-Dialog (floating, z_index=2000), modal wie der Dialog unten
         self.folder_picker.render(self.frame_arena.allocator(), t);
         self.picker.render(self.frame_arena.allocator(), t);
-        if (self.shortcuts_dialog_open) shortcuts_dialog.render(t);
+        if (self.shortcuts_dialog_open) shortcuts_dialog.render(t, self.shortcuts_scroll_y);
+        self.renderToasts(t);
 
         // Dialog INSIDE Clay layout (floating, z_index=2000 → overlays everything)
         // Must be here so Clay can register element bounds and mouse_pressed_this_frame is still true

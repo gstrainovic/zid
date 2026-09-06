@@ -9,6 +9,9 @@ const Theme = @import("theme.zig").Theme;
 
 pub const BOX_ID = "sc_box";
 pub const CLOSE_ID = "sc_close";
+pub const CONTENT_ID = "sc_content";
+/// Sichtbare Höhe der Liste; darüber hinaus wird gescrollt (Mausrad)
+pub const LIST_HEIGHT: f32 = 520;
 
 const COLUMN_WIDTH: f32 = 400;
 
@@ -42,7 +45,7 @@ fn renderScope(comptime scope: shortcuts.Scope, t: Theme) void {
     }
 }
 
-pub fn render(t: Theme) void {
+pub fn render(t: Theme, scroll_y: f32) void {
     clay.UI()(.{
         .id = clay.ElementId.ID("sc_backdrop"),
         .floating = .{ .attach_to = .to_root, .z_index = 2000 },
@@ -67,16 +70,24 @@ pub fn render(t: Theme) void {
             clay.text("Keyboard Shortcuts", .{ .font_size = 26, .color = t.text });
 
             clay.UI()(.{
-                .layout = .{ .direction = .left_to_right, .child_gap = 32 },
+                .id = clay.ElementId.ID("sc_viewport"),
+                .layout = .{ .sizing = .{ .w = .fixed(COLUMN_WIDTH * 2 + 32), .h = .fixed(LIST_HEIGHT) } },
+                .clip = .{ .vertical = true, .child_offset = .{ .x = 0, .y = -scroll_y } },
             })({
-                clay.UI()(.{ .layout = .{ .sizing = .{ .w = .fixed(COLUMN_WIDTH) }, .direction = .top_to_bottom } })({
-                    renderScope(.global, t);
-                    renderScope(.explorer, t);
-                });
-                clay.UI()(.{ .layout = .{ .sizing = .{ .w = .fixed(COLUMN_WIDTH) }, .direction = .top_to_bottom } })({
-                    renderScope(.editor, t);
+                clay.UI()(.{
+                    .id = clay.ElementId.ID(CONTENT_ID),
+                    .layout = .{ .direction = .left_to_right, .child_gap = 32, .sizing = .{ .w = .grow, .h = .fit } },
+                })({
+                    clay.UI()(.{ .layout = .{ .sizing = .{ .w = .fixed(COLUMN_WIDTH) }, .direction = .top_to_bottom } })({
+                        renderScope(.global, t);
+                        renderScope(.explorer, t);
+                    });
+                    clay.UI()(.{ .layout = .{ .sizing = .{ .w = .fixed(COLUMN_WIDTH) }, .direction = .top_to_bottom } })({
+                        renderScope(.editor, t);
+                    });
                 });
             });
+            clay.text("Mausrad scrollt", .{ .font_size = 14, .color = t.muted });
 
             clay.UI()(.{
                 .layout = .{

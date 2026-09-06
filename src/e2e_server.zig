@@ -417,7 +417,8 @@ fn buttonFromName(name: []const u8) ?@import("wio").Button {
         .{ "1", .@"1" },            .{ "2", .@"2" },              .{ "3", .@"3" },
         .{ "4", .@"4" },            .{ "5", .@"5" },              .{ "9", .@"9" },
         .{ "backslash", .backslash },   .{ "slash", .slash },         .{ "f12", .f12 },
-        .{ "dot", .dot },
+        .{ "dot", .dot },               .{ "equals", .equals },       .{ "minus", .minus },
+        .{ "0", .@"0" },
     };
     for (named) |entry| {
         if (std.mem.eql(u8, name, entry[0])) return entry[1];
@@ -766,7 +767,10 @@ fn uiState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
         ui.last_clipboard_text orelse "", ui.file_explorer.selectionCount(), if (ui.active_dialog) |ad| ad.focused else 0,
     });
     try buf.writer.print(", \"last_frame_ms\": {d:.2}, \"max_frame_ms\": {d:.2}", .{ ui.last_frame_ms, ui.takeMaxFrameMs() });
-    try buf.writer.print(", \"active_pane_index\": {d}", .{activePaneIndex(ui)});
+    try buf.writer.print(", \"active_pane_index\": {d}, \"light_theme\": {}, \"font_size\": {d}, \"autosave\": {}, \"menu_highlight\": {d}, \"shortcuts_scroll\": {d:.0}, \"toast\": ", .{
+        activePaneIndex(ui), ui.isLightTheme(), ui.getActiveEditor().font_size, ui.autosave, ui.menu_highlight orelse 999, ui.shortcuts_scroll_y,
+    });
+    try std.json.Stringify.value(ui.lastToast(), .{}, &buf.writer);
     try buf.writer.writeAll(", \"status_text\": ");
     try std.json.Stringify.value(ui.statusText(dc.arena()), .{}, &buf.writer);
     try buf.writer.writeAll(", \"all_tabs\": [");

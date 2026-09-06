@@ -270,6 +270,12 @@ pub fn main() !void {
 
     try ui_system.setupClay(plat.window_ptr, viewport_width, viewport_height, &text_renderer);
     ui_system.loadUserState();
+    // --theme light|dark überstimmt den gemerkten Zustand (einmalig; vorher wurde das Theme
+    // in jedem Frame auf Dark gesetzt und der Umschalter griff nie)
+    if (theme_override) |t| {
+        ui_system.theme = t;
+        ui_system.applyThemeToEditors();
+    }
 
     const force_gui_test = if (std.process.getEnvVarOwned(allocator, "FORCE_GUI_TEST")) |val| blk: {
         allocator.free(val);
@@ -445,13 +451,6 @@ pub fn main() !void {
             openProjectFolder(allocator, &ui_system, scheduler, &watcher, &git_repo_path, new_root) catch |err| {
                 log.err("open folder '{s}' failed: {}", .{ new_root, err });
             };
-        }
-
-        // Theme-Wechsel für Verifizierung entfernt — Standard: Dark
-        if (theme_override) |t| {
-            ui_system.theme = t;
-        } else {
-            ui_system.theme = ui.Theme.dark();
         }
 
         // Events verarbeiten
