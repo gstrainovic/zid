@@ -1,0 +1,40 @@
+===== Llama-3.2-3B-Q4 :: 1-tool-call-json | prompt=122 gen=19 | 9.2s | 2.07 tok/s
+{"tool": "read_file", "args": {"path": "/etc/hosts"}}
+
+===== Llama-3.2-3B-Q4 :: 2-code-python | prompt=47 gen=89 | 28.0s | 3.17 tok/s
+```python
+def quicksort(a):
+    if len(a) <= 1:
+        return a
+    pivot = a[len(a) // 2]
+    left = [x for x in a if x < pivot]
+    middle = [x for x in a if x == pivot]
+    right = [x for x in a if x > pivot]
+    return quicksort(left) + middle + quicksort(right)
+```
+
+===== Llama-3.2-3B-Q4 :: 3-instruction-strict | prompt=38 gen=3 | 4.0s | 0.75 tok/s | erwartet 'BERN': ja
+BERN
+
+===== Llama-3.2-3B-Q4 :: 4-german | prompt=52 gen=78 | 24.1s | 3.23 tok/s
+Ein Index in einer relationalen Datenbank ist ein Datensatz, der die Spalten oder Sätze in einer Tabelle ordnet, um schnellerere Abfragen und Datenmanipulationen zu ermöglichen. Durch den Einsatz von Indizes kann die Datenbank die Such- und Auswertekosten für bestimmte Abfragen erheblich reduzieren.
+
+===== Llama-3.2-3B-Q4 :: 5-reasoning | prompt=65 gen=113 | 40.8s | 2.77 tok/s | erwartet '15': ja
+To find the cost of one pen, we need to divide the cost of 3 pens by 3. 
+
+5 francs / 3 pens = 5/3 francs per pen
+
+Now, we multiply the cost of one pen by the number of pens we bought: 
+
+(5/3) * 21 = 5 * 7 = 35 francs
+
+We pay with a 50 franc note, so we subtract the cost of the pens from 50:
+
+50 - 35 = 15
+
+ANSWER: 15
+
+===== Llama-3.2-3B-Q4 :: 6-agent-multistep | prompt=87 gen=21 | 14.8s | 1.42 tok/s
+1. edit_file('utils.py', 'lenght', 'length')
+2. run_tests()
+

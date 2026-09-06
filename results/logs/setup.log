@@ -1,0 +1,447 @@
+
+=== BitNet holen
+Klone nach 'BitNet'...
+Submodul '3rdparty/llama.cpp' (https://github.com/isHuangXin/llama.cpp.git) für Pfad '3rdparty/llama.cpp' in die Konfiguration eingetragen.
+Klone nach '/home/g/ki/BitNet/3rdparty/llama.cpp'...
+Submodul-Pfad '3rdparty/llama.cpp': '390c307752ab78fd8189f359d6954c9ba1be74af' ausgecheckt
+
+=== Patch anwenden (nur noetig, falls noch nicht drin)
+uebersprungen (bereits angewendet oder Quelle abweichend)
+
+=== Kernel-Header erzeugen
+
+=== Bauen
+-- The C compiler identification is Clang 21.1.8
+-- The CXX compiler identification is Clang 21.1.8
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /usr/bin/clang - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/clang++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Success
+-- Found Threads: TRUE
+CMAKE_BUILD_TYPE=Release
+-- Found Git: /usr/bin/git (found version "2.55.0")
+-- The ASM compiler identification is Clang with GNU-like command-line
+-- Found assembler: /usr/bin/clang
+-- Warning: ccache not found - consider installing it for faster compilation or disable this warning with GGML_CCACHE=OFF
+-- CMAKE_SYSTEM_PROCESSOR: x86_64
+-- GGML_SYSTEM_ARCH: x86
+-- Found OpenMP_C: -fopenmp=libomp (found version "5.1")
+-- Found OpenMP_CXX: -fopenmp=libomp (found version "5.1")
+-- Found OpenMP: TRUE (found version "5.1")
+-- Including CPU backend
+-- x86 detected
+-- Adding CPU backend variant ggml-cpu: -march=native 
+-- ggml version: 0.15.3
+-- ggml commit:  390c30775
+-- Configuring done (1.2s)
+-- Generating done (0.0s)
+-- Build files have been written to: /home/g/ki/BitNet/build
+[1/201] Building CXX object 3rdparty/llama.cpp/ggml/src/CMakeFiles/ggml-base.dir/ggml-threading.cpp.o
+[2/201] Building CXX object 3rdparty/llama.cpp/ggml/src/CMakeFiles/ggml-cpu.dir/ggml-cpu/hbm.cpp.o
+[3/201] Building CXX object 3rdparty/llama.cpp/ggml/src/CMakeFiles/ggml-base.dir/ggml.cpp.o
+[4/201] Building C object 3rdparty/llama.cpp/ggml/src/CMakeFiles/ggml-base.dir/ggml-alloc.c.o
+[5/201] Building C object 3rdparty/llama.cpp/ggml/src/CMakeFiles/ggml-cpu.dir/ggml-cpu/ggml-cpu-i2s.c.o
+/home/g/ki/BitNet/3rdparty/llama.cpp/ggml/src/ggml-cpu/ggml-cpu-i2s.c:25:63: warning: unused parameter 'bs' [-Wunused-parameter]
+   25 | void ggml_gemv_i2_i8_s(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc) {
+      |                                                               ^
+/home/g/ki/BitNet/3rdparty/llama.cpp/ggml/src/ggml-cpu/ggml-cpu-i2s.c:25:133: warning: unused parameter 'nr' [-Wunused-parameter]
+   25 | void ggml_gemv_i2_i8_s(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc) {
+      |                                                                                                                                     ^
+/home/g/ki/BitNet/3rdparty/llama.cpp/ggml/src/ggml-cpu/ggml-cpu-i2s.c:25:6: warning: no previous prototype for function 'ggml_gemv_i2_i8_s' [-Wmissing-prototypes]
+   25 | void ggml_gemv_i2_i8_s(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc) {
+      |      ^
+/home/g/ki/BitNet/3rdparty/llama.cpp/ggml/src/ggml-cpu/ggml-cpu-i2s.c:25:1: note: declare 'static' if the function is not intended to be used outside of this translation unit
+   25 | void ggml_gemv_i2_i8_s(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc) {
+      | ^
+      | static 
+/home/g/ki/BitNet/3rdparty/llama.cpp/ggml/src/ggml-cpu/ggml-cpu-i2s.c:38:6: warning: no previous prototype for function 'ggml_gemm_i2_i8_s' [-Wmissing-prototypes]
+   38 | void ggml_gemm_i2_i8_s(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc) {
+      |      ^
+/home/g/ki/BitNet/3rdparty/llama.cpp/ggml/src/ggml-cpu/ggml-cpu-i2s.c:38:1: note: declare 'static' if the function is not intended to be used outside of this translation unit
+   38 | void ggml_gemm_i2_i8_s(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc) {
+      | ^
+      | static 
+/home/g/ki/BitNet/3rdparty/llama.cpp/ggml/src/ggml-cpu/ggml-cpu-i2s.c:233:6: warning: no previous prototype for function 'ggml_gemm_i2_i8_s_interleaved' [-Wmissing-prototypes]
+  233 | void ggml_gemm_i2_i8_s_interleaved(int n, float * GGML_RESTRICT s, size_t bs,
+      |      ^
+/home/g/ki/BitNet/3rdparty/llama.cpp/ggml/src/ggml-cpu/ggml-cpu-i2s.c:233:1: note: declare 'static' if the function is not intended to be used outside of this translation unit
+  233 | void ggml_gemm_i2_i8_s_interleaved(int n, float * GGML_RESTRICT s, size_t bs,
+      | ^
+      | static 
+/home/g/ki/BitNet/3rdparty/llama.cpp/ggml/src/ggml-cpu/ggml-cpu-i2s.c:428:6: warning: no previous prototype for function 'ggml_gemv_i2_i8_s_interleaved' [-Wmissing-prototypes]
+  428 | void ggml_gemv_i2_i8_s_interleaved(int n, float * GGML_RESTRICT s, size_t bs,
+      |      ^
+/home/g/ki/BitNet/3rdparty/llama.cpp/ggml/src/ggml-cpu/ggml-cpu-i2s.c:428:1: note: declare 'static' if the function is not intended to be used outside of this translation unit
+  428 | void ggml_gemv_i2_i8_s_interleaved(int n, float * GGML_RESTRICT s, size_t bs,
+      | ^
+      | static 
+6 warnings generated.
+[6/201] Building CXX object 3rdparty/llama.cpp/ggml/src/CMakeFiles/ggml-base.dir/ggml-opt.cpp.o
+[7/201] Building CXX object 3rdparty/llama.cpp/ggml/src/CMakeFiles/ggml-cpu.dir/ggml-cpu/ggml-cpu.cpp.o
+[8/201] Building CXX object 3rdparty/llama.cpp/ggml/src/CMakeFiles/ggml-cpu.dir/ggml-cpu/traits.cpp.o
+[9/201] Building CXX object 3rdparty/llama.cpp/ggml/src/CMakeFiles/ggml-base.dir/ggml-backend.cpp.o
+[10/201] Building C object 3rdparty/llama.cpp/ggml/src/CMakeFiles/ggml-cpu.dir/ggml-cpu/ggml-cpu.c.o
+[11/201] Building C object 3rdparty/llama.cpp/ggml/src/CMakeFiles/ggml-base.dir/ggml.c.o
+/home/g/ki/BitNet/3rdparty/llama.cpp/ggml/src/ggml.c:936:37: warning: cast from 'void (*)(const uint8_t *, float *, int64_t, const float)' (aka 'void (*)(const unsigned char *, float *, long, const float)') to 'ggml_to_float_t' (aka 'void (*)(const void *restrict, float *restrict, long)') converts to incompatible function type [-Wcast-function-type-mismatch]
+  936 |         .to_float                 = (ggml_to_float_t) dequantize_row_i2_s,
+      |                                     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/g/ki/BitNet/3rdparty/llama.cpp/ggml/src/ggml.c:931:24: warning: initializer overrides prior initialization of this subobject [-Winitializer-overrides]
+  931 |     [GGML_TYPE_I2_S] = {
+      |                        ^
+  932 |         .type_name                = "i2_s",
+      |         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  933 |         .blck_size                = 1,
+      |         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  934 |         .type_size                = sizeof(int8_t),
+      |         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  935 |         .is_quantized             = true,
+      |         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  936 |         .to_float                 = (ggml_to_float_t) dequantize_row_i2_s,
+      |         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  937 |     },
+      |     ~
+/home/g/ki/BitNet/3rdparty/llama.cpp/ggml/src/ggml.c:913:12: note: previous initialization is here
+  913 |     [36] = { // GGML_TYPE_IQ4_NL_4_4
+      |            ^~~~~~~~~~~~~~~~~~~~~~~~~
+  914 |         .type_name                = "TYPE_IQ4_NL_4_4 REMOVED, use IQ4_NL with runtime repacking",
+      |         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  915 |         .blck_size                = 0,
+      |         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  916 |         .type_size                = 0,
+      |         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  917 |         .is_quantized             = false,
+      |         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  918 |     },
+      |     ~
+/home/g/ki/BitNet/3rdparty/llama.cpp/ggml/src/ggml.c:938:24: warning: initializer overrides prior initialization of this subobject [-Winitializer-overrides]
+  938 |     [GGML_TYPE_I8_S] = {
+      |                        ^
+  939 |         .type_name                = "i8_s",
+      |         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  940 |         .blck_size                = 1,
+      |         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  941 |         .type_size                = sizeof(int8_t),
+      |         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  942 |         .is_quantized             = true,
+      |         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  943 |     },
+      |     ~
+/home/g/ki/BitNet/3rdparty/llama.cpp/ggml/src/ggml.c:919:12: note: previous initialization is here
+  919 |     [37] = { // GGML_TYPE_IQ4_NL_4_8
+      |            ^~~~~~~~~~~~~~~~~~~~~~~~~
+  920 |         .type_name                = "TYPE_IQ4_NL_4_8 REMOVED, use IQ4_NL with runtime repacking",
+      |         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  921 |         .blck_size                = 0,
+      |         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  922 |         .type_size                = 0,
+      |         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  923 |         .is_quantized             = false,
+      |         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  924 |     },
+      |     ~
+/home/g/ki/BitNet/3rdparty/llama.cpp/ggml/src/ggml.c:944:23: warning: initializer overrides prior initialization of this subobject [-Winitializer-overrides]
+  944 |     [GGML_TYPE_TL1] = {
+      |                       ^
+  945 |         .type_name                = "tl1",
+      |         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  946 |         .blck_size                = 1,
+      |         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  947 |         .type_size                = sizeof(int8_t),
+      |         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  948 |         .is_quantized             = false,
+      |         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  949 |     },
+      |     ~
+/home/g/ki/BitNet/3rdparty/llama.cpp/ggml/src/ggml.c:925:12: note: previous initialization is here
+  925 |     [38] = { // GGML_TYPE_IQ4_NL_8_8
+      |            ^~~~~~~~~~~~~~~~~~~~~~~~~
+  926 |         .type_name                = "TYPE_IQ4_NL_8_8 REMOVED, use IQ4_NL with runtime repacking",
+      |         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  927 |         .blck_size                = 0,
+      |         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  928 |         .type_size                = 0,
+      |         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  929 |         .is_quantized             = false,
+      |         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  930 |     },
+      |     ~
+4 warnings generated.
+[12/201] Building CXX object 3rdparty/llama.cpp/ggml/src/CMakeFiles/ggml-cpu.dir/ggml-cpu/amx/amx.cpp.o
+[13/201] Building CXX object 3rdparty/llama.cpp/ggml/src/CMakeFiles/ggml-cpu.dir/ggml-cpu/amx/mmq.cpp.o
+[14/201] Building C object 3rdparty/llama.cpp/ggml/src/CMakeFiles/ggml-cpu.dir/ggml-cpu/quants.c.o
+/home/g/ki/BitNet/3rdparty/llama.cpp/ggml/src/ggml-cpu/quants.c:1392:39: warning: cast from 'const void *' to 'unsigned char *' drops const qualifier [-Wcast-qual]
+ 1392 |     const uint8_t *    x = (uint8_t *)vx;
+      |                                       ^
+/home/g/ki/BitNet/3rdparty/llama.cpp/ggml/src/ggml-cpu/quants.c:1393:38: warning: cast from 'const void *' to 'signed char *' drops const qualifier [-Wcast-qual]
+ 1393 |     const int8_t  *    y = (int8_t *)vy;
+      |                                      ^
+/home/g/ki/BitNet/3rdparty/llama.cpp/ggml/src/ggml-cpu/quants.c:1390:63: warning: unused parameter 'bs' [-Wunused-parameter]
+ 1390 | static void ggml_vec_dot_i2_i8_s_1x1(int n, float * s, size_t bs, const void * vx, size_t bx, const void * vy, size_t by, int nrc) {
+      |                                                               ^
+/home/g/ki/BitNet/3rdparty/llama.cpp/ggml/src/ggml-cpu/quants.c:1390:119: warning: unused parameter 'by' [-Wunused-parameter]
+ 1390 | static void ggml_vec_dot_i2_i8_s_1x1(int n, float * s, size_t bs, const void * vx, size_t bx, const void * vy, size_t by, int nrc) {
+      |                                                                                                                       ^
+4 warnings generated.
+[15/201] Building CXX object 3rdparty/llama.cpp/ggml/src/CMakeFiles/ggml-cpu.dir/ggml-cpu/vec.cpp.o
+[16/201] Building CXX object 3rdparty/llama.cpp/ggml/src/CMakeFiles/ggml-cpu.dir/__/__/__/__/src/ggml-bitnet-lut.cpp.o
+[17/201] Building CXX object 3rdparty/llama.cpp/ggml/src/CMakeFiles/ggml.dir/ggml-backend-dl.cpp.o
+[18/201] Building CXX object 3rdparty/llama.cpp/ggml/src/CMakeFiles/ggml-base.dir/gguf.cpp.o
+[19/201] Building C object 3rdparty/llama.cpp/ggml/src/CMakeFiles/ggml-cpu.dir/ggml-cpu/arch/x86/quants.c.o
+[20/201] Building CXX object 3rdparty/llama.cpp/ggml/src/CMakeFiles/ggml-base.dir/ggml-backend-meta.cpp.o
+[21/201] Building CXX object 3rdparty/llama.cpp/ggml/src/CMakeFiles/ggml.dir/ggml-backend-reg.cpp.o
+[22/201] Building CXX object 3rdparty/llama.cpp/ggml/src/CMakeFiles/ggml-cpu.dir/ggml-cpu/binary-ops.cpp.o
+[23/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/llama.cpp.o
+[24/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/llama-cparams.cpp.o
+[25/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/llama-arch.cpp.o
+[26/201] Building C object 3rdparty/llama.cpp/ggml/src/CMakeFiles/ggml-base.dir/ggml-quants.c.o
+[27/201] Linking CXX shared library bin/libggml-base.so.0.15.3
+[28/201] Creating library symlink bin/libggml-base.so.0 bin/libggml-base.so
+[29/201] Building CXX object 3rdparty/llama.cpp/ggml/src/CMakeFiles/ggml-cpu.dir/ggml-cpu/arch/x86/repack.cpp.o
+[30/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/llama-adapter.cpp.o
+[31/201] Building CXX object 3rdparty/llama.cpp/ggml/src/CMakeFiles/ggml-cpu.dir/ggml-cpu/unary-ops.cpp.o
+[32/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/llama-hparams.cpp.o
+[33/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/llama-io.cpp.o
+[34/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/llama-batch.cpp.o
+[35/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/llama-chat.cpp.o
+[36/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/llama-impl.cpp.o
+[37/201] Building CXX object 3rdparty/llama.cpp/ggml/src/CMakeFiles/ggml-cpu.dir/ggml-cpu/repack.cpp.o
+/home/g/ki/BitNet/3rdparty/llama.cpp/ggml/src/ggml-cpu/repack.cpp:4862:16: warning: 'return' will never be executed [-Wunreachable-code-return]
+ 4862 |         return true;
+      |                ^~~~
+1 warning generated.
+[38/201] Building CXX object 3rdparty/llama.cpp/ggml/src/CMakeFiles/ggml-cpu.dir/ggml-cpu/llamafile/sgemm.cpp.o
+/home/g/ki/BitNet/3rdparty/llama.cpp/ggml/src/ggml-cpu/llamafile/sgemm.cpp:1498:16: warning: private field 'lda' is not used [-Wunused-private-field]
+ 1498 |     int64_t k, lda, ldb, ldc;
+      |                ^
+1 warning generated.
+[39/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/llama-memory.cpp.o
+[40/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/llama-kv-cache-iswa.cpp.o
+[41/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/llama-kv-cache-dsa.cpp.o
+[42/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/llama-mmap.cpp.o
+[43/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/llama-memory-hybrid.cpp.o
+[44/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/llama-memory-hybrid-iswa.cpp.o
+[45/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/llama-model-saver.cpp.o
+[46/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/llama-memory-recurrent.cpp.o
+[47/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/llama-graph.cpp.o
+[48/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/llama-context.cpp.o
+[49/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/llama-kv-cache-dsv4.cpp.o
+[50/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/afmoe.cpp.o
+[51/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/llama-grammar.cpp.o
+[52/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/apertus.cpp.o
+[53/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/arcee.cpp.o
+[54/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/arctic.cpp.o
+[55/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/arwkv7.cpp.o
+[56/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/unicode-data.cpp.o
+[57/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/baichuan.cpp.o
+[58/201] Building CXX object 3rdparty/llama.cpp/ggml/src/CMakeFiles/ggml-cpu.dir/ggml-cpu/ops.cpp.o
+/home/g/ki/BitNet/3rdparty/llama.cpp/ggml/src/ggml-cpu/ops.cpp:4795:21: warning: unused variable 'type' [-Wunused-variable]
+ 4795 |     const ggml_type type = src0->type;
+      |                     ^~~~
+/home/g/ki/BitNet/3rdparty/llama.cpp/ggml/src/ggml-cpu/ops.cpp:5726:13: warning: 4 enumeration values not handled in switch: 'GGML_TYPE_I2_S', 'GGML_TYPE_I8_S', 'GGML_TYPE_TL1'... [-Wswitch]
+ 5726 |     switch (src0->type) {
+      |             ^~~~~~~~~~
+2 warnings generated.
+[59/201] Linking CXX shared library bin/libggml-cpu.so.0.15.3
+[60/201] Creating library symlink bin/libggml-cpu.so.0 bin/libggml-cpu.so
+[61/201] Linking CXX shared library bin/libggml.so.0.15.3
+[62/201] Creating library symlink bin/libggml.so.0 bin/libggml.so
+[63/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/bailingmoe.cpp.o
+[64/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/bailingmoe2.cpp.o
+[65/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/bert.cpp.o
+[66/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/bitnet.cpp.o
+[67/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/llama-model-loader.cpp.o
+[68/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/llama-quant.cpp.o
+[69/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/llama-sampler.cpp.o
+[70/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/llama-vocab.cpp.o
+[71/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/bloom.cpp.o
+[72/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/chameleon.cpp.o
+[73/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/chatglm.cpp.o
+[74/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/cohere2.cpp.o
+[75/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/cogvlm.cpp.o
+[76/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/codeshell.cpp.o
+[77/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/cohere2moe.cpp.o
+[78/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/command-r.cpp.o
+[79/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/llama-kv-cache.cpp.o
+[80/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/dbrx.cpp.o
+[81/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/deci.cpp.o
+[82/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/deepseek.cpp.o
+[83/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/deepseek2.cpp.o
+[84/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/deepseek2ocr.cpp.o
+[85/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/llama-model.cpp.o
+[86/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/deepseek32.cpp.o
+[87/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/delta-net-base.cpp.o
+[88/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/deepseek4.cpp.o
+[89/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/dream.cpp.o
+[90/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/dots1.cpp.o
+[91/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/dflash.cpp.o
+[92/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/eagle3.cpp.o
+[93/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/ernie4-5-moe.cpp.o
+[94/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/ernie4-5.cpp.o
+[95/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/eurobert.cpp.o
+[96/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/exaone-moe.cpp.o
+[97/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/exaone.cpp.o
+[98/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/unicode.cpp.o
+[99/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/exaone4.cpp.o
+[100/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/falcon-h1.cpp.o
+[101/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/falcon.cpp.o
+[102/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/gemma.cpp.o
+[103/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/gemma-embedding.cpp.o
+[104/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/gemma2.cpp.o
+[105/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/gemma3.cpp.o
+[106/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/gemma4-assistant.cpp.o
+[107/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/gemma3n.cpp.o
+[108/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/glm-dsa.cpp.o
+[109/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/gemma4.cpp.o
+[110/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/glm4-moe.cpp.o
+[111/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/glm4.cpp.o
+[112/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/gpt2.cpp.o
+[113/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/granite-moe.cpp.o
+[114/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/gptneox.cpp.o
+[115/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/granite-hybrid.cpp.o
+[116/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/grok.cpp.o
+[117/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/granite.cpp.o
+[118/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/hunyuan-dense.cpp.o
+[119/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/grovemoe.cpp.o
+[120/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/hunyuan-moe.cpp.o
+[121/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/hunyuan-vl.cpp.o
+[122/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/internlm2.cpp.o
+[123/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/jais.cpp.o
+[124/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/jina-bert-v2.cpp.o
+[125/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/jamba.cpp.o
+[126/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/jina-bert-v3.cpp.o
+[127/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/jais2.cpp.o
+[128/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/kimi-linear.cpp.o
+[129/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/llada-moe.cpp.o
+[130/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/llada.cpp.o
+[131/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/llama-embed.cpp.o
+[132/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/lfm2moe.cpp.o
+[133/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/lfm2.cpp.o
+[134/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/llama.cpp.o
+[135/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/maincoder.cpp.o
+[136/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/mamba2.cpp.o
+[137/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/mamba.cpp.o
+[138/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/llama4.cpp.o
+[139/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/mamba-base.cpp.o
+[140/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/mimo2.cpp.o
+[141/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/mellum.cpp.o
+[142/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/minicpm.cpp.o
+[143/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/minimax-m2.cpp.o
+[144/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/minicpm3.cpp.o
+[145/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/mistral3.cpp.o
+[146/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/mistral4.cpp.o
+[147/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/nemotron-h-moe.cpp.o
+[148/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/mpt.cpp.o
+[149/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/modern-bert.cpp.o
+[150/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/nemotron.cpp.o
+[151/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/nemotron-h.cpp.o
+[152/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/neo-bert.cpp.o
+[153/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/nomic-bert-moe.cpp.o
+[154/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/nomic-bert.cpp.o
+[155/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/olmo.cpp.o
+[156/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/olmo2.cpp.o
+[157/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/olmoe.cpp.o
+[158/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/openai-moe.cpp.o
+[159/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/openelm.cpp.o
+[160/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/orion.cpp.o
+[161/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/paddleocr.cpp.o
+[162/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/pangu-embed.cpp.o
+[163/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/phi2.cpp.o
+[164/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/phimoe.cpp.o
+[165/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/phi3.cpp.o
+[166/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/plamo.cpp.o
+[167/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/plamo2.cpp.o
+[168/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/plm.cpp.o
+[169/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/plamo3.cpp.o
+[170/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/qwen.cpp.o
+[171/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/qwen2.cpp.o
+[172/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/qwen2vl.cpp.o
+[173/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/qwen2moe.cpp.o
+[174/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/qwen3.cpp.o
+[175/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/qwen35.cpp.o
+[176/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/qwen3moe.cpp.o
+[177/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/qwen3next.cpp.o
+[178/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/qwen35moe.cpp.o
+[179/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/refact.cpp.o
+[180/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/qwen3vl.cpp.o
+[181/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/qwen3vlmoe.cpp.o
+[182/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/rwkv6-base.cpp.o
+[183/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/rnd1.cpp.o
+[184/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/rwkv6qwen2.cpp.o
+[185/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/rwkv6.cpp.o
+[186/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/rwkv7-base.cpp.o
+[187/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/rwkv7.cpp.o
+[188/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/seed-oss.cpp.o
+[189/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/smollm3.cpp.o
+[190/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/stablelm.cpp.o
+[191/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/starcoder.cpp.o
+[192/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/smallthinker.cpp.o
+[193/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/starcoder2.cpp.o
+[194/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/t5.cpp.o
+[195/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/t5encoder.cpp.o
+[196/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/talkie.cpp.o
+[197/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/step35.cpp.o
+[198/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/wavtokenizer-dec.cpp.o
+[199/201] Building CXX object 3rdparty/llama.cpp/src/CMakeFiles/llama.dir/models/xverse.cpp.o
+[200/201] Linking CXX shared library bin/libllama.so.0.0.9918
+[201/201] Creating library symlink bin/libllama.so.0 bin/libllama.so
+
+=== Modelle holen
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0100   103  100   103    0     0    728      0 --:--:-- --:--:-- --:--:--   730
+100   994  100   994    0     0   3801      0 --:--:-- --:--:-- --:--:--  3801
+  0 1132M    0     0    0     0      0      0 --:--:--  0:00:01 --:--:--     0  0 1132M    0 2636k    0     0  1615k      0  0:11:58  0:00:01  0:11:57 5459k  2 1132M    2 33.2M    0     0  12.6M      0  0:01:29  0:00:02  0:01:27 22.3M  5 1132M    5 61.8M    0     0  17.0M      0  0:01:06  0:00:03  0:01:03 24.9M  8 1132M    8 94.7M    0     0  20.4M      0  0:00:55  0:00:04  0:00:51 27.1M 11 1132M   11  127M    0     0  22.6M      0  0:00:49  0:00:05  0:00:44 28.4M 14 1132M   14  159M    0     0  24.0M      0  0:00:47  0:00:06  0:00:41 31.3M 16 1132M   16  183M    0     0  24.0M      0  0:00:47  0:00:07  0:00:40 30.1M 18 1132M   18  212M    0     0  24.6M      0  0:00:45  0:00:08  0:00:37 30.2M 21 1132M   21  243M    0     0  25.2M      0  0:00:44  0:00:09  0:00:35 29.6M 24 1132M   24  272M    0     0  25.6M      0  0:00:44  0:00:10  0:00:34 28.9M 26 1132M   26  302M    0     0  25.9M      0  0:00:43  0:00:11  0:00:32 28.5M 29 1132M   29  332M    0     0  26.3M      0  0:00:43  0:00:12  0:00:31 29.6M 31 1132M   31  362M    0     0  26.5M      0  0:00:42  0:00:13  0:00:29 29.8M 34 1132M   34  386M    0     0  26.4M      0  0:00:42  0:00:14  0:00:28 28.6M 36 1132M   36  414M    0     0  26.4M      0  0:00:42  0:00:15  0:00:27 28.3M 38 1132M   38  434M    0     0  26.1M      0  0:00:43  0:00:16  0:00:27 26.4M 40 1132M   40  457M    0     0  25.9M      0  0:00:43  0:00:17  0:00:26 25.1M 42 1132M   42  477M    0     0  25.6M      0  0:00:44  0:00:18  0:00:26 23.0M 44 1132M   44  501M    0     0  25.5M      0  0:00:44  0:00:19  0:00:25 23.0M 46 1132M   46  528M    0     0  25.5M      0  0:00:44  0:00:20  0:00:24 22.7M 49 1132M   49  556M    0     0  25.7M      0  0:00:44  0:00:21  0:00:23 24.4M 51 1132M   51  583M    0     0  25.7M      0  0:00:43  0:00:22  0:00:21 25.1M 54 1132M   54  615M    0     0  26.0M      0  0:00:43  0:00:23  0:00:20 27.5M 57 1132M   57  646M    0     0  26.2M      0  0:00:43  0:00:24  0:00:19 28.9M 59 1132M   59  673M    0     0  26.2M      0  0:00:43  0:00:25  0:00:18 29.0M 61 1132M   61  694M    0     0  26.0M      0  0:00:43  0:00:26  0:00:17 27.6M 63 1132M   63  721M    0     0  26.1M      0  0:00:43  0:00:27  0:00:16 27.6M 66 1132M   66  750M    0     0  26.2M      0  0:00:43  0:00:28  0:00:15 26.9M 68 1132M   68  773M    0     0  26.1M      0  0:00:43  0:00:29  0:00:14 25.5M 70 1132M   70  797M    0     0  26.0M      0  0:00:43  0:00:30  0:00:13 24.9M 72 1132M   72  824M    0     0  26.0M      0  0:00:43  0:00:31  0:00:12 25.9M 75 1132M   75  854M    0     0  26.1M      0  0:00:43  0:00:32  0:00:11 26.3M 77 1132M   77  882M    0     0  26.2M      0  0:00:43  0:00:33  0:00:10 26.3M 79 1132M   79  905M    0     0  26.1M      0  0:00:43  0:00:34  0:00:09 26.3M 82 1132M   82  933M    0     0  26.2M      0  0:00:43  0:00:35  0:00:08 27.1M 85 1132M   85  968M    0     0  26.4M      0  0:00:42  0:00:36  0:00:06 28.8M 88 1132M   88  999M    0     0  26.5M      0  0:00:42  0:00:37  0:00:05 29.0M 90 1132M   90 1025M    0     0  26.5M      0  0:00:42  0:00:38  0:00:04 28.5M 92 1132M   92 1049M    0     0  26.4M      0  0:00:42  0:00:39  0:00:03 28.5M 95 1132M   95 1077M    0     0  26.5M      0  0:00:42  0:00:40  0:00:02 28.7M 97 1132M   97 1102M    0     0  26.4M      0  0:00:42  0:00:41  0:00:01 26.7M 99 1132M   99 1124M    0     0  26.3M      0  0:00:42  0:00:42 --:--:-- 25.0M100 1132M  100 1132M    0     0  26.4M      0  0:00:42  0:00:42 --:--:-- 25.6M
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0100  1056  100  1056    0     0   5590      0 --:--:-- --:--:-- --:--:--  5617
+  0 1925M    0  616k    0     0   771k      0  0:42:35 --:--:--  0:42:35  771k  3 1925M    3 63.5M    0     0  35.3M      0  0:00:54  0:00:01  0:00:53 62.9M  6 1925M    6  127M    0     0  45.5M      0  0:00:42  0:00:02  0:00:40 63.4M  9 1925M    9  192M    0     0  50.5M      0  0:00:38  0:00:03  0:00:35 63.8M 13 1925M   13  257M    0     0  53.6M      0  0:00:35  0:00:04  0:00:31 64.2M 16 1925M   16  322M    0     0  55.3M      0  0:00:34  0:00:05  0:00:29 63.9M 20 1925M   20  392M    0     0  57.7M      0  0:00:33  0:00:06  0:00:27 65.7M 23 1925M   23  458M    0     0  58.7M      0  0:00:32  0:00:07  0:00:25 66.2M 27 1925M   27  526M    0     0  59.8M      0  0:00:32  0:00:08  0:00:24 66.9M 30 1925M   30  582M    0     0  59.4M      0  0:00:32  0:00:09  0:00:23 65.0M 30 1925M   30  595M    0     0  55.0M      0  0:00:34  0:00:10  0:00:24 54.7M 32 1925M   32  617M    0     0  52.3M      0  0:00:36  0:00:11  0:00:25 44.9M 33 1925M   33  644M    0     0  50.3M      0  0:00:38  0:00:12  0:00:26 37.1M 36 1925M   36  707M    0     0  51.2M      0  0:00:37  0:00:13  0:00:24 36.1M 40 1925M   40  772M    0     0  52.1M      0  0:00:36  0:00:14  0:00:22 37.8M 43 1925M   43  832M    0     0  52.7M      0  0:00:36  0:00:15  0:00:21 47.6M 46 1925M   46  894M    0     0  53.2M      0  0:00:36  0:00:16  0:00:20 55.5M 49 1925M   49  956M    0     0  53.7M      0  0:00:35  0:00:17  0:00:18 62.3M 52 1925M   52 1012M    0     0  53.7M      0  0:00:35  0:00:18  0:00:17 60.5M 55 1925M   55 1073M    0     0  54.2M      0  0:00:35  0:00:19  0:00:16 60.2M 58 1925M   58 1135M    0     0  54.6M      0  0:00:35  0:00:20  0:00:15 60.6M 60 1925M   60 1171M    0     0  53.7M      0  0:00:35  0:00:21  0:00:14 55.3M 61 1925M   61 1185M    0     0  52.0M      0  0:00:37  0:00:22  0:00:15 45.8M 62 1925M   62 1209M    0     0  50.7M      0  0:00:37  0:00:23  0:00:14 39.6M 63 1925M   63 1228M    0     0  49.5M      0  0:00:38  0:00:24  0:00:14 31.1M 65 1925M   65 1252M    0     0  48.5M      0  0:00:39  0:00:25  0:00:14 23.3M 66 1925M   66 1279M    0     0  47.7M      0  0:00:40  0:00:26  0:00:14 21.6M 69 1925M   69 1333M    0     0  47.9M      0  0:00:40  0:00:27  0:00:13 29.4M 71 1925M   71 1368M    0     0  47.5M      0  0:00:40  0:00:28  0:00:12 31.8M 72 1925M   72 1390M    0     0  46.6M      0  0:00:41  0:00:29  0:00:12 32.2M 73 1925M   73 1408M    0     0  45.7M      0  0:00:42  0:00:30  0:00:12 31.0M 75 1925M   75 1462M    0     0  45.9M      0  0:00:41  0:00:31  0:00:10 36.5M 77 1925M   77 1500M    0     0  45.7M      0  0:00:42  0:00:32  0:00:10 33.4M 79 1925M   79 1528M    0     0  45.2M      0  0:00:42  0:00:33  0:00:09 31.9M 81 1925M   81 1572M    0     0  45.1M      0  0:00:42  0:00:34  0:00:08 36.4M 83 1925M   83 1610M    0     0  44.9M      0  0:00:42  0:00:35  0:00:07 40.5M 84 1925M   84 1626M    0     0  44.2M      0  0:00:43  0:00:36  0:00:07 32.8M 85 1925M   85 1644M    0     0  43.4M      0  0:00:44  0:00:37  0:00:07 28.7M 87 1925M   87 1678M    0     0  43.2M      0  0:00:44  0:00:38  0:00:06 30.0M 90 1925M   90 1735M    0     0  43.6M      0  0:00:44  0:00:39  0:00:05 32.5M 91 1925M   91 1758M    0     0  43.0M      0  0:00:44  0:00:40  0:00:04 29.4M 92 1925M   92 1788M    0     0  42.7M      0  0:00:45  0:00:41  0:00:04 32.2M 93 1925M   93 1807M    0     0  42.2M      0  0:00:45  0:00:42  0:00:03 32.6M 94 1925M   94 1822M    0     0  41.6M      0  0:00:46  0:00:43  0:00:03 28.8M 96 1925M   96 1851M    0     0  41.3M      0  0:00:46  0:00:44  0:00:02 23.2M 97 1925M   97 1872M    0     0  40.8M      0  0:00:47  0:00:45  0:00:02 22.8M 98 1925M   98 1890M    0     0  40.3M      0  0:00:47  0:00:46  0:00:01 20.4M 99 1925M   99 1913M    0     0  40.0M      0  0:00:48  0:00:47  0:00:01 21.3M100 1925M  100 1925M    0     0  39.8M      0  0:00:48  0:00:48 --:--:-- 22.7M
+
+=== colibri holen und bauen
+Klone nach 'colibri'...
+make: Zirkuläre Abhängigkeit colibri <- colibri wird nicht verwendet.
+gcc -O3 -march=native -fopenmp -pthread -Wall -Wextra -Wno-unused-parameter -Wno-misleading-indentation -Wno-unused-function  colibri.c    -o colibri -lm -fopenmp -pthread 
+gcc -O3 -march=native -fopenmp -pthread -Wall -Wextra -Wno-unused-parameter -Wno-misleading-indentation -Wno-unused-function olmoe.c -o olmoe -lm -fopenmp -pthread
+
+=== OLMoE konvertieren (laedt und loescht Shard fuer Shard)
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+[1/3] downloading model-00001-of-00003.safetensors (41 GB free)...
+  wrote model-00000.safetensors (512 tensors)
+    -> extracted+deleted model-00001-of-00003.safetensors (1 experts still incomplete)
+[2/3] downloading model-00002-of-00003.safetensors (39 GB free)...
+  wrote model-00001.safetensors (512 tensors)
+  wrote model-00002.safetensors (512 tensors)
+    -> extracted+deleted model-00002-of-00003.safetensors (1 experts still incomplete)
+[3/3] downloading model-00003-of-00003.safetensors (37 GB free)...
+  wrote model-00003.safetensors (512 tensors)
+    -> extracted+deleted model-00003-of-00003.safetensors (0 experts still incomplete)
+  wrote model-00004.safetensors (147 tensors)
+DONE.
+
+=== fertig
+
+Naechste Schritte — siehe README.md des Bench-Repos:
+
+  # BitNet messen
+  cd /home/g/ki/BitNet
+  ./build/bin/llama-bench -m models/BitNet-b1.58-2B-4T/ggml-model-i2_s.gguf \
+      -p 128 -n 64 -t 4,8,12,16 -r 2
+
+  # Fragebogen: Server starten, dann die zwei Skripte
+  ./build/bin/llama-server -m models/BitNet-b1.58-2B-4T/ggml-model-i2_s.gguf \
+      -t 4 -tb 12 -c 4096 --port 8080 &
+  python3 /home/g/projects/bitnet-colibri-bench/bench/agent_eval.py --port 8080 --label BitNet-2B-4T
+  python3 /home/g/projects/bitnet-colibri-bench/bench/probe.py      --port 8080 --label BitNet-2B-4T
+
+  # colibri
+  python3 /home/g/projects/bitnet-colibri-bench/bench/olmoe_eval.py \
+      --engine /home/g/ki/colibri/c/olmoe --snap /home/g/ki/colibri/olmoe_merged
+  python3 /home/g/projects/bitnet-colibri-bench/bench/olmoe_speed.py \
+      --engine /home/g/ki/colibri/c/olmoe --snap /home/g/ki/colibri/olmoe_merged

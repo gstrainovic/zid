@@ -1,0 +1,4 @@
+MAX_NEW=40  :   8.43 s  (bester von 2: [8.51, 8.43])
+MAX_NEW=240 :  25.58 s  (bester von 2: [25.58, 28.71])
+
+Steady-State-Dekodierung: 11.66 tok/s (85.7 ms/Token)

@@ -1,0 +1,15 @@
+===== BitNet-2B-4T @ Referenz-Engine + llama-bpe :: Agent-Tauglichkeit (10 Aufgaben, temp=0)
+   1. [OK  ] erwartet=read_file  bekommen=read_file      | ```json { "tool": "read_file", "args": { "path": "README.md" } } ```
+   2. [OK  ] erwartet=list_dir   bekommen=list_dir       | {"tool": "list_dir", "args": {"path": "src"}}
+   3. [OK  ] erwartet=write_file bekommen=write_file     | {"tool": "write_file", "args": {"path": "notes.txt", "text": "hello"}}
+   4. [OK  ] erwartet=search     bekommen=search         | {"tool": "search", "args": {"pattern": "TODO", "path": "/app"}}
+   5. [OK  ] erwartet=run_shell  bekommen=run_shell      | {"tool": "run_shell", "args": {"cmd": "pytest"}}
+   6. [OK  ] erwartet=read_file  bekommen=read_file      | {"tool": "read_file", "args": {"path": "config/settings.yaml"}}
+   7. [OK  ] erwartet=list_dir   bekommen=list_dir       | {"tool": "list_dir", "args": {}}
+   8. [OK  ] erwartet=write_file bekommen=write_file     | {"tool": "write_file", "args": {"path": "status.log", "text": "build ok"}}
+   9. [TOOL] erwartet=search     bekommen=read_file      | {"tool": "read_file", "args": {"path": "path/to/parse_args"}}
+  10. [OK  ] erwartet=run_shell  bekommen=run_shell      | {"tool": "run_shell", "args": {"cmd": "npm install"}}
+
+  gueltiges JSON:        10 / 10
+  richtiges Werkzeug:    9 / 10
+

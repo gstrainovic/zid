@@ -1,0 +1,15 @@
+===== BitNet-2B-4T :: Agent-Tauglichkeit (10 Aufgaben, temp=0)
+   1. [JSON] erwartet=read_file  bekommen=-              | The README.md is a file containing a directory. It is a file containing a directory.It is a file containing a ...
+   2. [JSON] erwartet=list_dir   bekommen=-              | {"tool": "<one of the five names above>", "args": {"file": "file", "args": {"file": "file", "args": {"file": "...
+   3. [TOOL] erwartet=write_file bekommen=<one of the five names above> | {"tool": "<one of the five names above>", "args": {"hello": "hello"}}
+   4. [JSON] erwartet=search     bekommen=-              | {"tool": "<one of the five names above>", "args": {...}}
+   5. [JSON] erwartet=run_shell  bekommen=-              | 1. Run the unit tests with pytest.
+   6. [JSON] erwartet=read_file  bekommen=-              | Sure, here is the contents of config settings.yaml: The contents of config settings.yaml are: { { { { { { { { ...
+   7. [JSON] erwartet=list_dir   bekommen=-              | 1. List all the names above> 2. List all the names below> 3. List all the names above> 4. List all the names b...
+   8. [JSON] erwartet=write_file bekommen=-              | {"tool": "<one of the five names above>", "args": {...}}
+   9. [JSON] erwartet=search     bekommen=-              | 1. parse_args defined in this repo?
+  10. [JSON] erwartet=run_shell  bekommen=-              | 1. Install the dependencies with npm install.
+
+  gueltiges JSON:        1 / 10
+  richtiges Werkzeug:    0 / 10
+

@@ -1,0 +1,15 @@
+===== OLMoE-1B-7B(colibri) :: Agent-Tauglichkeit (10 Aufgaben, TEMP=0)
+   1. [OK  ] erwartet=read_file  bekommen=read_file      | ```json {"tool": "read_file", "args": {"path": "README.md"}} ```
+   2. [TOOL] erwartet=list_dir   bekommen=read_file      | ```json {"tool": "read_file", "args": {"path": "src/*"}} ```
+   3. [OK  ] erwartet=write_file bekommen=write_file     | ```json {"tool": "write_file", "args": {"path": "notes.txt", "text": "hello"}} ```
+   4. [TOOL] erwartet=search     bekommen=read_file      | ```json {"tool": "read_file", "args": {"path": "./app/TODO"}} ```
+   5. [TOOL] erwartet=run_shell  bekommen=read_file      | ```json {"tool": "read_file", "args": {"path": "sample.txt"}} ```
+   6. [OK  ] erwartet=read_file  bekommen=read_file      | ```json {"tool": "read_file", "args": {"path": "config/settings.yaml"}} ```
+   7. [TOOL] erwartet=list_dir   bekommen=read_file      | ```json {"tool": "read_file", "args": {"path": "."}} ```
+   8. [OK  ] erwartet=write_file bekommen=write_file     | ```json {"tool": "write_file", "args": {"path": "status.log", "text": "build ok"}} ```
+   9. [TOOL] erwartet=search     bekommen=read_file      | {"tool": "read_file", "args": {}}
+  10. [TOOL] erwartet=run_shell  bekommen=npm            | ```json {"tool": "npm", "args": {"command": ["install"]}} ```
+
+  gueltiges JSON:        10 / 10
+  richtiges Werkzeug:    4 / 10
+
