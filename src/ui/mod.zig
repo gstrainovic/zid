@@ -16,6 +16,7 @@ const wio = @import("wio");
 const tab_bar_mod = @import("tab_bar.zig");
 const file_explorer_mod = @import("file_explorer.zig");
 const image_view_mod = @import("image_view.zig");
+const binary_view_mod = @import("binary_view.zig");
 const file_types = @import("file_types.zig");
 const markdown_view_mod = @import("markdown_view.zig");
 const pane_mod = @import("pane.zig");
@@ -1501,6 +1502,9 @@ pub const UI = struct {
                                      }
                                  }
                                  special_active = true;
+                            } else if (tab.kind == .binary) {
+                                binary_view_mod.render(allocator, tab.path, t);
+                                special_active = true;
                             } else if (tab.kind == .terminal) {
                                 self.renderTerminalContentInPane(pane, tab.path, t);
                                 special_active = true;

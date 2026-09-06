@@ -5,6 +5,7 @@
 const std = @import("std");
 const wgpu = @import("wgpu");
 const text = @import("mod.zig");
+const glyph_layout = @import("glyph_layout.zig");
 
 const log = std.log.scoped(.text_renderer_gpu);
 
@@ -285,81 +286,83 @@ const vertex_buffers = [_]wgpu.VertexBufferLayout{
             1.0;
 
         // === Phase 1: Text shapen (echte Glyph-Metriken vom Font) ===
-        var glyph_buf: [256]text.ShapedGlyph = undefined;
+        // Runs bis max_batch_glyphs kommen ohne Heap aus dem Shape-Cache; längere Runs
+        // (Binärdateien ohne Zeilenumbruch, sehr lange Zeilen) liefert shapeTextInto als
+        // owned Heap-Slice mit beliebig vielen Glyphen. Die Stack-Puffer unten sind fix,
+        // deshalb werden die Glyphen blockweise verarbeitet (früher: index out of bounds).
+        const max_batch = glyph_layout.max_batch_glyphs;
+        var glyph_buf: [max_batch]text.ShapedGlyph = undefined;
         var shaped = try ts.shapeTextInto(text_str, null, &glyph_buf);
         defer if (shaped.owned) shaped.deinit(ts.allocator);
 
         if (shaped.glyphs.len == 0) return;
 
-        // === Phase 2: Device-Positionen + Subpixel-Offsets berechnen ===
-        var device_x: [256]f32 = undefined;
-        var device_y: [256]f32 = undefined;
-        var subpixel_x: [256]u8 = undefined;
+        var device_x: [max_batch]f32 = undefined;
+        var device_y: [max_batch]f32 = undefined;
+        var subpixel_x: [max_batch]u8 = undefined;
+        var cached_results: [max_batch]text.CachedGlyph = undefined;
 
-        computeGlyphDevicePositions(
-            shaped.glyphs,
-            x,
-            y, // baseline_y
-            size_scale,
-            scale_factor,
-            device_x[0 .. shaped.glyphs.len],
-            device_y[0 .. shaped.glyphs.len],
-            subpixel_x[0 .. shaped.glyphs.len],
-        );
+        var pen_x = x;
+        var offset: usize = 0;
+        while (offset < shaped.glyphs.len) : (offset += max_batch) {
+            const chunk = shaped.glyphs[offset..@min(offset + max_batch, shaped.glyphs.len)];
+            const n = chunk.len;
 
-        // === Phase 3: Glyphs aus dem Atlas holen (batch, ein Lock) ===
-        var cached_results: [256]text.CachedGlyph = undefined;
+            // === Phase 2: Device-Positionen + Subpixel-Offsets berechnen ===
+            pen_x = glyph_layout.computeGlyphDevicePositions(
+                chunk,
+                pen_x,
+                y, // baseline_y
+                size_scale,
+                scale_factor,
+                device_x[0..n],
+                device_y[0..n],
+                subpixel_x[0..n],
+            );
 
-        try ts.resolveGlyphBatch(
-            shaped.glyphs,
-            font_size,
-            subpixel_x[0 .. shaped.glyphs.len],
-            cached_results[0 .. shaped.glyphs.len],
-        );
+            // === Phase 3: Glyphs aus dem Atlas holen (batch, ein Lock) ===
+            try ts.resolveGlyphBatch(chunk, font_size, subpixel_x[0..n], cached_results[0..n]);
 
-        // Wenn sich der Atlas geändert hat (neue Glyphen gerastert), auf GPU hochladen
-        // Auch beim ersten Mal hochladen (atlas_texture_view == null)
-        if (self.atlas_texture_view == null or text_renderer.atlasGeneration() != self.last_atlas_generation) {
-            if (self.batch_vertices.items.len > 0) {
-                try self.flush(render_pass);
+            // Wenn sich der Atlas geändert hat (neue Glyphen gerastert), auf GPU hochladen
+            // Auch beim ersten Mal hochladen (atlas_texture_view == null)
+            if (self.atlas_texture_view == null or text_renderer.atlasGeneration() != self.last_atlas_generation) {
+                if (self.batch_vertices.items.len > 0) {
+                    try self.flush(render_pass);
+                }
+                try self.updateAtlas(text_renderer.getAtlasData(), text_renderer.getAtlasSize());
+                self.last_atlas_generation = text_renderer.atlasGeneration();
             }
-            try self.updateAtlas(text_renderer.getAtlasData(), text_renderer.getAtlasSize());
-            self.last_atlas_generation = text_renderer.atlasGeneration();
-        }
 
-        // === Phase 4: GPU Vertices aus echten Glyph-Metriken bauen ===
-        for (
-            cached_results[0 .. shaped.glyphs.len],
-            device_x[0 .. shaped.glyphs.len],
-            device_y[0 .. shaped.glyphs.len],
-        ) |cached, dev_x, dev_y| {
-            if (cached.region.width == 0 or cached.region.height == 0) continue;
+            // === Phase 4: GPU Vertices aus echten Glyph-Metriken bauen ===
+            for (cached_results[0..n], device_x[0..n], device_y[0..n]) |cached, dev_x, dev_y| {
+                if (cached.region.width == 0 or cached.region.height == 0) continue;
 
-            // UV aus cached atlas_size (thread-safe, auch wenn Atlas wächst)
-            const uv = cached.uv();
+                // UV aus cached atlas_size (thread-safe, auch wenn Atlas wächst)
+                const uv = cached.uv();
 
-            const glyph_w: f32 = @floatFromInt(cached.region.width);
-            const glyph_h: f32 = @floatFromInt(cached.region.height);
+                const glyph_w: f32 = @floatFromInt(cached.region.width);
+                const glyph_h: f32 = @floatFromInt(cached.region.height);
 
-            // Device-Pixel Position: floor(device) + raster_offset → zurück zu logical
-            const glyph_x = (@floor(dev_x) + @as(f32, @floatFromInt(cached.offset_x))) / scale_factor;
-            const glyph_y = (@floor(dev_y) - @as(f32, @floatFromInt(cached.offset_y))) / scale_factor;
+                // Device-Pixel Position: floor(device) + raster_offset → zurück zu logical
+                const glyph_x = (@floor(dev_x) + @as(f32, @floatFromInt(cached.offset_x))) / scale_factor;
+                const glyph_y = (@floor(dev_y) - @as(f32, @floatFromInt(cached.offset_y))) / scale_factor;
 
-            // NDC (-1 bis 1)
-            const ndc_x0 = (glyph_x / self.viewport_width) * 2.0 - 1.0;
-            const ndc_y0 = -((glyph_y / self.viewport_height) * 2.0 - 1.0);
-            const ndc_x1 = ((glyph_x + glyph_w) / self.viewport_width) * 2.0 - 1.0;
-            const ndc_y1 = -(((glyph_y + glyph_h) / self.viewport_height) * 2.0 - 1.0);
+                // NDC (-1 bis 1)
+                const ndc_x0 = (glyph_x / self.viewport_width) * 2.0 - 1.0;
+                const ndc_y0 = -((glyph_y / self.viewport_height) * 2.0 - 1.0);
+                const ndc_x1 = ((glyph_x + glyph_w) / self.viewport_width) * 2.0 - 1.0;
+                const ndc_y1 = -(((glyph_y + glyph_h) / self.viewport_height) * 2.0 - 1.0);
 
-            // 2 Dreiecke = 6 Vertices (pos: 2f32 + uv: 2f32 + color: 4f32)
-            try self.batch_vertices.appendSlice(self.allocator, &.{
-                ndc_x0, ndc_y0, uv.u0, uv.v0, r, g, b, a,
-                ndc_x1, ndc_y0, uv.u1, uv.v0, r, g, b, a,
-                ndc_x0, ndc_y1, uv.u0, uv.v1, r, g, b, a,
-                ndc_x1, ndc_y0, uv.u1, uv.v0, r, g, b, a,
-                ndc_x1, ndc_y1, uv.u1, uv.v1, r, g, b, a,
-                ndc_x0, ndc_y1, uv.u0, uv.v1, r, g, b, a,
-            });
+                // 2 Dreiecke = 6 Vertices (pos: 2f32 + uv: 2f32 + color: 4f32)
+                try self.batch_vertices.appendSlice(self.allocator, &.{
+                    ndc_x0, ndc_y0, uv.u0, uv.v0, r, g, b, a,
+                    ndc_x1, ndc_y0, uv.u1, uv.v0, r, g, b, a,
+                    ndc_x0, ndc_y1, uv.u0, uv.v1, r, g, b, a,
+                    ndc_x1, ndc_y0, uv.u1, uv.v0, r, g, b, a,
+                    ndc_x1, ndc_y1, uv.u1, uv.v1, r, g, b, a,
+                    ndc_x0, ndc_y1, uv.u0, uv.v1, r, g, b, a,
+                });
+            }
         }
     }
 
@@ -421,38 +424,6 @@ const vertex_buffers = [_]wgpu.VertexBufferLayout{
         render_pass.draw(@intCast(vertex_count), 1, 0, 0);
 
         self.batch_vertices.clearRetainingCapacity();
-    }
-
-    /// Phase 1: Device-Pixel-Positionen und Subpixel-Offsets berechnen.
-    /// Exakt wie Gooey's computeGlyphDevicePositions.
-    fn computeGlyphDevicePositions(
-        shaped_glyphs: []const text.ShapedGlyph,
-        start_x: f32,
-        baseline_y: f32,
-        size_scale: f32,
-        scale_factor: f32,
-        out_device_x: []f32,
-        out_device_y: []f32,
-        out_subpixel_x: []u8,
-    ) void {
-        const SUBPIXEL_VARIANTS_F: f32 = 4.0;
-        var pen_x = start_x;
-        for (shaped_glyphs, 0..) |glyph, index| {
-            const scaled_x_offset = glyph.x_offset * size_scale;
-            const scaled_y_offset = glyph.y_offset * size_scale;
-            const scaled_advance = glyph.x_advance * size_scale;
-
-            const device_x = (pen_x + scaled_x_offset) * scale_factor;
-            const device_y = (baseline_y + scaled_y_offset) * scale_factor;
-
-            const fractional_x = device_x - @floor(device_x);
-
-            out_device_x[index] = device_x;
-            out_device_y[index] = device_y;
-            out_subpixel_x[index] = @intFromFloat(@floor(fractional_x * SUBPIXEL_VARIANTS_F));
-
-            pen_x += scaled_advance;
-        }
     }
 
     pub fn setViewport(self: *Self, width: u32, height: u32) void {

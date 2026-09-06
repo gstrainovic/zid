@@ -1463,15 +1463,15 @@ pub const CodeEditor = struct {
     }
 
     pub fn handleKeyPress(self: *Self, key: wio.Button) void {
-        std.log.info(">>> handleKeyPress ENTRY: key={} self.mods={}", .{key, self.mods});
+        std.log.debug("handleKeyPress: key={} mods={}", .{ key, self.mods });
         if (self.find.active) {
             self.handleFindKey(key);
             return;
         }
         if (self.keymap) |km| {
-            std.log.info("    keymap present, doing lookup key={} mods={}", .{key, self.mods});
+            std.log.debug("keymap lookup key={} mods={}", .{ key, self.mods });
             if (km.lookup(key, self.mods)) |action| {
-                std.log.info("    FOUND action={}", .{action});
+                std.log.debug("keymap action={}", .{action});
                 self.dispatchAction(action);
                 return;
             }
@@ -1691,9 +1691,9 @@ pub const CodeEditor = struct {
 
     pub fn handleChar(self: *Self, char_code: u21) void {
         if (char_code < 128) {
-            std.log.scoped(.editor).info("handleChar: '{c}'", .{@as(u8, @intCast(char_code))});
+            std.log.scoped(.editor).debug("handleChar: '{c}'", .{@as(u8, @intCast(char_code))});
         } else {
-            std.log.scoped(.editor).info("handleChar: U+{X}", .{char_code});
+            std.log.scoped(.editor).debug("handleChar: U+{X}", .{char_code});
         }
         if (char_code < 32 or char_code == 127) return;
         if (self.mods.ctrl and !self.mods.alt) return;

@@ -217,6 +217,34 @@ echo -e "open ./README.md\nget-state\nshutdown" | zig build run -- --interactive
 - Ablauf: Explorer setzt `pending_fs_change`, `UI.update()` holt es per `takeFsChange` ab
   und wendet es vor dem Layout an (`applyFsChange`).
 
+## Große und merkwürdige Dateien (Binärdateien, Riesenzeilen)
+
+- `gpu_renderer.renderText` arbeitet mit Stack-Puffern von `glyph_layout.max_batch_glyphs` (256)
+  Glyphen. `shapeTextInto` liefert für Runs über 256 Glyphen einen owned Heap-Slice beliebiger
+  Länge; die Glyphen werden deshalb blockweise verarbeitet, die Stiftposition läuft über
+  Blockgrenzen weiter (`glyph_layout.computeGlyphDevicePositions` gibt sie zurück, unit-getestet).
+  Vorher: `index out of bounds: index 463, len 256` beim Öffnen einer `.traineddata`-Datei.
+- Headless rendert keinen GPU-Text (`renderFrameWithText` läuft nur mit Fenster), ein Absturz im
+  Text-Renderer ist per E2E nicht reproduzierbar — reine Logik nach `src/text/glyph_layout.zig`
+  ziehen und dort testen. `types.zig` importiert `platform/mod.zig` (wio), deshalb nimmt das Modul
+  die Glyphen als `anytype`.
+- **Binärdateien** öffnen keinen Buffer: `file_types.detectFileKind` (Endung zuerst, dann die ersten
+  1024 Bytes durch `looksBinary`, Heuristik wie Zeds `analyze_byte_content`: bekannte Header,
+  NUL-Anteil ≥ 1/16, sonst ≥ 8 % nicht textartige Bytes; unit-getestet) liefert `.binary`, der Tab
+  zeigt nur `binary_view.zig` (Name, Größe). Bewusst ohne „Trotzdem öffnen“ (VS Code hat das, Zed
+  nicht). UTF-16 gilt als binär, es gibt keinen Decoder. Bild/PDF entscheidet weiter die Endung.
+  Eingaben auf einem Binär-Tab gehen wie bei Bild-Tabs an den Editor des vorherigen Buffers —
+  bekanntes Verhalten, Tastatur-Fokus pro Tab-Art steht in todo.md.
+- Runs über `ShapedRunCache.MAX_TEXT_LEN` (2048 Bytes) liefert der Shaper stumm leer: solche Zeilen
+  sind unsichtbar, kein Fehler im Log. Offen in todo.md (Editor soll nur den sichtbaren
+  Spaltenausschnitt an Clay geben).
+- `python3 scripts/e2e_odd_files.py` legt unter `tmp/` eine 3-KB-Binärdatei ohne Zeilenumbruch,
+  eine 5000-Zeichen-Zeile und eine 5-MB-Datei an, öffnet sie headless, tippt und misst die Latenz
+  bis das Zeichen in `editor_state` steht (Messung 06.09.2026: 0,06 s bei der langen Zeile,
+  1,2–2,4 s bei der 5-MB-Datei); die Binärdatei muss als Tab-Art `binary` ohne Buffer erscheinen. Logs mit Binärinhalt nur mit `grep -a` lesen, sonst schweigt grep.
+- Verwaiste Headless-Prozesse: `pkill -f '[v]ulkan-ed --headless'` — ohne die Klammer trifft das
+  Muster die eigene Shell, die den Befehl enthält.
+
 ## Bekannte Grenzen (kein Todo, bewusst so)
 
 - **Durchgestrichen in Markdown:** `~~text~~` toggelt zigdown zweimal und bleibt ungestylt,
