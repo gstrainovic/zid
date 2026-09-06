@@ -539,10 +539,11 @@ Seit 06.09.2026 liegt alles im Repo; `~/projects/ki` und das separate Bench-Repo
   Länge; die Glyphen werden deshalb blockweise verarbeitet, die Stiftposition läuft über
   Blockgrenzen weiter (`glyph_layout.computeGlyphDevicePositions` gibt sie zurück, unit-getestet).
   Vorher: `index out of bounds: index 463, len 256` beim Öffnen einer `.traineddata`-Datei.
-- Headless rendert keinen GPU-Text (`renderFrameWithText` läuft nur mit Fenster), ein Absturz im
-  Text-Renderer ist per E2E nicht reproduzierbar — reine Logik nach `src/text/glyph_layout.zig`
-  ziehen und dort testen. `types.zig` importiert `platform/mod.zig` (wio), deshalb nimmt das Modul
-  die Glyphen als `anytype`.
+- Headless rendert keinen GPU-Text (`renderFrameWithText` läuft nur mit Fenster). Glyph-Logik
+  nach `src/text/glyph_layout.zig` ziehen und dort unit-testen (`types.zig` importiert
+  `platform/mod.zig` (wio), deshalb nimmt das Modul die Glyphen als `anytype`). Ob die
+  Text-Strings der Render-Commands überhaupt noch gültig sind, prüft headless die Text-Probe
+  (siehe „Use-after-free in Render-Commands“).
 - **Binärdateien** öffnen keinen Buffer: `file_types.detectFileKind` (Endung zuerst, dann die ersten
   1024 Bytes durch `looksBinary`, Heuristik wie Zeds `analyze_byte_content`: bekannte Header,
   NUL-Anteil ≥ 1/16, sonst ≥ 8 % nicht textartige Bytes; unit-getestet) liefert `.binary`, der Tab
@@ -562,6 +563,34 @@ Seit 06.09.2026 liegt alles im Repo; `~/projects/ki` und das separate Bench-Repo
   1,2–2,4 s bei der 5-MB-Datei); die Binärdatei muss als Tab-Art `binary` ohne Buffer erscheinen. Logs mit Binärinhalt nur mit `grep -a` lesen, sonst schweigt grep.
 - Verwaiste Headless-Prozesse: `pkill -f '[v]ulkan-ed --headless'` — ohne die Klammer trifft das
   Muster die eigene Shell, die den Befehl enthält.
+
+## Use-after-free in Render-Commands (Segfault in `hashText`/`renderText`)
+
+- **Frame-Regel:** Die Render-Commands aus `renderExample` zeigen auf fremden Speicher
+  (Explorer-Knotennamen, Tab-Namen, Dialog-Nachricht, Frame-Arena). Der GPU-Renderer liest sie
+  erst *nach* `renderExample`. Nichts, worauf sie zeigen, darf zwischen `endLayout` und dem
+  nächsten `renderExample` freigegeben werden — „nach endLayout“ ist **nicht** sicher.
+  Aufräumen gehört vor das nächste Layout: `UI.update`, `processPending`, oder der Anfang
+  von `renderExample` (`applyPendingDialogResult`).
+- `applyDeferredLayoutActions` läuft am Anfang von `renderExample` und wendet an, was das
+  vorige Layout angefordert hat: Dialog-Klick/Enter (`pending_dialog_result`),
+  `pending_split`, `pending_tab_closes`, leere Panes. Vorher lief das direkt nach `endLayout`:
+  die Dialog-Nachricht wurde freigegeben, `performMove` → `refresh` → `loadDirectory` gab alle
+  Knotennamen frei, `closeTab`/`TabBarState.deinit` die Tab-Namen, während der Frame noch
+  gezeichnet wurde → `Segmentation fault` in `text_system.hashText` (Symptom vom 06.09.2026:
+  Bilder per Drag & Drop in einen Ordner verschoben, Absturz beim nächsten Zeichnen).
+- Kein `clay.text(&.{byte}, …)`: Zeiger auf ein Stack-Temporary, beim Zeichnen längst
+  überschrieben. Statische Literale nehmen (Git-Status-Buchstaben in `renderTreeEntry`).
+- **Werkzeug:** Headless fasst jeden Text-Command per `pwrite` in ein memfd an
+  (`src/debug/text_probe.zig`; `/dev/null` liest den Puffer nicht, EFAULT bleibt aus). Zeigt ein
+  Command auf unmapped Speicher, panict der Loop mit Command-Index, Bounding-Box und dem
+  vorigen Text. Mit `--page-alloc` oder `VULKAN_ED_PAGE_ALLOC=1` läuft alles über
+  `src/debug/free_log.zig` (page_allocator: jede Freigabe = munmap, kein In-Place-Remap) und
+  die Meldung enthält den Stack-Trace der Freigabe. So laufen lassen:
+  `VULKAN_ED_PAGE_ALLOC=1 python3 scripts/e2e_explorer.py` (jede E2E-Suite geht) oder
+  `python3 scripts/e2e_repro_text_uaf.py --page-alloc` (Ordnerwechsel, Bilder, Tooltip,
+  Picker-Klicks, Tab-Schließen). Der GPA unmappt kleine Buckets erst, wenn sie ganz leer sind,
+  darum fällt der Fehler im Fenster nur sporadisch auf.
 
 ## Bekannte Grenzen (kein Todo, bewusst so)
 
