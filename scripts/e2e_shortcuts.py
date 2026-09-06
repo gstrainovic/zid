@@ -236,13 +236,33 @@ def item5_menus():
 
 
 def item6_editor_context_menu():
-    print("--- 6. Editor-Kontextmenü zeigt Kürzel aus der Tabelle")
+    print("--- 6. Kontextmenüs (Editor, Markdown-Vorschau, Terminal) aus der Tabelle im gemeinsamen Stil")
+    rpc("explorer_open", [os.path.join(ROOT, "README.md")]); settle(10)
     rpc("click", [700, 400]); settle()
     rpc("right_click", [700, 400]); settle()
-    for item in ("Editor-Cut", "Editor-Copy", "Editor-Paste", "Editor-Split-V", "Editor-Split-H"):
+    for item in ("editor_menu_cut", "editor_menu_copy", "editor_menu_paste", "editor_menu_md_preview", "editor_menu_split_vertical", "editor_menu_split_horizontal"):
         check(bounds(item)["found"], f"Kontextmenü zeigt {item}")
+    # Gemeinsamer Stil: gleiche Zeilenhöhe wie das Tab- und Explorer-Menü (context_menu.zig)
+    check(abs(bounds("editor_menu_cut")["h"] - 30) < 0.5, "Menüzeile ist 30 px hoch wie in allen Kontextmenüs")
     shot("e2e_editor_ctx.ppm")
-    key("escape")
+    # Markdown Preview aus dem Editor-Menü öffnet die Vorschau; dort zeigt Rechtsklick das Vorschau-Menü
+    click_center("editor_menu_md_preview"); settle(10)
+    st = ui_state()
+    check(st["tabs"][st["active_tab"]]["kind"] == "markdown_preview", "Editor-Menü → Markdown Preview öffnet den Vorschau-Tab")
+    rpc("right_click", [700, 400]); settle()
+    check(bounds("md_menu_split_vertical")["found"] and bounds("md_menu_split_horizontal")["found"], "Vorschau-Menü zeigt Split V/H")
+    check(abs(bounds("md_menu_split_vertical")["h"] - 30) < 0.5, "Vorschau-Menüzeile ist 30 px hoch")
+    shot("e2e_md_ctx.ppm")
+    rpc("click", [700, 400]); settle()  # Klick neben das Menü schließt es
+    key("w", ctrl=True); settle(10)
+    # Terminal: eigene Einträge ohne Ctrl+C/V
+    rpc("open_terminal"); settle(10)
+    rpc("right_click", [700, 400]); settle()
+    check(bounds("term_menu_terminal_copy")["found"] and bounds("term_menu_terminal_paste")["found"], "Terminal-Menü zeigt Copy/Paste")
+    check(abs(bounds("term_menu_terminal_copy")["h"] - 30) < 0.5, "Terminal-Menüzeile ist 30 px hoch")
+    shot("e2e_term_ctx.ppm")
+    rpc("click", [700, 400]); settle()
+    key("w", ctrl=True); settle(10)
     rpc("click", [1100, 700]); settle()
 
 

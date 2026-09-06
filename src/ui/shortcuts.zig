@@ -114,6 +114,9 @@ pub const Command = enum {
     toggle_indent_guides,
     toggle_word_wrap,
     show_shortcuts,
+    /// Terminal-Kontextmenü: Auswahl kopieren / Zwischenablage einfügen (ohne Kürzel)
+    terminal_copy,
+    terminal_paste,
 };
 
 pub const Binding = struct {
@@ -201,11 +204,22 @@ pub const bindings = [_]Binding{
     .{ .command = .show_shortcuts, .key = .f1 },
 };
 
-/// Kontextmenü eines Tabs (Rechtsklick auf den Tab-Kopf), in dieser Reihenfolge
+/// Kontextmenü eines Tabs (Rechtsklick auf den Tab-Kopf), in dieser Reihenfolge.
+/// `md_preview` blendet die UI bei Nicht-Markdown-Tabs aus.
 pub const tab_menu_items = [_]Command{
     .close_tab,      .close_other_tabs,  .close_tabs_right,  .close_all_tabs, .close_saved_tabs,
-    .pin_tab,        .copy_tab_path,     .reveal_in_explorer, .split_vertical, .split_horizontal,
+    .pin_tab,        .copy_tab_path,     .reveal_in_explorer, .md_preview,    .split_vertical,
+    .split_horizontal,
 };
+
+/// Kontextmenü im Editor-Text (`md_preview` nur bei .md, im Chat-Eingabefeld nur Cut/Copy/Paste)
+pub const editor_menu_items = [_]Command{ .cut, .copy, .paste, .md_preview, .split_vertical, .split_horizontal };
+
+/// Kontextmenü der Markdown-Vorschau
+pub const markdown_menu_items = [_]Command{ .split_vertical, .split_horizontal };
+
+/// Kontextmenü des Terminals (eigene Commands: Ctrl+C/V gehen dort an die Shell)
+pub const terminal_menu_items = [_]Command{ .terminal_copy, .terminal_paste };
 
 pub const Menu = struct { title: []const u8, items: []const Command };
 
@@ -318,6 +332,8 @@ pub fn label(command: Command) []const u8 {
         .toggle_word_wrap => "Toggle Word Wrap",
         .toggle_indent_guides => "Toggle Indent Guides",
         .show_shortcuts => "Keyboard Shortcuts",
+        .terminal_copy => "Terminal Copy",
+        .terminal_paste => "Terminal Paste",
     };
 }
 
@@ -444,4 +460,16 @@ test "menus: jeder Menüeintrag hat ein Label" {
         try testing.expect(menu.title.len > 0);
         for (menu.items) |cmd| try testing.expect(label(cmd).len > 0);
     }
+}
+
+test "Kontextmenüs: Tab-Kopf hat Markdown Preview, jede Liste hat Labels, Terminal ohne Ctrl+C" {
+    try testing.expect(std.mem.indexOfScalar(Command, &tab_menu_items, .md_preview) != null);
+    for (tab_menu_items) |cmd| try testing.expect(label(cmd).len > 0);
+    for (editor_menu_items) |cmd| try testing.expect(label(cmd).len > 0);
+    for (markdown_menu_items) |cmd| try testing.expect(label(cmd).len > 0);
+    for (terminal_menu_items) |cmd| try testing.expect(label(cmd).len > 0);
+    // Im Terminal ist Ctrl+C kein Kopieren: eigene Commands ohne Kürzel
+    try testing.expectEqualStrings("", shortcutText(.terminal_copy));
+    try testing.expectEqualStrings("", shortcutText(.terminal_paste));
+    try testing.expectEqual(Command.md_preview, editor_menu_items[3]);
 }

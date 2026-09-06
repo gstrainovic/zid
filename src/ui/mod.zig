@@ -29,6 +29,7 @@ const folder_picker_mod = @import("folder_picker.zig");
 const picker_mod = @import("picker.zig");
 const user_state = @import("user_state.zig");
 const shortcuts = @import("shortcuts");
+const ctx_menu = @import("context_menu");
 const shortcuts_dialog = @import("shortcuts_dialog.zig");
 const ai_tools = @import("ai_tools");
 const agent_actions = @import("agent_actions.zig");
@@ -824,13 +825,10 @@ pub const UI = struct {
         // Offenes Tab-Kontextmenü: Eintrag ausführen oder schließen
         if (self.tab_menu) |menu| {
             self.tab_menu = null;
-            inline for (shortcuts.tab_menu_items) |cmd| {
-                if (clay.pointerOver(tabMenuItemId(cmd))) {
-                    self.tab_cmd_target = .{ .pane = menu.pane, .index = menu.index };
-                    self.executeCommand(cmd);
-                    self.tab_cmd_target = null;
-                    return;
-                }
+            if (ctx_menu.hit("tab_menu", &shortcuts.tab_menu_items, tabMenuHidden(menu))) |cmd| {
+                self.tab_cmd_target = .{ .pane = menu.pane, .index = menu.index };
+                self.executeCommand(cmd);
+                self.tab_cmd_target = null;
             }
             return;
         }
@@ -1269,7 +1267,10 @@ pub const UI = struct {
             .delete_line => self.getActiveEditor().dispatchAction(.DeleteLine),
             .split_vertical => self.getActiveEditor().dispatchAction(.SplitVertical),
             .split_horizontal => self.getActiveEditor().dispatchAction(.SplitHorizontal),
-            .md_preview => self.getActiveEditor().dispatchAction(.MdPreview),
+            // Aus dem Tab-Menü: Vorschau des angeklickten Tabs, sonst des aktiven Editors
+            .md_preview => if (self.tab_cmd_target) |t| self.requestMarkdownPreview(t.pane.data.leaf.tab_bar.tabs.items[t.index].path) else self.getActiveEditor().dispatchAction(.MdPreview),
+            .terminal_copy => if (self.getActiveTerminal()) |term| term.copyToClipboard() catch |err| log.err("terminal copy failed: {}", .{err}),
+            .terminal_paste => if (self.getActiveTerminal()) |term| term.pasteFromClipboard() catch |err| log.err("terminal paste failed: {}", .{err}),
             .find => self.getActiveEditor().dispatchAction(.Search),
             .rename_entry => {
                 if (self.file_explorer.selectedNodeIndex()) |node| self.file_explorer.startRename(node);
@@ -1872,51 +1873,20 @@ pub const UI = struct {
         return false;
     }
 
-    fn tabMenuItemId(comptime cmd: shortcuts.Command) clay.ElementId {
-        return clay.ElementId.ID("tab_menu_" ++ @tagName(cmd));
+    /// Markdown Preview nur für Text-Tabs mit .md-Pfad; die Vorschau selbst und
+    /// Terminal/Chat/Bild bekommen den Eintrag nicht.
+    fn tabMenuHidden(menu: TabMenu) ctx_menu.Hidden {
+        var hidden = ctx_menu.none;
+        const tabs = menu.pane.data.leaf.tab_bar.tabs.items;
+        const is_md = menu.index < tabs.len and tabs[menu.index].kind == .text and std.mem.endsWith(u8, tabs[menu.index].path, ".md");
+        if (!is_md) hidden.insert(.md_preview);
+        return hidden;
     }
 
-    /// Kontextmenü eines Tabs (Labels und Kürzel aus der Tabelle), schwebend an der Klickposition.
+    /// Kontextmenü eines Tabs (`shortcuts.tab_menu_items`, IDs `tab_menu_<command>`), schwebend an der Klickposition.
     fn renderTabMenu(self: *Self, menu: TabMenu, t: Theme) void {
         _ = self;
-        clay.UI()(.{
-            .id = clay.ElementId.ID("tab_menu_anchor"),
-            .layout = .{ .sizing = .{ .w = .fixed(0), .h = .fixed(0) } },
-            .floating = .{
-                .attach_to = .to_root,
-                .attach_points = .{ .element = .left_top, .parent = .left_top },
-                .offset = .{ .x = menu.x, .y = menu.y },
-                .z_index = 1000,
-            },
-        })({
-            clay.UI()(.{
-                .id = clay.ElementId.ID("tab_menu_container"),
-                .layout = .{ .sizing = .{ .w = .fit, .h = .fit }, .direction = .top_to_bottom, .padding = .all(4), .child_gap = 2 },
-                .background_color = t.overlay,
-                .border = .{ .width = .all(1), .color = t.border },
-                .corner_radius = .all(4),
-            })({
-                inline for (shortcuts.tab_menu_items) |cmd| {
-                    const item_id = tabMenuItemId(cmd);
-                    const hovered = clay.pointerOver(item_id);
-                    clay.UI()(.{
-                        .id = item_id,
-                        .layout = .{
-                            .sizing = .{ .w = .fixed(300), .h = .fixed(30) },
-                            .padding = .{ .left = 12, .right = 12 },
-                            .child_alignment = .{ .x = .left, .y = .center },
-                            .child_gap = 8,
-                        },
-                        .background_color = if (hovered) t.primary else .{ 0, 0, 0, 0 },
-                        .corner_radius = .all(3),
-                    })({
-                        clay.text(shortcuts.label(cmd), .{ .font_size = 18, .color = if (hovered) t.text_on_primary else t.text, .wrap_mode = .none });
-                        clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow } } })({});
-                        clay.text(shortcuts.shortcutText(cmd), .{ .font_size = 14, .color = if (hovered) t.text_on_primary else t.muted, .wrap_mode = .none });
-                    });
-                }
-            });
-        });
+        _ = ctx_menu.render("tab_menu", &shortcuts.tab_menu_items, menu.x, menu.y, tabMenuHidden(menu), ctx_menu.Colors.fromTheme(t));
     }
 
     pub fn recordFrameTime(self: *Self, ms: f32) void {
@@ -1995,6 +1965,18 @@ pub const UI = struct {
         } else {
             self.pending_tab_closes.append(self.allocator, .{ .pane = pane, .index = index }) catch {};
         }
+    }
+
+    /// Markdown-Vorschau von `path` anfordern: main.zig öffnet `preview://<path>` im nächsten
+    /// Frame und gibt den String frei.
+    fn requestMarkdownPreview(self: *Self, path: []const u8) void {
+        if (path.len == 0) return;
+        const preview_path = std.fmt.allocPrint(self.allocator, "preview://{s}", .{path}) catch |err| {
+            log.err("markdown preview for '{s}' failed: {}", .{ path, err });
+            return;
+        };
+        if (self.pending_tab_switch) |old| self.allocator.free(old);
+        self.pending_tab_switch = preview_path;
     }
 
     /// Ziel eines Tab-Kommandos: Kontextmenü-Tab oder aktiver Tab des aktiven Panes.
@@ -2496,12 +2478,7 @@ pub const UI = struct {
 
                     if (leaf.code_editor.pending_md_preview) {
                         leaf.code_editor.pending_md_preview = false;
-                        const path = leaf.code_editor.buffer.get_file_path();
-                        if (path.len > 0) {
-                            const preview_path = self.allocator.alloc(u8, path.len + 10) catch path;
-                            const final_path = std.fmt.bufPrint(@constCast(preview_path), "preview://{s}", .{path}) catch path;
-                            self.pending_tab_switch = final_path;
-                        }
+                        self.requestMarkdownPreview(leaf.code_editor.buffer.get_file_path());
                     }
 
                     // Aktiven Tab prüfen
@@ -3038,7 +3015,6 @@ pub const UI = struct {
     }
 
     fn renderTerminalContentInPane(self: *Self, pane: *pane_mod.Pane, path: []const u8, t: Theme) void {
-        _ = t;
         const leaf = &pane.data.leaf;
         const term_instance = leaf.tab_bar.terminal_instances.get(path) orelse return;
         term_instance.window = self.window;
@@ -3168,7 +3144,7 @@ pub const UI = struct {
                 });
             }
         });
-        term_instance.renderContextMenu();
+        term_instance.renderContextMenu(ctx_menu.Colors.fromTheme(t));
     }
 
     fn renderChatContentInPane(self: *Self, pane: *pane_mod.Pane, t: Theme) void {
