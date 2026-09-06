@@ -58,6 +58,15 @@ def open_and_poke(name):
     check(st["lines"] >= 1, f"{name}: Editor meldet {st['lines']} Zeilen, Cursor {st.get('cursor')}")
     shot(f"e2e_odd_{name}.ppm")
     check(os.path.getsize(os.path.join(TMP, f"e2e_odd_{name}.ppm")) > 1000, f"{name}: Screenshot geschrieben")
+    if name == "odd_long_line.txt":
+        # Riesenzeile: Ansicht folgt dem Cursor horizontal, Ausschnitt statt ganzer Zeile
+        rpc("key_press", ["home", True]); settle()
+        st = result_json("editor_state")
+        check(st["view_col"] == 0 and st["view_cols"] > 20, f"Ctrl+Home: view_col 0, {st['view_cols']} sichtbare Spalten")
+        rpc("key_press", ["end", False]); settle()
+        st = result_json("editor_state")
+        check(st["view_col"] > 0 and st["col"] >= st["view_col"], f"End auf der 5000er-Zeile scrollt horizontal (view_col {st['view_col']})")
+        shot("e2e_odd_long_line_end.ppm")
 
 
 def check_binary_tab():
