@@ -130,6 +130,14 @@ pub const UI = struct {
     tab_menu: ?TabMenu = null,
     /// Ziel eines Tab-Kommandos aus dem Kontextmenü; null = aktiver Tab des aktiven Panes
     tab_cmd_target: ?TabTarget = null,
+    /// UI-Uhr in ms (für Chords)
+    ui_time_ms: f32 = 0,
+    /// Ctrl+K gedrückt: der nächste Pfeil wechselt das Pane (bis zu dieser Zeit)
+    chord_k_until_ms: f32 = -1,
+    /// Pfad, für den der „Datei außerhalb geändert“-Dialog offen ist (owned)
+    external_change_path: ?[]u8 = null,
+    /// Tab-Index vor dem letzten Wechsel ins Terminal (Ctrl+J zurück)
+    terminal_return_index: ?usize = null,
     /// "Open Folder…"-Dialog
     folder_picker: folder_picker_mod.FolderPicker,
     /// Vom Dialog bestätigter Projektordner (owned); main.zig holt ihn per takePendingOpenFolder
@@ -342,6 +350,7 @@ pub const UI = struct {
         if (self.last_clipboard_text) |t| self.allocator.free(t);
         for (self.closed_tabs.items) |p| self.allocator.free(p);
         self.closed_tabs.deinit(self.allocator);
+        if (self.external_change_path) |p| self.allocator.free(p);
         self.folder_picker.deinit();
         if (self.git_branch.len > 0) self.allocator.free(self.git_branch);
         self.pending_tab_closes.deinit(self.allocator);
@@ -464,6 +473,22 @@ pub const UI = struct {
             return;
         }
         const explorer_has_focus = self.show_file_explorer and self.explorer_focused;
+        // Chord Ctrl+K, dann Pfeil: Pane-Fokus wie in Zed/VS Code
+        if (self.chord_k_until_ms > self.ui_time_ms) {
+            self.chord_k_until_ms = -1;
+            switch (key) {
+                .left => return self.executeCommand(.focus_pane_left),
+                .right => return self.executeCommand(.focus_pane_right),
+                .up => return self.executeCommand(.focus_pane_up),
+                .down => return self.executeCommand(.focus_pane_down),
+                .left_control, .right_control => self.chord_k_until_ms = self.ui_time_ms + 1500,
+                else => {},
+            }
+        }
+        if (key == .k and self.is_ctrl_down and !self.is_shift_down and !self.is_alt_down) {
+            self.chord_k_until_ms = self.ui_time_ms + 1500;
+            return;
+        }
         if (keyFromButton(key)) |k| {
             const mods = self.currentMods();
             if (shortcuts.lookup(k, mods, .global)) |cmd| {
@@ -967,6 +992,7 @@ pub const UI = struct {
         self.anim_manager.update(delta_ms);
         self.getActiveEditor().time_ms += delta_ms;
         self.file_explorer.now_ms += delta_ms;
+        self.ui_time_ms += delta_ms;
         self.ai_chat.updateTimeMs(delta_ms);
     }
 
@@ -1099,7 +1125,7 @@ pub const UI = struct {
             .x => .x, .y => .y, .z => .z,
             .@"1" => .n1, .@"2" => .n2, .@"3" => .n3, .@"4" => .n4, .@"5" => .n5,
             .@"6" => .n6, .@"7" => .n7, .@"8" => .n8, .@"9" => .n9,
-            .tab => .tab, .grave => .grave, .backslash => .backslash, .f1 => .f1, .f2 => .f2, .f5 => .f5,
+            .tab => .tab, .grave => .grave, .backslash => .backslash, .slash => .slash, .f1 => .f1, .f2 => .f2, .f5 => .f5, .f12 => .f12,
             .delete => .delete, .escape => .escape, .enter, .kp_enter => .enter,
             .page_up => .page_up, .page_down => .page_down,
             .left => .left, .right => .right, .up => .up, .down => .down,
@@ -1197,7 +1223,178 @@ pub const UI = struct {
             .goto_tab_7 => self.gotoTab(6),
             .goto_tab_8 => self.gotoTab(7),
             .goto_tab_9 => self.gotoTab(8),
+            .toggle_comment => self.getActiveEditor().dispatchAction(.ToggleComment),
+            .move_line_up => self.getActiveEditor().dispatchAction(.MoveLineUp),
+            .move_line_down => self.getActiveEditor().dispatchAction(.MoveLineDown),
+            .duplicate_line => self.getActiveEditor().dispatchAction(.DuplicateLine),
+            .goto_line => self.getActiveEditor().dispatchAction(.GotoLine),
+            .replace => self.getActiveEditor().dispatchAction(.Replace),
+            .outdent_lines => self.getActiveEditor().dispatchAction(.OutdentLines),
+            .goto_definition => self.getActiveEditor().dispatchAction(.GotoDefinition),
+            .focus_pane_left => self.focusPane(.left),
+            .focus_pane_right => self.focusPane(.right),
+            .focus_pane_up => self.focusPane(.up),
+            .focus_pane_down => self.focusPane(.down),
+            .focus_explorer => {
+                self.show_file_explorer = true;
+                self.explorer_focused = true;
+                if (self.file_explorer.selected_index == null and self.file_explorer.visible_entries.items.len > 0) self.file_explorer.selectEntry(0);
+            },
+            .toggle_terminal => self.toggleTerminal(),
         }
+    }
+
+    pub const Direction = enum { left, right, up, down };
+
+    fn collectLeaves(pane: *pane_mod.Pane, buf: []*pane_mod.Pane, n: *usize) void {
+        switch (pane.data) {
+            .leaf => {
+                if (n.* < buf.len) {
+                    buf[n.*] = pane;
+                    n.* += 1;
+                }
+            },
+            .split => |s| {
+                collectLeaves(s.children[0], buf, n);
+                collectLeaves(s.children[1], buf, n);
+            },
+        }
+    }
+
+    fn paneCenter(pane: *pane_mod.Pane) ?struct { x: f32, y: f32 } {
+        const data = clay.getElementData(clay.ElementId.IDI("Pane", @truncate(@intFromPtr(pane))));
+        if (!data.found) return null;
+        const bb = data.bounding_box;
+        return .{ .x = bb.x + bb.width / 2, .y = bb.y + bb.height / 2 };
+    }
+
+    /// Nächstes Leaf-Pane in Richtung `dir` (nach den Layout-Bounds des letzten Frames) fokussieren.
+    pub fn focusPane(self: *Self, dir: Direction) void {
+        var buf: [32]*pane_mod.Pane = undefined;
+        var n: usize = 0;
+        collectLeaves(self.root_pane, &buf, &n);
+        const from = paneCenter(self.active_pane) orelse return;
+        var best: ?*pane_mod.Pane = null;
+        var best_dist: f32 = std.math.floatMax(f32);
+        for (buf[0..n]) |p| {
+            if (p == self.active_pane) continue;
+            const c = paneCenter(p) orelse continue;
+            const dx = c.x - from.x;
+            const dy = c.y - from.y;
+            const ok = switch (dir) {
+                .left => dx < -1 and @abs(dy) <= @abs(dx) * 2,
+                .right => dx > 1 and @abs(dy) <= @abs(dx) * 2,
+                .up => dy < -1 and @abs(dx) <= @abs(dy) * 2,
+                .down => dy > 1 and @abs(dx) <= @abs(dy) * 2,
+            };
+            if (!ok) continue;
+            const d = dx * dx + dy * dy;
+            if (d < best_dist) {
+                best_dist = d;
+                best = p;
+            }
+        }
+        if (best) |p| {
+            self.active_pane = p;
+            self.explorer_focused = false;
+        }
+    }
+
+    /// Ctrl+J: Terminal-Tab im aktiven Pane aktivieren (anlegen, wenn keiner da ist);
+    /// vom Terminal aus zurück zum vorherigen Tab.
+    fn toggleTerminal(self: *Self) void {
+        const tb = self.getActiveTabBar();
+        if (self.isTerminalActive()) {
+            if (self.terminal_return_index) |i| {
+                if (i < tb.tabs.items.len and tb.tabs.items[i].kind != .terminal) tb.setActive(i);
+            }
+            return;
+        }
+        self.terminal_return_index = tb.active_index;
+        for (tb.tabs.items, 0..) |tab, i| {
+            if (tab.kind == .terminal) {
+                tb.setActive(i);
+                return;
+            }
+        }
+        tb.openTerminal();
+    }
+
+    /// Text der Statusleiste für den aktiven Editor (Zeile/Spalte, Auswahl, EOL, Encoding, Sprache, Einrückung).
+    pub fn statusText(self: *Self, arena: std.mem.Allocator) []const u8 {
+        const tb = self.getActiveTabBar();
+        const tab = tb.getActiveTab() orelse return "";
+        if (tab.kind != .text) return "";
+        const ed = self.getActiveEditor();
+        const edit_ops = @import("../editor/edit_ops.zig");
+        var sel_buf: [48]u8 = undefined;
+        var sel_text: []const u8 = "";
+        if (ed.selectionRange()) |r| {
+            if (r.begin.row == r.end.row) {
+                sel_text = std.fmt.bufPrint(&sel_buf, "  ({d} selected)", .{r.end.col - r.begin.col}) catch "";
+            } else {
+                sel_text = std.fmt.bufPrint(&sel_buf, "  ({d} lines selected)", .{r.end.row - r.begin.row + 1}) catch "";
+            }
+        }
+        const eol: []const u8 = if (ed.buffer.file_eol_mode == .crlf) "CRLF" else "LF";
+        return std.fmt.allocPrint(arena, "Ln {d}, Col {d}{s}    {s}    UTF-8    {s}    Spaces: 4", .{
+            ed.cursor.row + 1, ed.cursor.col + 1, sel_text, eol, edit_ops.languageNameForPath(tab.path),
+        }) catch "";
+    }
+
+    /// Datei auf der Platte geändert (Watcher): ungeänderte Buffer still neu laden, geänderte fragen.
+    pub fn handleExternalChange(self: *Self, path: []const u8) void {
+        const buf = self.open_buffers.get(path) orelse return;
+        const content = std.fs.cwd().readFileAlloc(self.allocator, path, 64 * 1024 * 1024) catch return;
+        defer self.allocator.free(content);
+        const current = buf.store_to_string_cached(buf.root, buf.file_eol_mode);
+        if (std.mem.eql(u8, content, current)) return; // eigener Save oder gleicher Inhalt
+        if (!self.anyTabModified(path)) {
+            _ = self.reloadFileFromDisk(path, content);
+            return;
+        }
+        if (self.active_dialog != null or self.external_change_path != null) return;
+        const msg = std.fmt.allocPrint(self.allocator, "'{s}' changed on disk. Reload and lose your edits?", .{std.fs.path.basename(path)}) catch return;
+        self.external_change_path = self.allocator.dupe(u8, path) catch {
+            self.allocator.free(msg);
+            return;
+        };
+        self.active_dialog = .{
+            .dialog = .{
+                .title = "File Changed",
+                .message = msg,
+                .actions = &.{
+                    .{ .label = "Reload", .result = .yes },
+                    .{ .label = "Keep Mine", .result = .cancel },
+                },
+            },
+            .callback = handleExternalChangeDialog,
+            .message_needs_free = true,
+        };
+    }
+
+    fn handleExternalChangeDialog(ui: *UI, res: dialog_mod.DialogResult, _: usize, _: ?*anyopaque) void {
+        const path = ui.external_change_path orelse return;
+        defer {
+            ui.allocator.free(path);
+            ui.external_change_path = null;
+        }
+        if (res != .yes) return;
+        const content = std.fs.cwd().readFileAlloc(ui.allocator, path, 64 * 1024 * 1024) catch return;
+        defer ui.allocator.free(content);
+        _ = ui.reloadFileFromDisk(path, content);
+    }
+
+    fn anyTabModified(self: *Self, path: []const u8) bool {
+        var buf: [32]*pane_mod.Pane = undefined;
+        var n: usize = 0;
+        collectLeaves(self.root_pane, &buf, &n);
+        for (buf[0..n]) |p| {
+            for (p.data.leaf.tab_bar.tabs.items) |tab| {
+                if (std.mem.eql(u8, tab.path, path) and tab.modified) return true;
+            }
+        }
+        return false;
     }
 
     fn tabMenuItemId(comptime cmd: shortcuts.Command) clay.ElementId {
@@ -1555,6 +1752,9 @@ pub const UI = struct {
                 svg.Svg(arena, "status_git_icon", svg.Lucide.git_branch, 18, t.success);
                 const branch_text = if (self.git_branch.len > 0) self.git_branch else "—";
                 clay.text(branch_text, .{ .font_size = 18, .color = t.subtext });
+                clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow } } })({});
+                const status = self.statusText(arena);
+                if (status.len > 0) clay.text(status, .{ .font_size = 16, .color = t.subtext, .wrap_mode = .none });
             });
 
             // Main Content Area (Sidebar + Editor)

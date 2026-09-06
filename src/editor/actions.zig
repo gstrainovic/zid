@@ -78,6 +78,16 @@ pub const Action = enum {
     MdPreview,
     SplitVertical,
     SplitHorizontal,
+    // Bearbeiten
+    IndentLines,
+    OutdentLines,
+    ToggleComment,
+    MoveLineUp,
+    MoveLineDown,
+    DuplicateLine,
+    GotoLine,
+    Replace,
+    GotoDefinition,
 };
 
 pub const KeyEvent = struct {

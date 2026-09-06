@@ -13,6 +13,7 @@ const find_ops = @import("find_ops.zig");
 
 const actions = @import("actions.zig");
 const keymap = @import("keymap.zig");
+const edit_ops = @import("edit_ops.zig");
 
 /// Measurement function type: returns width of text in pixels.
 pub const MeasureFn = *const fn (ptr: [*c]const u8, len: usize) f32;
@@ -131,6 +132,8 @@ pub const CodeEditor = struct {
     last_mouse_click_ms: f32 = 0,
     last_mouse_click_line: usize = 0,
     last_mouse_click_col: usize = 0,
+    /// Klicks in Folge (1 = einfach, 2 = doppelt, 3 = dreifach)
+    click_count: u32 = 0,
 
     /// View for scrolling
     view: flow_core.View,
@@ -155,6 +158,8 @@ pub const CodeEditor = struct {
     pending_md_preview: bool = false,
     /// Suchleiste (Ctrl+F)
     find: FindState = .{},
+    /// Gehe zu Zeile (Ctrl+G)
+    goto: GotoState = .{},
 
     /// Zeitpunkt der letzten Cursor-Bewegung (für Blink-Delay)
     last_cursor_movement_ms: f32 = 0,
@@ -311,11 +316,15 @@ pub const CodeEditor = struct {
                 colcount.* = 1;
                 return 1;  // ASCII: jedes Zeichen ist 1 Byte und Breite 1
             }
+            /// Breite eines ganzen Chunks: insert_chars addiert sie zur Cursor-Spalte. Vorher
+            /// war das pauschal 1, der Cursor stand nach Einfügen/Autoclose eine Spalte zu weit links.
             fn egc_chunk_width(_: flow_core.Buffer.Metrics, chunk_: []const u8, _: usize) usize {
-                if (chunk_.len == 0) return 0;
-                if (chunk_[0] == '\n') return 1;
-                if (chunk_[0] == '\t') return 4;
-                return 1;
+                var w: usize = 0;
+                for (chunk_) |b| {
+                    if ((b & 0xC0) == 0x80) continue; // UTF-8-Folgebyte
+                    w += if (b == '\t') 4 else 1;
+                }
+                return w;
             }
             fn egc_last(_: flow_core.Buffer.Metrics, egcs: []const u8) []const u8 {
                 return egcs;
@@ -797,7 +806,7 @@ pub const CodeEditor = struct {
         self.selection_anchor = self.cursor;
     }
 
-    fn selectionRange(self: *const Self) ?flow_core.Selection {
+    pub fn selectionRange(self: *const Self) ?flow_core.Selection {
         if (!self.hasSelection()) return null;
         const anchor = self.selection_anchor.?;
         return .{ .begin = if (anchor.row < self.cursor.row or (anchor.row == self.cursor.row and anchor.col < self.cursor.col)) anchor else self.cursor, .end = if (anchor.row < self.cursor.row or (anchor.row == self.cursor.row and anchor.col < self.cursor.col)) self.cursor else anchor };
@@ -877,7 +886,7 @@ pub const CodeEditor = struct {
         switch (action) {
             .InsertNewline, .InsertTab,
             .DeleteBack, .DeleteForward, .DeleteWordBack, .DeleteWordForward, .DeleteLine,
-            .Cut, .Paste => {
+            .Cut, .Paste, .IndentLines, .OutdentLines, .ToggleComment, .MoveLineUp, .MoveLineDown, .DuplicateLine => {
                 self.typing_in_progress = false;
                 self.snapshotForUndo();
             },
@@ -1074,7 +1083,22 @@ pub const CodeEditor = struct {
                         const byte_pos = self.buffer.root.get_line_width_to_pos(self.cursor.row, self.cursor.col, m) catch 0;
                         const char_start = prevCharBoundary(line_text, byte_pos);
                         const char_bytes = byte_pos - char_start;
-                        if (char_bytes > 0) {
+                        // Backspace zwischen () [] {} "" '' `` löscht das Paar
+                        const prev_b: ?u8 = if (byte_pos > 0) line_text[byte_pos - 1] else null;
+                        const next_b: ?u8 = if (byte_pos < line_text.len) line_text[byte_pos] else null;
+                        if (char_bytes == 1 and edit_ops.deletesPair(prev_b, next_b)) {
+                            const pair_text = self.allocator.dupe(u8, line_text[byte_pos - 1 .. byte_pos + 1]) catch return;
+                            defer self.allocator.free(pair_text);
+                            self.pushEditForChange(self.cursor.row, self.cursor.col - 1, pair_text, "");
+                            const sel: flow_core.Selection = .{
+                                .begin = .{ .row = self.cursor.row, .col = self.cursor.col - 1 },
+                                .end = .{ .row = self.cursor.row, .col = self.cursor.col + 1 },
+                            };
+                            const result2 = self.buffer.root.delete_range(sel, self.buffer.allocator, null, m) catch return;
+                            self.buffer.root = result2;
+                            self.cursor.col -= 1;
+                            self.cursor.target = self.cursor.col;
+                        } else if (char_bytes > 0) {
                             const del_text = self.allocator.dupe(u8, line_text[char_start..byte_pos]) catch return;
                             defer self.allocator.free(del_text);
                             const del_row = self.cursor.row;
@@ -1190,18 +1214,35 @@ pub const CodeEditor = struct {
             },
             .InsertNewline => {
                 if (self.deleteSelection()) {}
-                const ins_row = self.cursor.row;
-                const ins_col = self.cursor.col;
-                self.pushEditForChange(ins_row, ins_col, "", "\n");
-                const result = self.buffer.root.insert_chars(
-                    self.cursor.row, self.cursor.col, "\n", self.buffer.allocator, m,
-                ) catch return;
-                self.buffer.root = result[2];
-                self.cursor.row += 1;
-                self.cursor.col = 0;
-                self.cursor.target = 0;
+                // Auto-Indent: Einrückung der Zeile, nach { ( [ eine Stufe mehr, Klammerpaar aufspannen
+                const line_text = self.getLine(self.cursor.row);
+                const cursor_byte = @min(self.buffer.root.get_line_width_to_pos(self.cursor.row, self.cursor.col, m) catch line_text.len, line_text.len);
+                const ins = edit_ops.newlineInsertion(self.allocator, line_text, cursor_byte) catch return;
+                defer self.allocator.free(ins.text);
+                self.insertString(ins.text) catch return;
+                if (ins.rows_back > 0) {
+                    self.cursor.row -= ins.rows_back;
+                    self.cursor.col = self.lineWidth(self.cursor.row);
+                    self.cursor.target = self.cursor.col;
+                }
             },
+            .IndentLines => self.indentSelection(false),
+            .OutdentLines => self.indentSelection(true),
+            .ToggleComment => self.toggleComment(),
+            .MoveLineUp => self.moveLines(false),
+            .MoveLineDown => self.moveLines(true),
+            .DuplicateLine => self.duplicateLines(),
+            .GotoLine => self.openGoto(),
+            .Replace => self.openReplace(),
+            .GotoDefinition => self.gotoDefinition(self.cursor.row, self.cursor.col),
             .InsertTab => {
+                // Mehrzeilige Auswahl: Zeilen einrücken statt Text ersetzen
+                if (self.selectionRange()) |r| {
+                    if (r.end.row > r.begin.row) {
+                        self.indentSelection(false);
+                        return;
+                    }
+                }
                 if (self.deleteSelection()) {}
                 const ins_row = self.cursor.row;
                 const ins_col = self.cursor.col;
@@ -1339,11 +1380,114 @@ pub const CodeEditor = struct {
         /// Letzter Treffer; Ausgangspunkt für weiter/zurück
         last_match: ?find_ops.Match = null,
         not_found: bool = false,
+        /// Ersetzen-Zeile sichtbar (Ctrl+H); Tab wechselt das Feld
+        replace_mode: bool = false,
+        focus_replace: bool = false,
+        replacement: [256]u8 = undefined,
+        replacement_len: usize = 0,
+        /// Letzte Ersetzen-alle-Anzahl für die Anzeige
+        replaced_count: ?usize = null,
 
         pub fn text(self: *const FindState) []const u8 {
             return self.query[0..self.len];
         }
+
+        pub fn replacementText(self: *const FindState) []const u8 {
+            return self.replacement[0..self.replacement_len];
+        }
     };
+
+    /// Gehe zu Zeile (Ctrl+G): Ziffern tippen, Enter springt
+    pub const GotoState = struct {
+        active: bool = false,
+        digits: [12]u8 = undefined,
+        len: usize = 0,
+    };
+
+    pub fn openGoto(self: *Self) void {
+        self.goto = .{ .active = true };
+    }
+
+    /// Ctrl+H: Suchleiste mit Ersetzen-Zeile öffnen
+    pub fn openReplace(self: *Self) void {
+        self.openFind();
+        self.find.replace_mode = true;
+        self.find.focus_replace = self.find.len > 0;
+        self.find.replaced_count = null;
+    }
+
+    /// Aktuellen Treffer (= Auswahl) ersetzen und zum nächsten springen.
+    pub fn replaceCurrent(self: *Self) void {
+        const m = self.find.last_match orelse {
+            self.findStep(true, true);
+            return;
+        };
+        const r = self.selectionRange() orelse {
+            self.findStep(true, true);
+            return;
+        };
+        if (r.begin.row != m.begin.row or r.begin.col != m.begin.col) {
+            self.findStep(true, true);
+            return;
+        }
+        self.typing_in_progress = false;
+        self.snapshotForUndo();
+        self.insertString(self.find.replacementText()) catch return;
+        self.find.last_match = null;
+        self.findStep(true, true);
+    }
+
+    /// Alle Treffer im Buffer ersetzen; liefert die Anzahl.
+    pub fn replaceAll(self: *Self) usize {
+        if (self.find.len == 0) return 0;
+        const Finder = find_ops.Finder(LineSource);
+        self.typing_in_progress = false;
+        self.snapshotForUndo();
+        var from: find_ops.Pos = .{ .row = 0, .col = 0 };
+        var first = true;
+        var count: usize = 0;
+        while (count < 100_000) {
+            var start = from;
+            if (first) {
+                // Finder sucht exklusiv ab `from`: vor den Anfang zurücksetzen
+                first = false;
+                start = .{ .row = self.lineCount() -| 1, .col = std.math.maxInt(u32) };
+                const mm = Finder.find(.{ .ed = self }, self.find.text(), start, true) orelse break;
+                if (mm.begin.row != 0 or mm.begin.col != 0) {
+                    // Erster Treffer liegt nicht am Anfang: normal ab (0,0) exklusiv weitersuchen,
+                    // aber den Treffer an (0,0) nicht verpassen
+                    start = .{ .row = 0, .col = 0 };
+                    if (!(mm.begin.row == 0 and mm.begin.col == 0)) {
+                        self.selection_anchor = .{ .row = mm.begin.row, .col = mm.begin.col, .target = mm.begin.col };
+                        self.cursor = .{ .row = mm.end.row, .col = mm.end.col, .target = mm.end.col };
+                        self.insertString(self.find.replacementText()) catch break;
+                        count += 1;
+                        from = .{ .row = self.cursor.row, .col = self.cursor.col };
+                        continue;
+                    }
+                }
+                self.selection_anchor = .{ .row = mm.begin.row, .col = mm.begin.col, .target = mm.begin.col };
+                self.cursor = .{ .row = mm.end.row, .col = mm.end.col, .target = mm.end.col };
+                self.insertString(self.find.replacementText()) catch break;
+                count += 1;
+                from = .{ .row = self.cursor.row, .col = self.cursor.col };
+                continue;
+            }
+            const mm = Finder.find(.{ .ed = self }, self.find.text(), start, true) orelse break;
+            // Umbruch am Dateiende: Treffer vor `from` bedeutet, wir sind einmal durch
+            if (mm.begin.row < from.row or (mm.begin.row == from.row and mm.begin.col < from.col)) break;
+            self.selection_anchor = .{ .row = mm.begin.row, .col = mm.begin.col, .target = mm.begin.col };
+            self.cursor = .{ .row = mm.end.row, .col = mm.end.col, .target = mm.end.col };
+            self.insertString(self.find.replacementText()) catch break;
+            count += 1;
+            from = .{ .row = self.cursor.row, .col = self.cursor.col };
+        }
+        self.find.last_match = null;
+        self.find.replaced_count = count;
+        self.selection_anchor = null;
+        self.ensureCursorVisible();
+        return count;
+    }
 
     const LineSource = struct {
         ed: *CodeEditor,
@@ -1372,6 +1516,8 @@ pub const CodeEditor = struct {
 
     pub fn closeFind(self: *Self) void {
         self.find.active = false;
+        self.find.replace_mode = false;
+        self.find.focus_replace = false;
     }
 
     /// Nächsten/vorherigen Treffer markieren. `inclusive`: ein Treffer an der
@@ -1418,8 +1564,27 @@ pub const CodeEditor = struct {
     fn handleFindKey(self: *Self, key: wio.Button) void {
         switch (key) {
             .escape => self.closeFind(),
-            .enter, .kp_enter => self.findNext(!self.mods.shift),
+            .tab => if (self.find.replace_mode) {
+                self.find.focus_replace = !self.find.focus_replace;
+            },
+            .enter, .kp_enter => {
+                if (self.find.replace_mode and self.mods.alt) {
+                    _ = self.replaceAll();
+                } else if (self.find.replace_mode and self.find.focus_replace) {
+                    self.replaceCurrent();
+                } else {
+                    self.findNext(!self.mods.shift);
+                }
+            },
             .backspace => {
+                if (self.find.replace_mode and self.find.focus_replace) {
+                    if (self.find.replacement_len > 0) {
+                        var i = self.find.replacement_len - 1;
+                        while (i > 0 and (self.find.replacement[i] & 0xC0) == 0x80) i -= 1;
+                        self.find.replacement_len = i;
+                    }
+                    return;
+                }
                 if (self.find.len > 0) {
                     var i = self.find.len - 1;
                     while (i > 0 and (self.find.query[i] & 0xC0) == 0x80) i -= 1;
@@ -1436,6 +1601,12 @@ pub const CodeEditor = struct {
     fn handleFindChar(self: *Self, cp: u21) void {
         var tmp: [4]u8 = undefined;
         const n = std.unicode.utf8Encode(cp, &tmp) catch return;
+        if (self.find.replace_mode and self.find.focus_replace) {
+            if (self.find.replacement_len + n > self.find.replacement.len) return;
+            @memcpy(self.find.replacement[self.find.replacement_len .. self.find.replacement_len + n], tmp[0..n]);
+            self.find.replacement_len += n;
+            return;
+        }
         if (self.find.len + n > self.find.query.len) return;
         @memcpy(self.find.query[self.find.len .. self.find.len + n], tmp[0..n]);
         self.find.len += n;
@@ -1486,12 +1657,116 @@ pub const CodeEditor = struct {
             if (status.len > 0) clay.text(status, .{ .font_size = 16, .color = if (self.find.not_found) .{ 220, 90, 90, 255 } else .{ 150, 150, 170, 255 }, .wrap_mode = .none });
             clay.text("Enter ↓  Shift+Enter ↑  Esc", .{ .font_size = 14, .color = .{ 120, 120, 140, 255 }, .wrap_mode = .none });
         });
+        if (self.find.replace_mode) self.renderReplaceRow(arena, editor_id);
+    }
+
+    fn renderReplaceRow(self: *Self, arena: std.mem.Allocator, editor_id: clay.ElementId) void {
+        clay.UI()(.{
+            .id = clay.ElementId.ID("replace_widget"),
+            .floating = .{
+                .attach_to = .to_element_with_id,
+                .parentId = editor_id.id,
+                .attach_points = .{ .element = .right_top, .parent = .right_top },
+                .offset = .{ .x = -24, .y = 60 },
+                .z_index = 500,
+            },
+            .layout = .{
+                .sizing = .{ .w = .fit, .h = .fit },
+                .direction = .left_to_right,
+                .padding = .all(8),
+                .child_gap = 10,
+                .child_alignment = .{ .y = .center },
+            },
+            .background_color = .{ 45, 45, 60, 255 },
+            .border = .{ .width = .all(1), .color = .{ 100, 100, 120, 255 } },
+            .corner_radius = .all(4),
+        })({
+            clay.text("Replace", .{ .font_size = 18, .color = .{ 150, 150, 170, 255 }, .wrap_mode = .none });
+            clay.UI()(.{
+                .id = clay.ElementId.ID("replace_input"),
+                .layout = .{
+                    .sizing = .{ .w = .fixed(260), .h = .fixed(30) },
+                    .padding = .axes(0, 8),
+                    .child_alignment = .{ .y = .center },
+                },
+                .clip = .{ .horizontal = true },
+                .background_color = .{ 30, 30, 46, 255 },
+                .border = .{ .width = .all(1), .color = if (self.find.focus_replace) .{ 120, 140, 220, 255 } else .{ 80, 80, 100, 255 } },
+                .corner_radius = .all(3),
+            })({
+                const shown = if (self.find.focus_replace)
+                    std.fmt.allocPrint(arena, "{s}|", .{self.find.replacementText()}) catch self.find.replacementText()
+                else
+                    self.find.replacementText();
+                clay.text(shown, .{ .font_size = 18, .color = .{ 220, 220, 240, 255 }, .wrap_mode = .none });
+            });
+            if (self.find.replaced_count) |n| {
+                const t = std.fmt.allocPrint(arena, "{d} replaced", .{n}) catch "";
+                clay.text(t, .{ .font_size = 16, .color = .{ 150, 150, 170, 255 }, .wrap_mode = .none });
+            }
+            clay.text("Tab wechselt  Enter ersetzt  Alt+Enter alle", .{ .font_size = 14, .color = .{ 120, 120, 140, 255 }, .wrap_mode = .none });
+        });
+    }
+
+    fn renderGotoWidget(self: *Self, arena: std.mem.Allocator, editor_id: clay.ElementId) void {
+        clay.UI()(.{
+            .id = clay.ElementId.ID("goto_widget"),
+            .floating = .{
+                .attach_to = .to_element_with_id,
+                .parentId = editor_id.id,
+                .attach_points = .{ .element = .center_top, .parent = .center_top },
+                .offset = .{ .x = 0, .y = 8 },
+                .z_index = 500,
+            },
+            .layout = .{
+                .sizing = .{ .w = .fit, .h = .fit },
+                .direction = .left_to_right,
+                .padding = .all(8),
+                .child_gap = 10,
+                .child_alignment = .{ .y = .center },
+            },
+            .background_color = .{ 45, 45, 60, 255 },
+            .border = .{ .width = .all(1), .color = .{ 100, 100, 120, 255 } },
+            .corner_radius = .all(4),
+        })({
+            clay.text("Go to line", .{ .font_size = 18, .color = .{ 150, 150, 170, 255 }, .wrap_mode = .none });
+            clay.UI()(.{
+                .id = clay.ElementId.ID("goto_input"),
+                .layout = .{ .sizing = .{ .w = .fixed(120), .h = .fixed(30) }, .padding = .axes(0, 8), .child_alignment = .{ .y = .center } },
+                .background_color = .{ 30, 30, 46, 255 },
+                .border = .{ .width = .all(1), .color = .{ 120, 140, 220, 255 } },
+                .corner_radius = .all(3),
+            })({
+                const shown = std.fmt.allocPrint(arena, "{s}|", .{self.goto.digits[0..self.goto.len]}) catch "";
+                clay.text(shown, .{ .font_size = 18, .color = .{ 220, 220, 240, 255 }, .wrap_mode = .none });
+            });
+            const hint = std.fmt.allocPrint(arena, "1–{d}  Enter  Esc", .{self.lineCount()}) catch "";
+            clay.text(hint, .{ .font_size = 14, .color = .{ 120, 120, 140, 255 }, .wrap_mode = .none });
+        });
     }
 
     pub fn handleKeyPress(self: *Self, key: wio.Button) void {
         std.log.debug("handleKeyPress: key={} mods={}", .{ key, self.mods });
         if (self.find.active) {
             self.handleFindKey(key);
+            return;
+        }
+        if (self.goto.active) {
+            switch (key) {
+                .escape => self.goto.active = false,
+                .backspace => self.goto.len -|= 1,
+                .enter, .kp_enter => {
+                    const n = std.fmt.parseInt(usize, self.goto.digits[0..self.goto.len], 10) catch 0;
+                    self.goto.active = false;
+                    if (n > 0) {
+                        self.cursor = .{ .row = @min(n - 1, self.lineCount() -| 1), .col = 0, .target = 0 };
+                        self.selection_anchor = null;
+                        self.ensureCursorVisible();
+                        self.recordCursorMovement();
+                    }
+                },
+                else => {},
+            }
             return;
         }
         if (self.keymap) |km| {
@@ -1578,11 +1853,40 @@ pub const CodeEditor = struct {
         const line_idx = self.lineFromY(y);
         const col = self.colFromX(x, line_idx);
 
-        const is_double_click = (self.time_ms - self.last_mouse_click_ms < 500.0) and
-            self.last_mouse_click_line == line_idx and
-            self.last_mouse_click_col == col;
+        // Ctrl+Klick: zur Definition im Text springen
+        if (self.mods.ctrl) {
+            self.gotoDefinition(line_idx, col);
+            self.mouse_down = false;
+            return;
+        }
+        // Shift+Klick: Auswahl vom Anker (oder alten Cursor) bis zum Klick erweitern
+        if (self.mods.shift) {
+            if (self.selection_anchor == null) self.selection_anchor = self.cursor;
+            self.cursor.row = line_idx;
+            self.cursor.col = col;
+            self.cursor.target = col;
+            self.mouse_down = true;
+            self.last_mouse_click_ms = self.time_ms;
+            self.recordCursorMovement();
+            self.current_line = self.cursor.row + 1;
+            return;
+        }
 
-        if (is_double_click) {
+        const quick = (self.time_ms - self.last_mouse_click_ms < 500.0) and self.last_mouse_click_line == line_idx;
+        const is_double_click = quick and self.last_mouse_click_col == col and self.click_count == 1;
+        const is_triple_click = quick and self.click_count >= 2;
+        self.click_count = if (quick) self.click_count + 1 else 1;
+
+        if (is_triple_click) {
+            // Ganze Zeile markieren (mit Umbruch, wie VS Code)
+            self.selection_anchor = .{ .row = line_idx, .col = 0, .target = 0 };
+            if (line_idx + 1 < self.lineCount()) {
+                self.cursor = .{ .row = line_idx + 1, .col = 0, .target = 0 };
+            } else {
+                const w = self.lineWidth(line_idx);
+                self.cursor = .{ .row = line_idx, .col = w, .target = w };
+            }
+        } else if (is_double_click) {
             const line_text = self.getLine(line_idx);
             const line_w = self.lineWidth(line_idx);
             const m = self.metrics();
@@ -1638,6 +1942,199 @@ pub const CodeEditor = struct {
     pub fn handleMouseUp(self: *Self) void {
         self.mouse_down = false;
         self.scrollbar_dragging = false;
+    }
+
+    /// Beim Ziehen über den oberen/unteren Rand pro Frame eine Zeile scrollen und den Cursor mitziehen.
+    fn autoScrollWhileDragging(self: *Self) void {
+        if (!self.mouse_down or self.scrollbar_dragging) return;
+        const top = self.content_origin_y;
+        const bottom = self.content_origin_y + self.height;
+        if (self.mouse_y < top) {
+            self.scrollLines(1);
+        } else if (self.mouse_y > bottom) {
+            self.scrollLines(-1);
+        } else return;
+        const line_idx = self.lineFromY(@max(top, @min(self.mouse_y, bottom - 1)));
+        self.cursor.row = line_idx;
+        self.cursor.col = self.colFromX(self.mouse_x, line_idx);
+        self.current_line = self.cursor.row + 1;
+    }
+
+    /// Wort unter (row, col) im Text suchen: erste Zeile, die wie eine Definition aussieht.
+    pub fn gotoDefinition(self: *Self, row: usize, col: usize) void {
+        const m = self.metrics();
+        const line_text = self.getLine(row);
+        const byte = @min(self.buffer.root.get_line_width_to_pos(row, col, m) catch line_text.len, line_text.len);
+        const word_src = edit_ops.wordAt(line_text, byte);
+        if (word_src.len == 0) return;
+        const word = self.allocator.dupe(u8, word_src) catch return;
+        defer self.allocator.free(word);
+        const total = self.lineCount();
+        var i: usize = 0;
+        while (i < total) : (i += 1) {
+            if (i == row) continue;
+            const l = self.getLine(i);
+            if (edit_ops.looksLikeDefinition(l, word)) {
+                const pos = std.mem.indexOf(u8, l, word) orelse 0;
+                const c = self.buffer.root.pos_to_width(i, pos, m) catch 0;
+                self.selection_anchor = null;
+                self.cursor = .{ .row = i, .col = c, .target = c };
+                self.ensureCursorVisible();
+                self.recordCursorMovement();
+                self.current_line = i + 1;
+                return;
+            }
+        }
+    }
+
+    // ───────────────────────── Zeilen-Operationen ─────────────────────────
+
+    /// Zeilenbereich der Auswahl (oder Cursorzeile); eine Auswahl, die in Spalte 0 endet,
+    /// nimmt diese letzte Zeile nicht mit (wie VS Code).
+    fn selectedLineSpan(self: *const Self) struct { first: usize, last: usize } {
+        if (self.selectionRange()) |r| {
+            var last = r.end.row;
+            if (last > r.begin.row and r.end.col == 0) last -= 1;
+            return .{ .first = r.begin.row, .last = last };
+        }
+        return .{ .first = self.cursor.row, .last = self.cursor.row };
+    }
+
+    /// Text der Zeilen first..last (ohne Umbruch am Ende) ersetzen; Cursor/Anker bleiben in ihren Zeilen.
+    fn replaceLineSpan(self: *Self, first: usize, last: usize, new_text: []const u8) void {
+        const m = self.metrics();
+        const sel: flow_core.Selection = .{
+            .begin = .{ .row = first, .col = 0 },
+            .end = .{ .row = last, .col = self.lineWidth(last) },
+        };
+        const old = self.getTextInRange(sel) catch return;
+        defer if (old.len > 0) self.allocator.free(old);
+        self.pushEditForChange(first, 0, old, new_text);
+        const deleted = self.buffer.root.delete_range(sel, self.buffer.allocator, null, m) catch return;
+        self.buffer.root = deleted;
+        const result = self.buffer.root.insert_chars(first, 0, new_text, self.buffer.allocator, m) catch return;
+        self.buffer.root = result[2];
+        self.markDirty(first, last + 1);
+    }
+
+    /// Zeilen der Auswahl als Slices sammeln (owned Kopien, weil getLine einen Scratch nutzt).
+    fn collectLines(self: *Self, first: usize, last: usize) ![][]u8 {
+        var out: std.ArrayList([]u8) = .empty;
+        errdefer {
+            for (out.items) |l| self.allocator.free(l);
+            out.deinit(self.allocator);
+        }
+        var i = first;
+        while (i <= last) : (i += 1) try out.append(self.allocator, try self.allocator.dupe(u8, self.getLine(i)));
+        return out.toOwnedSlice(self.allocator);
+    }
+
+    fn freeLines(self: *Self, lines: [][]u8) void {
+        for (lines) |l| self.allocator.free(l);
+        self.allocator.free(lines);
+    }
+
+    fn clampCols(self: *Self) void {
+        self.cursor.col = @min(self.cursor.col, self.lineWidth(self.cursor.row));
+        self.cursor.target = self.cursor.col;
+        if (self.selection_anchor) |*a| a.col = @min(a.col, self.lineWidth(a.row));
+    }
+
+    /// Tab/Shift+Tab: markierte Zeilen (oder Cursorzeile) ein-/ausrücken.
+    pub fn indentSelection(self: *Self, outdent: bool) void {
+        const span = self.selectedLineSpan();
+        const lines = self.collectLines(span.first, span.last) catch return;
+        defer self.freeLines(lines);
+        const consts: [][]const u8 = @ptrCast(lines);
+        const new_text = edit_ops.indentLines(self.allocator, consts, outdent) catch return;
+        defer self.allocator.free(new_text);
+        self.replaceLineSpan(span.first, span.last, new_text);
+        // Cursor/Anker um die Einrückung verschieben
+        const delta: usize = edit_ops.indent_unit.len;
+        if (outdent) {
+            self.cursor.col -|= delta;
+            if (self.selection_anchor) |*a| a.col -|= delta;
+        } else {
+            if (self.lineWidth(self.cursor.row) > 0) self.cursor.col += delta;
+            if (self.selection_anchor) |*a| {
+                if (self.lineWidth(a.row) > 0) a.col += delta;
+            }
+        }
+        self.clampCols();
+    }
+
+    /// Ctrl+/: Zeilenkommentar der markierten Zeilen umschalten (Präfix je Endung).
+    pub fn toggleComment(self: *Self) void {
+        const prefix = edit_ops.commentPrefixForPath(self.buffer.get_file_path()) orelse return;
+        const span = self.selectedLineSpan();
+        const lines = self.collectLines(span.first, span.last) catch return;
+        defer self.freeLines(lines);
+        const consts: [][]const u8 = @ptrCast(lines);
+        const new_text = edit_ops.toggleCommentLines(self.allocator, consts, prefix) catch return;
+        defer self.allocator.free(new_text);
+        self.replaceLineSpan(span.first, span.last, new_text);
+        self.clampCols();
+    }
+
+    /// Alt+↑/↓: markierte Zeilen um eine Zeile verschieben.
+    pub fn moveLines(self: *Self, down: bool) void {
+        const span = self.selectedLineSpan();
+        const total = self.lineCount();
+        if (down and span.last + 1 >= total) return;
+        if (!down and span.first == 0) return;
+        const lines = self.collectLines(span.first, span.last) catch return;
+        defer self.freeLines(lines);
+        const other_row = if (down) span.last + 1 else span.first - 1;
+        const other = self.allocator.dupe(u8, self.getLine(other_row)) catch return;
+        defer self.allocator.free(other);
+
+        var buf: std.ArrayList(u8) = .empty;
+        defer buf.deinit(self.allocator);
+        if (down) buf.appendSlice(self.allocator, other) catch return;
+        for (lines, 0..) |l, i| {
+            if (down or i > 0) buf.append(self.allocator, '\n') catch return;
+            buf.appendSlice(self.allocator, l) catch return;
+        }
+        if (!down) {
+            buf.append(self.allocator, '\n') catch return;
+            buf.appendSlice(self.allocator, other) catch return;
+        }
+        const first = if (down) span.first else span.first - 1;
+        const last = if (down) span.last + 1 else span.last;
+        self.replaceLineSpan(first, last, buf.items);
+        if (down) {
+            self.cursor.row += 1;
+            if (self.selection_anchor) |*a| a.row += 1;
+        } else {
+            self.cursor.row -= 1;
+            if (self.selection_anchor) |*a| a.row -= 1;
+        }
+        self.clampCols();
+        self.ensureCursorVisible();
+    }
+
+    /// Ctrl+Shift+D: markierte Zeilen (oder Cursorzeile) darunter duplizieren.
+    pub fn duplicateLines(self: *Self) void {
+        const span = self.selectedLineSpan();
+        const m = self.metrics();
+        const sel: flow_core.Selection = .{
+            .begin = .{ .row = span.first, .col = 0 },
+            .end = .{ .row = span.last, .col = self.lineWidth(span.last) },
+        };
+        const text = self.getTextInRange(sel) catch return;
+        defer if (text.len > 0) self.allocator.free(text);
+        const ins = std.mem.concat(self.allocator, u8, &.{ "\n", text }) catch return;
+        defer self.allocator.free(ins);
+        const at_col = self.lineWidth(span.last);
+        self.pushEditForChange(span.last, at_col, "", ins);
+        const result = self.buffer.root.insert_chars(span.last, at_col, ins, self.buffer.allocator, m) catch return;
+        self.buffer.root = result[2];
+        self.markDirty(span.first, span.last + 1 + (span.last - span.first));
+        const n = span.last - span.first + 1;
+        self.cursor.row += n;
+        if (self.selection_anchor) |*a| a.row += n;
+        self.clampCols();
+        self.ensureCursorVisible();
     }
 
     fn lineFromY(self: *const Self, y: f32) usize {
@@ -1774,10 +2271,56 @@ pub const CodeEditor = struct {
             self.handleFindChar(char_code);
             return;
         }
+        if (self.goto.active) {
+            if (char_code >= '0' and char_code <= '9' and self.goto.len < self.goto.digits.len) {
+                self.goto.digits[self.goto.len] = @intCast(char_code);
+                self.goto.len += 1;
+            }
+            return;
+        }
 
         if (!self.typing_in_progress) {
             self.snapshotForUndo();
             self.typing_in_progress = true;
+        }
+
+        // Autoclose: Klammern und Anführungszeichen als Paar, Schließen springt drüber
+        if (edit_ops.closerFor(char_code)) |closer| {
+            if (!self.hasSelection()) {
+                const line_text = self.getLine(self.cursor.row);
+                const byte_pos = @min(self.buffer.root.get_line_width_to_pos(self.cursor.row, self.cursor.col, self.metrics()) catch line_text.len, line_text.len);
+                const prev_b: ?u8 = if (byte_pos > 0) line_text[byte_pos - 1] else null;
+                const next_b: ?u8 = if (byte_pos < line_text.len) line_text[byte_pos] else null;
+                switch (edit_ops.autoclosePolicy(char_code, prev_b, next_b)) {
+                    .skip_over => {
+                        self.cursor.col += 1;
+                        self.cursor.target = self.cursor.col;
+                        self.recordCursorMovement();
+                        return;
+                    },
+                    .insert_pair => {
+                        const pair = [_]u8{ @intCast(char_code), closer };
+                        self.insertString(&pair) catch return;
+                        self.cursor.col -= 1;
+                        self.cursor.target = self.cursor.col;
+                        self.recordCursorMovement();
+                        return;
+                    },
+                    .plain => {},
+                }
+            }
+        } else if (char_code == ')' or char_code == ']' or char_code == '}') {
+            if (!self.hasSelection()) {
+                const line_text = self.getLine(self.cursor.row);
+                const byte_pos = @min(self.buffer.root.get_line_width_to_pos(self.cursor.row, self.cursor.col, self.metrics()) catch line_text.len, line_text.len);
+                const next_b: ?u8 = if (byte_pos < line_text.len) line_text[byte_pos] else null;
+                if (edit_ops.autoclosePolicy(char_code, null, next_b) == .skip_over) {
+                    self.cursor.col += 1;
+                    self.cursor.target = self.cursor.col;
+                    self.recordCursorMovement();
+                    return;
+                }
+            }
         }
 
         if (self.deleteSelection()) {}
@@ -1824,6 +2367,8 @@ pub const CodeEditor = struct {
             .background_color = self.bg_color,
         })({
             if (self.find.active) self.renderFindWidget(arena, editor_id);
+            if (self.goto.active) self.renderGotoWidget(arena, editor_id);
+            self.autoScrollWhileDragging();
             // pointerOver must be called INSIDE clay.UI where Clay's internal state is valid
             if (clay.pointerOver(editor_id)) {
                 self.last_frame_hovered = true;
@@ -2589,4 +3134,135 @@ test "lange Zeile: Cursor am Ende scrollt die Ansicht horizontal, sichtbarer Aus
     try std.testing.expectEqual(@as(usize, 8), t.ed.view.col);
     t.ed.scrollColumns(20);
     try std.testing.expectEqual(@as(usize, 0), t.ed.view.col);
+}
+
+fn editorText(ed: *CodeEditor) ![]u8 {
+    const last = ed.lineCount() -| 1;
+    return ed.getTextInRange(.{ .begin = .{ .row = 0, .col = 0 }, .end = .{ .row = last, .col = 100_000 } });
+}
+
+test "Enter übernimmt die Einrückung und rückt nach { eine Stufe ein; }-Paar wird aufgespannt" {
+    var t = try testEditor(std.testing.allocator, "    if (x) {}");
+    defer t.buffer.deinit();
+    defer t.ed.deinit();
+    t.ed.cursor = .{ .row = 0, .col = 12, .target = 12 }; // zwischen { und }
+    t.ed.handleKeyPress(.enter);
+    const text = try editorText(&t.ed);
+    defer std.testing.allocator.free(text);
+    try std.testing.expectEqualStrings("    if (x) {\n        \n    }", text);
+    try std.testing.expectEqual(@as(usize, 1), t.ed.cursor.row);
+    try std.testing.expectEqual(@as(usize, 8), t.ed.cursor.col);
+}
+
+test "Autoclose: ( fügt () ein, ) springt drüber, Backspace löscht das leere Paar, it's bleibt" {
+    var t = try testEditor(std.testing.allocator, "");
+    defer t.buffer.deinit();
+    defer t.ed.deinit();
+    t.ed.handleChar('(');
+    var text = try editorText(&t.ed);
+    try std.testing.expectEqualStrings("()", text);
+    std.testing.allocator.free(text);
+    try std.testing.expectEqual(@as(usize, 1), t.ed.cursor.col);
+    t.ed.handleChar(')');
+    text = try editorText(&t.ed);
+    try std.testing.expectEqualStrings("()", text);
+    std.testing.allocator.free(text);
+    try std.testing.expectEqual(@as(usize, 2), t.ed.cursor.col);
+    t.ed.handleKeyPress(.backspace);
+    t.ed.handleKeyPress(.backspace);
+    text = try editorText(&t.ed);
+    try std.testing.expectEqualStrings("", text);
+    std.testing.allocator.free(text);
+    for ("it") |c| t.ed.handleChar(c);
+    t.ed.handleChar('\'');
+    t.ed.handleChar('s');
+    text = try editorText(&t.ed);
+    try std.testing.expectEqualStrings("it's", text);
+    std.testing.allocator.free(text);
+}
+
+test "Tab rückt eine mehrzeilige Auswahl ein, Shift+Tab wieder aus" {
+    var t = try testEditor(std.testing.allocator, "a\nb\nc");
+    defer t.buffer.deinit();
+    defer t.ed.deinit();
+    t.ed.selection_anchor = .{ .row = 0, .col = 0, .target = 0 };
+    t.ed.cursor = .{ .row = 1, .col = 1, .target = 1 };
+    t.ed.handleKeyPress(.tab);
+    var text = try editorText(&t.ed);
+    try std.testing.expectEqualStrings("    a\n    b\nc", text);
+    std.testing.allocator.free(text);
+    t.ed.dispatchAction(.OutdentLines);
+    text = try editorText(&t.ed);
+    try std.testing.expectEqualStrings("a\nb\nc", text);
+    std.testing.allocator.free(text);
+}
+
+test "Ctrl+/ kommentiert die Cursorzeile je Endung und wieder aus" {
+    var t = try testEditor(std.testing.allocator, "const x = 1;\nconst y = 2;");
+    defer t.buffer.deinit();
+    defer t.ed.deinit();
+    t.buffer.set_file_path("/tmp/x.zig");
+    t.ed.cursor = .{ .row = 1, .col = 3, .target = 3 };
+    t.ed.dispatchAction(.ToggleComment);
+    var text = try editorText(&t.ed);
+    try std.testing.expectEqualStrings("const x = 1;\n// const y = 2;", text);
+    std.testing.allocator.free(text);
+    t.ed.dispatchAction(.ToggleComment);
+    text = try editorText(&t.ed);
+    try std.testing.expectEqualStrings("const x = 1;\nconst y = 2;", text);
+    std.testing.allocator.free(text);
+}
+
+test "Alt+↓ / Alt+↑ verschieben die Zeile, Ctrl+Shift+D dupliziert sie" {
+    var t = try testEditor(std.testing.allocator, "one\ntwo\nthree");
+    defer t.buffer.deinit();
+    defer t.ed.deinit();
+    t.ed.cursor = .{ .row = 0, .col = 2, .target = 2 };
+    t.ed.dispatchAction(.MoveLineDown);
+    var text = try editorText(&t.ed);
+    try std.testing.expectEqualStrings("two\none\nthree", text);
+    std.testing.allocator.free(text);
+    try std.testing.expectEqual(@as(usize, 1), t.ed.cursor.row);
+    t.ed.dispatchAction(.MoveLineUp);
+    text = try editorText(&t.ed);
+    try std.testing.expectEqualStrings("one\ntwo\nthree", text);
+    std.testing.allocator.free(text);
+    try std.testing.expectEqual(@as(usize, 0), t.ed.cursor.row);
+    t.ed.dispatchAction(.DuplicateLine);
+    text = try editorText(&t.ed);
+    try std.testing.expectEqualStrings("one\none\ntwo\nthree", text);
+    std.testing.allocator.free(text);
+    try std.testing.expectEqual(@as(usize, 1), t.ed.cursor.row);
+}
+
+test "Ersetzen: replaceAll ersetzt alle Treffer, Gehe zu Zeile springt" {
+    var t = try testEditor(std.testing.allocator, "foo bar foo\nbaz foo");
+    defer t.buffer.deinit();
+    defer t.ed.deinit();
+    t.ed.findText("foo");
+    t.ed.find.replace_mode = true;
+    @memcpy(t.ed.find.replacement[0..2], "XY");
+    t.ed.find.replacement_len = 2;
+    const n = t.ed.replaceAll();
+    try std.testing.expectEqual(@as(usize, 3), n);
+    const text = try editorText(&t.ed);
+    defer std.testing.allocator.free(text);
+    try std.testing.expectEqualStrings("XY bar XY\nbaz XY", text);
+
+    t.ed.closeFind();
+    t.ed.dispatchAction(.GotoLine);
+    try std.testing.expect(t.ed.goto.active);
+    t.ed.handleChar('2');
+    t.ed.handleKeyPress(.enter);
+    try std.testing.expect(!t.ed.goto.active);
+    try std.testing.expectEqual(@as(usize, 1), t.ed.cursor.row);
+}
+
+test "gotoDefinition springt zur fn-Zeile des Worts unter dem Cursor" {
+    var t = try testEditor(std.testing.allocator, "pub fn hello() void {}\n\nfn main() void {\n    hello();\n}");
+    defer t.buffer.deinit();
+    defer t.ed.deinit();
+    t.ed.gotoDefinition(3, 6);
+    try std.testing.expectEqual(@as(usize, 0), t.ed.cursor.row);
+    try std.testing.expectEqual(@as(usize, 7), t.ed.cursor.col);
 }

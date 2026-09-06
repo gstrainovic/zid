@@ -100,8 +100,17 @@ pub const Keymap = struct {
 
         // Delete line (wie VS Code Ctrl+Shift+K). Muss zu src/ui/shortcuts.zig passen.
         try km.bind(.k, .{ .ctrl = true, .shift = true }, .DeleteLine);
-        // Suchleiste
+        // Suchleiste, Ersetzen, Gehe zu Zeile
         try km.bind(.f, .{ .ctrl = true }, .Search);
+        try km.bind(.h, .{ .ctrl = true }, .Replace);
+        try km.bind(.g, .{ .ctrl = true }, .GotoLine);
+        // Bearbeiten (wie VS Code). Muss zu src/ui/shortcuts.zig passen.
+        try km.bind(.tab, .{ .shift = true }, .OutdentLines);
+        try km.bind(.slash, .{ .ctrl = true }, .ToggleComment);
+        try km.bind(.up, .{ .alt = true }, .MoveLineUp);
+        try km.bind(.down, .{ .alt = true }, .MoveLineDown);
+        try km.bind(.d, .{ .ctrl = true, .shift = true }, .DuplicateLine);
+        try km.bind(.f12, .{}, .GotoDefinition);
 
         // Context Menu
         try km.bind(.mouse_right, .{}, .ShowContextMenu);

@@ -426,6 +426,7 @@ pub fn main() !void {
                     .file_changed, .file_created, .file_deleted => {
                         log.debug("file event: {} for {s}", .{ result.tag, result.payload });
                         git_refresh.mark(std.time.milliTimestamp());
+                        if (result.tag == .file_changed) ui_system.handleExternalChange(result.payload);
                     },
                     else => {},
                 }

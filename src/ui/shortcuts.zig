@@ -10,7 +10,7 @@ const std = @import("std");
 pub const Key = enum {
     a, b, c, d, e, f, g, h, j, k, n, o, p, r, s, t, v, w, x, y, z,
     n1, n2, n3, n4, n5, n6, n7, n8, n9,
-    tab, grave, backslash, f1, f2, f5, delete, escape, enter, page_up, page_down, left, right, up, down,
+    tab, grave, backslash, slash, f1, f2, f5, f12, delete, escape, enter, page_up, page_down, left, right, up, down,
 };
 
 pub const Mods = struct {
@@ -76,6 +76,22 @@ pub const Command = enum {
     goto_tab_7,
     goto_tab_8,
     goto_tab_9,
+    // Editor (Keymap in src/editor/keymap.zig)
+    toggle_comment,
+    move_line_up,
+    move_line_down,
+    duplicate_line,
+    goto_line,
+    replace,
+    outdent_lines,
+    goto_definition,
+    // Panes / Fokus
+    focus_pane_left,
+    focus_pane_right,
+    focus_pane_up,
+    focus_pane_down,
+    focus_explorer,
+    toggle_terminal,
     show_shortcuts,
 };
 
@@ -134,6 +150,23 @@ pub const bindings = [_]Binding{
     .{ .command = .goto_tab_7, .key = .n7, .mods = .{ .ctrl = true } },
     .{ .command = .goto_tab_8, .key = .n8, .mods = .{ .ctrl = true } },
     .{ .command = .goto_tab_9, .key = .n9, .mods = .{ .ctrl = true } },
+    // Editor-Bearbeitung
+    .{ .command = .toggle_comment, .key = .slash, .mods = .{ .ctrl = true }, .scope = .editor },
+    .{ .command = .move_line_up, .key = .up, .mods = .{ .alt = true }, .scope = .editor },
+    .{ .command = .move_line_down, .key = .down, .mods = .{ .alt = true }, .scope = .editor },
+    .{ .command = .duplicate_line, .key = .d, .mods = .{ .ctrl = true, .shift = true }, .scope = .editor },
+    .{ .command = .goto_line, .key = .g, .mods = .{ .ctrl = true }, .scope = .editor },
+    .{ .command = .replace, .key = .h, .mods = .{ .ctrl = true }, .scope = .editor },
+    .{ .command = .outdent_lines, .key = .tab, .mods = .{ .shift = true }, .scope = .editor },
+    .{ .command = .goto_definition, .key = .f12, .scope = .editor },
+    // Panes / Fokus (Ctrl+K + Pfeil geht zusätzlich als Chord, siehe UI.handleKeyPress)
+    .{ .command = .split_vertical, .key = .backslash, .mods = .{ .ctrl = true } },
+    .{ .command = .focus_pane_left, .key = .left, .mods = .{ .ctrl = true, .alt = true } },
+    .{ .command = .focus_pane_right, .key = .right, .mods = .{ .ctrl = true, .alt = true } },
+    .{ .command = .focus_pane_up, .key = .up, .mods = .{ .ctrl = true, .alt = true } },
+    .{ .command = .focus_pane_down, .key = .down, .mods = .{ .ctrl = true, .alt = true } },
+    .{ .command = .focus_explorer, .key = .e, .mods = .{ .ctrl = true, .shift = true } },
+    .{ .command = .toggle_terminal, .key = .j, .mods = .{ .ctrl = true } },
     .{ .command = .show_shortcuts, .key = .f1 },
 };
 
@@ -148,8 +181,8 @@ pub const Menu = struct { title: []const u8, items: []const Command };
 /// Menüleiste im Header, in dieser Reihenfolge.
 pub const menus = [_]Menu{
     .{ .title = "File", .items = &.{ .new_file, .save, .open_folder, .close_tab, .close_all_tabs, .reopen_closed_tab } },
-    .{ .title = "Edit", .items = &.{ .undo, .redo, .cut, .copy, .paste, .select_all, .delete_line, .find } },
-    .{ .title = "View", .items = &.{ .toggle_explorer, .split_vertical, .split_horizontal, .md_preview, .new_terminal } },
+    .{ .title = "Edit", .items = &.{ .undo, .redo, .cut, .copy, .paste, .select_all, .delete_line, .duplicate_line, .move_line_up, .move_line_down, .toggle_comment, .find, .replace, .goto_line, .goto_definition } },
+    .{ .title = "View", .items = &.{ .toggle_explorer, .focus_explorer, .split_vertical, .split_horizontal, .md_preview, .new_terminal, .toggle_terminal } },
     .{ .title = "Help", .items = &.{.show_shortcuts} },
 };
 
@@ -220,6 +253,20 @@ pub fn label(command: Command) []const u8 {
         .goto_tab_7 => "Go to Tab 7",
         .goto_tab_8 => "Go to Tab 8",
         .goto_tab_9 => "Go to Tab 9",
+        .toggle_comment => "Toggle Line Comment",
+        .move_line_up => "Move Line Up",
+        .move_line_down => "Move Line Down",
+        .duplicate_line => "Duplicate Line",
+        .goto_line => "Go to Line…",
+        .replace => "Replace",
+        .outdent_lines => "Outdent Lines",
+        .goto_definition => "Go to Definition",
+        .focus_pane_left => "Focus Pane Left",
+        .focus_pane_right => "Focus Pane Right",
+        .focus_pane_up => "Focus Pane Up",
+        .focus_pane_down => "Focus Pane Down",
+        .focus_explorer => "Focus Explorer",
+        .toggle_terminal => "Toggle Terminal",
         .show_shortcuts => "Keyboard Shortcuts",
     };
 }
@@ -246,7 +293,7 @@ fn keyName(key: Key) []const u8 {
         .k => "K", .n => "N", .o => "O", .p => "P", .r => "R", .s => "S", .t => "T", .v => "V", .w => "W",
         .x => "X", .y => "Y", .z => "Z",
         .n1 => "1", .n2 => "2", .n3 => "3", .n4 => "4", .n5 => "5", .n6 => "6", .n7 => "7", .n8 => "8", .n9 => "9",
-        .tab => "Tab", .grave => "`", .backslash => "\\", .f1 => "F1", .f2 => "F2", .f5 => "F5", .delete => "Del",
+        .tab => "Tab", .grave => "`", .backslash => "\\", .slash => "/", .f1 => "F1", .f2 => "F2", .f5 => "F5", .f12 => "F12", .delete => "Del",
         .escape => "Esc", .enter => "Enter", .page_up => "PgUp", .page_down => "PgDn",
         .left => "←", .right => "→", .up => "↑", .down => "↓",
     };
@@ -280,7 +327,8 @@ test "shortcutText: Anzeige-Text pro Command, leer wenn ohne Taste" {
     try testing.expectEqualStrings("Ctrl+`", shortcutText(.new_terminal));
     try testing.expectEqualStrings("F2", shortcutText(.rename_entry));
     try testing.expectEqualStrings("Del", shortcutText(.delete_entry));
-    try testing.expectEqualStrings("", shortcutText(.split_vertical));
+    try testing.expectEqualStrings("Ctrl+\\", shortcutText(.split_vertical));
+    try testing.expectEqualStrings("", shortcutText(.md_preview));
 }
 
 test "Explorer-Buchstaben: d löscht, r benennt um, a legt an, Shift+A Ordner, y/x/p Zwischenablage" {
@@ -310,6 +358,19 @@ test "Tab-Kürzel: Ctrl+Shift+T, Ctrl+PgUp/PgDn, Ctrl+1..9" {
     try testing.expectEqual(Command.goto_tab_9, lookup(.n9, .{ .ctrl = true }, .global).?);
     try testing.expectEqual(Command.save, lookup(.s, .{ .ctrl = true }, .global).?);
     for (tab_menu_items) |cmd| try testing.expect(label(cmd).len > 0);
+}
+
+test "Editor- und Pane-Kürzel stehen in der Tabelle" {
+    try testing.expectEqual(Command.toggle_comment, lookup(.slash, .{ .ctrl = true }, .editor).?);
+    try testing.expectEqual(Command.move_line_down, lookup(.down, .{ .alt = true }, .editor).?);
+    try testing.expectEqual(Command.goto_line, lookup(.g, .{ .ctrl = true }, .editor).?);
+    try testing.expectEqual(Command.replace, lookup(.h, .{ .ctrl = true }, .editor).?);
+    try testing.expectEqual(Command.split_vertical, lookup(.backslash, .{ .ctrl = true }, .global).?);
+    try testing.expectEqual(Command.focus_pane_right, lookup(.right, .{ .ctrl = true, .alt = true }, .global).?);
+    try testing.expectEqual(Command.focus_explorer, lookup(.e, .{ .ctrl = true, .shift = true }, .global).?);
+    try testing.expectEqual(Command.toggle_terminal, lookup(.j, .{ .ctrl = true }, .global).?);
+    try testing.expectEqualStrings("Ctrl+/", shortcutText(.toggle_comment));
+    try testing.expectEqualStrings("Alt+↑", shortcutText(.move_line_up));
 }
 
 test "Tabelle: keine doppelte Belegung innerhalb eines Scopes" {
