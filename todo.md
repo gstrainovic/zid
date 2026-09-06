@@ -24,9 +24,7 @@ Belege aus der Sitzung vom 06.09.2026 (Log mit Panic in `gpu_renderer.zig:305`) 
 
 ## Editor
 
-- [ ] **P2 Ctrl+P Datei-Schnellöffner** (fuzzy) und **Ctrl+Shift+P Command Palette** über die
-      Kürzel-Tabelle (Ctrl+G und Ctrl+H gibt es seit 06.09.2026; Regex/Case-Toggle in der Suche und
-      Tabs/Breitzeichen in `find_ops` bleiben offen).
+- [ ] **P3 Suche: Regex/Case-Toggle**, Tabs/Breitzeichen in `find_ops` (zählt Codepoints).
 - [ ] **P3 LSP anbinden**: `lsp_client.zig` kann definition/hover/completion, wird aber nirgends
       gestartet; Ctrl+Klick/F12 springen heute per Textmuster (`edit_ops.looksLikeDefinition`) nur
       innerhalb der Datei.

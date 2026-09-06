@@ -261,6 +261,19 @@ echo -e "open ./README.md\nget-state\nshutdown" | zig build run -- --interactive
 - RPCs: `key_press_alt(name, ctrl, shift, alt)`, `click_mods(x, y, ctrl, shift)`, `editor_state.selection`,
   `ui_state.active_pane_index`. `python3 scripts/e2e_editor.py` deckt alles ab.
 
+## Schnellöffner (Ctrl+P) und Command Palette (Ctrl+Shift+P)
+
+- `src/ui/picker.zig`: ein modaler Picker für beide Modi, Matching in `src/ui/fuzzy.zig` (unit-getestet:
+  Teilfolge in Reihenfolge, Bonus für zusammenhängende Treffer, Wortanfänge, Dateinamen). Die Palette
+  listet alle `shortcuts.Command` mit Label und Kürzel; Enter läuft über `executeCommand`.
+- Dateiliste: Hintergrund-Thread (`scanWorker`, Breitensuche, versteckte und `zig-out`/`node_modules`/…
+  übersprungen, max. 100 000), Ergebnis kommt per Mutex in `poll()` (jeden Frame aus `update`). Labels
+  liegen in einer Arena: 30 000 einzelne `free()` mit dem Debug-Allocator dauerten Sekunden und
+  blockierten den Main-Thread. Cache 10 s je Root. Der Picker erscheint sofort, „Scanning…“ im Hinweis.
+- `filter()` tauscht die Trefferliste erst nach dem Ranking (der RPC-Thread liest nebenläufig).
+- RPC `picker_state` (open, scanning, mode, query, matches, items, selected, selected_label);
+  `python3 scripts/e2e_picker.py`.
+
 ## Tab-Leiste
 
 - **Vorschau-Tabs** (`Tab.preview`): Einfachklick oder Space im Explorer öffnet als Vorschau (Text in
