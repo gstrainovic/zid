@@ -11,6 +11,12 @@ const chat_markdown = @import("chat_markdown");
 const MarkdownView = @import("markdown_view.zig").MarkdownView;
 const ui_mod = @import("mod.zig");
 const ai_tools = @import("ai_tools");
+const ai_history = @import("ai_history");
+
+/// Zeichenbudget für die mitgeschickte Historie. llama-server läuft mit `-c 8192`; Tools-Schema
+/// (~6,5 k Zeichen) und Systemprompt kosten ~2 k Tokens, die Antwort braucht Platz, und ein
+/// 8000-Token-Prompt dauerte auf der P1000 123 s. 12 000 Zeichen ≈ 3–4 k Tokens.
+pub const history_budget_chars: usize = 12_000;
 
 const log = std.log.scoped(.ai_chat);
 
@@ -485,7 +491,16 @@ pub const AIChatState = struct {
         {
             self.mutex.lock();
             defer self.mutex.unlock();
+            var entries: std.ArrayListUnmanaged(ai_history.Entry) = .empty;
+            defer entries.deinit(self.allocator);
             for (self.messages.items) |m| {
+                const role: ai_history.Role = if (std.mem.eql(u8, m.role, "tool")) .tool else if (std.mem.eql(u8, m.role, "assistant")) .assistant else .user;
+                const extra = if (m.tool_calls_json) |t| t.len else 0;
+                try entries.append(self.allocator, .{ .role = role, .chars = m.content.len + extra });
+            }
+            const from = ai_history.keepFrom(entries.items, history_budget_chars);
+            if (from > 0) log.info("chat history trimmed: sending {d} of {d} messages", .{ self.messages.items.len - from, self.messages.items.len });
+            for (self.messages.items[from..]) |m| {
                 try api_messages.append(self.allocator, .{ .role = m.role, .content = m.content, .tool_calls = m.tool_calls_json, .tool_call_id = m.tool_call_id });
             }
         }
@@ -510,7 +525,11 @@ pub const AIChatState = struct {
     pub fn handleError(self: *Self, payload: []const u8) void {
         log.err("AI task error: {s}", .{payload});
         self.clearStream();
-        self.addMessage("assistant", "Error communicating with AI agent.") catch {};
+        const text = if (std.mem.eql(u8, payload, "ContextTooLong"))
+            "The request exceeds the model's context window (8192 tokens). Start a new chat or ask about a smaller file."
+        else
+            "Error communicating with AI agent.";
+        self.addMessage("assistant", text) catch {};
         self.is_loading = false;
     }
 
