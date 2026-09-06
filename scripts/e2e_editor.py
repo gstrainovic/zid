@@ -195,7 +195,44 @@ def step_external_change():
     check(not dialog_open() and "Q" in text(), "Keep Mine behält die eigenen Änderungen")
 
 
-STEPS = [step_autoclose_and_indent, step_comment_move_duplicate, step_goto_replace, step_mouse, step_status_bar, step_panes, step_external_change]
+def step_visuals():
+    print("--- Klammerpaar, Minimap, Whitespace, Einrück-Guides")
+    rpc("open_file", [SRC]); settle(10)
+    rpc("click", [700, 300]); settle()
+    key("s", ctrl=True); settle(10)
+    time.sleep(0.5)
+    with open(SRC, "w") as f:
+        f.write("pub fn hello() void {}\n\nfn main() void {\n    hello();\n}\n")
+    t0 = time.time()
+    while time.time() - t0 < 5 and "fn main() void {" not in text():
+        time.sleep(0.1)
+    check("fn main() void {" in text(), "Fixture wieder geladen")
+    idx = text().split("\n").index("fn main() void {")
+    goto_line(idx + 1)
+    key("end")
+    st = ed()
+    check(st["bracket_pair"] is not None and st["bracket_pair"][0] == [idx, len("fn main() void {") - 1], f"Cursor hinter {{ markiert das Paar: {st['bracket_pair']}")
+    check(st["bracket_pair"][1][0] > idx, "Partner-Klammer liegt in einer späteren Zeile")
+    check(st["minimap"] and st["indent_guides"] and not st["whitespace"], "Standard: Minimap und Guides an, Whitespace aus")
+    shot("e2e_editor_visuals.ppm")
+    key("p", ctrl=True, shift=True); settle()
+    rpc("type_text", ["render whitespace"]); settle(10)
+    key("enter"); settle(10)
+    check(ed()["whitespace"], "Toggle Render Whitespace")
+    key("p", ctrl=True, shift=True); settle()
+    rpc("type_text", ["toggle minimap"]); settle(10)
+    key("enter"); settle(10)
+    check(not ed()["minimap"], "Toggle Minimap aus")
+    shot("e2e_editor_whitespace.ppm")
+    key("p", ctrl=True, shift=True); settle()
+    rpc("type_text", ["toggle minimap"]); settle(10)
+    key("enter"); settle(10)
+    key("p", ctrl=True, shift=True); settle()
+    rpc("type_text", ["render whitespace"]); settle(10)
+    key("enter"); settle(10)
+
+
+STEPS = [step_autoclose_and_indent, step_comment_move_duplicate, step_goto_replace, step_mouse, step_status_bar, step_panes, step_external_change, step_visuals]
 
 
 def main():
