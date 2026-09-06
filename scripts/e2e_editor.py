@@ -295,7 +295,40 @@ def step_multicursor():
     check(not text().startswith("-"), "Undo nimmt die Mehrfach-Eingabe in einem Schritt zurück")
 
 
-STEPS = [step_autoclose_and_indent, step_comment_move_duplicate, step_goto_replace, step_mouse, step_status_bar, step_panes, step_external_change, step_visuals, step_search_options, step_multicursor]
+def step_word_wrap():
+    print("--- Word-Wrap (Alt+Z): lange Zeile in mehreren Reihen, Klick in die zweite Reihe")
+    rpc("open_file", [SRC]); settle(10)
+    rpc("click", [EDITOR_X, EDITOR_Y]); settle()
+    key("s", ctrl=True); settle(10)
+    time.sleep(0.5)
+    long_line = " ".join(f"w{i:03d}" for i in range(60))  # 299 Zeichen
+    with open(SRC, "w") as f:
+        f.write(long_line + "\nzwei\ndrei\n")
+    t0 = time.time()
+    while time.time() - t0 < 5 and "w059" not in text():
+        time.sleep(0.1)
+    check("w059" in text(), "Fixture mit langer Zeile geladen")
+    check(not ed()["word_wrap"], "Word-Wrap ist standardmäßig aus")
+    check(not result_json("element_bounds_i", ["codew", 1])["found"], "ohne Wrap keine Fortsetzungsreihe")
+    key_alt("z")
+    check(ed()["word_wrap"], "Alt+Z schaltet Word-Wrap ein")
+    cont = result_json("element_bounds_i", ["codew", 1])
+    check(cont["found"], "zweite Reihe der langen Zeile hat ein Layout-Element")
+    first = result_json("element_bounds_i", ["code", 0])
+    check(cont["y"] > first["y"], "Fortsetzungsreihe liegt unter der ersten")
+    goto_line(1)
+    check(ed()["visual_rows"] >= 5, f"lange Zeile belegt {ed()['visual_rows']} Reihen")
+    rpc("click", [cont["x"] + 20, cont["y"] + cont["h"] / 2]); settle()
+    st = ed()
+    check(st["row"] == 0 and st["col"] >= 10, f"Klick in die zweite Reihe bleibt in Zeile 1, Spalte {st['col']}")
+    shot("e2e_editor_wordwrap.ppm")
+    key_alt("z")
+    check(not ed()["word_wrap"], "Alt+Z schaltet Word-Wrap wieder aus")
+    # Clay behält getElementData für nicht mehr gerenderte IDs, deshalb über den Zustand prüfen
+    check(ed()["visual_rows"] == 1, "lange Zeile belegt wieder eine Reihe")
+
+
+STEPS = [step_autoclose_and_indent, step_comment_move_duplicate, step_goto_replace, step_mouse, step_status_bar, step_panes, step_external_change, step_visuals, step_search_options, step_multicursor, step_word_wrap]
 
 
 def main():
@@ -304,7 +337,7 @@ def main():
     proc = subprocess.Popen(
         [os.path.join(ROOT, "zig-out", "bin", "vulkan-ed"), "--headless", "--ai=off"],
         cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
-        env=dict(os.environ, XDG_DATA_HOME=os.path.join(ROOT, "tmp", "xdg")),
+        env=dict(os.environ, XDG_DATA_HOME=os.path.join(ROOT, "tmp", "xdg"), XDG_CONFIG_HOME=os.path.join(ROOT, "tmp", "xdg-config")),
     )
     try:
         wait_port(proc)

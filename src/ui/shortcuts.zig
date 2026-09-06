@@ -107,6 +107,7 @@ pub const Command = enum {
     toggle_minimap,
     toggle_whitespace,
     toggle_indent_guides,
+    toggle_word_wrap,
     show_shortcuts,
 };
 
@@ -169,6 +170,7 @@ pub const bindings = [_]Binding{
     .{ .command = .goto_tab_9, .key = .n9, .mods = .{ .ctrl = true } },
     // Editor-Bearbeitung
     .{ .command = .toggle_comment, .key = .slash, .mods = .{ .ctrl = true }, .scope = .editor },
+    .{ .command = .toggle_word_wrap, .key = .z, .mods = .{ .alt = true } },
     .{ .command = .move_line_up, .key = .up, .mods = .{ .alt = true }, .scope = .editor },
     .{ .command = .move_line_down, .key = .down, .mods = .{ .alt = true }, .scope = .editor },
     .{ .command = .duplicate_line, .key = .d, .mods = .{ .ctrl = true, .shift = true }, .scope = .editor },
@@ -205,7 +207,7 @@ pub const Menu = struct { title: []const u8, items: []const Command };
 pub const menus = [_]Menu{
     .{ .title = "File", .items = &.{ .new_file, .quick_open, .save, .toggle_autosave, .open_folder, .close_tab, .close_all_tabs, .reopen_closed_tab } },
     .{ .title = "Edit", .items = &.{ .undo, .redo, .cut, .copy, .paste, .select_all, .delete_line, .duplicate_line, .move_line_up, .move_line_down, .toggle_comment, .find, .replace, .goto_line, .goto_definition, .select_next_occurrence, .add_cursor_above, .add_cursor_below } },
-    .{ .title = "View", .items = &.{ .toggle_explorer, .focus_explorer, .split_vertical, .split_horizontal, .md_preview, .new_terminal, .toggle_terminal, .toggle_theme, .zoom_in, .zoom_out, .zoom_reset, .toggle_minimap, .toggle_whitespace, .toggle_indent_guides } },
+    .{ .title = "View", .items = &.{ .toggle_explorer, .focus_explorer, .split_vertical, .split_horizontal, .md_preview, .new_terminal, .toggle_terminal, .toggle_theme, .zoom_in, .zoom_out, .zoom_reset, .toggle_minimap, .toggle_whitespace, .toggle_indent_guides, .toggle_word_wrap } },
     .{ .title = "Help", .items = &.{ .command_palette, .show_shortcuts } },
 };
 
@@ -304,6 +306,7 @@ pub fn label(command: Command) []const u8 {
         .toggle_autosave => "Toggle Autosave",
         .toggle_minimap => "Toggle Minimap",
         .toggle_whitespace => "Toggle Render Whitespace",
+        .toggle_word_wrap => "Toggle Word Wrap",
         .toggle_indent_guides => "Toggle Indent Guides",
         .show_shortcuts => "Keyboard Shortcuts",
     };

@@ -401,6 +401,14 @@ pub fn build(b: *std.Build) void {
     const run_fuzzy_tests = b.addRunArtifact(fuzzy_tests);
     run_fuzzy_tests.has_side_effects = true;
 
+    const wrap_ops_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("src/editor/wrap_ops.zig"),
+        .target = target,
+        .optimize = optimize,
+    }) });
+    const run_wrap_ops_tests = b.addRunArtifact(wrap_ops_tests);
+    run_wrap_ops_tests.has_side_effects = true;
+
     const edit_ops_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("src/editor/edit_ops.zig"),
         .target = target,
@@ -457,6 +465,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_folder_ops_tests.step);
     test_step.dependOn(&run_shortcuts_tests.step);
     test_step.dependOn(&run_find_ops_tests.step);
+    test_step.dependOn(&run_wrap_ops_tests.step);
     test_step.dependOn(&run_device_select_tests.step);
     test_step.dependOn(&run_ai_history_tests.step);
     test_step.dependOn(&run_ai_tools_tests.step);

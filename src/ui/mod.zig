@@ -1410,11 +1410,12 @@ pub const UI = struct {
             },
             .toggle_minimap => self.toggleEditorOption(.minimap),
             .toggle_whitespace => self.toggleEditorOption(.whitespace),
+            .toggle_word_wrap => self.toggleEditorOption(.word_wrap),
             .toggle_indent_guides => self.toggleEditorOption(.indent_guides),
         }
     }
 
-    pub const EditorOption = enum { minimap, whitespace, indent_guides };
+    pub const EditorOption = enum { minimap, whitespace, indent_guides, word_wrap };
 
     /// Anzeigeoption in allen Editoren umschalten (gemerkt).
     fn toggleEditorOption(self: *Self, opt: EditorOption) void {
@@ -1423,6 +1424,7 @@ pub const UI = struct {
             .minimap => !ed.show_minimap,
             .whitespace => !ed.show_whitespace,
             .indent_guides => !ed.show_indent_guides,
+            .word_wrap => !ed.word_wrap,
         };
         var buf: [32]*pane_mod.Pane = undefined;
         var n: usize = 0;
@@ -1433,6 +1435,10 @@ pub const UI = struct {
                 .minimap => e.show_minimap = new_value,
                 .whitespace => e.show_whitespace = new_value,
                 .indent_guides => e.show_indent_guides = new_value,
+                .word_wrap => {
+                    e.word_wrap = new_value;
+                    e.ensureCursorVisible();
+                },
             }
         }
         self.showToast("{s} {s}", .{ @tagName(opt), if (new_value) "on" else "off" });
@@ -1441,6 +1447,17 @@ pub const UI = struct {
 
     pub fn isLightTheme(self: *const Self) bool {
         return self.theme.bg[0] > 128;
+    }
+
+    /// Neue Editoren (Split) übernehmen Anzeigeoptionen, Schriftgröße und Theme des Ausgangs-Editors;
+    /// vorher startete ein gesplitteter Pane mit den Standardwerten (Minimap an, kein Wrap …).
+    fn copyEditorOptions(dst: *editor_mod.CodeEditor, src: *const editor_mod.CodeEditor, theme: Theme) void {
+        dst.show_minimap = src.show_minimap;
+        dst.show_whitespace = src.show_whitespace;
+        dst.show_indent_guides = src.show_indent_guides;
+        dst.word_wrap = src.word_wrap;
+        dst.setFontSize(src.font_size);
+        dst.applyTheme(theme);
     }
 
     pub fn applyThemeToEditors(self: *Self) void {
@@ -1753,6 +1770,7 @@ pub const UI = struct {
             .minimap = self.getActiveEditor().show_minimap,
             .whitespace = self.getActiveEditor().show_whitespace,
             .indent_guides = self.getActiveEditor().show_indent_guides,
+            .word_wrap = self.getActiveEditor().word_wrap,
         }) catch |err| log.warn("state save '{s}' failed: {}", .{ path, err });
     }
 
@@ -1775,6 +1793,7 @@ pub const UI = struct {
             e.show_minimap = st.minimap;
             e.show_whitespace = st.whitespace;
             e.show_indent_guides = st.indent_guides;
+            e.word_wrap = st.word_wrap;
         }
     }
 
@@ -2630,9 +2649,11 @@ pub const UI = struct {
         const old_content_leaf = try pane_mod.Pane.createLeaf(self.allocator, current_buffer);
         const new_split_leaf = try pane_mod.Pane.createLeaf(self.allocator, current_buffer);
 
-        // 3. Deep-copy tab state (dupes strings)
+        // 3. Deep-copy tab state (dupes strings); Anzeigeoptionen und Schrift übernehmen
         try old_content_leaf.data.leaf.tab_bar.cloneFrom(&current_leaf.tab_bar);
         try new_split_leaf.data.leaf.tab_bar.cloneFrom(&current_leaf.tab_bar);
+        copyEditorOptions(old_content_leaf.data.leaf.code_editor, current_leaf.code_editor, self.theme);
+        copyEditorOptions(new_split_leaf.data.leaf.code_editor, current_leaf.code_editor, self.theme);
 
         // 4. CLEANUP ORIGINAL DATA before overwriting
         // Copy the old data so we can deinit it safely after replacing the union branch
