@@ -232,6 +232,29 @@ echo -e "open ./README.md\nget-state\nshutdown" | zig build run -- --interactive
 - `python3 scripts/e2e_explorer.py` fährt Fokus, Kürzel, Dialog-Tastatur, Papierkorb, Navigation,
   Anlegen/Umbenennen, Zwischenablage, Mehrfachauswahl und Kontextmenü headless durch.
 
+## Tab-Leiste
+
+- **Vorschau-Tabs** (`Tab.preview`): Einfachklick oder Space im Explorer öffnet als Vorschau (Text in
+  `subtext`-Farbe), der nächste Vorschau-Klick ersetzt sie an derselben Stelle; Doppelklick (< 400 ms,
+  `FileExplorerState.now_ms`), Enter, Änderung oder festes Öffnen macht sie fest. `openFileAs(path,
+  preview)`; `openFile` bleibt fest (Agent, RPC). Fest öffnen ersetzt keine Vorschau (wie VS Code).
+- **Leiste** scrollt den aktiven Tab per `scroll_x` in den Sichtbereich (`tab_strip` mit Clip);
+  Namensgleichheit zeigt den Elternordner (`a/mod.zig`), ungespeichert = „• name“. Mittelklick
+  schließt, Rechtsklick öffnet das Menü aus `shortcuts.tab_menu_items` (`tab_menu_<command>`),
+  Kommandos laufen mit `tab_cmd_target` durch `executeCommand`. Drag & Drop: `TabBarState.drag`
+  (Start beim Klick, ab 6 px Bewegung, Drop auf `tabIndexAt`). Angepinnte Tabs haben kein ×
+  und bleiben bei Close Others/All/Saved; geänderte Tabs ebenso (kein Dialog pro Tab).
+- Ctrl+Shift+T öffnet aus `UI.closed_tabs` (max. 20, nur noch existierende Dateien), Ctrl+1…9,
+  Ctrl+PgUp/PgDn, Ctrl+S ist global. „Don't Save“ lädt den Buffer von der Platte neu, weil Buffer
+  das Schließen überleben. Auto-Reveal: Tab-Wechsel auf eine Textdatei markiert sie im Explorer.
+- RPCs: `tab_bounds(index)`, `middle_click`, `mouse_down`/`mouse_up` (Drag), `move_mouse` hält die
+  gedrückte Taste; Tab-JSON hat `preview`/`pinned`. `python3 scripts/e2e_tabs.py` deckt alles ab.
+- Frame-Zeit: `ui_state.last_frame_ms`/`max_frame_ms` (Maximum seit dem letzten Abholen). Die
+  frühere „1–2 s Tipp-Latenz“ bei der 5-MB-Datei war der `editor_state`-RPC (5 MB JSON je Abfrage);
+  echte Frames liegen bei 1–4 ms. Fehler beim Laden/Speichern zeigt `UI.reportError` als Dialog.
+- Markdown-Preview hält je Sprache einen Highlighter (`code_highlighters`-Map); vorher wurde bei
+  jedem Sprachwechsel ein neuer Tree-sitter-Parser gebaut, viermal pro Frame bei vier Sprachen.
+
 ## Explorer: Umbenennen/Löschen und offene Tabs
 
 - Umbenennen zieht Tab-Pfad, Titel, Buffer-Pfad und `open_buffers`-Schlüssel mit, auch für

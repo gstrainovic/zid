@@ -32,6 +32,11 @@ pub const Tab = struct {
     kind: FileKind = .text,
     /// Optional: cached buffer for text files to preserve modified state
     buffer: ?*@import("flow_core").Buffer = null,
+    /// Vorschau-Tab (Einfachklick im Explorer): wird vom nächsten Vorschau-Öffnen ersetzt,
+    /// Doppelklick, Enter oder eine Änderung machen ihn fest.
+    preview: bool = false,
+    /// Angepinnt: kein Schließen-Kreuz, von „Close Others/All/Saved“ ausgenommen
+    pinned: bool = false,
 };
 
 /// Tab-Bar State
@@ -51,6 +56,10 @@ pub const TabBarState = struct {
     textarea_instances: std.StringHashMap(*TextAreaState),
     /// Counter for terminal tab naming
     terminal_counter: u32 = 0,
+    /// Horizontaler Versatz der Tab-Reihe, damit der aktive Tab sichtbar bleibt
+    scroll_x: f32 = 0,
+    /// Laufendes Ziehen eines Tabs (Umordnen)
+    drag: ?struct { index: usize, start_x: f32, moved: bool = false } = null,
 
     const Self = @This();
 
@@ -110,16 +119,84 @@ pub const TabBarState = struct {
         return null;
     }
 
-    /// Neuen Tab öffnen
+    /// Neuen Tab öffnen (fester Tab)
     pub fn openFile(self: *Self, path: []const u8) !void {
-        // Prüfen ob Datei bereits offen ist
+        return self.openFileAs(path, false);
+    }
+
+    /// Index des Vorschau-Tabs in dieser Leiste, falls vorhanden
+    pub fn previewIndex(self: *const Self) ?usize {
         for (self.tabs.items, 0..) |tab, i| {
+            if (tab.preview) return i;
+        }
+        return null;
+    }
+
+    /// Tab öffnen; `preview` = Vorschau-Tab (ersetzt einen vorhandenen Vorschau-Tab).
+    pub fn openFileAs(self: *Self, path: []const u8, preview: bool) !void {
+        // Prüfen ob Datei bereits offen ist
+        for (self.tabs.items, 0..) |*tab, i| {
             if (std.mem.eql(u8, tab.path, path)) {
-                // Bereits offen → aktivieren
+                // Bereits offen → aktivieren; fest öffnen macht einen Vorschau-Tab fest
+                if (!preview) tab.preview = false;
                 self.setActive(i);
                 return;
             }
         }
+        // Vorschau ersetzt die alte Vorschau an derselben Stelle
+        const slot: ?usize = if (preview) self.previewIndex() else null;
+        if (slot) |idx| {
+            self.closeTab(idx);
+        }
+        try self.appendFileTab(path, preview);
+        if (slot) |idx| {
+            if (idx < self.tabs.items.len - 1) self.moveTab(self.tabs.items.len - 1, idx);
+            self.setActive(idx);
+        }
+    }
+
+    /// Tab von `from` nach `to` verschieben (Drag & Drop, Vorschau-Slot); aktiver Tab bleibt aktiv.
+    pub fn moveTab(self: *Self, from: usize, to: usize) void {
+        const n = self.tabs.items.len;
+        if (from >= n or to >= n or from == to) return;
+        const active_path: ?[]const u8 = if (self.active_index) |ai| self.tabs.items[ai].path else null;
+        const tab = self.tabs.orderedRemove(from);
+        self.tabs.insert(self.allocator, to, tab) catch {
+            self.tabs.append(self.allocator, tab) catch {};
+        };
+        if (active_path) |p| {
+            for (self.tabs.items, 0..) |t, i| {
+                if (t.path.ptr == p.ptr) {
+                    self.active_index = i;
+                    break;
+                }
+            }
+        }
+    }
+
+    /// Tab unter (x, y) anhand der Clay-Bounds des letzten Layouts.
+    pub fn tabIndexAt(self: *const Self, x: f32, y: f32) ?usize {
+        for (self.tabs.items, 0..) |_, i| {
+            const data = clay.getElementData(tabId(self, i));
+            if (!data.found) continue;
+            const bb = data.bounding_box;
+            if (x >= bb.x and x < bb.x + bb.width and y >= bb.y and y < bb.y + bb.height) return i;
+        }
+        return null;
+    }
+
+    pub fn togglePin(self: *Self, index: usize) void {
+        if (index >= self.tabs.items.len) return;
+        self.tabs.items[index].pinned = !self.tabs.items[index].pinned;
+        if (self.tabs.items[index].pinned) self.tabs.items[index].preview = false;
+    }
+
+    /// Vorschau-Tab fest machen (Doppelklick, Enter, Änderung)
+    pub fn makePermanent(self: *Self, index: usize) void {
+        if (index < self.tabs.items.len) self.tabs.items[index].preview = false;
+    }
+
+    fn appendFileTab(self: *Self, path: []const u8, preview: bool) !void {
 
         // Check if it's an existing terminal
         if (self.terminal_instances.contains(path)) {
@@ -154,6 +231,8 @@ pub const TabBarState = struct {
             .modified = false,
             .is_active = false,
             .kind = kind,
+            // Terminal/Chat/Preview sind nie Vorschau
+            .preview = preview and (kind == .text or kind == .image or kind == .pdf or kind == .binary),
         });
 
         // Neuen Tab aktivieren
@@ -177,6 +256,8 @@ pub const TabBarState = struct {
                 .modified = tab.modified,
                 .is_active = tab.is_active,
                 .buffer = tab.buffer,
+                .preview = tab.preview,
+                .pinned = tab.pinned,
             });
         }
         self.active_index = other.active_index;
@@ -443,11 +524,36 @@ pub const TabRequest = struct {
 };
 
 /// Tab-Bar für Clay rendern
+pub fn tabId(state: *const TabBarState, index: usize) clay.ElementId {
+    return clay.ElementId.IDI("tab", @as(u32, @truncate(@intFromPtr(state))) ^ @as(u32, @intCast(index)));
+}
+
+/// Anzeigename: bei gleichem Dateinamen in zwei Tabs kommt der Elternordner davor (a/mod.zig).
+fn tabLabel(arena: std.mem.Allocator, state: *const TabBarState, index: usize) []const u8 {
+    const tab = state.tabs.items[index];
+    var duplicate = false;
+    for (state.tabs.items, 0..) |other, i| {
+        if (i != index and std.mem.eql(u8, other.display_name, tab.display_name)) duplicate = true;
+    }
+    if (!duplicate) return tab.display_name;
+    const dir = std.fs.path.dirname(tab.path) orelse return tab.display_name;
+    const parent = std.fs.path.basename(dir);
+    if (parent.len == 0) return tab.display_name;
+    return std.fmt.allocPrint(arena, "{s}/{s}", .{ parent, tab.display_name }) catch tab.display_name;
+}
+
+/// Breite eines Tabs wie in renderTab (für das Scrollen zum aktiven Tab)
+fn tabWidth(label: []const u8, modified: bool) f32 {
+    const text_width = ui.measureTextWidth(label, 24.0) + (if (modified) ui.measureTextWidth("• ", 24.0) else 0);
+    return 8.0 + text_width + 8.0 + 8.0 + 24.0;
+}
+
 pub fn renderTabBar(
     arena: std.mem.Allocator,
     state: *TabBarState,
     theme: Theme,
     mouse_pressed: bool,
+    mouse_down: bool,
     mouse_x: f32,
     mouse_y: f32,
 ) ?TabRequest {
@@ -455,9 +561,46 @@ pub fn renderTabBar(
     var tab_to_close: ?usize = null;
     var tab_to_switch: ?usize = null;
 
-    // Tab-Bar Container — horizontal scrollbar wenn Tabs nicht passen
+    const container_id = clay.ElementId.IDI("tab_bar_container", @as(u32, @truncate(@intFromPtr(state))));
+    const strip_id = clay.ElementId.IDI("tab_strip", @as(u32, @truncate(@intFromPtr(state))));
+
+    // Aktiven Tab in den Sichtbereich scrollen (Breite des Streifens aus dem letzten Layout)
+    const strip_data = clay.getElementData(strip_id);
+    if (strip_data.found and strip_data.bounding_box.width > 0) {
+        const avail = strip_data.bounding_box.width;
+        var x0: f32 = 0;
+        var total: f32 = 0;
+        var active_w: f32 = 0;
+        for (state.tabs.items, 0..) |tab, i| {
+            const w = tabWidth(tabLabel(arena, state, i), tab.modified);
+            if (state.active_index != null and i < state.active_index.?) x0 += w;
+            if (state.active_index == i) active_w = w;
+            total += w;
+        }
+        if (state.active_index != null) {
+            if (x0 < state.scroll_x) state.scroll_x = x0;
+            if (x0 + active_w > state.scroll_x + avail) state.scroll_x = x0 + active_w - avail;
+        }
+        const max_scroll = @max(0, total - avail);
+        state.scroll_x = @max(0, @min(state.scroll_x, max_scroll));
+    }
+
+    // Drag & Drop: loslassen → Tab an die Position unter der Maus verschieben
+    if (state.drag) |d| {
+        if (!mouse_down) {
+            state.drag = null;
+            if (d.moved) {
+                if (state.tabIndexAt(mouse_x, mouse_y)) |target| {
+                    if (target != d.index) state.moveTab(d.index, target);
+                }
+            }
+        } else if (@abs(mouse_x - d.start_x) > 6) {
+            state.drag.?.moved = true;
+        }
+    }
+
     clay.UI()(.{
-        .id = clay.ElementId.IDI("tab_bar_container", @as(u32, @truncate(@intFromPtr(state)))),
+        .id = container_id,
         .layout = .{
             .sizing = .{ .w = .grow, .h = .fixed(44) },
             .direction = .left_to_right,
@@ -466,24 +609,31 @@ pub fn renderTabBar(
         },
         .background_color = theme.surface,
     })({
-        for (state.tabs.items, 0..) |*tab, i| {
-            const is_active = state.active_index == i;
-            const req = renderTab(
-                arena,
-                state,
-                tab.*,
-                i,
-                is_active,
-                theme,
-                mouse_pressed,
-                mouse_x,
-                mouse_y,
-            );
-            if (req) |r| {
-                if (r.close) tab_to_close = r.index;
-                if (r.do_switch) tab_to_switch = r.index;
+        clay.UI()(.{
+            .id = strip_id,
+            .layout = .{ .sizing = .{ .w = .grow, .h = .grow }, .direction = .left_to_right, .child_gap = 0 },
+            .clip = .{ .horizontal = true, .child_offset = .{ .x = -state.scroll_x, .y = 0 } },
+        })({
+            for (state.tabs.items, 0..) |*tab, i| {
+                const is_active = state.active_index == i;
+                const req = renderTab(
+                    arena,
+                    state,
+                    tab.*,
+                    tabLabel(arena, state, i),
+                    i,
+                    is_active,
+                    theme,
+                    mouse_pressed,
+                    mouse_x,
+                    mouse_y,
+                );
+                if (req) |r| {
+                    if (r.close) tab_to_close = r.index;
+                    if (r.do_switch) tab_to_switch = r.index;
+                }
             }
-        }
+        });
 
         const add_btn_id = clay.ElementId.IDI("add_tab_btn", @truncate(@intFromPtr(state)));
 
@@ -677,6 +827,7 @@ fn renderTab(
     arena: std.mem.Allocator,
     state: *TabBarState,
     tab: Tab,
+    label: []const u8,
     index: usize,
     is_active: bool,
     theme: Theme,
@@ -685,7 +836,7 @@ fn renderTab(
     mouse_y: f32,
 ) ?TabRequest {
     const state_id_base = @as(u32, @truncate(@intFromPtr(state)));
-    const tab_id = clay.ElementId.IDI("tab", state_id_base ^ @as(u32, @intCast(index)));
+    const tab_id = tabId(state, index);
     const close_id = clay.ElementId.IDI("tab_close", state_id_base ^ @as(u32, @intCast(index)));
 
     var is_tab_hovered = false;
@@ -693,11 +844,11 @@ fn renderTab(
 
     var request: ?TabRequest = null;
 
-    // Label vorab erzeugen (für modified-Indikator)
+    // Label: Punkt für ungespeichert (wie VS Code/Zed), Ordner-Präfix bei Namensgleichheit
     const label_str = if (tab.modified)
-        std.fmt.allocPrint(arena, "{s} *", .{tab.display_name}) catch tab.display_name
+        std.fmt.allocPrint(arena, "• {s}", .{label}) catch label
     else
-        tab.display_name;
+        label;
 
     // Gemessene Breite + Puffer
     const text_width = ui.measureTextWidth(label_str, 24.0);
@@ -705,9 +856,11 @@ fn renderTab(
 
     // Tab-Element erstellen - mit aktiven/hover Farben
     // Farben basieren auf letztem Frame's hover state (immediate mode üblich)
+    const dragging = if (state.drag) |d| (d.index == index and d.moved) else false;
     const bg_color = if (is_active) theme.bg else if (is_tab_hovered) [4]f32{ theme.bg[0], theme.bg[1], theme.bg[2], 128.0 } else theme.surface;
-    const text_color = if (is_active) theme.text else theme.muted;
-    const border_color = if (is_active) theme.accent else .{ 0.0, 0.0, 0.0, 0.0 };
+    // Vorschau-Tab: gedämpfte Farbe statt Kursiv (nur eine Font-Face); angepinnt: Akzent
+    const text_color = if (tab.pinned) theme.accent else if (tab.preview) theme.subtext else if (is_active) theme.text else theme.muted;
+    const border_color = if (dragging) theme.primary else if (is_active) theme.accent else .{ 0.0, 0.0, 0.0, 0.0 };
 
     clay.UI()(.{
         .id = tab_id,
@@ -739,7 +892,7 @@ fn renderTab(
             });
         });
 
-        // Close Button (X) - Element immer erstellen, Text nur bei hover/aktiv
+        // Close Button (X) - Element immer erstellen, Text nur bei hover/aktiv; angepinnt: nie
         const close_icon_color = if (is_close_hovered) theme.danger else text_color;
         clay.UI()(.{
             .id = close_id,
@@ -748,7 +901,7 @@ fn renderTab(
                 .child_alignment = .{ .x = .center, .y = .center },
             },
         })({
-            if (is_tab_hovered or is_active) {
+            if ((is_tab_hovered or is_active) and !tab.pinned) {
                 clay.text("x", .{
                     .font_size = 20,
                     .color = close_icon_color,
@@ -773,10 +926,12 @@ fn renderTab(
 
     // Mouse-Event Processing
     if (mouse_pressed) {
-        if (is_close_hovered) {
+        if (is_close_hovered and !tab.pinned) {
             request = TabRequest{ .index = index, .close = true };
-        } else if (is_tab_hovered and !is_active) {
-            request = TabRequest{ .index = index, .do_switch = true };
+        } else if (is_tab_hovered) {
+            if (!is_active) request = TabRequest{ .index = index, .do_switch = true };
+            // Ziehen beginnt hier; ob es ein Klick bleibt, entscheidet die Bewegung
+            state.drag = .{ .index = index, .start_x = mouse_x };
         }
     }
 

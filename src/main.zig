@@ -401,6 +401,7 @@ pub fn main() !void {
     while ((headless_mode or plat.isRunning()) and (e2e_ctx == null or !e2e_ctx.?.shutdown_flag.load(.seq_cst))) {
         if (e2e_ctx) |*c| e2e_server.drainInputs(c);
         const delta_time_ms: f32 = 16.0;
+        const frame_t0 = std.time.nanoTimestamp();
 
         if (!headless_mode) wio.update();
 
@@ -580,11 +581,12 @@ pub fn main() !void {
 
         // Phase 9: Datei öffnen verarbeiten
         if (ui_system.file_explorer.file_to_open) |path| {
-            ui_system.getActiveTabBar().openFile(path) catch {};
+            ui_system.getActiveTabBar().openFileAs(path, ui_system.file_explorer.file_to_open_preview) catch {};
+            ui_system.file_explorer.file_to_open_preview = false;
 
             // Dateityp prüfen
             const kind = file_types.detectFileKind(path);
-            log.info("Opening file: {s} (kind: {s})", .{path, @tagName(kind)});
+            log.debug("Opening file: {s} (kind: {s})", .{path, @tagName(kind)});
             
             if (kind == .text) {
                 // Nichts zu tun: openFile → setActive → pending_switch_path, und der
@@ -677,7 +679,7 @@ pub fn main() !void {
 
         // Tab-Wechsel anfordern (Markdown Preview)
         if (ui_system.pending_tab_switch) |path| {
-            log.info("Main: Opening preview tab for {s}", .{path});
+            log.debug("Main: Opening preview tab for {s}", .{path});
             ui_system.getActiveTabBar().openFile(path) catch |err| {
                 log.err("Failed to open tab for preview: {}", .{err});
             };
@@ -705,7 +707,7 @@ pub fn main() !void {
                 }
                 break :blk file_types.getFileKind(path);
             };
-            log.info("Switching to tab: {s} (kind: {s})", .{path, @tagName(kind)});
+            log.debug("Switching to tab: {s} (kind: {s})", .{path, @tagName(kind)});
             
             if (kind == .terminal) {
                 // Terminal tabs are self-contained — no file loading needed.
@@ -719,7 +721,11 @@ pub fn main() !void {
             } else if (kind == .text) {
                 // Fetch or create buffer from ui_system (ensures central ownership)
                 const new_buf = ui_system.getOrCreateBuffer(path) catch |err| {
-                    log.err("Failed to load/get buffer for '{s}': {}", .{ path, err });
+                    if (err == error.FileTooBig) {
+                        ui_system.reportError("Cannot open '{s}': file is larger than 64 MB", .{std.fs.path.basename(path)});
+                    } else {
+                        ui_system.reportError("Cannot open '{s}': {s}", .{ std.fs.path.basename(path), @errorName(err) });
+                    }
                     continue;
                 };
                 
@@ -728,6 +734,8 @@ pub fn main() !void {
                 }
                 
                 ui_system.getActiveEditor().setBuffer(new_buf, path);
+                // Explorer folgt dem aktiven Tab (Auto-Reveal), ohne den Fokus zu nehmen
+                ui_system.file_explorer.revealPath(path);
             } else if (kind == .image) {
                 // Bild beim Tab-Wechsel sicherstellen dass es geladen ist
                 if (!ui_system.open_images.contains(path)) {
@@ -860,6 +868,7 @@ pub fn main() !void {
         const has_more_work = ui_system.getActiveEditor().highlightChunked(2, ui_system.getActiveEditor().time_ms);
 
         frame_count += 1;
+        ui_system.recordFrameTime(@as(f32, @floatFromInt(std.time.nanoTimestamp() - frame_t0)) / 1_000_000.0);
 
         if (headless_mode) {
             std.Thread.sleep(16 * std.time.ns_per_ms);

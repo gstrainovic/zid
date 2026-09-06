@@ -57,9 +57,9 @@ pub const MarkdownView = struct {
     doc_arena: ?*std.heap.ArenaAllocator = null,
     parsed: ?*zigdown.parser.ParseResult = null,
 
-    /// Code block highlighter (cached per language)
-    code_highlighter: ?*flow_core.highlight.SyntaxHighlighter = null,
-    code_highlighter_lang: []const u8 = "",
+    /// Code-Block-Highlighter je Sprache (Schlüssel owned). Vorher wurde bei jedem
+    /// Sprachwechsel neu erzeugt: vier Blöcke in vier Sprachen = vier Tree-sitter-Parser pro Frame.
+    code_highlighters: ?std.StringHashMap(*flow_core.highlight.SyntaxHighlighter) = null,
 
     const Self = @This();
 
@@ -96,12 +96,14 @@ pub const MarkdownView = struct {
             self.allocator.destroy(arena);
             self.doc_arena = null;
         }
-        if (self.code_highlighter) |hl| {
-            hl.destroy();
-        }
-        if (self.code_highlighter_lang.len > 0) {
-            self.allocator.free(self.code_highlighter_lang);
-            self.code_highlighter_lang = "";
+        if (self.code_highlighters) |*map| {
+            var it = map.iterator();
+            while (it.next()) |kv| {
+                kv.value_ptr.*.destroy();
+                self.allocator.free(kv.key_ptr.*);
+            }
+            map.deinit();
+            self.code_highlighters = null;
         }
         if (self.text.len > 0 and self.text.ptr != "".ptr) {
             self.allocator.free(self.text);
@@ -384,33 +386,35 @@ pub const MarkdownView = struct {
         });
     }
 
+    /// Highlighter für eine Sprache holen oder einmalig anlegen (null = keine Sprache / unbekannt).
+    fn highlighterFor(self: *Self, lang_name: []const u8) ?*flow_core.highlight.SyntaxHighlighter {
+        if (lang_name.len == 0) return null;
+        if (self.code_highlighters == null) self.code_highlighters = std.StringHashMap(*flow_core.highlight.SyntaxHighlighter).init(self.allocator);
+        const map = &self.code_highlighters.?;
+        if (map.get(lang_name)) |hl| return hl;
+        const created = flow_core.highlight.SyntaxHighlighter.create(self.allocator, lang_name) catch |err| {
+            std.log.debug("md_preview: highlighter create failed for '{s}': {s}", .{ lang_name, @errorName(err) });
+            return null;
+        };
+        const key = self.allocator.dupe(u8, lang_name) catch {
+            created.destroy();
+            return null;
+        };
+        map.put(key, created) catch {
+            self.allocator.free(key);
+            created.destroy();
+            return null;
+        };
+        std.log.debug("md_preview: highlighter created for '{s}'", .{lang_name});
+        return created;
+    }
+
     fn renderCodeBlock(self: *Self, code: []const u8, lang_tag: ?[]const u8, arena: std.mem.Allocator, theme: Theme) void {
         // Determine language for highlighter
         const lang_name = lang_tag orelse "";
         std.log.debug("md_preview: renderCodeBlock lang='{s}' code_len={d}", .{ lang_name, code.len });
 
-        // Create or reuse highlighter for this language — rebuild if language changed
-        const lang_changed = !std.mem.eql(u8, self.code_highlighter_lang, lang_name);
-        if (lang_changed and lang_name.len > 0) {
-            if (self.code_highlighter) |old_hl| {
-                old_hl.destroy();
-                self.code_highlighter = null;
-            }
-            if (self.code_highlighter_lang.len > 0) {
-                self.allocator.free(self.code_highlighter_lang);
-                self.code_highlighter_lang = "";
-            }
-            std.log.debug("md_preview: creating highlighter for lang='{s}'", .{lang_name});
-            const created = flow_core.highlight.SyntaxHighlighter.create(self.allocator, lang_name) catch |err| {
-                std.log.err("md_preview: highlighter create failed for '{s}': {s}", .{ lang_name, @errorName(err) });
-                return;
-            };
-            self.code_highlighter = created;
-            self.code_highlighter_lang = self.allocator.dupe(u8, lang_name) catch "";
-            std.log.debug("md_preview: highlighter created for '{s}'", .{lang_name});
-        }
-
-        const hl = self.code_highlighter;
+        const hl = self.highlighterFor(lang_name);
         if (hl) |highlighter| {
             const Ctx = struct {
                 fn egc_length(_: flow_core.Buffer.Metrics, egcs: []const u8, colcount: *usize, _: usize) usize {
