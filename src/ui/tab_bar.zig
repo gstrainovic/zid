@@ -135,7 +135,8 @@ pub const TabBarState = struct {
             return;
         }
 
-        var kind = file_types.getFileKind(path);
+        // Endung + Dateianfang: Binärdateien bekommen einen Hinweis-Tab statt eines Buffers
+        var kind = file_types.detectFileKind(path);
         var display_name = std.fs.path.basename(path);
 
         if (std.mem.startsWith(u8, path, "preview://")) {

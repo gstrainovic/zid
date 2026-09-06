@@ -579,7 +579,7 @@ pub fn main() !void {
             ui_system.getActiveTabBar().openFile(path) catch {};
 
             // Dateityp prüfen
-            const kind = file_types.getFileKind(path);
+            const kind = file_types.detectFileKind(path);
             log.info("Opening file: {s} (kind: {s})", .{path, @tagName(kind)});
             
             if (kind == .text) {
@@ -706,6 +706,10 @@ pub fn main() !void {
             if (kind == .terminal) {
                 // Terminal tabs are self-contained — no file loading needed.
                 // Path cleanup happens below at the common pending_switch_path free.
+                state_dirty = true;
+                wio.cancelWait();
+            } else if (kind == .binary) {
+                // Binärdatei: kein Buffer, der Tab zeigt nur den Hinweis (binary_view.zig).
                 state_dirty = true;
                 wio.cancelWait();
             } else if (kind == .text) {

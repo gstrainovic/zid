@@ -407,7 +407,7 @@ pub const MarkdownView = struct {
             };
             self.code_highlighter = created;
             self.code_highlighter_lang = self.allocator.dupe(u8, lang_name) catch "";
-            std.log.info("md_preview: highlighter created successfully for '{s}'", .{lang_name});
+            std.log.debug("md_preview: highlighter created for '{s}'", .{lang_name});
         }
 
         const hl = self.code_highlighter;
