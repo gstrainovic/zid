@@ -332,6 +332,7 @@ pub const LlamaAgent = struct {
                     std.log.debug("llama-server still loading (503)", .{});
                     return error.ServerLoading;
                 }
+                if (res.status == .bad_request) return error.ContextTooLong;
                 std.log.err("Llama Server Error: {d}", .{res.status});
                 return error.LlamaServerError;
             }
@@ -418,6 +419,11 @@ pub const LlamaAgent = struct {
             var redirect_buf: [4096]u8 = undefined;
             var response = try req.receiveHead(&redirect_buf);
             if (response.head.status != .ok) {
+                // 400 über der Kontextgrenze: llama-server kürzt nicht still, sondern lehnt ab
+                if (response.head.status == .bad_request) {
+                    std.log.err("Llama Server rejected the request (400): prompt exceeds the context window?", .{});
+                    return error.ContextTooLong;
+                }
                 std.log.err("Llama Server Error: {d}", .{@intFromEnum(response.head.status)});
                 return error.LlamaServerError;
             }
