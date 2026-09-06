@@ -5,14 +5,8 @@ Belege aus der Sitzung vom 06.09.2026 (Log mit Panic in `gpu_renderer.zig:305`) 
 
 ## Robustheit bei großen und merkwürdigen Dateien
 
-- [ ] **P1 Zeilen über 2048 Bytes sind unsichtbar**: `shapeTextInto` gibt oberhalb von
-      `ShapedRunCache.MAX_TEXT_LEN` stumm einen leeren Run zurück, die Zeile fehlt einfach
-      (`tmp/e2e_odd_odd_long_line.txt.png`: Zeile 1 mit 5000 Zeichen ist leer). Lösung: der Editor gibt
-      pro Zeile nur den sichtbaren Spaltenausschnitt an Clay (heute `getLine(i)` komplett), dann
-      brauchen weder Shaper noch Renderer Riesen-Runs.
-- [ ] **P2 Horizontales Scrollen** im Editor: lange Zeilen werden am rechten Rand abgeschnitten, der
-      Cursor kann aus dem Sichtbereich laufen (kein `view.col`), keine horizontale Scrollbar,
-      kein Word-Wrap-Umschalter.
+- [ ] **P3 Horizontale Scrollbar und Word-Wrap-Umschalter** im Editor (Shift+Mausrad und
+      Cursor-Folgen gibt es seit 06.09.2026).
 - [ ] **P2 Große Dateien**: 5-MB-Datei mit 100 000 Zeilen öffnet in 0,2 s, aber ein getipptes Zeichen
       am Dateiende braucht 1,2–2,4 s bis es sichtbar ist (`scripts/e2e_odd_files.py`, zwei Läufe). Profilieren
       (Verdacht: Reparse/`lineCount`/Gutter-Messung pro Frame), Ziel < 50 ms.
@@ -79,3 +73,24 @@ Belege aus der Sitzung vom 06.09.2026 (Log mit Panic in `gpu_renderer.zig:305`) 
       letzten Tab, Ctrl+Shift+E Fokus in den Explorer, Ctrl+J Terminal-Panel.
 - [ ] **P3 Menüleiste per Tastatur** (Alt+F …, Pfeile, Escape schließt), Kürzel-Dialog scrollbar,
       Toasts für Erfolg/Fehler (gespeichert, gelöscht, Ladefehler).
+
+## KI-Agent (aus `~/projects/bitnet-colibri-bench/HANDOFF-vulkan-ed.md`, 06.09.2026)
+
+- [ ] **P2 Temperatur pro Anfrageart**: `agent.zig` `buildPayload` schickt fest `temperature: 0.7`,
+      auch in Werkzeugrunden; der Bench misst die 10/10 Werkzeugwahl von Qwen3-4B bei 0.0. Messen
+      (drei Läufe `bench/agent_eval.py` bei 0.7 gegen 0.0, Anleitung im Handoff); fällt die Quote,
+      Temperatur 0 für Anfragen mit `tools`, 0.7 nur für reine Chat-Antworten (Unit-Test auf
+      `buildPayload` zuerst). Bleibt sie bei 10/10, negatives Ergebnis in AGENTS.md notieren.
+- [ ] **P3 CPU-Fallback ohne Batch-Threads**: `agent.zig` startet mit `-t min(Kerne, 8)` ohne `-tb`;
+      der Bench nutzt `-t 8 -tb 12` (Qwen3-4B CPU 9,9 tok/s). Mit `llama-bench -p 128 -n 64` `-t 8`
+      gegen `-t 8 -tb 12` messen; bringt es etwas, `-tb` an die Kernzahl gekoppelt ergänzen
+      (Unit-Test auf den argv-Aufbau zuerst).
+- [ ] **P2 Gemessene Grenzen in AGENTS.md**: Ein-Datei-Fix gelingt mit Qwen3-4B, Ursachen über einen
+      Import hinweg scheitern (Qwen3 gefahrlos, Llama-3.2-3B destruktiv); Prompt-Verarbeitung auf
+      der P1000 96 tok/s, Kontext wächst je Werkzeugrunde, `-c 8192` ohne Kürzen der Historie —
+      prüfen, was llama-server an der Kontextgrenze tut, und entscheiden, ob alte Runden verworfen
+      werden; Agenten-Änderungen nur in Git-Repos (nur Bestätigungsdialoge sichern) — mindestens
+      dokumentieren, Warnung außerhalb eines Repos ist Produktentscheidung.
+- Regeln aus dem Handoff: `python3 scripts/e2e_ai_tools.py` muss nach jeder Änderung an `agent.zig`
+  grün bleiben; Messzahlen mit Engine-Commit und Modell-sha256; Referenz
+  `bitnet-colibri-bench/results/linux-i7-8850H-gpu-und-neue-modelle.md`.

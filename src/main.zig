@@ -524,6 +524,10 @@ pub fn main() !void {
                         }
                         if (lines_delta != 0) ui_system.handleScroll(lines_delta);
                     },
+                    .scroll_horizontal => |delta| {
+                        const cols_delta: i32 = @intFromFloat(@round(@as(f32, @floatCast(delta)) * 4));
+                        if (cols_delta != 0) ui_system.handleScrollHorizontal(-cols_delta);
+                    },
                     else => {},
                 }
                 plat.handleEventExternal(event);

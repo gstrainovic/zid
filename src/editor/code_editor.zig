@@ -55,15 +55,19 @@ fn lessThanTag(_: void, a: flow_core.highlight.ColorTag, b: flow_core.highlight.
     return a.end > b.end; // längere zuerst bei gleichem Start (Container-Prinzip)
 }
 
+/// `line` ist der sichtbare Ausschnitt der Zeile ab Byte `offset` (horizontales Scrollen);
+/// die Highlight-Tags beziehen sich auf die ganze Zeile (`full_len` Bytes).
 fn renderHighlightedLine(
     arena: std.mem.Allocator,
     hl: *flow_core.highlight.SyntaxHighlighter,
     line_idx: usize,
     line: []const u8,
+    offset: usize,
+    full_len: usize,
     font_size: u16,
     plain_color: clay.Color,
 ) void {
-    const tags = hl.tagsForLine(line_idx, line.len, arena) catch {
+    const tags = hl.tagsForLine(line_idx, full_len, arena) catch {
         const persistent = arena.dupe(u8, line) catch "";
         clay.text(persistent, .{ .font_size = font_size, .color = plain_color, .wrap_mode = .none });
         return;
@@ -72,20 +76,24 @@ fn renderHighlightedLine(
 
     var pos: usize = 0;
     for (tags) |tag| {
-        if (tag.end > line.len) continue;
+        if (tag.end > full_len) continue;
         if (tag.start >= tag.end) continue;
-        
+        // In den Ausschnitt verschieben und beschneiden
+        const tag_start = @min(tag.start -| offset, line.len);
+        const tag_end = @min(tag.end -| offset, line.len);
+        if (tag_start >= tag_end) continue;
+
         // Robust gegen Überlappungen: nur den Teil rendern, der noch nicht gezeichnet wurde
-        const actual_start = @max(tag.start, pos);
-        if (actual_start >= tag.end) continue;
+        const actual_start = @max(tag_start, pos);
+        if (actual_start >= tag_end) continue;
 
         if (actual_start > pos) {
             const seg = arena.dupe(u8, line[pos..actual_start]) catch "";
             clay.text(seg, .{ .font_size = font_size, .color = plain_color, .wrap_mode = .none });
         }
-        const seg = arena.dupe(u8, line[actual_start..tag.end]) catch "";
+        const seg = arena.dupe(u8, line[actual_start..tag_end]) catch "";
         clay.text(seg, .{ .font_size = font_size, .color = colorFromTag(tag.fg), .wrap_mode = .none });
-        pos = tag.end;
+        pos = tag_end;
     }
     if (pos < line.len) {
         const seg = arena.dupe(u8, line[pos..]) catch "";
@@ -151,7 +159,8 @@ pub const CodeEditor = struct {
     /// Zeitpunkt der letzten Cursor-Bewegung (für Blink-Delay)
     last_cursor_movement_ms: f32 = 0,
 
-    /// Layout
+    /// Layout (Breite/Höhe des Editor-Elements aus dem letzten Layout)
+    width: f32 = 800,
     height: f32 = 400,
     gutter_width: f32 = 50,
     scrollbar_width: f32 = 10,
@@ -1632,10 +1641,12 @@ pub const CodeEditor = struct {
 
         const line_text = self.getLine(line_idx);
         if (line_text.len == 0) return 0;
+        // Horizontal gescrollt: Messung beginnt beim ersten sichtbaren Byte
+        const first_visible = @min(self.buffer.root.get_line_width_to_pos(line_idx, self.view.col, self.metrics()) catch 0, line_text.len);
 
         if (self.measure_fn) |measure| {
             var x_accum: f32 = 0.0;
-            var byte_offset: usize = 0;
+            var byte_offset: usize = first_visible;
             while (byte_offset < line_text.len) {
                 var next_offset = byte_offset + 1;
                 while (next_offset < line_text.len and (line_text[next_offset] & 0xC0) == 0x80) {
@@ -1655,7 +1666,52 @@ pub const CodeEditor = struct {
         if (char_width <= 0) return 0;
         const col_f = @as(isize, @intFromFloat(@floor(rel_x / char_width)));
         if (col_f < 0) return 0;
-        return @min(@as(usize, @intCast(col_f)), self.lineWidth(line_idx));
+        return @min(@as(usize, @intCast(col_f)) + self.view.col, self.lineWidth(line_idx));
+    }
+
+    /// Breite eines Zeichens der Monospace-Schrift (Messung, sonst Faustformel).
+    fn charWidth(self: *const Self) f32 {
+        if (self.measure_fn) |measure| {
+            const w = measure("M", 1);
+            if (w > 0) return w;
+        }
+        return @as(f32, @floatFromInt(self.font_size)) * 0.6;
+    }
+
+    /// Spalten, die neben Gutter und Padding in den Editor passen.
+    pub fn visibleColCount(self: *const Self) usize {
+        const avail = self.width - self.gutter_width - 12 - self.scrollbar_width;
+        if (avail <= 0) return 10;
+        return @max(10, @as(usize, @intFromFloat(@floor(avail / self.charWidth()))));
+    }
+
+    pub const VisibleSlice = struct { text: []const u8, start_byte: usize };
+
+    /// Sichtbarer Ausschnitt einer Zeile ab `view.col`, höchstens `view.cols + 2` Spalten.
+    /// Nur dieser Teil geht an Clay: Riesenzeilen kosten so weder Shaper noch Renderer, und
+    /// Zeilen über 2048 Bytes (Shaper-Grenze) bleiben sichtbar.
+    pub fn visibleSliceOf(self: *Self, line_idx: usize, line: []const u8) VisibleSlice {
+        const m = self.metrics();
+        const cols = if (self.view.cols > 0) self.view.cols else self.visibleColCount();
+        const start = @min(self.buffer.root.get_line_width_to_pos(line_idx, self.view.col, m) catch 0, line.len);
+        const end = @min(self.buffer.root.get_line_width_to_pos(line_idx, self.view.col + cols + 2, m) catch line.len, line.len);
+        if (start >= end) return .{ .text = line[line.len..], .start_byte = line.len };
+        return .{ .text = line[start..end], .start_byte = start };
+    }
+
+    /// Wie visibleSliceOf, holt die Zeile selbst (Slice zeigt in line_scratch).
+    pub fn visibleSlice(self: *Self, line_idx: usize) VisibleSlice {
+        const line = self.getLine(line_idx);
+        return self.visibleSliceOf(line_idx, line);
+    }
+
+    /// Horizontal scrollen (Shift+Mausrad): positiv = nach links wie scrollLines nach oben.
+    pub fn scrollColumns(self: *Self, delta: i32) void {
+        if (delta > 0) {
+            self.view.col = self.view.col -| @as(usize, @intCast(delta));
+        } else if (delta < 0) {
+            self.view.col += @as(usize, @intCast(-delta));
+        }
     }
 
     // =========================================================================
@@ -1685,7 +1741,7 @@ pub const CodeEditor = struct {
 
     pub fn ensureCursorVisible(self: *Self) void {
         self.view.rows = self.visibleLineCount();
-        self.view.cols = 200; // reasonable default
+        self.view.cols = self.visibleColCount();
         self.view.clamp(&self.cursor, true);
     }
 
@@ -1858,7 +1914,8 @@ pub const CodeEditor = struct {
                                 },
                                 .background_color = if (is_current) self.current_line_highlight else .{ 0, 0, 0, 0 },
                             })({
-                                self.renderLine(arena, i, line_text);
+                                const slice = self.visibleSliceOf(i, line_text);
+                                self.renderLine(arena, i, slice.text, slice.start_byte, line_text.len);
                             });
                         });
                     }
@@ -1875,7 +1932,7 @@ pub const CodeEditor = struct {
         }
     }
 
-    fn renderLine(self: *Self, arena: std.mem.Allocator, line_idx: usize, line: []const u8) void {
+    fn renderLine(self: *Self, arena: std.mem.Allocator, line_idx: usize, line: []const u8, offset: usize, full_len: usize) void {
         clay.UI()(.{
             .layout = .{ 
                 .sizing = .{ .w = .grow, .h = .grow },
@@ -1889,14 +1946,14 @@ pub const CodeEditor = struct {
 
             const plain_color: clay.Color = .{ 202, 211, 245, 255 };
             if (self.highlighter != null) {
-                renderHighlightedLine(arena, self.highlighter.?, line_idx, line, self.font_size, plain_color);
+                renderHighlightedLine(arena, self.highlighter.?, line_idx, line, offset, full_len, self.font_size, plain_color);
             } else {
                 const persistent = arena.dupe(u8, line) catch "";
                 clay.text(persistent, .{ .font_size = self.font_size, .color = plain_color, .wrap_mode = .none });
             }
 
             if (line_idx == self.cursor.row) {
-                self.renderCursor(arena);
+                self.renderCursor(arena, offset);
             }
         });
     }
@@ -1905,16 +1962,19 @@ pub const CodeEditor = struct {
         const range = self.selectionRange() orelse return;
         if (line_idx < range.begin.row or line_idx > range.end.row) return;
 
-        const line = self.getLine(line_idx);
+        const full_line = self.getLine(line_idx);
 
         const start_col = if (line_idx == range.begin.row) range.begin.col else 0;
         const end_col = if (line_idx == range.end.row) range.end.col else self.lineWidth(line_idx);
 
         const start_byte = self.buffer.root.get_line_width_to_pos(line_idx, start_col, self.metrics()) catch 0;
-        const end_byte = self.buffer.root.get_line_width_to_pos(line_idx, end_col, self.metrics()) catch line.len;
+        const end_byte = self.buffer.root.get_line_width_to_pos(line_idx, end_col, self.metrics()) catch full_line.len;
 
-        const start_clamped = @min(start_byte, line.len);
-        const end_clamped = @min(end_byte, line.len);
+        // In den sichtbaren Ausschnitt verschieben (horizontales Scrollen)
+        const vis = self.visibleSliceOf(line_idx, full_line);
+        const line = vis.text;
+        const start_clamped = @min(start_byte -| vis.start_byte, line.len);
+        const end_clamped = @min(end_byte -| vis.start_byte, line.len);
 
         if (start_clamped >= end_clamped and line_idx < range.end.row) {
             // Selection extends to end of line
@@ -1978,7 +2038,7 @@ pub const CodeEditor = struct {
         }
     }
 
-    fn renderCursor(self: *Self, arena: std.mem.Allocator) void {
+    fn renderCursor(self: *Self, arena: std.mem.Allocator, offset: usize) void {
         const blink_ms: f32 = 500.0;
         const blink_delay_ms: f32 = 400.0;
 
@@ -1989,8 +2049,8 @@ pub const CodeEditor = struct {
 
         const line = self.getLine(self.cursor.row);
         const m = self.metrics();
-        const byte_pos = self.buffer.root.get_line_width_to_pos(self.cursor.row, self.cursor.col, m) catch line.len;
-        const text_before_cursor = if (byte_pos <= line.len) line[0..byte_pos] else line;
+        const byte_pos = @min(self.buffer.root.get_line_width_to_pos(self.cursor.row, self.cursor.col, m) catch line.len, line.len);
+        const text_before_cursor = if (byte_pos > offset) line[offset..byte_pos] else line[0..0];
 
         clay.UI()(.{
             .layout = .{ .sizing = .{ .w = .fixed(0), .h = .fixed(@floatFromInt(self.font_size + 16)) } },
@@ -2476,4 +2536,40 @@ test "Enter nach Klick und dann Tippen frisst den Zeilenumbruch nicht" {
     t.ed.handleChar('x');
     try std.testing.expectEqual(@as(usize, 2), t.ed.lineCount());
     try std.testing.expectEqual(@as(usize, 1), t.ed.cursor.row);
+}
+
+test "lange Zeile: Cursor am Ende scrollt die Ansicht horizontal, sichtbarer Ausschnitt bleibt klein" {
+    var t = try testEditor(std.testing.allocator, "");
+    defer t.buffer.deinit();
+    defer t.ed.deinit();
+    var long: [5000]u8 = undefined;
+    @memset(&long, 'x');
+    t.ed.setText(&long);
+    t.ed.width = 800; // ~ (800 - Gutter - Padding) / (0.6 * font_size) sichtbare Spalten
+
+    // Anfang: kein horizontaler Versatz, Ausschnitt deutlich kürzer als die Zeile
+    t.ed.ensureCursorVisible();
+    try std.testing.expectEqual(@as(usize, 0), t.ed.view.col);
+    const head = t.ed.visibleSlice(0);
+    try std.testing.expect(head.text.len < 200);
+    try std.testing.expectEqual(@as(usize, 0), head.start_byte);
+
+    // Ende der Zeile: Ansicht folgt dem Cursor, der Ausschnitt endet am Zeilenende
+    t.ed.handleKeyPress(.end);
+    try std.testing.expect(t.ed.view.col > 0);
+    try std.testing.expect(t.ed.cursor.col >= t.ed.view.col);
+    try std.testing.expect(t.ed.cursor.col < t.ed.view.col + t.ed.view.cols);
+    const tail = t.ed.visibleSlice(0);
+    try std.testing.expect(tail.text.len < 200);
+    try std.testing.expectEqual(@as(usize, 5000), tail.start_byte + tail.text.len);
+
+    // Zurück an den Anfang: Versatz verschwindet
+    t.ed.handleKeyPress(.home);
+    try std.testing.expectEqual(@as(usize, 0), t.ed.view.col);
+
+    // Shift+Mausrad scrollt Spalten, nie unter 0
+    t.ed.scrollColumns(-8);
+    try std.testing.expectEqual(@as(usize, 8), t.ed.view.col);
+    t.ed.scrollColumns(20);
+    try std.testing.expectEqual(@as(usize, 0), t.ed.view.col);
 }
