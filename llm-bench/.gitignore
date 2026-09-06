@@ -1,0 +1,14 @@
+# Modelle und Builds gehoeren nicht ins Repo
+*.gguf
+*.safetensors
+build/
+olmoe_merged/
+.venv*/
+__pycache__/
+*.pyc
+
+# private Einstellungen dieses Rechners
+.claude/
+
+# das Perplexity-Korpus gehoert bewusst ins Repo (siehe CLAUDE.md)
+!bench/ppl-corpus.txt

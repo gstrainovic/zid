@@ -1,0 +1,845 @@
+build: 3962 (1f86f058) with clang version 21.1.8 (Fedora 21.1.8-6.fc43) for x86_64-redhat-linux-gnu
+system info: n_threads = 4, n_threads_batch = 4, total_threads = 12
+
+system_info: n_threads = 4 (n_threads_batch = 4) / 12 | AVX = 1 | AVX_VNNI = 0 | AVX2 = 1 | AVX512 = 0 | AVX512_VBMI = 0 | AVX512_VNNI = 0 | AVX512_BF16 = 0 | FMA = 1 | NEON = 0 | SVE = 0 | ARM_FMA = 0 | F16C = 1 | FP16_VA = 0 | RISCV_VECT = 0 | WASM_SIMD = 0 | BLAS = 0 | SSE3 = 1 | SSSE3 = 1 | VSX = 0 | MATMUL_INT8 = 0 | LLAMAFILE = 1 | 
+
+main: HTTP server is listening, hostname: 127.0.0.1, port: 8084, http threads: 11
+main: loading model
+llama_model_loader: loaded meta data with 24 key-value pairs and 332 tensors from /home/g/ki/BitNet/models/BitNet-b1.58-2B-4T/ggml-model-i2_s.gguf (version GGUF V3 (latest))
+llama_model_loader: Dumping metadata keys/values. Note: KV overrides do not apply in this output.
+llama_model_loader: - kv   0:                       general.architecture str              = bitnet-b1.58
+llama_model_loader: - kv   1:                               general.name str              = bitnet2b
+llama_model_loader: - kv   2:                    bitnet-b1.58.vocab_size u32              = 128256
+llama_model_loader: - kv   3:                bitnet-b1.58.context_length u32              = 4096
+llama_model_loader: - kv   4:              bitnet-b1.58.embedding_length u32              = 2560
+llama_model_loader: - kv   5:                   bitnet-b1.58.block_count u32              = 30
+llama_model_loader: - kv   6:           bitnet-b1.58.feed_forward_length u32              = 6912
+llama_model_loader: - kv   7:          bitnet-b1.58.rope.dimension_count u32              = 128
+llama_model_loader: - kv   8:          bitnet-b1.58.attention.head_count u32              = 20
+llama_model_loader: - kv   9:       bitnet-b1.58.attention.head_count_kv u32              = 5
+llama_model_loader: - kv  10:               tokenizer.ggml.add_bos_token bool             = true
+llama_model_loader: - kv  11: bitnet-b1.58.attention.layer_norm_rms_epsilon f32              = 0.000010
+llama_model_loader: - kv  12:                bitnet-b1.58.rope.freq_base f32              = 500000.000000
+llama_model_loader: - kv  13:                          general.file_type u32              = 40
+llama_model_loader: - kv  14:                       tokenizer.ggml.model str              = gpt2
+llama_model_loader: - kv  15:                      tokenizer.ggml.tokens arr[str,128256]  = ["!", "\"", "#", "$", "%", "&", "'", ...
+llama_model_loader: - kv  16:                      tokenizer.ggml.scores arr[f32,128256]  = [0.000000, 0.000000, 0.000000, 0.0000...
+llama_model_loader: - kv  17:                  tokenizer.ggml.token_type arr[i32,128256]  = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, ...
+llama_model_loader: - kv  18:                      tokenizer.ggml.merges arr[str,280147]  = ["Ġ Ġ", "Ġ ĠĠĠ", "ĠĠ ĠĠ", "...
+llama_model_loader: - kv  19:                tokenizer.ggml.bos_token_id u32              = 128000
+llama_model_loader: - kv  20:                tokenizer.ggml.eos_token_id u32              = 128001
+llama_model_loader: - kv  21:            tokenizer.ggml.padding_token_id u32              = 128001
+llama_model_loader: - kv  22:                    tokenizer.chat_template str              = {% for message in messages %}{% if lo...
+llama_model_loader: - kv  23:               general.quantization_version u32              = 2
+llama_model_loader: - type  f32:  121 tensors
+llama_model_loader: - type  f16:    1 tensors
+llama_model_loader: - type i2_s:  210 tensors
+validate_override: Using metadata override (  str) 'tokenizer.ggml.pre' = llama-bpe
+llm_load_vocab: control token: 128255 '<|reserved_special_token_250|>' is not marked as EOG
+llm_load_vocab: control token: 128254 '<|reserved_special_token_249|>' is not marked as EOG
+llm_load_vocab: control token: 128253 '<|reserved_special_token_248|>' is not marked as EOG
+llm_load_vocab: control token: 128251 '<|reserved_special_token_246|>' is not marked as EOG
+llm_load_vocab: control token: 128246 '<|reserved_special_token_241|>' is not marked as EOG
+llm_load_vocab: control token: 128243 '<|reserved_special_token_238|>' is not marked as EOG
+llm_load_vocab: control token: 128240 '<|reserved_special_token_235|>' is not marked as EOG
+llm_load_vocab: control token: 128239 '<|reserved_special_token_234|>' is not marked as EOG
+llm_load_vocab: control token: 128238 '<|reserved_special_token_233|>' is not marked as EOG
+llm_load_vocab: control token: 128237 '<|reserved_special_token_232|>' is not marked as EOG
+llm_load_vocab: control token: 128232 '<|reserved_special_token_227|>' is not marked as EOG
+llm_load_vocab: control token: 128228 '<|reserved_special_token_223|>' is not marked as EOG
+llm_load_vocab: control token: 128227 '<|reserved_special_token_222|>' is not marked as EOG
+llm_load_vocab: control token: 128225 '<|reserved_special_token_220|>' is not marked as EOG
+llm_load_vocab: control token: 128222 '<|reserved_special_token_217|>' is not marked as EOG
+llm_load_vocab: control token: 128215 '<|reserved_special_token_210|>' is not marked as EOG
+llm_load_vocab: control token: 128211 '<|reserved_special_token_206|>' is not marked as EOG
+llm_load_vocab: control token: 128210 '<|reserved_special_token_205|>' is not marked as EOG
+llm_load_vocab: control token: 128204 '<|reserved_special_token_199|>' is not marked as EOG
+llm_load_vocab: control token: 128203 '<|reserved_special_token_198|>' is not marked as EOG
+llm_load_vocab: control token: 128201 '<|reserved_special_token_196|>' is not marked as EOG
+llm_load_vocab: control token: 128197 '<|reserved_special_token_192|>' is not marked as EOG
+llm_load_vocab: control token: 128196 '<|reserved_special_token_191|>' is not marked as EOG
+llm_load_vocab: control token: 128195 '<|reserved_special_token_190|>' is not marked as EOG
+llm_load_vocab: control token: 128193 '<|reserved_special_token_188|>' is not marked as EOG
+llm_load_vocab: control token: 128191 '<|reserved_special_token_186|>' is not marked as EOG
+llm_load_vocab: control token: 128190 '<|reserved_special_token_185|>' is not marked as EOG
+llm_load_vocab: control token: 128185 '<|reserved_special_token_180|>' is not marked as EOG
+llm_load_vocab: control token: 128184 '<|reserved_special_token_179|>' is not marked as EOG
+llm_load_vocab: control token: 128182 '<|reserved_special_token_177|>' is not marked as EOG
+llm_load_vocab: control token: 128181 '<|reserved_special_token_176|>' is not marked as EOG
+llm_load_vocab: control token: 128177 '<|reserved_special_token_172|>' is not marked as EOG
+llm_load_vocab: control token: 128176 '<|reserved_special_token_171|>' is not marked as EOG
+llm_load_vocab: control token: 128175 '<|reserved_special_token_170|>' is not marked as EOG
+llm_load_vocab: control token: 128174 '<|reserved_special_token_169|>' is not marked as EOG
+llm_load_vocab: control token: 128173 '<|reserved_special_token_168|>' is not marked as EOG
+llm_load_vocab: control token: 128172 '<|reserved_special_token_167|>' is not marked as EOG
+llm_load_vocab: control token: 128168 '<|reserved_special_token_163|>' is not marked as EOG
+llm_load_vocab: control token: 128167 '<|reserved_special_token_162|>' is not marked as EOG
+llm_load_vocab: control token: 128166 '<|reserved_special_token_161|>' is not marked as EOG
+llm_load_vocab: control token: 128165 '<|reserved_special_token_160|>' is not marked as EOG
+llm_load_vocab: control token: 128162 '<|reserved_special_token_157|>' is not marked as EOG
+llm_load_vocab: control token: 128159 '<|reserved_special_token_154|>' is not marked as EOG
+llm_load_vocab: control token: 128155 '<|reserved_special_token_150|>' is not marked as EOG
+llm_load_vocab: control token: 128153 '<|reserved_special_token_148|>' is not marked as EOG
+llm_load_vocab: control token: 128152 '<|reserved_special_token_147|>' is not marked as EOG
+llm_load_vocab: control token: 128151 '<|reserved_special_token_146|>' is not marked as EOG
+llm_load_vocab: control token: 128148 '<|reserved_special_token_143|>' is not marked as EOG
+llm_load_vocab: control token: 128146 '<|reserved_special_token_141|>' is not marked as EOG
+llm_load_vocab: control token: 128144 '<|reserved_special_token_139|>' is not marked as EOG
+llm_load_vocab: control token: 128143 '<|reserved_special_token_138|>' is not marked as EOG
+llm_load_vocab: control token: 128141 '<|reserved_special_token_136|>' is not marked as EOG
+llm_load_vocab: control token: 128139 '<|reserved_special_token_134|>' is not marked as EOG
+llm_load_vocab: control token: 128138 '<|reserved_special_token_133|>' is not marked as EOG
+llm_load_vocab: control token: 128135 '<|reserved_special_token_130|>' is not marked as EOG
+llm_load_vocab: control token: 128133 '<|reserved_special_token_128|>' is not marked as EOG
+llm_load_vocab: control token: 128132 '<|reserved_special_token_127|>' is not marked as EOG
+llm_load_vocab: control token: 128131 '<|reserved_special_token_126|>' is not marked as EOG
+llm_load_vocab: control token: 128130 '<|reserved_special_token_125|>' is not marked as EOG
+llm_load_vocab: control token: 128128 '<|reserved_special_token_123|>' is not marked as EOG
+llm_load_vocab: control token: 128125 '<|reserved_special_token_120|>' is not marked as EOG
+llm_load_vocab: control token: 128121 '<|reserved_special_token_116|>' is not marked as EOG
+llm_load_vocab: control token: 128120 '<|reserved_special_token_115|>' is not marked as EOG
+llm_load_vocab: control token: 128119 '<|reserved_special_token_114|>' is not marked as EOG
+llm_load_vocab: control token: 128116 '<|reserved_special_token_111|>' is not marked as EOG
+llm_load_vocab: control token: 128112 '<|reserved_special_token_107|>' is not marked as EOG
+llm_load_vocab: control token: 128109 '<|reserved_special_token_104|>' is not marked as EOG
+llm_load_vocab: control token: 128107 '<|reserved_special_token_102|>' is not marked as EOG
+llm_load_vocab: control token: 128106 '<|reserved_special_token_101|>' is not marked as EOG
+llm_load_vocab: control token: 128105 '<|reserved_special_token_100|>' is not marked as EOG
+llm_load_vocab: control token: 128103 '<|reserved_special_token_98|>' is not marked as EOG
+llm_load_vocab: control token: 128100 '<|reserved_special_token_95|>' is not marked as EOG
+llm_load_vocab: control token: 128099 '<|reserved_special_token_94|>' is not marked as EOG
+llm_load_vocab: control token: 128098 '<|reserved_special_token_93|>' is not marked as EOG
+llm_load_vocab: control token: 128094 '<|reserved_special_token_89|>' is not marked as EOG
+llm_load_vocab: control token: 128088 '<|reserved_special_token_83|>' is not marked as EOG
+llm_load_vocab: control token: 128087 '<|reserved_special_token_82|>' is not marked as EOG
+llm_load_vocab: control token: 128086 '<|reserved_special_token_81|>' is not marked as EOG
+llm_load_vocab: control token: 128084 '<|reserved_special_token_79|>' is not marked as EOG
+llm_load_vocab: control token: 128082 '<|reserved_special_token_77|>' is not marked as EOG
+llm_load_vocab: control token: 128078 '<|reserved_special_token_73|>' is not marked as EOG
+llm_load_vocab: control token: 128075 '<|reserved_special_token_70|>' is not marked as EOG
+llm_load_vocab: control token: 128073 '<|reserved_special_token_68|>' is not marked as EOG
+llm_load_vocab: control token: 128072 '<|reserved_special_token_67|>' is not marked as EOG
+llm_load_vocab: control token: 128070 '<|reserved_special_token_65|>' is not marked as EOG
+llm_load_vocab: control token: 128065 '<|reserved_special_token_60|>' is not marked as EOG
+llm_load_vocab: control token: 128064 '<|reserved_special_token_59|>' is not marked as EOG
+llm_load_vocab: control token: 128062 '<|reserved_special_token_57|>' is not marked as EOG
+llm_load_vocab: control token: 128060 '<|reserved_special_token_55|>' is not marked as EOG
+llm_load_vocab: control token: 128059 '<|reserved_special_token_54|>' is not marked as EOG
+llm_load_vocab: control token: 128057 '<|reserved_special_token_52|>' is not marked as EOG
+llm_load_vocab: control token: 128056 '<|reserved_special_token_51|>' is not marked as EOG
+llm_load_vocab: control token: 128054 '<|reserved_special_token_49|>' is not marked as EOG
+llm_load_vocab: control token: 128051 '<|reserved_special_token_46|>' is not marked as EOG
+llm_load_vocab: control token: 128043 '<|reserved_special_token_38|>' is not marked as EOG
+llm_load_vocab: control token: 128042 '<|reserved_special_token_37|>' is not marked as EOG
+llm_load_vocab: control token: 128041 '<|reserved_special_token_36|>' is not marked as EOG
+llm_load_vocab: control token: 128040 '<|reserved_special_token_35|>' is not marked as EOG
+llm_load_vocab: control token: 128035 '<|reserved_special_token_30|>' is not marked as EOG
+llm_load_vocab: control token: 128033 '<|reserved_special_token_28|>' is not marked as EOG
+llm_load_vocab: control token: 128032 '<|reserved_special_token_27|>' is not marked as EOG
+llm_load_vocab: control token: 128029 '<|reserved_special_token_24|>' is not marked as EOG
+llm_load_vocab: control token: 128025 '<|reserved_special_token_20|>' is not marked as EOG
+llm_load_vocab: control token: 128024 '<|reserved_special_token_19|>' is not marked as EOG
+llm_load_vocab: control token: 128021 '<|reserved_special_token_16|>' is not marked as EOG
+llm_load_vocab: control token: 128020 '<|reserved_special_token_15|>' is not marked as EOG
+llm_load_vocab: control token: 128019 '<|reserved_special_token_14|>' is not marked as EOG
+llm_load_vocab: control token: 128018 '<|reserved_special_token_13|>' is not marked as EOG
+llm_load_vocab: control token: 128015 '<|reserved_special_token_10|>' is not marked as EOG
+llm_load_vocab: control token: 128013 '<|reserved_special_token_8|>' is not marked as EOG
+llm_load_vocab: control token: 128012 '<|reserved_special_token_7|>' is not marked as EOG
+llm_load_vocab: control token: 128010 '<|reserved_special_token_5|>' is not marked as EOG
+llm_load_vocab: control token: 128005 '<|reserved_special_token_3|>' is not marked as EOG
+llm_load_vocab: control token: 128004 '<|reserved_special_token_2|>' is not marked as EOG
+llm_load_vocab: control token: 128002 '<|reserved_special_token_0|>' is not marked as EOG
+llm_load_vocab: control token: 128249 '<|reserved_special_token_244|>' is not marked as EOG
+llm_load_vocab: control token: 128187 '<|reserved_special_token_182|>' is not marked as EOG
+llm_load_vocab: control token: 128180 '<|reserved_special_token_175|>' is not marked as EOG
+llm_load_vocab: control token: 128134 '<|reserved_special_token_129|>' is not marked as EOG
+llm_load_vocab: control token: 128179 '<|reserved_special_token_174|>' is not marked as EOG
+llm_load_vocab: control token: 128037 '<|reserved_special_token_32|>' is not marked as EOG
+llm_load_vocab: control token: 128045 '<|reserved_special_token_40|>' is not marked as EOG
+llm_load_vocab: control token: 128089 '<|reserved_special_token_84|>' is not marked as EOG
+llm_load_vocab: control token: 128212 '<|reserved_special_token_207|>' is not marked as EOG
+llm_load_vocab: control token: 128104 '<|reserved_special_token_99|>' is not marked as EOG
+llm_load_vocab: control token: 128205 '<|reserved_special_token_200|>' is not marked as EOG
+llm_load_vocab: control token: 128142 '<|reserved_special_token_137|>' is not marked as EOG
+llm_load_vocab: control token: 128028 '<|reserved_special_token_23|>' is not marked as EOG
+llm_load_vocab: control token: 128126 '<|reserved_special_token_121|>' is not marked as EOG
+llm_load_vocab: control token: 128198 '<|reserved_special_token_193|>' is not marked as EOG
+llm_load_vocab: control token: 128071 '<|reserved_special_token_66|>' is not marked as EOG
+llm_load_vocab: control token: 128092 '<|reserved_special_token_87|>' is not marked as EOG
+llm_load_vocab: control token: 128183 '<|reserved_special_token_178|>' is not marked as EOG
+llm_load_vocab: control token: 128140 '<|reserved_special_token_135|>' is not marked as EOG
+llm_load_vocab: control token: 128226 '<|reserved_special_token_221|>' is not marked as EOG
+llm_load_vocab: control token: 128007 '<|end_header_id|>' is not marked as EOG
+llm_load_vocab: control token: 128052 '<|reserved_special_token_47|>' is not marked as EOG
+llm_load_vocab: control token: 128053 '<|reserved_special_token_48|>' is not marked as EOG
+llm_load_vocab: control token: 128058 '<|reserved_special_token_53|>' is not marked as EOG
+llm_load_vocab: control token: 128150 '<|reserved_special_token_145|>' is not marked as EOG
+llm_load_vocab: control token: 128149 '<|reserved_special_token_144|>' is not marked as EOG
+llm_load_vocab: control token: 128209 '<|reserved_special_token_204|>' is not marked as EOG
+llm_load_vocab: control token: 128169 '<|reserved_special_token_164|>' is not marked as EOG
+llm_load_vocab: control token: 128157 '<|reserved_special_token_152|>' is not marked as EOG
+llm_load_vocab: control token: 128038 '<|reserved_special_token_33|>' is not marked as EOG
+llm_load_vocab: control token: 128178 '<|reserved_special_token_173|>' is not marked as EOG
+llm_load_vocab: control token: 128091 '<|reserved_special_token_86|>' is not marked as EOG
+llm_load_vocab: control token: 128115 '<|reserved_special_token_110|>' is not marked as EOG
+llm_load_vocab: control token: 128233 '<|reserved_special_token_228|>' is not marked as EOG
+llm_load_vocab: control token: 128145 '<|reserved_special_token_140|>' is not marked as EOG
+llm_load_vocab: control token: 128039 '<|reserved_special_token_34|>' is not marked as EOG
+llm_load_vocab: control token: 128136 '<|reserved_special_token_131|>' is not marked as EOG
+llm_load_vocab: control token: 128170 '<|reserved_special_token_165|>' is not marked as EOG
+llm_load_vocab: control token: 128236 '<|reserved_special_token_231|>' is not marked as EOG
+llm_load_vocab: control token: 128154 '<|reserved_special_token_149|>' is not marked as EOG
+llm_load_vocab: control token: 128049 '<|reserved_special_token_44|>' is not marked as EOG
+llm_load_vocab: control token: 128023 '<|reserved_special_token_18|>' is not marked as EOG
+llm_load_vocab: control token: 128003 '<|reserved_special_token_1|>' is not marked as EOG
+llm_load_vocab: control token: 128016 '<|reserved_special_token_11|>' is not marked as EOG
+llm_load_vocab: control token: 128113 '<|reserved_special_token_108|>' is not marked as EOG
+llm_load_vocab: control token: 128158 '<|reserved_special_token_153|>' is not marked as EOG
+llm_load_vocab: control token: 128223 '<|reserved_special_token_218|>' is not marked as EOG
+llm_load_vocab: control token: 128156 '<|reserved_special_token_151|>' is not marked as EOG
+llm_load_vocab: control token: 128008 '<|reserved_special_token_4|>' is not marked as EOG
+llm_load_vocab: control token: 128085 '<|reserved_special_token_80|>' is not marked as EOG
+llm_load_vocab: control token: 128160 '<|reserved_special_token_155|>' is not marked as EOG
+llm_load_vocab: control token: 128001 '<|end_of_text|>' is not marked as EOG
+llm_load_vocab: control token: 128110 '<|reserved_special_token_105|>' is not marked as EOG
+llm_load_vocab: control token: 128247 '<|reserved_special_token_242|>' is not marked as EOG
+llm_load_vocab: control token: 128122 '<|reserved_special_token_117|>' is not marked as EOG
+llm_load_vocab: control token: 128050 '<|reserved_special_token_45|>' is not marked as EOG
+llm_load_vocab: control token: 128221 '<|reserved_special_token_216|>' is not marked as EOG
+llm_load_vocab: control token: 128244 '<|reserved_special_token_239|>' is not marked as EOG
+llm_load_vocab: control token: 128248 '<|reserved_special_token_243|>' is not marked as EOG
+llm_load_vocab: control token: 128213 '<|reserved_special_token_208|>' is not marked as EOG
+llm_load_vocab: control token: 128006 '<|start_header_id|>' is not marked as EOG
+llm_load_vocab: control token: 128208 '<|reserved_special_token_203|>' is not marked as EOG
+llm_load_vocab: control token: 128074 '<|reserved_special_token_69|>' is not marked as EOG
+llm_load_vocab: control token: 128234 '<|reserved_special_token_229|>' is not marked as EOG
+llm_load_vocab: control token: 128083 '<|reserved_special_token_78|>' is not marked as EOG
+llm_load_vocab: control token: 128224 '<|reserved_special_token_219|>' is not marked as EOG
+llm_load_vocab: control token: 128055 '<|reserved_special_token_50|>' is not marked as EOG
+llm_load_vocab: control token: 128097 '<|reserved_special_token_92|>' is not marked as EOG
+llm_load_vocab: control token: 128206 '<|reserved_special_token_201|>' is not marked as EOG
+llm_load_vocab: control token: 128081 '<|reserved_special_token_76|>' is not marked as EOG
+llm_load_vocab: control token: 128068 '<|reserved_special_token_63|>' is not marked as EOG
+llm_load_vocab: control token: 128067 '<|reserved_special_token_62|>' is not marked as EOG
+llm_load_vocab: control token: 128046 '<|reserved_special_token_41|>' is not marked as EOG
+llm_load_vocab: control token: 128194 '<|reserved_special_token_189|>' is not marked as EOG
+llm_load_vocab: control token: 128069 '<|reserved_special_token_64|>' is not marked as EOG
+llm_load_vocab: control token: 128000 '<|begin_of_text|>' is not marked as EOG
+llm_load_vocab: control token: 128220 '<|reserved_special_token_215|>' is not marked as EOG
+llm_load_vocab: control token: 128214 '<|reserved_special_token_209|>' is not marked as EOG
+llm_load_vocab: control token: 128108 '<|reserved_special_token_103|>' is not marked as EOG
+llm_load_vocab: control token: 128200 '<|reserved_special_token_195|>' is not marked as EOG
+llm_load_vocab: control token: 128048 '<|reserved_special_token_43|>' is not marked as EOG
+llm_load_vocab: control token: 128027 '<|reserved_special_token_22|>' is not marked as EOG
+llm_load_vocab: control token: 128114 '<|reserved_special_token_109|>' is not marked as EOG
+llm_load_vocab: control token: 128235 '<|reserved_special_token_230|>' is not marked as EOG
+llm_load_vocab: control token: 128252 '<|reserved_special_token_247|>' is not marked as EOG
+llm_load_vocab: control token: 128199 '<|reserved_special_token_194|>' is not marked as EOG
+llm_load_vocab: control token: 128129 '<|reserved_special_token_124|>' is not marked as EOG
+llm_load_vocab: control token: 128245 '<|reserved_special_token_240|>' is not marked as EOG
+llm_load_vocab: control token: 128164 '<|reserved_special_token_159|>' is not marked as EOG
+llm_load_vocab: control token: 128124 '<|reserved_special_token_119|>' is not marked as EOG
+llm_load_vocab: control token: 128102 '<|reserved_special_token_97|>' is not marked as EOG
+llm_load_vocab: control token: 128036 '<|reserved_special_token_31|>' is not marked as EOG
+llm_load_vocab: control token: 128229 '<|reserved_special_token_224|>' is not marked as EOG
+llm_load_vocab: control token: 128163 '<|reserved_special_token_158|>' is not marked as EOG
+llm_load_vocab: control token: 128127 '<|reserved_special_token_122|>' is not marked as EOG
+llm_load_vocab: control token: 128111 '<|reserved_special_token_106|>' is not marked as EOG
+llm_load_vocab: control token: 128231 '<|reserved_special_token_226|>' is not marked as EOG
+llm_load_vocab: control token: 128188 '<|reserved_special_token_183|>' is not marked as EOG
+llm_load_vocab: control token: 128061 '<|reserved_special_token_56|>' is not marked as EOG
+llm_load_vocab: control token: 128137 '<|reserved_special_token_132|>' is not marked as EOG
+llm_load_vocab: control token: 128093 '<|reserved_special_token_88|>' is not marked as EOG
+llm_load_vocab: control token: 128095 '<|reserved_special_token_90|>' is not marked as EOG
+llm_load_vocab: control token: 128189 '<|reserved_special_token_184|>' is not marked as EOG
+llm_load_vocab: control token: 128090 '<|reserved_special_token_85|>' is not marked as EOG
+llm_load_vocab: control token: 128147 '<|reserved_special_token_142|>' is not marked as EOG
+llm_load_vocab: control token: 128219 '<|reserved_special_token_214|>' is not marked as EOG
+llm_load_vocab: control token: 128230 '<|reserved_special_token_225|>' is not marked as EOG
+llm_load_vocab: control token: 128217 '<|reserved_special_token_212|>' is not marked as EOG
+llm_load_vocab: control token: 128031 '<|reserved_special_token_26|>' is not marked as EOG
+llm_load_vocab: control token: 128030 '<|reserved_special_token_25|>' is not marked as EOG
+llm_load_vocab: control token: 128250 '<|reserved_special_token_245|>' is not marked as EOG
+llm_load_vocab: control token: 128192 '<|reserved_special_token_187|>' is not marked as EOG
+llm_load_vocab: control token: 128096 '<|reserved_special_token_91|>' is not marked as EOG
+llm_load_vocab: control token: 128186 '<|reserved_special_token_181|>' is not marked as EOG
+llm_load_vocab: control token: 128207 '<|reserved_special_token_202|>' is not marked as EOG
+llm_load_vocab: control token: 128171 '<|reserved_special_token_166|>' is not marked as EOG
+llm_load_vocab: control token: 128080 '<|reserved_special_token_75|>' is not marked as EOG
+llm_load_vocab: control token: 128077 '<|reserved_special_token_72|>' is not marked as EOG
+llm_load_vocab: control token: 128101 '<|reserved_special_token_96|>' is not marked as EOG
+llm_load_vocab: control token: 128079 '<|reserved_special_token_74|>' is not marked as EOG
+llm_load_vocab: control token: 128216 '<|reserved_special_token_211|>' is not marked as EOG
+llm_load_vocab: control token: 128014 '<|reserved_special_token_9|>' is not marked as EOG
+llm_load_vocab: control token: 128047 '<|reserved_special_token_42|>' is not marked as EOG
+llm_load_vocab: control token: 128202 '<|reserved_special_token_197|>' is not marked as EOG
+llm_load_vocab: control token: 128044 '<|reserved_special_token_39|>' is not marked as EOG
+llm_load_vocab: control token: 128161 '<|reserved_special_token_156|>' is not marked as EOG
+llm_load_vocab: control token: 128017 '<|reserved_special_token_12|>' is not marked as EOG
+llm_load_vocab: control token: 128066 '<|reserved_special_token_61|>' is not marked as EOG
+llm_load_vocab: control token: 128242 '<|reserved_special_token_237|>' is not marked as EOG
+llm_load_vocab: control token: 128118 '<|reserved_special_token_113|>' is not marked as EOG
+llm_load_vocab: control token: 128076 '<|reserved_special_token_71|>' is not marked as EOG
+llm_load_vocab: control token: 128034 '<|reserved_special_token_29|>' is not marked as EOG
+llm_load_vocab: control token: 128241 '<|reserved_special_token_236|>' is not marked as EOG
+llm_load_vocab: control token: 128026 '<|reserved_special_token_21|>' is not marked as EOG
+llm_load_vocab: control token: 128218 '<|reserved_special_token_213|>' is not marked as EOG
+llm_load_vocab: control token: 128063 '<|reserved_special_token_58|>' is not marked as EOG
+llm_load_vocab: control token: 128117 '<|reserved_special_token_112|>' is not marked as EOG
+llm_load_vocab: control token: 128011 '<|reserved_special_token_6|>' is not marked as EOG
+llm_load_vocab: control token: 128022 '<|reserved_special_token_17|>' is not marked as EOG
+llm_load_vocab: control token: 128123 '<|reserved_special_token_118|>' is not marked as EOG
+llm_load_vocab: special_eos_id is not in special_eog_ids - the tokenizer config may be incorrect
+llm_load_vocab: special tokens cache size = 256
+llm_load_vocab: token to piece cache size = 0.8000 MB
+validate_override: Using metadata override (  str) 'tokenizer.ggml.pre' = llama-bpe
+llm_load_print_meta: format           = GGUF V3 (latest)
+llm_load_print_meta: arch             = bitnet-b1.58
+llm_load_print_meta: vocab type       = BPE
+llm_load_print_meta: n_vocab          = 128256
+llm_load_print_meta: n_merges         = 280147
+llm_load_print_meta: vocab_only       = 0
+llm_load_print_meta: n_ctx_train      = 4096
+llm_load_print_meta: n_embd           = 2560
+llm_load_print_meta: n_layer          = 30
+llm_load_print_meta: n_head           = 20
+llm_load_print_meta: n_head_kv        = 5
+llm_load_print_meta: n_rot            = 128
+llm_load_print_meta: n_swa            = 0
+llm_load_print_meta: n_embd_head_k    = 128
+llm_load_print_meta: n_embd_head_v    = 128
+llm_load_print_meta: n_gqa            = 4
+llm_load_print_meta: n_embd_k_gqa     = 640
+llm_load_print_meta: n_embd_v_gqa     = 640
+llm_load_print_meta: f_norm_eps       = 0.0e+00
+llm_load_print_meta: f_norm_rms_eps   = 1.0e-05
+llm_load_print_meta: f_clamp_kqv      = 0.0e+00
+llm_load_print_meta: f_max_alibi_bias = 0.0e+00
+llm_load_print_meta: f_logit_scale    = 0.0e+00
+llm_load_print_meta: n_ff             = 6912
+llm_load_print_meta: n_expert         = 0
+llm_load_print_meta: n_expert_used    = 0
+llm_load_print_meta: causal attn      = 1
+llm_load_print_meta: pooling type     = 0
+llm_load_print_meta: rope type        = 2
+llm_load_print_meta: rope scaling     = linear
+llm_load_print_meta: freq_base_train  = 500000.0
+llm_load_print_meta: freq_scale_train = 1
+llm_load_print_meta: n_ctx_orig_yarn  = 4096
+llm_load_print_meta: rope_finetuned   = unknown
+llm_load_print_meta: ssm_d_conv       = 0
+llm_load_print_meta: ssm_d_inner      = 0
+llm_load_print_meta: ssm_d_state      = 0
+llm_load_print_meta: ssm_dt_rank      = 0
+llm_load_print_meta: ssm_dt_b_c_rms   = 0
+llm_load_print_meta: model type       = 2B
+llm_load_print_meta: model ftype      = I2_S - 2 bpw ternary
+llm_load_print_meta: model params     = 2.41 B
+llm_load_print_meta: model size       = 1.10 GiB (3.91 BPW) 
+llm_load_print_meta: general.name     = bitnet2b
+llm_load_print_meta: BOS token        = 128000 '<|begin_of_text|>'
+llm_load_print_meta: EOS token        = 128001 '<|end_of_text|>'
+llm_load_print_meta: EOT token        = 128009 '<|eot_id|>'
+llm_load_print_meta: PAD token        = 128001 '<|end_of_text|>'
+llm_load_print_meta: LF token         = 128 'Ä'
+llm_load_print_meta: EOG token        = 128001 '<|end_of_text|>'
+llm_load_print_meta: EOG token        = 128009 '<|eot_id|>'
+llm_load_print_meta: max token length = 256
+llm_load_tensors: ggml ctx size =    0.15 MiB
+llm_load_tensors:        CPU buffer size =  1124.81 MiB
+...............................
+llama_new_context_with_model: n_ctx      = 4096
+llama_new_context_with_model: n_batch    = 2048
+llama_new_context_with_model: n_ubatch   = 512
+llama_new_context_with_model: flash_attn = 0
+llama_new_context_with_model: freq_base  = 500000.0
+llama_new_context_with_model: freq_scale = 1
+llama_kv_cache_init:        CPU KV buffer size =   300.00 MiB
+llama_new_context_with_model: KV self size  =  300.00 MiB, K (f16):  150.00 MiB, V (f16):  150.00 MiB
+llama_new_context_with_model:        CPU  output buffer size =     0.98 MiB
+llama_new_context_with_model:        CPU compute buffer size =   255.50 MiB
+llama_new_context_with_model: graph nodes  = 1116
+llama_new_context_with_model: graph splits = 1
+common_init_from_params: warming up the model with an empty run - please wait ... (--no-warmup to disable)
+srv          init: initializing slots, n_slots = 1
+slot         init: id  0 | task -1 | new slot n_ctx_slot = 4096
+main: model loaded
+main: chat template, built_in: 1, chat_example: 'System: You are a helpful assistantUser: Hello<|eot_id|>Assistant: Hi thereUser: How are you?<|eot_id|>Assistant: '
+main: server is listening on 127.0.0.1:8084 - starting the main loop
+srv  update_slots: all slots are idle
+request: GET /health 127.0.0.1 200
+request: GET /health 127.0.0.1 200
+request: POST /tokenize 127.0.0.1 200
+request: GET /health 127.0.0.1 200
+slot launch_slot_: id  0 | task 0 | processing task
+slot update_slots: id  0 | task 0 | tokenizing prompt, len = 1
+slot update_slots: id  0 | task 0 | prompt tokenized, n_ctx_slot = 4096, n_keep = 0, n_prompt_tokens = 112
+slot update_slots: id  0 | task 0 | kv cache rm [0, end)
+slot update_slots: id  0 | task 0 | prompt processing progress, n_past = 112, n_tokens = 112, progress = 1.000000
+slot update_slots: id  0 | task 0 | prompt done, n_past = 112, n_tokens = 112
+slot      release: id  0 | task 0 | stop processing: n_past = 141, truncated = 0
+slot print_timing: id  0 | task 0 | 
+prompt eval time =     816.37 ms /   112 tokens (    7.29 ms per token,   137.19 tokens per second)
+       eval time =    1354.44 ms /    30 tokens (   45.15 ms per token,    22.15 tokens per second)
+      total time =    2170.80 ms /   142 tokens
+srv  update_slots: all slots are idle
+request: POST /v1/chat/completions 127.0.0.1 200
+slot launch_slot_: id  0 | task 31 | processing task
+slot update_slots: id  0 | task 31 | tokenizing prompt, len = 1
+slot update_slots: id  0 | task 31 | prompt tokenized, n_ctx_slot = 4096, n_keep = 0, n_prompt_tokens = 114
+slot update_slots: id  0 | task 31 | kv cache rm [0, end)
+slot update_slots: id  0 | task 31 | prompt processing progress, n_past = 114, n_tokens = 114, progress = 1.000000
+slot update_slots: id  0 | task 31 | prompt done, n_past = 114, n_tokens = 114
+slot      release: id  0 | task 31 | stop processing: n_past = 130, truncated = 0
+slot print_timing: id  0 | task 31 | 
+prompt eval time =     878.36 ms /   114 tokens (    7.70 ms per token,   129.79 tokens per second)
+       eval time =     747.55 ms /    17 tokens (   43.97 ms per token,    22.74 tokens per second)
+      total time =    1625.91 ms /   131 tokens
+srv  update_slots: all slots are idle
+request: POST /v1/chat/completions 127.0.0.1 200
+slot launch_slot_: id  0 | task 49 | processing task
+slot update_slots: id  0 | task 49 | tokenizing prompt, len = 1
+slot update_slots: id  0 | task 49 | prompt tokenized, n_ctx_slot = 4096, n_keep = 0, n_prompt_tokens = 116
+slot update_slots: id  0 | task 49 | kv cache rm [0, end)
+slot update_slots: id  0 | task 49 | prompt processing progress, n_past = 116, n_tokens = 116, progress = 1.000000
+slot update_slots: id  0 | task 49 | prompt done, n_past = 116, n_tokens = 116
+slot      release: id  0 | task 49 | stop processing: n_past = 139, truncated = 0
+slot print_timing: id  0 | task 49 | 
+prompt eval time =     885.78 ms /   116 tokens (    7.64 ms per token,   130.96 tokens per second)
+       eval time =    1082.35 ms /    24 tokens (   45.10 ms per token,    22.17 tokens per second)
+      total time =    1968.13 ms /   140 tokens
+srv  update_slots: all slots are idle
+request: POST /v1/chat/completions 127.0.0.1 200
+slot launch_slot_: id  0 | task 74 | processing task
+slot update_slots: id  0 | task 74 | tokenizing prompt, len = 1
+slot update_slots: id  0 | task 74 | prompt tokenized, n_ctx_slot = 4096, n_keep = 0, n_prompt_tokens = 118
+slot update_slots: id  0 | task 74 | kv cache rm [0, end)
+slot update_slots: id  0 | task 74 | prompt processing progress, n_past = 118, n_tokens = 118, progress = 1.000000
+slot update_slots: id  0 | task 74 | prompt done, n_past = 118, n_tokens = 118
+slot      release: id  0 | task 74 | stop processing: n_past = 139, truncated = 0
+slot print_timing: id  0 | task 74 | 
+prompt eval time =     922.24 ms /   118 tokens (    7.82 ms per token,   127.95 tokens per second)
+       eval time =     990.93 ms /    22 tokens (   45.04 ms per token,    22.20 tokens per second)
+      total time =    1913.17 ms /   140 tokens
+srv  update_slots: all slots are idle
+request: POST /v1/chat/completions 127.0.0.1 200
+slot launch_slot_: id  0 | task 97 | processing task
+slot update_slots: id  0 | task 97 | tokenizing prompt, len = 1
+slot update_slots: id  0 | task 97 | prompt tokenized, n_ctx_slot = 4096, n_keep = 0, n_prompt_tokens = 113
+slot update_slots: id  0 | task 97 | kv cache rm [0, end)
+slot update_slots: id  0 | task 97 | prompt processing progress, n_past = 113, n_tokens = 113, progress = 1.000000
+slot update_slots: id  0 | task 97 | prompt done, n_past = 113, n_tokens = 113
+slot      release: id  0 | task 97 | stop processing: n_past = 129, truncated = 0
+slot print_timing: id  0 | task 97 | 
+prompt eval time =     879.60 ms /   113 tokens (    7.78 ms per token,   128.47 tokens per second)
+       eval time =     756.31 ms /    17 tokens (   44.49 ms per token,    22.48 tokens per second)
+      total time =    1635.91 ms /   130 tokens
+srv  update_slots: all slots are idle
+request: POST /v1/chat/completions 127.0.0.1 200
+slot launch_slot_: id  0 | task 115 | processing task
+slot update_slots: id  0 | task 115 | tokenizing prompt, len = 1
+slot update_slots: id  0 | task 115 | prompt tokenized, n_ctx_slot = 4096, n_keep = 0, n_prompt_tokens = 115
+slot update_slots: id  0 | task 115 | kv cache rm [0, end)
+slot update_slots: id  0 | task 115 | prompt processing progress, n_past = 115, n_tokens = 115, progress = 1.000000
+slot update_slots: id  0 | task 115 | prompt done, n_past = 115, n_tokens = 115
+slot      release: id  0 | task 115 | stop processing: n_past = 133, truncated = 0
+slot print_timing: id  0 | task 115 | 
+prompt eval time =     894.93 ms /   115 tokens (    7.78 ms per token,   128.50 tokens per second)
+       eval time =     842.45 ms /    19 tokens (   44.34 ms per token,    22.55 tokens per second)
+      total time =    1737.37 ms /   134 tokens
+srv  update_slots: all slots are idle
+request: POST /v1/chat/completions 127.0.0.1 200
+slot launch_slot_: id  0 | task 135 | processing task
+slot update_slots: id  0 | task 135 | tokenizing prompt, len = 1
+slot update_slots: id  0 | task 135 | prompt tokenized, n_ctx_slot = 4096, n_keep = 0, n_prompt_tokens = 113
+slot update_slots: id  0 | task 135 | kv cache rm [0, end)
+slot update_slots: id  0 | task 135 | prompt processing progress, n_past = 113, n_tokens = 113, progress = 1.000000
+slot update_slots: id  0 | task 135 | prompt done, n_past = 113, n_tokens = 113
+slot      release: id  0 | task 135 | stop processing: n_past = 125, truncated = 0
+slot print_timing: id  0 | task 135 | 
+prompt eval time =     859.15 ms /   113 tokens (    7.60 ms per token,   131.52 tokens per second)
+       eval time =     563.80 ms /    13 tokens (   43.37 ms per token,    23.06 tokens per second)
+      total time =    1422.96 ms /   126 tokens
+srv  update_slots: all slots are idle
+request: POST /v1/chat/completions 127.0.0.1 200
+slot launch_slot_: id  0 | task 149 | processing task
+slot update_slots: id  0 | task 149 | tokenizing prompt, len = 1
+slot update_slots: id  0 | task 149 | prompt tokenized, n_ctx_slot = 4096, n_keep = 0, n_prompt_tokens = 117
+slot update_slots: id  0 | task 149 | kv cache rm [0, end)
+slot update_slots: id  0 | task 149 | prompt processing progress, n_past = 117, n_tokens = 117, progress = 1.000000
+slot update_slots: id  0 | task 149 | prompt done, n_past = 117, n_tokens = 117
+slot      release: id  0 | task 149 | stop processing: n_past = 141, truncated = 0
+slot print_timing: id  0 | task 149 | 
+prompt eval time =     888.47 ms /   117 tokens (    7.59 ms per token,   131.69 tokens per second)
+       eval time =    1130.32 ms /    25 tokens (   45.21 ms per token,    22.12 tokens per second)
+      total time =    2018.79 ms /   142 tokens
+srv  update_slots: all slots are idle
+request: POST /v1/chat/completions 127.0.0.1 200
+slot launch_slot_: id  0 | task 175 | processing task
+slot update_slots: id  0 | task 175 | tokenizing prompt, len = 1
+slot update_slots: id  0 | task 175 | prompt tokenized, n_ctx_slot = 4096, n_keep = 0, n_prompt_tokens = 117
+slot update_slots: id  0 | task 175 | kv cache rm [0, end)
+slot update_slots: id  0 | task 175 | prompt processing progress, n_past = 117, n_tokens = 117, progress = 1.000000
+slot update_slots: id  0 | task 175 | prompt done, n_past = 117, n_tokens = 117
+slot      release: id  0 | task 175 | stop processing: n_past = 137, truncated = 0
+slot print_timing: id  0 | task 175 | 
+prompt eval time =     898.14 ms /   117 tokens (    7.68 ms per token,   130.27 tokens per second)
+       eval time =     942.11 ms /    21 tokens (   44.86 ms per token,    22.29 tokens per second)
+      total time =    1840.25 ms /   138 tokens
+srv  update_slots: all slots are idle
+request: POST /v1/chat/completions 127.0.0.1 200
+slot launch_slot_: id  0 | task 197 | processing task
+slot update_slots: id  0 | task 197 | tokenizing prompt, len = 1
+slot update_slots: id  0 | task 197 | prompt tokenized, n_ctx_slot = 4096, n_keep = 0, n_prompt_tokens = 113
+slot update_slots: id  0 | task 197 | kv cache rm [0, end)
+slot update_slots: id  0 | task 197 | prompt processing progress, n_past = 113, n_tokens = 113, progress = 1.000000
+slot update_slots: id  0 | task 197 | prompt done, n_past = 113, n_tokens = 113
+slot      release: id  0 | task 197 | stop processing: n_past = 130, truncated = 0
+slot print_timing: id  0 | task 197 | 
+prompt eval time =     860.55 ms /   113 tokens (    7.62 ms per token,   131.31 tokens per second)
+       eval time =     796.16 ms /    18 tokens (   44.23 ms per token,    22.61 tokens per second)
+      total time =    1656.71 ms /   131 tokens
+srv  update_slots: all slots are idle
+request: POST /v1/chat/completions 127.0.0.1 200
+request: GET /health 127.0.0.1 200
+slot launch_slot_: id  0 | task 216 | processing task
+slot update_slots: id  0 | task 216 | tokenizing prompt, len = 1
+slot update_slots: id  0 | task 216 | prompt tokenized, n_ctx_slot = 4096, n_keep = 0, n_prompt_tokens = 112
+slot update_slots: id  0 | task 216 | kv cache rm [0, end)
+slot update_slots: id  0 | task 216 | prompt processing progress, n_past = 112, n_tokens = 112, progress = 1.000000
+slot update_slots: id  0 | task 216 | prompt done, n_past = 112, n_tokens = 112
+slot      release: id  0 | task 216 | stop processing: n_past = 141, truncated = 0
+slot print_timing: id  0 | task 216 | 
+prompt eval time =     785.03 ms /   112 tokens (    7.01 ms per token,   142.67 tokens per second)
+       eval time =    1356.90 ms /    30 tokens (   45.23 ms per token,    22.11 tokens per second)
+      total time =    2141.93 ms /   142 tokens
+srv  update_slots: all slots are idle
+request: POST /v1/chat/completions 127.0.0.1 200
+slot launch_slot_: id  0 | task 247 | processing task
+slot update_slots: id  0 | task 247 | tokenizing prompt, len = 1
+slot update_slots: id  0 | task 247 | prompt tokenized, n_ctx_slot = 4096, n_keep = 0, n_prompt_tokens = 114
+slot update_slots: id  0 | task 247 | kv cache rm [0, end)
+slot update_slots: id  0 | task 247 | prompt processing progress, n_past = 114, n_tokens = 114, progress = 1.000000
+slot update_slots: id  0 | task 247 | prompt done, n_past = 114, n_tokens = 114
+slot      release: id  0 | task 247 | stop processing: n_past = 130, truncated = 0
+slot print_timing: id  0 | task 247 | 
+prompt eval time =     849.89 ms /   114 tokens (    7.46 ms per token,   134.14 tokens per second)
+       eval time =     750.05 ms /    17 tokens (   44.12 ms per token,    22.67 tokens per second)
+      total time =    1599.94 ms /   131 tokens
+srv  update_slots: all slots are idle
+request: POST /v1/chat/completions 127.0.0.1 200
+slot launch_slot_: id  0 | task 265 | processing task
+slot update_slots: id  0 | task 265 | tokenizing prompt, len = 1
+slot update_slots: id  0 | task 265 | prompt tokenized, n_ctx_slot = 4096, n_keep = 0, n_prompt_tokens = 116
+slot update_slots: id  0 | task 265 | kv cache rm [0, end)
+slot update_slots: id  0 | task 265 | prompt processing progress, n_past = 116, n_tokens = 116, progress = 1.000000
+slot update_slots: id  0 | task 265 | prompt done, n_past = 116, n_tokens = 116
+slot      release: id  0 | task 265 | stop processing: n_past = 139, truncated = 0
+slot print_timing: id  0 | task 265 | 
+prompt eval time =     852.56 ms /   116 tokens (    7.35 ms per token,   136.06 tokens per second)
+       eval time =    1084.31 ms /    24 tokens (   45.18 ms per token,    22.13 tokens per second)
+      total time =    1936.86 ms /   140 tokens
+srv  update_slots: all slots are idle
+request: POST /v1/chat/completions 127.0.0.1 200
+slot launch_slot_: id  0 | task 290 | processing task
+slot update_slots: id  0 | task 290 | tokenizing prompt, len = 1
+slot update_slots: id  0 | task 290 | prompt tokenized, n_ctx_slot = 4096, n_keep = 0, n_prompt_tokens = 118
+slot update_slots: id  0 | task 290 | kv cache rm [0, end)
+slot update_slots: id  0 | task 290 | prompt processing progress, n_past = 118, n_tokens = 118, progress = 1.000000
+slot update_slots: id  0 | task 290 | prompt done, n_past = 118, n_tokens = 118
+slot      release: id  0 | task 290 | stop processing: n_past = 139, truncated = 0
+slot print_timing: id  0 | task 290 | 
+prompt eval time =     894.71 ms /   118 tokens (    7.58 ms per token,   131.89 tokens per second)
+       eval time =     989.28 ms /    22 tokens (   44.97 ms per token,    22.24 tokens per second)
+      total time =    1883.99 ms /   140 tokens
+srv  update_slots: all slots are idle
+request: POST /v1/chat/completions 127.0.0.1 200
+slot launch_slot_: id  0 | task 313 | processing task
+slot update_slots: id  0 | task 313 | tokenizing prompt, len = 1
+slot update_slots: id  0 | task 313 | prompt tokenized, n_ctx_slot = 4096, n_keep = 0, n_prompt_tokens = 113
+slot update_slots: id  0 | task 313 | kv cache rm [0, end)
+slot update_slots: id  0 | task 313 | prompt processing progress, n_past = 113, n_tokens = 113, progress = 1.000000
+slot update_slots: id  0 | task 313 | prompt done, n_past = 113, n_tokens = 113
+slot      release: id  0 | task 313 | stop processing: n_past = 129, truncated = 0
+slot print_timing: id  0 | task 313 | 
+prompt eval time =     848.84 ms /   113 tokens (    7.51 ms per token,   133.12 tokens per second)
+       eval time =     752.65 ms /    17 tokens (   44.27 ms per token,    22.59 tokens per second)
+      total time =    1601.49 ms /   130 tokens
+srv  update_slots: all slots are idle
+request: POST /v1/chat/completions 127.0.0.1 200
+slot launch_slot_: id  0 | task 331 | processing task
+slot update_slots: id  0 | task 331 | tokenizing prompt, len = 1
+slot update_slots: id  0 | task 331 | prompt tokenized, n_ctx_slot = 4096, n_keep = 0, n_prompt_tokens = 115
+slot update_slots: id  0 | task 331 | kv cache rm [0, end)
+slot update_slots: id  0 | task 331 | prompt processing progress, n_past = 115, n_tokens = 115, progress = 1.000000
+slot update_slots: id  0 | task 331 | prompt done, n_past = 115, n_tokens = 115
+slot      release: id  0 | task 331 | stop processing: n_past = 133, truncated = 0
+slot print_timing: id  0 | task 331 | 
+prompt eval time =     879.73 ms /   115 tokens (    7.65 ms per token,   130.72 tokens per second)
+       eval time =     845.68 ms /    19 tokens (   44.51 ms per token,    22.47 tokens per second)
+      total time =    1725.40 ms /   134 tokens
+srv  update_slots: all slots are idle
+request: POST /v1/chat/completions 127.0.0.1 200
+slot launch_slot_: id  0 | task 351 | processing task
+slot update_slots: id  0 | task 351 | tokenizing prompt, len = 1
+slot update_slots: id  0 | task 351 | prompt tokenized, n_ctx_slot = 4096, n_keep = 0, n_prompt_tokens = 113
+slot update_slots: id  0 | task 351 | kv cache rm [0, end)
+slot update_slots: id  0 | task 351 | prompt processing progress, n_past = 113, n_tokens = 113, progress = 1.000000
+slot update_slots: id  0 | task 351 | prompt done, n_past = 113, n_tokens = 113
+slot      release: id  0 | task 351 | stop processing: n_past = 125, truncated = 0
+slot print_timing: id  0 | task 351 | 
+prompt eval time =     884.54 ms /   113 tokens (    7.83 ms per token,   127.75 tokens per second)
+       eval time =     562.91 ms /    13 tokens (   43.30 ms per token,    23.09 tokens per second)
+      total time =    1447.45 ms /   126 tokens
+srv  update_slots: all slots are idle
+request: POST /v1/chat/completions 127.0.0.1 200
+slot launch_slot_: id  0 | task 365 | processing task
+slot update_slots: id  0 | task 365 | tokenizing prompt, len = 1
+slot update_slots: id  0 | task 365 | prompt tokenized, n_ctx_slot = 4096, n_keep = 0, n_prompt_tokens = 117
+slot update_slots: id  0 | task 365 | kv cache rm [0, end)
+slot update_slots: id  0 | task 365 | prompt processing progress, n_past = 117, n_tokens = 117, progress = 1.000000
+slot update_slots: id  0 | task 365 | prompt done, n_past = 117, n_tokens = 117
+slot      release: id  0 | task 365 | stop processing: n_past = 141, truncated = 0
+slot print_timing: id  0 | task 365 | 
+prompt eval time =     887.50 ms /   117 tokens (    7.59 ms per token,   131.83 tokens per second)
+       eval time =    1127.84 ms /    25 tokens (   45.11 ms per token,    22.17 tokens per second)
+      total time =    2015.34 ms /   142 tokens
+srv  update_slots: all slots are idle
+request: POST /v1/chat/completions 127.0.0.1 200
+slot launch_slot_: id  0 | task 391 | processing task
+slot update_slots: id  0 | task 391 | tokenizing prompt, len = 1
+slot update_slots: id  0 | task 391 | prompt tokenized, n_ctx_slot = 4096, n_keep = 0, n_prompt_tokens = 117
+slot update_slots: id  0 | task 391 | kv cache rm [0, end)
+slot update_slots: id  0 | task 391 | prompt processing progress, n_past = 117, n_tokens = 117, progress = 1.000000
+slot update_slots: id  0 | task 391 | prompt done, n_past = 117, n_tokens = 117
+slot      release: id  0 | task 391 | stop processing: n_past = 137, truncated = 0
+slot print_timing: id  0 | task 391 | 
+prompt eval time =     891.39 ms /   117 tokens (    7.62 ms per token,   131.25 tokens per second)
+       eval time =     943.55 ms /    21 tokens (   44.93 ms per token,    22.26 tokens per second)
+      total time =    1834.94 ms /   138 tokens
+srv  update_slots: all slots are idle
+request: POST /v1/chat/completions 127.0.0.1 200
+slot launch_slot_: id  0 | task 413 | processing task
+slot update_slots: id  0 | task 413 | tokenizing prompt, len = 1
+slot update_slots: id  0 | task 413 | prompt tokenized, n_ctx_slot = 4096, n_keep = 0, n_prompt_tokens = 113
+slot update_slots: id  0 | task 413 | kv cache rm [0, end)
+slot update_slots: id  0 | task 413 | prompt processing progress, n_past = 113, n_tokens = 113, progress = 1.000000
+slot update_slots: id  0 | task 413 | prompt done, n_past = 113, n_tokens = 113
+slot      release: id  0 | task 413 | stop processing: n_past = 130, truncated = 0
+slot print_timing: id  0 | task 413 | 
+prompt eval time =     871.26 ms /   113 tokens (    7.71 ms per token,   129.70 tokens per second)
+       eval time =     796.66 ms /    18 tokens (   44.26 ms per token,    22.59 tokens per second)
+      total time =    1667.93 ms /   131 tokens
+srv  update_slots: all slots are idle
+request: POST /v1/chat/completions 127.0.0.1 200
+request: GET /health 127.0.0.1 200
+slot launch_slot_: id  0 | task 432 | processing task
+slot update_slots: id  0 | task 432 | tokenizing prompt, len = 1
+slot update_slots: id  0 | task 432 | prompt tokenized, n_ctx_slot = 4096, n_keep = 0, n_prompt_tokens = 112
+slot update_slots: id  0 | task 432 | kv cache rm [0, end)
+slot update_slots: id  0 | task 432 | prompt processing progress, n_past = 112, n_tokens = 112, progress = 1.000000
+slot update_slots: id  0 | task 432 | prompt done, n_past = 112, n_tokens = 112
+slot      release: id  0 | task 432 | stop processing: n_past = 141, truncated = 0
+slot print_timing: id  0 | task 432 | 
+prompt eval time =     848.56 ms /   112 tokens (    7.58 ms per token,   131.99 tokens per second)
+       eval time =    1365.03 ms /    30 tokens (   45.50 ms per token,    21.98 tokens per second)
+      total time =    2213.59 ms /   142 tokens
+srv  update_slots: all slots are idle
+request: POST /v1/chat/completions 127.0.0.1 200
+slot launch_slot_: id  0 | task 463 | processing task
+slot update_slots: id  0 | task 463 | tokenizing prompt, len = 1
+slot update_slots: id  0 | task 463 | prompt tokenized, n_ctx_slot = 4096, n_keep = 0, n_prompt_tokens = 114
+slot update_slots: id  0 | task 463 | kv cache rm [0, end)
+slot update_slots: id  0 | task 463 | prompt processing progress, n_past = 114, n_tokens = 114, progress = 1.000000
+slot update_slots: id  0 | task 463 | prompt done, n_past = 114, n_tokens = 114
+slot      release: id  0 | task 463 | stop processing: n_past = 130, truncated = 0
+slot print_timing: id  0 | task 463 | 
+prompt eval time =     885.75 ms /   114 tokens (    7.77 ms per token,   128.70 tokens per second)
+       eval time =     751.67 ms /    17 tokens (   44.22 ms per token,    22.62 tokens per second)
+      total time =    1637.42 ms /   131 tokens
+srv  update_slots: all slots are idle
+request: POST /v1/chat/completions 127.0.0.1 200
+slot launch_slot_: id  0 | task 481 | processing task
+slot update_slots: id  0 | task 481 | tokenizing prompt, len = 1
+slot update_slots: id  0 | task 481 | prompt tokenized, n_ctx_slot = 4096, n_keep = 0, n_prompt_tokens = 116
+slot update_slots: id  0 | task 481 | kv cache rm [0, end)
+slot update_slots: id  0 | task 481 | prompt processing progress, n_past = 116, n_tokens = 116, progress = 1.000000
+slot update_slots: id  0 | task 481 | prompt done, n_past = 116, n_tokens = 116
+slot      release: id  0 | task 481 | stop processing: n_past = 139, truncated = 0
+slot print_timing: id  0 | task 481 | 
+prompt eval time =     889.95 ms /   116 tokens (    7.67 ms per token,   130.34 tokens per second)
+       eval time =    1088.70 ms /    24 tokens (   45.36 ms per token,    22.04 tokens per second)
+      total time =    1978.65 ms /   140 tokens
+srv  update_slots: all slots are idle
+request: POST /v1/chat/completions 127.0.0.1 200
+slot launch_slot_: id  0 | task 506 | processing task
+slot update_slots: id  0 | task 506 | tokenizing prompt, len = 1
+slot update_slots: id  0 | task 506 | prompt tokenized, n_ctx_slot = 4096, n_keep = 0, n_prompt_tokens = 118
+slot update_slots: id  0 | task 506 | kv cache rm [0, end)
+slot update_slots: id  0 | task 506 | prompt processing progress, n_past = 118, n_tokens = 118, progress = 1.000000
+slot update_slots: id  0 | task 506 | prompt done, n_past = 118, n_tokens = 118
+slot      release: id  0 | task 506 | stop processing: n_past = 139, truncated = 0
+slot print_timing: id  0 | task 506 | 
+prompt eval time =     921.01 ms /   118 tokens (    7.81 ms per token,   128.12 tokens per second)
+       eval time =     997.05 ms /    22 tokens (   45.32 ms per token,    22.07 tokens per second)
+      total time =    1918.06 ms /   140 tokens
+srv  update_slots: all slots are idle
+request: POST /v1/chat/completions 127.0.0.1 200
+slot launch_slot_: id  0 | task 529 | processing task
+slot update_slots: id  0 | task 529 | tokenizing prompt, len = 1
+slot update_slots: id  0 | task 529 | prompt tokenized, n_ctx_slot = 4096, n_keep = 0, n_prompt_tokens = 113
+slot update_slots: id  0 | task 529 | kv cache rm [0, end)
+slot update_slots: id  0 | task 529 | prompt processing progress, n_past = 113, n_tokens = 113, progress = 1.000000
+slot update_slots: id  0 | task 529 | prompt done, n_past = 113, n_tokens = 113
+slot      release: id  0 | task 529 | stop processing: n_past = 129, truncated = 0
+slot print_timing: id  0 | task 529 | 
+prompt eval time =     867.81 ms /   113 tokens (    7.68 ms per token,   130.21 tokens per second)
+       eval time =     755.14 ms /    17 tokens (   44.42 ms per token,    22.51 tokens per second)
+      total time =    1622.95 ms /   130 tokens
+srv  update_slots: all slots are idle
+request: POST /v1/chat/completions 127.0.0.1 200
+slot launch_slot_: id  0 | task 547 | processing task
+slot update_slots: id  0 | task 547 | tokenizing prompt, len = 1
+slot update_slots: id  0 | task 547 | prompt tokenized, n_ctx_slot = 4096, n_keep = 0, n_prompt_tokens = 115
+slot update_slots: id  0 | task 547 | kv cache rm [0, end)
+slot update_slots: id  0 | task 547 | prompt processing progress, n_past = 115, n_tokens = 115, progress = 1.000000
+slot update_slots: id  0 | task 547 | prompt done, n_past = 115, n_tokens = 115
+slot      release: id  0 | task 547 | stop processing: n_past = 133, truncated = 0
+slot print_timing: id  0 | task 547 | 
+prompt eval time =     895.33 ms /   115 tokens (    7.79 ms per token,   128.44 tokens per second)
+       eval time =     852.62 ms /    19 tokens (   44.87 ms per token,    22.28 tokens per second)
+      total time =    1747.95 ms /   134 tokens
+srv  update_slots: all slots are idle
+request: POST /v1/chat/completions 127.0.0.1 200
+slot launch_slot_: id  0 | task 567 | processing task
+slot update_slots: id  0 | task 567 | tokenizing prompt, len = 1
+slot update_slots: id  0 | task 567 | prompt tokenized, n_ctx_slot = 4096, n_keep = 0, n_prompt_tokens = 113
+slot update_slots: id  0 | task 567 | kv cache rm [0, end)
+slot update_slots: id  0 | task 567 | prompt processing progress, n_past = 113, n_tokens = 113, progress = 1.000000
+slot update_slots: id  0 | task 567 | prompt done, n_past = 113, n_tokens = 113
+slot      release: id  0 | task 567 | stop processing: n_past = 125, truncated = 0
+slot print_timing: id  0 | task 567 | 
+prompt eval time =     890.02 ms /   113 tokens (    7.88 ms per token,   126.96 tokens per second)
+       eval time =     575.60 ms /    13 tokens (   44.28 ms per token,    22.59 tokens per second)
+      total time =    1465.62 ms /   126 tokens
+srv  update_slots: all slots are idle
+request: POST /v1/chat/completions 127.0.0.1 200
+slot launch_slot_: id  0 | task 581 | processing task
+slot update_slots: id  0 | task 581 | tokenizing prompt, len = 1
+slot update_slots: id  0 | task 581 | prompt tokenized, n_ctx_slot = 4096, n_keep = 0, n_prompt_tokens = 117
+slot update_slots: id  0 | task 581 | kv cache rm [0, end)
+slot update_slots: id  0 | task 581 | prompt processing progress, n_past = 117, n_tokens = 117, progress = 1.000000
+slot update_slots: id  0 | task 581 | prompt done, n_past = 117, n_tokens = 117
+slot      release: id  0 | task 581 | stop processing: n_past = 141, truncated = 0
+slot print_timing: id  0 | task 581 | 
+prompt eval time =     966.15 ms /   117 tokens (    8.26 ms per token,   121.10 tokens per second)
+       eval time =    1152.63 ms /    25 tokens (   46.11 ms per token,    21.69 tokens per second)
+      total time =    2118.78 ms /   142 tokens
+srv  update_slots: all slots are idle
+request: POST /v1/chat/completions 127.0.0.1 200
+slot launch_slot_: id  0 | task 607 | processing task
+slot update_slots: id  0 | task 607 | tokenizing prompt, len = 1
+slot update_slots: id  0 | task 607 | prompt tokenized, n_ctx_slot = 4096, n_keep = 0, n_prompt_tokens = 117
+slot update_slots: id  0 | task 607 | kv cache rm [0, end)
+slot update_slots: id  0 | task 607 | prompt processing progress, n_past = 117, n_tokens = 117, progress = 1.000000
+slot update_slots: id  0 | task 607 | prompt done, n_past = 117, n_tokens = 117
+slot      release: id  0 | task 607 | stop processing: n_past = 137, truncated = 0
+slot print_timing: id  0 | task 607 | 
+prompt eval time =     988.26 ms /   117 tokens (    8.45 ms per token,   118.39 tokens per second)
+       eval time =     964.17 ms /    21 tokens (   45.91 ms per token,    21.78 tokens per second)
+      total time =    1952.43 ms /   138 tokens
+srv  update_slots: all slots are idle
+request: POST /v1/chat/completions 127.0.0.1 200
+slot launch_slot_: id  0 | task 629 | processing task
+slot update_slots: id  0 | task 629 | tokenizing prompt, len = 1
+slot update_slots: id  0 | task 629 | prompt tokenized, n_ctx_slot = 4096, n_keep = 0, n_prompt_tokens = 113
+slot update_slots: id  0 | task 629 | kv cache rm [0, end)
+slot update_slots: id  0 | task 629 | prompt processing progress, n_past = 113, n_tokens = 113, progress = 1.000000
+slot update_slots: id  0 | task 629 | prompt done, n_past = 113, n_tokens = 113
+slot      release: id  0 | task 629 | stop processing: n_past = 130, truncated = 0
+slot print_timing: id  0 | task 629 | 
+prompt eval time =     947.02 ms /   113 tokens (    8.38 ms per token,   119.32 tokens per second)
+       eval time =     817.45 ms /    18 tokens (   45.41 ms per token,    22.02 tokens per second)
+      total time =    1764.47 ms /   131 tokens
+srv  update_slots: all slots are idle
+request: POST /v1/chat/completions 127.0.0.1 200
+request: GET /health 127.0.0.1 200
+slot launch_slot_: id  0 | task 648 | processing task
+slot update_slots: id  0 | task 648 | tokenizing prompt, len = 1
+slot update_slots: id  0 | task 648 | prompt tokenized, n_ctx_slot = 4096, n_keep = 0, n_prompt_tokens = 116
+slot update_slots: id  0 | task 648 | kv cache rm [0, end)
+slot update_slots: id  0 | task 648 | prompt processing progress, n_past = 116, n_tokens = 116, progress = 1.000000
+slot update_slots: id  0 | task 648 | prompt done, n_past = 116, n_tokens = 116
+slot      release: id  0 | task 648 | stop processing: n_past = 134, truncated = 0
+slot print_timing: id  0 | task 648 | 
+prompt eval time =     899.98 ms /   116 tokens (    7.76 ms per token,   128.89 tokens per second)
+       eval time =     856.61 ms /    19 tokens (   45.08 ms per token,    22.18 tokens per second)
+      total time =    1756.59 ms /   135 tokens
+srv  update_slots: all slots are idle
+request: POST /v1/chat/completions 127.0.0.1 200
+slot launch_slot_: id  0 | task 668 | processing task
+slot update_slots: id  0 | task 668 | tokenizing prompt, len = 1
+slot update_slots: id  0 | task 668 | prompt tokenized, n_ctx_slot = 4096, n_keep = 0, n_prompt_tokens = 40
+slot update_slots: id  0 | task 668 | kv cache rm [0, end)
+slot update_slots: id  0 | task 668 | prompt processing progress, n_past = 40, n_tokens = 40, progress = 1.000000
+slot update_slots: id  0 | task 668 | prompt done, n_past = 40, n_tokens = 40
+slot      release: id  0 | task 668 | stop processing: n_past = 128, truncated = 0
+slot print_timing: id  0 | task 668 | 
+prompt eval time =     326.45 ms /    40 tokens (    8.16 ms per token,   122.53 tokens per second)
+       eval time =    4181.09 ms /    89 tokens (   46.98 ms per token,    21.29 tokens per second)
+      total time =    4507.53 ms /   129 tokens
+srv  update_slots: all slots are idle
+request: POST /v1/chat/completions 127.0.0.1 200
+slot launch_slot_: id  0 | task 758 | processing task
+slot update_slots: id  0 | task 758 | tokenizing prompt, len = 1
+slot update_slots: id  0 | task 758 | prompt tokenized, n_ctx_slot = 4096, n_keep = 0, n_prompt_tokens = 31
+slot update_slots: id  0 | task 758 | kv cache rm [0, end)
+slot update_slots: id  0 | task 758 | prompt processing progress, n_past = 31, n_tokens = 31, progress = 1.000000
+slot update_slots: id  0 | task 758 | prompt done, n_past = 31, n_tokens = 31
+slot      release: id  0 | task 758 | stop processing: n_past = 34, truncated = 0
+slot print_timing: id  0 | task 758 | 
+prompt eval time =     279.66 ms /    31 tokens (    9.02 ms per token,   110.85 tokens per second)
+       eval time =     139.99 ms /     4 tokens (   35.00 ms per token,    28.57 tokens per second)
+      total time =     419.64 ms /    35 tokens
+srv  update_slots: all slots are idle
+request: POST /v1/chat/completions 127.0.0.1 200
+slot launch_slot_: id  0 | task 763 | processing task
+slot update_slots: id  0 | task 763 | tokenizing prompt, len = 1
+slot update_slots: id  0 | task 763 | prompt tokenized, n_ctx_slot = 4096, n_keep = 0, n_prompt_tokens = 45
+slot update_slots: id  0 | task 763 | kv cache rm [0, end)
+slot update_slots: id  0 | task 763 | prompt processing progress, n_past = 45, n_tokens = 45, progress = 1.000000
+slot update_slots: id  0 | task 763 | prompt done, n_past = 45, n_tokens = 45
+slot      release: id  0 | task 763 | stop processing: n_past = 221, truncated = 0
+slot print_timing: id  0 | task 763 | 
+prompt eval time =     376.43 ms /    45 tokens (    8.37 ms per token,   119.54 tokens per second)
+       eval time =    8508.11 ms /   177 tokens (   48.07 ms per token,    20.80 tokens per second)
+      total time =    8884.54 ms /   222 tokens
+srv  update_slots: all slots are idle
+request: POST /v1/chat/completions 127.0.0.1 200
+slot launch_slot_: id  0 | task 941 | processing task
+slot update_slots: id  0 | task 941 | tokenizing prompt, len = 1
+slot update_slots: id  0 | task 941 | prompt tokenized, n_ctx_slot = 4096, n_keep = 0, n_prompt_tokens = 59
+slot update_slots: id  0 | task 941 | kv cache rm [0, end)
+slot update_slots: id  0 | task 941 | prompt processing progress, n_past = 59, n_tokens = 59, progress = 1.000000
+slot update_slots: id  0 | task 941 | prompt done, n_past = 59, n_tokens = 59
+slot      release: id  0 | task 941 | stop processing: n_past = 212, truncated = 0
+slot print_timing: id  0 | task 941 | 
+prompt eval time =     505.43 ms /    59 tokens (    8.57 ms per token,   116.73 tokens per second)
+       eval time =    7388.69 ms /   154 tokens (   47.98 ms per token,    20.84 tokens per second)
+      total time =    7894.11 ms /   213 tokens
+srv  update_slots: all slots are idle
+request: POST /v1/chat/completions 127.0.0.1 200
+slot launch_slot_: id  0 | task 1096 | processing task
+slot update_slots: id  0 | task 1096 | tokenizing prompt, len = 1
+slot update_slots: id  0 | task 1096 | prompt tokenized, n_ctx_slot = 4096, n_keep = 0, n_prompt_tokens = 80
+slot update_slots: id  0 | task 1096 | kv cache rm [0, end)
+slot update_slots: id  0 | task 1096 | prompt processing progress, n_past = 80, n_tokens = 80, progress = 1.000000
+slot update_slots: id  0 | task 1096 | prompt done, n_past = 80, n_tokens = 80
+slot      release: id  0 | task 1096 | stop processing: n_past = 95, truncated = 0
+slot print_timing: id  0 | task 1096 | 
+prompt eval time =     654.67 ms /    80 tokens (    8.18 ms per token,   122.20 tokens per second)
+       eval time =     717.73 ms /    16 tokens (   44.86 ms per token,    22.29 tokens per second)
+      total time =    1372.39 ms /    96 tokens
+srv  update_slots: all slots are idle
+request: POST /v1/chat/completions 127.0.0.1 200

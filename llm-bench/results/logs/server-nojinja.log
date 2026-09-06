@@ -1,0 +1,15 @@
+0.00.002.419 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)
+0.00.004.217 I srv    load_model: loading model 'models/BitNet-b1.58-2B-4T/ggml-model-i2_s.gguf'
+0.00.506.654 W load: missing pre-tokenizer type, using: 'default'
+0.00.506.660 W load:                                             
+0.00.506.660 W load: ************************************        
+0.00.506.660 W load: GENERATION QUALITY WILL BE DEGRADED!        
+0.00.506.660 W load: CONSIDER REGENERATING THE MODEL             
+0.00.506.661 W load: ************************************        
+0.00.506.661 W load:                                             
+0.00.910.976 I srv    load_model: initializing, n_slots = 4, n_ctx_slot = 4096, kv_unified = 'true'
+0.00.912.578 I srv  llama_server: model loaded
+0.00.912.608 I srv  llama_server: listening on http://127.0.0.1:8080
+0.01.014.564 W srv    operator(): got exception: {"error":{"code":500,"message":"this custom template is not supported, try using --jinja","type":"server_error"}}
+0.40.183.567 W srv    operator(): got exception: {"error":{"code":500,"message":"this custom template is not supported, try using --jinja","type":"server_error"}}
+0.51.705.387 I srv    operator(): operator(): cleaning up before exit...
