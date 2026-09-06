@@ -9,7 +9,7 @@ const std = @import("std");
 /// diese Datei ohne wio testbar bleibt; mod.zig übersetzt per keyFromButton.
 pub const Key = enum {
     a, b, c, d, e, f, g, h, j, k, n, o, p, r, s, t, v, w, x, y, z,
-    n1, n2, n3, n4, n5, n6, n7, n8, n9,
+    n0, n1, n2, n3, n4, n5, n6, n7, n8, n9, equals, minus,
     tab, grave, backslash, slash, dot, f1, f2, f5, f12, delete, escape, enter, page_up, page_down, left, right, up, down,
 };
 
@@ -96,6 +96,11 @@ pub const Command = enum {
     toggle_terminal,
     quick_open,
     command_palette,
+    toggle_theme,
+    zoom_in,
+    zoom_out,
+    zoom_reset,
+    toggle_autosave,
     show_shortcuts,
 };
 
@@ -175,6 +180,9 @@ pub const bindings = [_]Binding{
     .{ .command = .toggle_terminal, .key = .j, .mods = .{ .ctrl = true } },
     .{ .command = .quick_open, .key = .p, .mods = .{ .ctrl = true } },
     .{ .command = .command_palette, .key = .p, .mods = .{ .ctrl = true, .shift = true } },
+    .{ .command = .zoom_in, .key = .equals, .mods = .{ .ctrl = true } },
+    .{ .command = .zoom_out, .key = .minus, .mods = .{ .ctrl = true } },
+    .{ .command = .zoom_reset, .key = .n0, .mods = .{ .ctrl = true } },
     .{ .command = .show_shortcuts, .key = .f1 },
 };
 
@@ -188,9 +196,9 @@ pub const Menu = struct { title: []const u8, items: []const Command };
 
 /// Menüleiste im Header, in dieser Reihenfolge.
 pub const menus = [_]Menu{
-    .{ .title = "File", .items = &.{ .new_file, .quick_open, .save, .open_folder, .close_tab, .close_all_tabs, .reopen_closed_tab } },
+    .{ .title = "File", .items = &.{ .new_file, .quick_open, .save, .toggle_autosave, .open_folder, .close_tab, .close_all_tabs, .reopen_closed_tab } },
     .{ .title = "Edit", .items = &.{ .undo, .redo, .cut, .copy, .paste, .select_all, .delete_line, .duplicate_line, .move_line_up, .move_line_down, .toggle_comment, .find, .replace, .goto_line, .goto_definition } },
-    .{ .title = "View", .items = &.{ .toggle_explorer, .focus_explorer, .split_vertical, .split_horizontal, .md_preview, .new_terminal, .toggle_terminal } },
+    .{ .title = "View", .items = &.{ .toggle_explorer, .focus_explorer, .split_vertical, .split_horizontal, .md_preview, .new_terminal, .toggle_terminal, .toggle_theme, .zoom_in, .zoom_out, .zoom_reset } },
     .{ .title = "Help", .items = &.{ .command_palette, .show_shortcuts } },
 };
 
@@ -279,6 +287,11 @@ pub fn label(command: Command) []const u8 {
         .toggle_terminal => "Toggle Terminal",
         .quick_open => "Go to File…",
         .command_palette => "Command Palette…",
+        .toggle_theme => "Toggle Light/Dark Theme",
+        .zoom_in => "Zoom In",
+        .zoom_out => "Zoom Out",
+        .zoom_reset => "Reset Zoom",
+        .toggle_autosave => "Toggle Autosave",
         .show_shortcuts => "Keyboard Shortcuts",
     };
 }
@@ -304,7 +317,7 @@ fn keyName(key: Key) []const u8 {
         .a => "A", .b => "B", .c => "C", .d => "D", .e => "E", .f => "F", .g => "G", .h => "H", .j => "J",
         .k => "K", .n => "N", .o => "O", .p => "P", .r => "R", .s => "S", .t => "T", .v => "V", .w => "W",
         .x => "X", .y => "Y", .z => "Z",
-        .n1 => "1", .n2 => "2", .n3 => "3", .n4 => "4", .n5 => "5", .n6 => "6", .n7 => "7", .n8 => "8", .n9 => "9",
+        .n0 => "0", .equals => "=", .minus => "-", .n1 => "1", .n2 => "2", .n3 => "3", .n4 => "4", .n5 => "5", .n6 => "6", .n7 => "7", .n8 => "8", .n9 => "9",
         .tab => "Tab", .grave => "`", .backslash => "\\", .slash => "/", .dot => ".", .f1 => "F1", .f2 => "F2", .f5 => "F5", .f12 => "F12", .delete => "Del",
         .escape => "Esc", .enter => "Enter", .page_up => "PgUp", .page_down => "PgDn",
         .left => "←", .right => "→", .up => "↑", .down => "↓",

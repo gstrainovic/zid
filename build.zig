@@ -354,6 +354,14 @@ pub fn build(b: *std.Build) void {
     const run_ai_tools_tests = b.addRunArtifact(ai_tools_tests);
     run_ai_tools_tests.has_side_effects = true;
 
+    const backup_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("src/editor/backup.zig"),
+        .target = target,
+        .optimize = optimize,
+    }) });
+    const run_backup_tests = b.addRunArtifact(backup_tests);
+    run_backup_tests.has_side_effects = true;
+
     const user_state_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("src/ui/user_state.zig"),
         .target = target,
@@ -438,6 +446,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_edit_ops_tests.step);
     test_step.dependOn(&run_fuzzy_tests.step);
     test_step.dependOn(&run_user_state_tests.step);
+    test_step.dependOn(&run_backup_tests.step);
 
     const run_chat_markdown_tests = b.addRunArtifact(chat_markdown_tests);
     run_chat_markdown_tests.has_side_effects = true;

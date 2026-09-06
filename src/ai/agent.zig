@@ -327,6 +327,11 @@ pub const LlamaAgent = struct {
             };
 
             if (res.status != .ok) {
+                // 503 während des Warmups: der Server lädt das Modell noch — kein Fehler, nur warten
+                if (res.status == .service_unavailable) {
+                    std.log.debug("llama-server still loading (503)", .{});
+                    return error.ServerLoading;
+                }
                 std.log.err("Llama Server Error: {d}", .{res.status});
                 return error.LlamaServerError;
             }

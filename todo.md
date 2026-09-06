@@ -7,8 +7,6 @@ Belege aus der Sitzung vom 06.09.2026 (Log mit Panic in `gpu_renderer.zig:305`) 
 
 - [ ] **P3 Horizontale Scrollbar und Word-Wrap-Umschalter** im Editor (Shift+Mausrad und
       Cursor-Folgen gibt es seit 06.09.2026).
-- [ ] **P3 llama-server 503 während des Warmups** landet als `error: Llama Server Error: 503` im Log
-      statt als Status im Chat-Kopf.
 ## Explorer
 
 - [ ] **P3 .gitignore-Einträge ausgegraut** zeigen (versteckte Dateien schaltet `.` seit 06.09.2026
@@ -21,15 +19,10 @@ Belege aus der Sitzung vom 06.09.2026 (Log mit Panic in `gpu_renderer.zig:305`) 
 - [ ] **P3 LSP anbinden**: `lsp_client.zig` kann definition/hover/completion, wird aber nirgends
       gestartet; Ctrl+Klick/F12 springen heute per Textmuster (`edit_ops.looksLikeDefinition`) nur
       innerhalb der Datei.
-- [ ] **P3 Klammern hervorheben**, Einrück-Guides, Whitespace anzeigen, aktuelle Zeile im Gutter,
-      Minimap, Mehrfach-Cursor (Ctrl+D nächstes Vorkommen, Ctrl+Alt+↑/↓), Schriftgröße
-      Ctrl+±/Ctrl+0, Theme umschalten.
-- [ ] **P3 Autosave/Backup** und CRLF-Dateien beim Speichern unverändert lassen.
-
+- [ ] **P3 Klammern hervorheben**, Einrück-Guides, Whitespace anzeigen, Minimap, Mehrfach-Cursor
+      (Ctrl+D nächstes Vorkommen, Ctrl+Alt+↑/↓). (Schriftgröße Ctrl+±/0, Theme-Umschalter und die
+      aktuelle Zeile im Gutter gibt es seit 06.09.2026.)
 ## Fenster, Splits, Menüs
-
-- [ ] **P3 Menüleiste per Tastatur** (Alt+F …, Pfeile, Escape schließt), Kürzel-Dialog scrollbar,
-      Toasts für Erfolg/Fehler (gespeichert, gelöscht, Ladefehler).
 
 ## KI-Agent (aus `~/projects/bitnet-colibri-bench/HANDOFF-vulkan-ed.md`, 06.09.2026)
 

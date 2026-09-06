@@ -147,6 +147,8 @@ pub const FileExplorerState = struct {
     clipboard: ?Clipboard = null,
     /// Letzter Fehler einer Dateisystem-Aktion (Anzeige in der UI)
     last_error: ?[]u8 = null,
+    /// Letzte Erfolgsmeldung (Toast in der UI, owned)
+    last_info: ?[]u8 = null,
     /// Versteckte Einträge (`.name`) anzeigen (Taste `.`)
     show_hidden: bool = false,
     /// Filterfeld (Taste `/`): nur Einträge, deren Name den Text enthält, plus ihre Elternordner
@@ -209,6 +211,7 @@ pub const FileExplorerState = struct {
         self.pending_fs_changes.deinit(self.allocator);
         self.clearClipboard();
         if (self.last_error) |e| self.allocator.free(e);
+        if (self.last_info) |e| self.allocator.free(e);
         for (self.nodes.items) |*node| {
             self.allocator.free(node.name);
             self.allocator.free(node.path);
@@ -371,6 +374,10 @@ pub const FileExplorerState = struct {
         if (cursor_node) |cn| {
             self.selected_index = self.visibleIndexOfNode(cn);
         }
+        // Kürzere Liste (Filter, Zuklappen): Scroll-Versatz einfangen, sonst steht alles über dem Viewport
+        const content = @as(f32, @floatFromInt(self.visible_entries.items.len)) * ROW_HEIGHT;
+        const max_scroll = @max(0, content - self.viewport_height);
+        if (self.scroll_offset_y > max_scroll) self.scroll_offset_y = max_scroll;
     }
 
     /// Filter: Name enthält den Text (Groß/Klein egal) oder ein geladener Nachfahre passt.
@@ -987,6 +994,18 @@ pub const FileExplorerState = struct {
         return self.pending_fs_changes.orderedRemove(0);
     }
 
+    fn setInfo(self: *Self, comptime fmt: []const u8, args: anytype) void {
+        if (self.last_info) |e| self.allocator.free(e);
+        self.last_info = std.fmt.allocPrint(self.allocator, fmt, args) catch null;
+    }
+
+    /// Letzte Erfolgsmeldung abholen (owned, Aufrufer gibt frei).
+    pub fn takeInfo(self: *Self) ?[]u8 {
+        const e = self.last_info;
+        self.last_info = null;
+        return e;
+    }
+
     fn setError(self: *Self, comptime fmt: []const u8, args: anytype) void {
         log.err(fmt, args);
         if (self.last_error) |e| self.allocator.free(e);
@@ -1075,6 +1094,7 @@ pub const FileExplorerState = struct {
             log.info("moved to trash '{s}'", .{p});
             self.pushFsChange(.deleted, p, null);
         }
+        if (paths.len == 1) self.setInfo("Moved to trash: {s}", .{std.fs.path.basename(paths[0])}) else self.setInfo("Moved {d} items to trash", .{paths.len});
         self.refresh(null);
     }
 

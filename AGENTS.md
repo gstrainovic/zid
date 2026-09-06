@@ -273,6 +273,29 @@ echo -e "open ./README.md\nget-state\nshutdown" | zig build run -- --interactive
 - RPCs: `key_press_alt(name, ctrl, shift, alt)`, `click_mods(x, y, ctrl, shift)`, `editor_state.selection`,
   `ui_state.active_pane_index`. `python3 scripts/e2e_editor.py` deckt alles ab.
 
+## Theme, Zoom, Autosave, Toasts, Menü-Tastatur
+
+- **Theme:** `toggle_theme` (View, Palette) schaltet `UI.theme` zwischen `Theme.light()`/`dark()`;
+  Editor-Farben kommen aus `CodeEditor.applyTheme` (bg, gutter, Zeilennummern, Cursor, Auswahl,
+  `text_color`). `--theme light|dark` gilt einmalig beim Start; vorher setzte main.zig das Theme in
+  **jedem Frame** auf Dark, deshalb griff kein Umschalter (Ursache, Datum 06.09.2026).
+- **Zoom:** Ctrl+=/Ctrl+-/Ctrl+0 (`zoom_in/out/reset`, 10–48, `setFontSizeAll` für alle Panes).
+- **Autosave:** File → Toggle Autosave (`UI.autosave`), speichert 1 s nach der letzten Änderung
+  (`CodeEditor.last_edit_ms`) nur Text-Tabs mit Pfad. Jedes Speichern legt vorher eine Sicherung
+  unter `$XDG_DATA_HOME/vulkan-ed/backup/<name>.<hash>.bak` ab (`src/editor/backup.zig`, eine je
+  Datei, wird ersetzt). CRLF-Dateien bleiben CRLF (`file_eol_mode`, Test im Editor).
+- **Gemerkt** (`user_state`): `theme`, `font_size`, `autosave` zusätzlich zu Breite/Hidden.
+- **Toasts:** `UI.showToast` (3 s, unten rechts, max. 4): „Saved x“ (`CodeEditor.takeSaved`),
+  „Moved to trash: x“ (`FileExplorerState.takeInfo`), „Font size n“, „Autosave on/off“.
+  RPC `ui_state.toast` liefert den jüngsten Text.
+- **Menü per Tastatur:** Alt+F/E/V/H öffnet, ←/→ wechselt, ↑/↓ markiert (`menu_highlight`),
+  Enter führt aus, Escape schließt. **Kürzel-Dialog** scrollt (Mausrad, ↑/↓; `shortcuts_scroll_y`,
+  Inhalt `sc_content` in einem 520-px-Clip).
+- **503 beim Warmup:** `agent.zig` liefert `error.ServerLoading` (debug-Log) statt `Llama Server
+  Error: 503` im Fehler-Log; die Warmup-Schleife wiederholt, der Chat zeigt „initializing“.
+- `python3 scripts/e2e_ui_misc.py` deckt Theme, Zoom, Autosave, Toast, Backup, Menü-Tastatur und
+  Dialog-Scroll ab.
+
 ## Schnellöffner (Ctrl+P) und Command Palette (Ctrl+Shift+P)
 
 - `src/ui/picker.zig`: ein modaler Picker für beide Modi, Matching in `src/ui/fuzzy.zig` (unit-getestet:
