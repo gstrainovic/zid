@@ -113,6 +113,11 @@ pub const UI = struct {
     pending_split: ?pane_mod.PaneDirection,
 
     active_dialog: ?ActiveDialog,
+    /// Klick/Enter im Dialog aus dem letzten Layout. Wird erst vor dem nächsten Layout
+    /// verarbeitet: Die Render-Commands des aktuellen Frames zeigen noch auf die
+    /// Dialog-Nachricht und auf alles, was der Callback freigibt (z. B. Explorer-Knoten
+    /// nach `performMove` → `refresh`); der GPU-Renderer liest sie erst nach renderExample.
+    pending_dialog_result: ?dialog_mod.DialogResult = null,
     /// Ausgeklapptes Header-Menü (Index in shortcuts.menus), null = keins
     open_menu: ?usize = null,
     /// Help → Keyboard Shortcuts offen
@@ -2056,6 +2061,63 @@ pub const UI = struct {
         return p;
     }
 
+    /// Aktionen, die während des Layouts angefordert wurden (Split, Tab-Schließen, leere
+    /// Panes), vor dem nächsten Layout ausführen. Nach `endLayout` wäre es zu früh: die
+    /// Render-Commands des Frames zeigen noch auf Tab-Namen (`closeTab`, `TabBarState.deinit`
+    /// geben sie frei) und werden erst nach `renderExample` gezeichnet.
+    fn applyDeferredLayoutActions(self: *Self) void {
+        self.applyPendingDialogResult();
+        // Handle global split requests
+        if (self.pending_split) |dir| {
+            self.splitActivePane(dir) catch |err| {
+                log.err("Failed to split pane: {}", .{err});
+            };
+            self.pending_split = null;
+        }
+
+        // Process deferred tab closes
+        while (self.pending_tab_closes.pop()) |req| {
+            log.debug("pending_tab_closes: processing close for pane={*} index={d}", .{ req.pane, req.index });
+            // Verify pane is still valid and has tabs
+            switch (req.pane.data) {
+                .leaf => |*leaf| {
+                    log.debug("pending_tab_closes: leaf has {d} tabs, closing index={d}", .{ leaf.tab_bar.tabs.items.len, req.index });
+                    if (req.index < leaf.tab_bar.tabs.items.len) {
+                        const closing = leaf.tab_bar.tabs.items[req.index];
+                        if (closing.kind == .text or closing.kind == .image or closing.kind == .pdf or closing.kind == .binary) {
+                            if (self.allocator.dupe(u8, closing.path)) |dup| {
+                                self.closed_tabs.append(self.allocator, dup) catch self.allocator.free(dup);
+                                if (self.closed_tabs.items.len > 20) self.allocator.free(self.closed_tabs.orderedRemove(0));
+                            } else |_| {}
+                        }
+                        leaf.tab_bar.closeTab(req.index);
+                        // Don't call cancelWait here - causes recursive render with destroyed pane!
+                    } else {
+                        log.warn("pending_tab_closes: index {d} out of range (len={d}), skipping", .{ req.index, leaf.tab_bar.tabs.items.len });
+                    }
+                },
+                else => {
+                    log.warn("pending_tab_closes: pane is not a leaf, skipping", .{});
+                },
+            }
+        }
+
+        // Cleanup empty panes (close split if a pane becomes empty)
+        _ = self.cleanupEmptyPanes(null, self.root_pane);
+    }
+
+    /// Dialog-Ergebnis des vorigen Frames anwenden, bevor ein neues Layout beginnt.
+    /// Erst jetzt sind die alten Render-Commands garantiert gezeichnet, der Callback darf
+    /// Speicher freigeben, auf den sie zeigten.
+    fn applyPendingDialogResult(self: *Self) void {
+        const res = self.pending_dialog_result orelse return;
+        self.pending_dialog_result = null;
+        const ad = self.active_dialog orelse return;
+        ad.callback(self, res, ad.context_usize, ad.context_ptr);
+        if (ad.message_needs_free) self.allocator.free(ad.dialog.message);
+        self.active_dialog = null;
+    }
+
     /// Layout beginnen
     pub fn beginLayout(self: *Self) void {
         _ = self.frame_arena.reset(.retain_capacity);
@@ -2199,6 +2261,7 @@ pub const UI = struct {
     }
 
     pub fn renderExample(self: *Self, image_data: ?*const anyopaque) []clay.RenderCommand {
+        self.applyDeferredLayoutActions();
         self.beginLayout();
 
         const t = self.theme;
@@ -2333,63 +2396,16 @@ pub const UI = struct {
         // Dialog INSIDE Clay layout (floating, z_index=2000 → overlays everything)
         // Must be here so Clay can register element bounds and mouse_pressed_this_frame is still true
         if (self.tab_menu) |menu| self.renderTabMenu(menu, t);
-        var pending_dialog_result: ?dialog_mod.DialogResult = null;
         if (self.active_dialog) |*ad| {
-            pending_dialog_result = ad.dialog.render(t, self.mouse_pressed_this_frame, ad.focused) orelse ad.key_result;
+            const res = ad.dialog.render(t, self.mouse_pressed_this_frame, ad.focused) orelse ad.key_result;
             ad.key_result = null;
+            // Nicht hier verarbeiten: siehe pending_dialog_result / applyPendingDialogResult
+            if (self.pending_dialog_result == null) self.pending_dialog_result = res;
         }
 
         const commands = self.endLayout();
-
-        // Process deferred dialog result (after layout so no use-after-free)
-        if (pending_dialog_result) |res| {
-            if (self.active_dialog) |*ad| {
-                ad.callback(self, res, ad.context_usize, ad.context_ptr);
-                if (ad.message_needs_free) {
-                    self.allocator.free(ad.dialog.message);
-                }
-                self.active_dialog = null;
-            }
-        }
-
-        // Handle global split requests
-        if (self.pending_split) |dir| {
-            self.splitActivePane(dir) catch |err| {
-                log.err("Failed to split pane: {}", .{err});
-            };
-            self.pending_split = null;
-        }
-
-        // Process deferred tab closes
-        while (self.pending_tab_closes.pop()) |req| {
-            log.debug("pending_tab_closes: processing close for pane={*} index={d}", .{ req.pane, req.index });
-            // Verify pane is still valid and has tabs
-            switch (req.pane.data) {
-                .leaf => |*leaf| {
-                    log.debug("pending_tab_closes: leaf has {d} tabs, closing index={d}", .{ leaf.tab_bar.tabs.items.len, req.index });
-                    if (req.index < leaf.tab_bar.tabs.items.len) {
-                        const closing = leaf.tab_bar.tabs.items[req.index];
-                        if (closing.kind == .text or closing.kind == .image or closing.kind == .pdf or closing.kind == .binary) {
-                            if (self.allocator.dupe(u8, closing.path)) |dup| {
-                                self.closed_tabs.append(self.allocator, dup) catch self.allocator.free(dup);
-                                if (self.closed_tabs.items.len > 20) self.allocator.free(self.closed_tabs.orderedRemove(0));
-                            } else |_| {}
-                        }
-                        leaf.tab_bar.closeTab(req.index);
-                        // Don't call cancelWait here - causes recursive render with destroyed pane!
-                    } else {
-                        log.warn("pending_tab_closes: index {d} out of range (len={d}), skipping", .{ req.index, leaf.tab_bar.tabs.items.len });
-                    }
-                },
-                else => {
-                    log.warn("pending_tab_closes: pane is not a leaf, skipping", .{});
-                },
-            }
-        }
-
-        // Cleanup empty panes (close split if a pane becomes empty)
-        _ = self.cleanupEmptyPanes(null, self.root_pane);
-
+        // Nachlauf (Split, Tab-Schließen, leere Panes) läuft NICHT hier: die Commands zeigen
+        // noch auf Tab-Namen und Panes, siehe applyDeferredLayoutActions.
         return commands;
     }
 

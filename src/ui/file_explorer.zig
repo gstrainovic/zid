@@ -1680,7 +1680,20 @@ fn renderTreeEntry(
                 'S' => theme.muted,
                 else => theme.muted,
             };
-            clay.text(&.{code}, .{
+            // Kein `&.{code}`: das wäre ein Zeiger auf ein Stack-Temporary, das beim
+            // Zeichnen (nach dem Layout) längst überschrieben ist.
+            const code_str: []const u8 = switch (code) {
+                'A' => "A",
+                'M' => "M",
+                'C' => "C",
+                'D' => "D",
+                'R' => "R",
+                'U' => "U",
+                '?' => "?",
+                'S' => "S",
+                else => "•",
+            };
+            clay.text(code_str, .{
                 .font_size = 20,
                 .color = if (is_selected) theme.text_on_primary else git_color,
             });

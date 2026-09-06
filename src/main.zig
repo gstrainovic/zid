@@ -1,4 +1,6 @@
 const std = @import("std");
+const free_log_mod = @import("debug/free_log.zig");
+const text_probe = @import("debug/text_probe.zig");
 const builtin = @import("builtin");
 const file_types = @import("ui/file_types.zig");
 const wio = @import("wio");
@@ -71,7 +73,15 @@ pub fn main() !void {
     // Allocator setup
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    // --page-alloc: jede Allokation auf eigenen Seiten, Freigaben mit Stack-Trace protokolliert
+    // (Use-after-free-Suche zusammen mit der Text-Probe im Headless-Loop).
+    var page_alloc_mode = std.posix.getenv("VULKAN_ED_PAGE_ALLOC") != null;
+    for (std.os.argv) |a| {
+        if (std.mem.eql(u8, std.mem.span(a), "--page-alloc")) page_alloc_mode = true;
+    }
+    const free_log = try std.heap.page_allocator.create(free_log_mod.FreeLog);
+    free_log.* = .{};
+    const allocator = if (page_alloc_mode) free_log.allocator() else gpa.allocator();
 
     // CLI Argumente parsen
     var theme_override: ?ui.Theme = null;
@@ -108,6 +118,8 @@ pub fn main() !void {
             headless_mode = true;
             e2e_mode = true;
             log.info("Interactive mode enabled — stdin/stdout command interface", .{});
+        } else if (std.mem.eql(u8, args[i], "--page-alloc")) {
+            log.info("page allocator with free log enabled (debug)", .{});
         } else if (std.mem.eql(u8, args[i], "--ai=off")) {
             ai_disabled = true;
             log.info("AI disabled via --ai=off", .{});
@@ -847,6 +859,19 @@ pub fn main() !void {
         // erst nach dem nächsten Input-Event.
         if (state_dirty) {
             render_commands = ui_system.renderExample(&logo_texture);
+        }
+
+        // Headless: Text-Strings der Commands anfassen wie der GPU-Renderer, damit ein
+        // Use-after-free auch ohne Fenster auffällt (mit --page-alloc samt Freigabestelle).
+        if (headless_mode) {
+            if (text_probe.probe(render_commands)) |f| {
+                std.debug.print(
+                    "TEXT PROBE FAULT: command {d}/{d} ptr=0x{x} len={d} bbox=({d:.0},{d:.0} {d:.0}x{d:.0}) prev_text=\"{s}\"\n",
+                    .{ f.index, render_commands.len, f.ptr, f.len, f.bbox.x, f.bbox.y, f.bbox.width, f.bbox.height, f.prev_text },
+                );
+                if (free_log.findFree(f.ptr)) |e| free_log_mod.FreeLog.dumpEntry(e) else std.debug.print("no free-log entry for that address\n", .{});
+                @panic("render command references unmapped text");
+            }
         }
 
         // Cursor-Form anpassen basierend auf Layout-Ergebnis
