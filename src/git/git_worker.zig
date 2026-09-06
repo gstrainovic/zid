@@ -55,12 +55,33 @@ pub fn taskGitStatus(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.Tas
 
     const out = try runGit(alloc, params.repo_path, &.{
         "--no-optional-locks", "status", "--porcelain=v2",
-        "--branch",            "--null",
+        "--branch",            "--null", "--ignored",
     });
     defer alloc.free(out);
 
+    // Pfade in porcelain v2 sind relativ zur Repo-Wurzel, nicht zum Projektordner
+    const toplevel = runGit(alloc, params.repo_path, &.{ "rev-parse", "--show-toplevel" }) catch null;
+    defer if (toplevel) |t| alloc.free(t);
+    const root = if (toplevel) |t| std.mem.trimEnd(u8, t, "\n\r") else null;
+
+    return .{
+        .tag = .git_status,
+        .payload = try parseStatusOutput(alloc, out, root),
+        .allocator = alloc,
+    };
+}
+
+/// porcelain-v2-Ausgabe (NUL-getrennt) in das Explorer-Format übersetzen:
+/// `root:<abs>`, `branch:<name>`, dann je Eintrag `<code>:<pfad>` (A/M/C/S/?/I).
+/// `I` sind ignorierte Einträge (`! pfad`, Ordner ohne abschließenden Schrägstrich).
+pub fn parseStatusOutput(alloc: std.mem.Allocator, out: []const u8, root: ?[]const u8) ![]u8 {
     var buf: std.ArrayListUnmanaged(u8) = .empty;
     defer buf.deinit(alloc);
+    if (root) |r| {
+        try buf.appendSlice(alloc, "root:");
+        try buf.appendSlice(alloc, r);
+        try buf.append(alloc, '\n');
+    }
 
     var it = std.mem.splitScalar(u8, out, 0);
     outer: while (it.next()) |line| {
@@ -103,23 +124,22 @@ pub fn taskGitStatus(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.Tas
             continue :outer;
         }
 
-        if (line[0] == '?') {
-            // "? <path>" — fields separated by SPACE
+        if (line[0] == '?' or line[0] == '!') {
+            // "? <path>" bzw. "! <path>" — Ordner kommen als "pfad/"
             var parts = std.mem.splitScalar(u8, line, ' ');
-            _ = parts.next() orelse continue; // "?"
-            const path = parts.next() orelse continue;
-            const entry = try std.fmt.allocPrint(alloc, "?:{s}\n", .{path});
+            _ = parts.next() orelse continue; // "?" / "!"
+            const raw = parts.next() orelse continue;
+            const path = std.mem.trimEnd(u8, raw, "/");
+            if (path.len == 0) continue :outer;
+            const code: u8 = if (line[0] == '!') 'I' else '?';
+            const entry = try std.fmt.allocPrint(alloc, "{c}:{s}\n", .{ code, path });
             defer alloc.free(entry);
             try buf.appendSlice(alloc, entry);
             continue :outer;
         }
     }
 
-    return .{
-        .tag = .git_status,
-        .payload = try buf.toOwnedSlice(alloc),
-        .allocator = alloc,
-    };
+    return buf.toOwnedSlice(alloc);
 }
 
 /// Payload: "<short-hash> <subject>\n" pro Zeile
@@ -281,3 +301,19 @@ test "git blame on known file" {
     try std.testing.expect(result.tag == .git_blame);
 }
 // extra line Sa 18 Apr 2026 12:35:44 CEST
+
+test "parseStatusOutput: root, branch, geändert, unbekannt, ignoriert (Ordner ohne Schrägstrich)" {
+    const alloc = std.testing.allocator;
+    const out = "# branch.head main\x00" ++
+        "1 .M N... 100644 100644 100644 abc def src/a.zig\x00" ++
+        "1 A. N... 000000 100644 100644 000 111 src/new.zig\x00" ++
+        "? notes.txt\x00" ++
+        "! zig-out/\x00" ++
+        "! build.log\x00";
+    const payload = try parseStatusOutput(alloc, out, "/repo");
+    defer alloc.free(payload);
+    try std.testing.expectEqualStrings("root:/repo\nbranch:main\nM:src/a.zig\nA:src/new.zig\n?:notes.txt\nI:zig-out\nI:build.log\n", payload);
+    const no_root = try parseStatusOutput(alloc, "? x\x00", null);
+    defer alloc.free(no_root);
+    try std.testing.expectEqualStrings("?:x\n", no_root);
+}

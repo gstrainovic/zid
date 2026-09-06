@@ -385,6 +385,18 @@ echo -e "open ./README.md\nget-state\nshutdown" | zig build run -- --interactive
 - Markdown-Preview hält je Sprache einen Highlighter (`code_highlighters`-Map); vorher wurde bei
   jedem Sprachwechsel ein neuer Tree-sitter-Parser gebaut, viermal pro Frame bei vier Sprachen.
 
+## Explorer: .gitignore-Einträge
+
+- `taskGitStatus` ruft `git status --porcelain=v2 --branch --null --ignored` (im Projekt ~50 ms
+  mehr) und schreibt zusätzlich `root:<toplevel>` (aus `rev-parse --show-toplevel`): porcelain-Pfade
+  sind relativ zur Repo-Wurzel, nicht zum Projektordner. Das Parsing steckt in
+  `git_worker.parseStatusOutput` (unit-getestet); ignorierte Einträge kommen als `I:<pfad>`, Ordner
+  ohne den abschließenden Schrägstrich von `! pfad/`.
+- `FileExplorer.isIgnored(path)`: Eintrag selbst oder ein Vorfahr mit `I` → Name in `theme.muted`,
+  kein Badge; `folderStatus` überspringt `I`, damit ein ignorierter Ordner keinen Status nach oben
+  vererbt. RPC `explorer_entries[].ignored`; E2E-Schritt `step_gitignore` nutzt, dass `tmp/` im
+  Projekt ignoriert ist.
+
 ## Explorer: Umbenennen/Löschen und offene Tabs
 
 - Umbenennen zieht Tab-Pfad, Titel, Buffer-Pfad und `open_buffers`-Schlüssel mit, auch für

@@ -9,8 +9,6 @@ Belege aus der Sitzung vom 06.09.2026 (Log mit Panic in `gpu_renderer.zig:305`) 
       Cursor-Folgen gibt es seit 06.09.2026).
 ## Explorer
 
-- [ ] **P3 .gitignore-Einträge ausgegraut** zeigen (versteckte Dateien schaltet `.` seit 06.09.2026
-      um; ignorierte Dateien bräuchten `git status --ignored` im Git-Worker).
 ## Tab-Leiste
 
 ## Editor
