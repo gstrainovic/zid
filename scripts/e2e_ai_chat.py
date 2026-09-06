@@ -94,9 +94,21 @@ def run_with_backend():
         st, dt = wait_for(lambda s: not s["loading"], 120, "Antwort")
         last = st["messages"][-1]
         check(last["role"] == "assistant" and "pong" in last["content"].lower(), f"Antwort erhalten: {last['content'].strip()[:60]!r} ({dt:.1f}s)")
+        code_only_answer()
         shot("e2e_ai_chat.ppm")
     finally:
         stop(proc, log)
+
+
+def code_only_answer():
+    """Antwort, die nur aus einem Codeblock besteht (endet mit ``` ohne Newline): brachte
+    zigdown zum Absturz (leerer Tag in handleLineCode). Der Chat muss danach noch leben."""
+    send("Reply only with a zig code block for hello world, no explanation.")
+    st, dt = wait_for(lambda s: not s["loading"], 120, "Codeblock-Antwort fertig")
+    content = st["messages"][-1]["content"]
+    check("```" in content, f"Antwort enthält einen Codeblock ({dt:.1f}s)")
+    settle(10)
+    check(chat()["status"] == "ready", "Chat lebt nach dem Rendern des Codeblocks weiter")
 
 
 def run_ai_off():

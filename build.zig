@@ -336,6 +336,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    chat_markdown_mod.addImport("zigdown", zigdown_mod);
     exe_mod.addImport("chat_markdown", chat_markdown_mod);
     const chat_markdown_tests = b.addTest(.{ .root_module = chat_markdown_mod });
 
