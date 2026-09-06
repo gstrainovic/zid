@@ -441,8 +441,8 @@ pub const UI = struct {
         self.window = window;
         self.getActiveEditor().window = window;
         self.ai_chat.setWindow(window);
-        self.ai_chat.input_textarea.measure_fn = cMeasureText;
-        g_font_size = @floatFromInt(self.ai_chat.input_textarea.font_size);
+        self.ai_chat.input_editor.measure_fn = cMeasureText;
+        g_font_size = @floatFromInt(self.ai_chat.input_editor.font_size);
 
         // Globalen Measure-Context setzen (für Maus→Spalte)
         g_text_renderer = text_renderer;
@@ -731,17 +731,20 @@ pub const UI = struct {
     /// Modifier-State aktualisieren
     pub fn setShiftState(self: *Self, pressed: bool) void {
         self.is_shift_down = pressed;
+        self.ai_chat.setShiftState(pressed);
         self.getActiveEditor().setShiftState(pressed);
     }
 
     pub fn setCtrlState(self: *Self, pressed: bool) void {
         self.is_ctrl_down = pressed;
         if (!pressed) self.commitTabSwitcher();
+        self.ai_chat.setCtrlState(pressed);
         self.getActiveEditor().setCtrlState(pressed);
     }
 
     pub fn setAltState(self: *Self, pressed: bool) void {
         self.is_alt_down = pressed;
+        self.ai_chat.setAltState(pressed);
         self.getActiveEditor().setAltState(pressed);
     }
 
@@ -1630,6 +1633,7 @@ pub const UI = struct {
         var n: usize = 0;
         collectLeaves(self.root_pane, &buf, &n);
         for (buf[0..n]) |p| p.data.leaf.code_editor.applyTheme(self.theme);
+        self.ai_chat.input_editor.applyTheme(self.theme);
     }
 
     fn setFontSizeAll(self: *Self, size: u16) void {
@@ -2662,7 +2666,7 @@ pub const UI = struct {
             if (self.mouse_x >= c.input_bounds_x and self.mouse_x < c.input_bounds_x + c.input_bounds_w and
                 self.mouse_y >= c.input_bounds_y and self.mouse_y < c.input_bounds_y + c.input_bounds_h)
             {
-                return c.input_textarea.desired_cursor;
+                return c.input_editor.desired_cursor;
             }
         }
 

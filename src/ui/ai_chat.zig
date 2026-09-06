@@ -6,7 +6,7 @@ const agent = @import("agent");
 const scheduler_mod = @import("scheduler");
 const ai_worker = @import("ai_worker");
 const flow_core = @import("flow_core");
-const textarea_mod = @import("components/mod.zig");
+const CodeEditor = @import("../editor/mod.zig").CodeEditor;
 const chat_markdown = @import("chat_markdown");
 const MarkdownView = @import("markdown_view.zig").MarkdownView;
 const ui_mod = @import("mod.zig");
@@ -97,8 +97,8 @@ pub const AIChatState = struct {
     msg_sb_dragging: bool = false,
     msg_sb_drag_offset: f32 = 0,
 
-    // Input-Editor (TextArea mit eigenem Buffer)
-    input_textarea: textarea_mod.TextAreaState,
+    /// Eingabefeld: derselbe CodeEditor wie die Datei-Tabs, ohne Gutter/Minimap, mit Word-Wrap
+    input_editor: CodeEditor,
     input_buffer: *flow_core.Buffer,
     input_height: f32 = 120,
     input_splitter_dragging: bool = false,
@@ -127,16 +127,21 @@ pub const AIChatState = struct {
         var state = Self{
             .allocator = allocator,
             .messages = .empty,
-            .input_textarea = textarea_mod.TextAreaState.init(allocator, input_buf),
+            .input_editor = CodeEditor.init(allocator, input_buf),
             .input_buffer = input_buf,
             .model_exists = exists,
         };
-        state.input_textarea.is_textarea = true;
+        state.input_editor.show_gutter = false;
+        state.input_editor.show_minimap = false;
+        state.input_editor.show_indent_guides = false;
+        state.input_editor.compact_menu = true;
+        state.input_editor.word_wrap = true;
+        state.input_editor.bg_color = .{ 28, 28, 34, 255 };
         state.tools_json = ai_tools.toolsJson(allocator) catch "";
         // Buffer.create liefert einen Root ohne Zeilenanfang (keine Zeile 0).
         // Erst load_from_string("") via setText macht den Puffer beschreibbar,
         // sonst verwirft der Rope-Walker jedes Zeichen nach dem ersten.
-        state.input_textarea.setText("");
+        state.input_editor.setText("");
 
         return state;
     }
@@ -162,7 +167,7 @@ pub const AIChatState = struct {
         for (self.pending_tools.items) |c| c.deinit(self.allocator);
         self.pending_tools.deinit(self.allocator);
         if (self.tools_json.len > 0) self.allocator.free(self.tools_json);
-        self.input_textarea.deinit();
+        self.input_editor.deinit();
         self.input_buffer.deinit();
         if (self.agent) |a| a.deinit();
         self.clearStream();
@@ -453,7 +458,7 @@ pub const AIChatState = struct {
         const user_text = try self.allocator.dupe(u8, text);
         defer self.allocator.free(user_text);
         try self.addMessage("user", user_text);
-        self.input_textarea.setText("");
+        self.input_editor.setText("");
 
         // Kein Agent: sofort erklären statt endlos "Gemma is thinking..."
         if (self.notReadyMessage()) |msg| {
@@ -594,32 +599,49 @@ pub const AIChatState = struct {
                 return false;
             },
             .enter => {
-                self.input_textarea.handleKeyPress(key);
+                // Enter sendet, Shift+Enter macht eine neue Zeile (wie VS Code/Zed-Chat)
+                if (self.input_editor.mods.shift) {
+                    // Direkt als Aktion: die Keymap kennt Enter nur ohne Modifier
+                    self.input_editor.dispatchAction(.InsertNewline);
+                    return true;
+                }
                 self.sendMessage() catch |err| log.err("Send message failed: {}", .{err});
                 return true;
             },
             .backspace => {
-                self.input_textarea.handleKeyPress(key);
+                self.input_editor.handleKeyPress(key);
                 return true;
             },
             else => {
-                self.input_textarea.handleKeyPress(key);
+                self.input_editor.handleKeyPress(key);
                 return false;
             },
         }
     }
 
     pub fn handleChar(self: *Self, char_code: u21) void {
-        self.input_textarea.handleChar(char_code);
+        self.input_editor.handleChar(char_code);
+    }
+
+    pub fn setShiftState(self: *Self, pressed: bool) void {
+        self.input_editor.setShiftState(pressed);
+    }
+
+    pub fn setCtrlState(self: *Self, pressed: bool) void {
+        self.input_editor.setCtrlState(pressed);
+    }
+
+    pub fn setAltState(self: *Self, pressed: bool) void {
+        self.input_editor.setAltState(pressed);
     }
 
     pub fn updateTimeMs(self: *Self, delta_ms: f32) void {
         self.ui_time_ms += delta_ms;
-        self.input_textarea.time_ms += delta_ms;
+        self.input_editor.time_ms += delta_ms;
     }
 
     pub fn handleMouseDown(self: *Self, x: f32, y: f32, button: wio.Button) void {
-        self.input_textarea.handleMouseDown(x, y, button);
+        self.input_editor.handleMouseDown(x, y, button);
     }
 
     pub fn handleMouseMove(self: *Self, x: f32, y: f32) void {
@@ -628,12 +650,12 @@ pub const AIChatState = struct {
             const new_height = self.input_height + (self.input_splitter_y + self.input_splitter_h - y);
             self.input_height = @max(40, @min(400, new_height));
         }
-        self.input_textarea.handleMouseMove(x, y);
+        self.input_editor.handleMouseMove(x, y);
     }
 
     pub fn handleMouseUp(self: *Self) void {
         self.input_splitter_dragging = false;
-        self.input_textarea.handleMouseUp();
+        self.input_editor.handleMouseUp();
     }
 
     /// Messages-Scrollbar: Mouse-Down
@@ -682,7 +704,7 @@ pub const AIChatState = struct {
     }
 
     pub fn setWindow(self: *Self, win: ?*wio.Window) void {
-        self.input_textarea.setWindow(win);
+        self.input_editor.window = win;
     }
 };
 
@@ -698,7 +720,7 @@ pub fn renderAIChat(
     window: ?*wio.Window,
     ui_ptr: *ui_mod.UI,
 ) void {
-    state.input_textarea.setWindow(window);
+    state.input_editor.window = window;
 
     // "Ans Ende scrollen" (999999) VOR dem Layout auflösen: sonst rendert dieser Frame
     // mit child_offset -999999 ins Leere. Beim Streaming setzt jedes Delta den Marker,
@@ -962,8 +984,8 @@ pub fn renderAIChat(
             state.input_splitter_h = splitter_data.bounding_box.height;
         }
 
-        // ── Input box (TextArea) ────────────────────────────────────────
-        const input_id = clay.ElementId.IDI("ai_chat_input", @truncate(@intFromPtr(&state.input_textarea)));
+        // ── Input box (CodeEditor) ────────────────────────────────────────
+        const input_id = clay.ElementId.IDI("ai_chat_input", @truncate(@intFromPtr(&state.input_editor)));
 
         clay.UI()(.{
             .id = input_id,
@@ -975,7 +997,7 @@ pub fn renderAIChat(
             .border = .{ .width = .all(1), .color = theme.border },
             .corner_radius = .all(4),
         })({
-            state.input_textarea.render(arena, mouse_pressed);
+            state.input_editor.render(arena, mouse_pressed);
         });
 
         // Input-Bounds für Cursor-Detection speichern
@@ -986,6 +1008,12 @@ pub fn renderAIChat(
             state.input_bounds_w = input_box_data.bounding_box.width;
             state.input_bounds_h = input_box_data.bounding_box.height;
             state.input_bounds_valid = true;
+            // Der Editor braucht Ursprung und Größe für Mausklicks, sichtbare Zeilen und Word-Wrap
+            // (Panes setzen das in renderPane; hier ist die Box das Layout-Element)
+            state.input_editor.content_origin_x = input_box_data.bounding_box.x;
+            state.input_editor.content_origin_y = input_box_data.bounding_box.y;
+            state.input_editor.width = input_box_data.bounding_box.width;
+            state.input_editor.height = input_box_data.bounding_box.height;
         }
     });
 }

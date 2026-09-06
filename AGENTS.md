@@ -164,14 +164,16 @@ echo -e "open ./README.md\nget-state\nshutdown" | zig build run -- --interactive
   gepatcht). `chat_markdown.finishForParser` hängt deshalb immer einen Zeilenumbruch an und
   schließt einen offenen Zaun; `toDisplayMarkdown`/`wrapToolResult` laufen darüber. Test mit
   echtem zigdown-Parse in `chat_markdown.zig`, E2E `code_only_answer` in `e2e_ai_chat.py`.
-- **Textarea-Komponente nur noch als Chat-Eingabe:** die Tabs „New TextArea“ und „New Chat2“
-  (Prototypen vom 19.04.2026: mehrzeilige Eingabe und Markdown-Verlauf, beides ist seither im
-  echten Chat) wurden am 06.09.2026 samt `FileKind.textarea/chat2` und `textarea_instances`
-  entfernt. `components/textarea.zig` ist eine eigene Kopie der Editor-Logik; Editor-Neuerungen
-  (Mehrfach-Cursor, Word-Wrap) kommen dort nicht an. Sauberer wäre irgendwann der CodeEditor ohne
-  Gutter als Chat-Eingabe.
-- Keine Unit-Tests für `ai_chat.zig`: die Datei importiert `components/textarea.zig`, das
-  `../../editor/actions.zig` zieht, also kein eigenes Test-Root möglich. Logik dort klein halten.
+- **Chat-Eingabe ist der CodeEditor** (seit 06.09.2026; vorher `components/textarea.zig`, eine
+  2140-Zeilen-Kopie des Editors vom April, gelöscht): `AIChatState.input_editor` mit
+  `show_gutter = false`, `show_minimap = false`, `compact_menu = true` (Kontextmenü nur
+  Cut/Copy/Paste) und `word_wrap = true`. Enter sendet, Shift+Enter fügt eine Zeile ein
+  (`dispatchAction(.InsertNewline)`, die Keymap kennt Enter nur ohne Modifier). Das UI reicht
+  Shift/Ctrl/Alt auch an den Chat-Editor weiter, `applyThemeToEditors` färbt ihn mit. Editor-
+  Neuerungen gelten damit automatisch auch im Chat. E2E `input_newline_and_send` in
+  `e2e_ai_chat.py` (läuft im `--ai=off`-Teil).
+- Keine Unit-Tests für `ai_chat.zig`: die Datei importiert den CodeEditor und die UI, also kein
+  eigenes Test-Root möglich. Logik dort klein halten.
 
 ## Engines und Modelle (`engines/`, `models/`, `llm-bench/`)
 
