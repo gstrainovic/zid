@@ -173,6 +173,13 @@ Seit 06.09.2026 liegt alles im Repo; `~/projects/ki` und das separate Bench-Repo
   ignoriert, nie committen), das BitNet-Referenzmodell unter
   `models/bitnet-b1.58-2B-4T/ggml-model-i2_s.gguf`. In `engines/BitNet/models/` zeigen zwei
   Symlinks (`_compare`, `BitNet-b1.58-2B-4T`) auf `models/`, damit BitNets eigene Skripte laufen.
+- **cmake brennt absolute Pfade ein:** nach dem Umzug fanden `llama-server` und `llama-bench`
+  ihre `libllama.so` nicht (RUNPATH zeigte auf `~/projects/ki/...`). `llm-bench/setup/fix-rpath.sh`
+  schreibt die RUNPATHs aller Programme und Bibliotheken beider Builds per patchelf auf
+  `$ORIGIN`-relative Pfade um (Kopie patchen und darüberschieben, weil ein laufender llama-server
+  die Datei gemappt hält: „Text file busy“). Nach jedem Neubau bzw. Verschieben erneut ausführen;
+  die Build-Verzeichnisse selbst kann cmake nach einem Umzug nicht mehr neu konfigurieren
+  (`CMAKE_HOME_DIRECTORY`), ein Neubau muss von vorn beginnen.
 - **`llm-bench/`** ist das frühere Repo `bitnet-colibri-bench` als `git subtree` (Historie
   erhalten, Rohlogs unter `results/logs/`). `results/*.md` sind historische Protokolle und werden
   nicht angefasst; `bench/olmoe_*.py` bleiben als Messprotokoll (colibri ist gelöscht).
