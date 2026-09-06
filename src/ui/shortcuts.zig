@@ -108,6 +108,7 @@ pub const Command = enum {
     toggle_whitespace,
     toggle_indent_guides,
     toggle_word_wrap,
+    toggle_preview_tabs,
     show_shortcuts,
 };
 
@@ -207,7 +208,7 @@ pub const Menu = struct { title: []const u8, items: []const Command };
 pub const menus = [_]Menu{
     .{ .title = "File", .items = &.{ .new_file, .quick_open, .save, .toggle_autosave, .open_folder, .close_tab, .close_all_tabs, .reopen_closed_tab } },
     .{ .title = "Edit", .items = &.{ .undo, .redo, .cut, .copy, .paste, .select_all, .delete_line, .duplicate_line, .move_line_up, .move_line_down, .toggle_comment, .find, .replace, .goto_line, .goto_definition, .select_next_occurrence, .add_cursor_above, .add_cursor_below } },
-    .{ .title = "View", .items = &.{ .toggle_explorer, .focus_explorer, .split_vertical, .split_horizontal, .md_preview, .new_terminal, .toggle_terminal, .toggle_theme, .zoom_in, .zoom_out, .zoom_reset, .toggle_minimap, .toggle_whitespace, .toggle_indent_guides, .toggle_word_wrap } },
+    .{ .title = "View", .items = &.{ .toggle_explorer, .focus_explorer, .split_vertical, .split_horizontal, .md_preview, .new_terminal, .toggle_terminal, .toggle_theme, .zoom_in, .zoom_out, .zoom_reset, .toggle_minimap, .toggle_whitespace, .toggle_indent_guides, .toggle_word_wrap, .toggle_preview_tabs } },
     .{ .title = "Help", .items = &.{ .command_palette, .show_shortcuts } },
 };
 
@@ -307,6 +308,7 @@ pub fn label(command: Command) []const u8 {
         .toggle_minimap => "Toggle Minimap",
         .toggle_whitespace => "Toggle Render Whitespace",
         .toggle_word_wrap => "Toggle Word Wrap",
+        .toggle_preview_tabs => "Toggle Preview Tabs",
         .toggle_indent_guides => "Toggle Indent Guides",
         .show_shortcuts => "Keyboard Shortcuts",
     };

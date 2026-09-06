@@ -337,7 +337,8 @@ def main():
     proc = subprocess.Popen(
         [os.path.join(ROOT, "zig-out", "bin", "vulkan-ed"), "--headless", "--ai=off"],
         cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
-        env=dict(os.environ, XDG_DATA_HOME=os.path.join(ROOT, "tmp", "xdg"), XDG_CONFIG_HOME=os.path.join(ROOT, "tmp", "xdg-config")),
+        # VULKAN_ED_LSP=off: hier wird der lokale Textmuster-Sprung geprüft, zls deckt scripts/e2e_lsp.py ab
+        env=dict(os.environ, XDG_DATA_HOME=os.path.join(ROOT, "tmp", "xdg"), XDG_CONFIG_HOME=os.path.join(ROOT, "tmp", "xdg-config"), VULKAN_ED_LSP="off"),
     )
     try:
         wait_port(proc)

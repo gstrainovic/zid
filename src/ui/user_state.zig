@@ -15,6 +15,9 @@ pub const State = struct {
     whitespace: bool = false,
     indent_guides: bool = true,
     word_wrap: bool = false,
+    /// Einfachklick im Explorer öffnet einen Vorschau-Tab, der vom nächsten ersetzt wird (VS Code/Zed);
+    /// Standard aus: jede Datei bekommt ihren eigenen Tab.
+    preview_tabs: bool = false,
 };
 
 /// `key=value`-Zeilen lesen; unbekannte Schlüssel und kaputte Werte werden ignoriert.
@@ -43,6 +46,8 @@ pub fn parse(text: []const u8) State {
             st.minimap = std.mem.eql(u8, value, "true") or std.mem.eql(u8, value, "1");
         } else if (std.mem.eql(u8, key, "word_wrap")) {
             st.word_wrap = std.mem.eql(u8, value, "true") or std.mem.eql(u8, value, "1");
+        } else if (std.mem.eql(u8, key, "preview_tabs")) {
+            st.preview_tabs = std.mem.eql(u8, value, "true") or std.mem.eql(u8, value, "1");
         } else if (std.mem.eql(u8, key, "whitespace")) {
             st.whitespace = std.mem.eql(u8, value, "true") or std.mem.eql(u8, value, "1");
         } else if (std.mem.eql(u8, key, "indent_guides")) {
@@ -53,12 +58,12 @@ pub fn parse(text: []const u8) State {
 }
 
 pub fn format(alloc: std.mem.Allocator, st: State) ![]u8 {
-    return std.fmt.allocPrint(alloc, "# vulkan-ed state\nsidebar_width={d}\nshow_hidden={s}\ntheme={s}\nfont_size={d}\nautosave={s}\nminimap={s}\nwhitespace={s}\nindent_guides={s}\nword_wrap={s}\n", .{
+    return std.fmt.allocPrint(alloc, "# vulkan-ed state\nsidebar_width={d}\nshow_hidden={s}\ntheme={s}\nfont_size={d}\nautosave={s}\nminimap={s}\nwhitespace={s}\nindent_guides={s}\nword_wrap={s}\npreview_tabs={s}\n", .{
         @as(u32, @intFromFloat(@round(st.sidebar_width))), if (st.show_hidden) "true" else "false",
         if (st.light_theme) "light" else "dark",                 st.font_size,
         if (st.autosave) "true" else "false",                    if (st.minimap) "true" else "false",
         if (st.whitespace) "true" else "false",                  if (st.indent_guides) "true" else "false",
-        if (st.word_wrap) "true" else "false",
+        if (st.word_wrap) "true" else "false",                  if (st.preview_tabs) "true" else "false",
     });
 }
 
@@ -102,9 +107,10 @@ test "format und loadFrom/saveTo sind umkehrbar" {
     const a = testing.allocator;
     const text = try format(a, .{ .sidebar_width = 301.4, .show_hidden = true });
     defer a.free(text);
-    try testing.expectEqualStrings("# vulkan-ed state\nsidebar_width=301\nshow_hidden=true\ntheme=dark\nfont_size=24\nautosave=false\nminimap=true\nwhitespace=false\nindent_guides=true\nword_wrap=false\n", text);
-    const st3 = parse("minimap=false\nwhitespace=true\nindent_guides=0\nword_wrap=true\n");
-    try testing.expect(!st3.minimap and st3.whitespace and !st3.indent_guides and st3.word_wrap);
+    try testing.expectEqualStrings("# vulkan-ed state\nsidebar_width=301\nshow_hidden=true\ntheme=dark\nfont_size=24\nautosave=false\nminimap=true\nwhitespace=false\nindent_guides=true\nword_wrap=false\npreview_tabs=false\n", text);
+    const st3 = parse("minimap=false\nwhitespace=true\nindent_guides=0\nword_wrap=true\npreview_tabs=true\n");
+    try testing.expect(!st3.minimap and st3.whitespace and !st3.indent_guides and st3.word_wrap and st3.preview_tabs);
+    try testing.expect(!parse("").preview_tabs);
     const st2 = parse("theme=light\nfont_size=30\nautosave=1\nfont_size=99\n");
     try testing.expect(st2.light_theme and st2.autosave);
     try testing.expectEqual(@as(u16, 30), st2.font_size);
