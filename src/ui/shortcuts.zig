@@ -7,7 +7,7 @@ const std = @import("std");
 
 /// Tasten, die Kürzel verwenden. Spiegel der nötigen wio.Button-Werte, damit
 /// diese Datei ohne wio testbar bleibt; mod.zig übersetzt per keyFromButton.
-pub const Key = enum { a, b, c, f, k, n, o, s, v, w, x, y, z, tab, grave, f1, f2, delete, escape, enter };
+pub const Key = enum { a, b, c, d, f, k, n, o, p, r, s, v, w, x, y, z, tab, grave, f1, f2, f5, delete, escape, enter };
 
 pub const Mods = struct {
     ctrl: bool = false,
@@ -41,6 +41,19 @@ pub const Command = enum {
     md_preview,
     rename_entry,
     delete_entry,
+    new_file_entry,
+    new_folder_entry,
+    cut_entry,
+    copy_entry,
+    paste_entry,
+    duplicate_entry,
+    copy_path,
+    copy_relative_path,
+    reveal_in_file_manager,
+    open_in_terminal,
+    collapse_all,
+    refresh_explorer,
+    select_all_entries,
     show_shortcuts,
 };
 
@@ -71,6 +84,21 @@ pub const bindings = [_]Binding{
     .{ .command = .new_terminal, .key = .grave, .mods = .{ .ctrl = true } },
     .{ .command = .rename_entry, .key = .f2, .scope = .explorer },
     .{ .command = .delete_entry, .key = .delete, .scope = .explorer },
+    // Buchstaben-Kürzel im Explorer wie nvim-tree/yazi: erste Bindung je Command liefert den Anzeige-Text
+    .{ .command = .rename_entry, .key = .r, .scope = .explorer },
+    .{ .command = .delete_entry, .key = .d, .scope = .explorer },
+    .{ .command = .new_file_entry, .key = .a, .scope = .explorer },
+    .{ .command = .new_folder_entry, .key = .a, .mods = .{ .shift = true }, .scope = .explorer },
+    .{ .command = .copy_entry, .key = .y, .scope = .explorer },
+    .{ .command = .cut_entry, .key = .x, .scope = .explorer },
+    .{ .command = .paste_entry, .key = .p, .scope = .explorer },
+    .{ .command = .duplicate_entry, .key = .d, .mods = .{ .ctrl = true }, .scope = .explorer },
+    .{ .command = .copy_path, .key = .c, .scope = .explorer },
+    .{ .command = .copy_relative_path, .key = .c, .mods = .{ .shift = true }, .scope = .explorer },
+    .{ .command = .refresh_explorer, .key = .r, .mods = .{ .shift = true }, .scope = .explorer },
+    .{ .command = .refresh_explorer, .key = .f5, .scope = .explorer },
+    .{ .command = .collapse_all, .key = .w, .scope = .explorer },
+    .{ .command = .select_all_entries, .key = .a, .mods = .{ .ctrl = true }, .scope = .explorer },
     .{ .command = .show_shortcuts, .key = .f1 },
 };
 
@@ -120,7 +148,20 @@ pub fn label(command: Command) []const u8 {
         .split_horizontal => "Split Horizontally",
         .md_preview => "Markdown Preview",
         .rename_entry => "Rename",
-        .delete_entry => "Delete",
+        .delete_entry => "Move to Trash",
+        .new_file_entry => "New File",
+        .new_folder_entry => "New Folder",
+        .cut_entry => "Cut",
+        .copy_entry => "Copy",
+        .paste_entry => "Paste",
+        .duplicate_entry => "Duplicate",
+        .copy_path => "Copy Path",
+        .copy_relative_path => "Copy Relative Path",
+        .reveal_in_file_manager => "Reveal in File Manager",
+        .open_in_terminal => "Open in Terminal",
+        .collapse_all => "Collapse All",
+        .refresh_explorer => "Refresh",
+        .select_all_entries => "Select All Entries",
         .show_shortcuts => "Keyboard Shortcuts",
     };
 }
@@ -143,9 +184,9 @@ pub fn shortcutTextFor(key: Key, mods: Mods) []const u8 {
 
 fn keyName(key: Key) []const u8 {
     return switch (key) {
-        .a => "A", .b => "B", .c => "C", .f => "F", .k => "K", .n => "N", .o => "O",
-        .s => "S", .v => "V", .w => "W", .x => "X", .y => "Y", .z => "Z",
-        .tab => "Tab", .grave => "`", .f1 => "F1", .f2 => "F2", .delete => "Del",
+        .a => "A", .b => "B", .c => "C", .d => "D", .f => "F", .k => "K", .n => "N", .o => "O",
+        .p => "P", .r => "R", .s => "S", .v => "V", .w => "W", .x => "X", .y => "Y", .z => "Z",
+        .tab => "Tab", .grave => "`", .f1 => "F1", .f2 => "F2", .f5 => "F5", .delete => "Del",
         .escape => "Esc", .enter => "Enter",
     };
 }
@@ -179,6 +220,25 @@ test "shortcutText: Anzeige-Text pro Command, leer wenn ohne Taste" {
     try testing.expectEqualStrings("F2", shortcutText(.rename_entry));
     try testing.expectEqualStrings("Del", shortcutText(.delete_entry));
     try testing.expectEqualStrings("", shortcutText(.split_vertical));
+}
+
+test "Explorer-Buchstaben: d löscht, r benennt um, a legt an, Shift+A Ordner, y/x/p Zwischenablage" {
+    try testing.expectEqual(Command.delete_entry, lookup(.d, .{}, .explorer).?);
+    try testing.expectEqual(Command.rename_entry, lookup(.r, .{}, .explorer).?);
+    try testing.expectEqual(Command.new_file_entry, lookup(.a, .{}, .explorer).?);
+    try testing.expectEqual(Command.new_folder_entry, lookup(.a, .{ .shift = true }, .explorer).?);
+    try testing.expectEqual(Command.copy_entry, lookup(.y, .{}, .explorer).?);
+    try testing.expectEqual(Command.cut_entry, lookup(.x, .{}, .explorer).?);
+    try testing.expectEqual(Command.paste_entry, lookup(.p, .{}, .explorer).?);
+    try testing.expectEqual(Command.copy_path, lookup(.c, .{}, .explorer).?);
+    try testing.expectEqual(Command.refresh_explorer, lookup(.r, .{ .shift = true }, .explorer).?);
+    try testing.expectEqual(Command.select_all_entries, lookup(.a, .{ .ctrl = true }, .explorer).?);
+    // Ohne Explorer-Fokus bleiben Buchstaben Text
+    try testing.expect(lookup(.d, .{}, .global) == null);
+    // Anzeige-Text zeigt die erste Bindung (F2/Del), der Buchstabe steht zusätzlich in der Tabelle
+    try testing.expectEqualStrings("F2", shortcutText(.rename_entry));
+    try testing.expectEqualStrings("A", shortcutText(.new_file_entry));
+    try testing.expectEqualStrings("Shift+A", shortcutText(.new_folder_entry));
 }
 
 test "Tabelle: keine doppelte Belegung innerhalb eines Scopes" {

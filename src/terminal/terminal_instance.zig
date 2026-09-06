@@ -360,6 +360,11 @@ pub const TerminalInstance = struct {
 
     /// Create a new terminal instance and spawn a shell
     pub fn init(allocator: std.mem.Allocator, cols: u16, rows: u16) !*Self {
+        return initIn(allocator, cols, rows, null);
+    }
+
+    /// Wie init, Shell startet in `start_dir` (null = Arbeitsverzeichnis des Prozesses).
+    pub fn initIn(allocator: std.mem.Allocator, cols: u16, rows: u16, start_dir: ?[]const u8) !*Self {
         const self = try allocator.create(Self);
         errdefer allocator.destroy(self);
 
@@ -382,7 +387,7 @@ pub const TerminalInstance = struct {
 
         // Get CWD
         var cwd_buf: [1024]u8 = undefined;
-        const cwd = std.fs.cwd().realpath(".", &cwd_buf) catch null;
+        const cwd: ?[]const u8 = start_dir orelse (std.fs.cwd().realpath(".", &cwd_buf) catch null);
 
         // Spawn shell process
         try pty.spawn(shell, cwd);

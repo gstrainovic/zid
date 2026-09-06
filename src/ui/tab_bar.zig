@@ -184,6 +184,11 @@ pub const TabBarState = struct {
 
     /// Open a new terminal tab
     pub fn openTerminal(self: *Self) void {
+        self.openTerminalIn(null);
+    }
+
+    /// Terminal mit Shell im Ordner `cwd` öffnen (null = Prozess-Arbeitsverzeichnis).
+    pub fn openTerminalIn(self: *Self, cwd: ?[]const u8) void {
         self.terminal_counter += 1;
         const name = std.fmt.allocPrint(self.allocator, "Terminal {d}", .{self.terminal_counter}) catch return;
         const path_copy = self.allocator.dupe(u8, name) catch {
@@ -192,7 +197,7 @@ pub const TabBarState = struct {
         };
 
         // Create terminal instance (80x24 default)
-        const term = TerminalInstance.init(self.allocator, 80, 24) catch |err| {
+        const term = TerminalInstance.initIn(self.allocator, 80, 24, cwd) catch |err| {
             log.err("Failed to create terminal: {}", .{err});
             self.allocator.free(name);
             self.allocator.free(path_copy);

@@ -21,6 +21,7 @@ const file_types = @import("file_types.zig");
 const markdown_view_mod = @import("markdown_view.zig");
 const pane_mod = @import("pane.zig");
 const dialog_mod = @import("dialog.zig");
+const dialog_ops = @import("dialog_ops.zig");
 const folder_picker_mod = @import("folder_picker.zig");
 const shortcuts = @import("shortcuts");
 const shortcuts_dialog = @import("shortcuts_dialog.zig");
@@ -72,6 +73,10 @@ pub const UI = struct {
         context_ptr: ?*anyopaque = null,
         callback: *const fn (*UI, dialog_mod.DialogResult, usize, ?*anyopaque) void,
         message_needs_free: bool = false,
+        /// Per Tastatur fokussierter Button (Tab wandert, Enter wählt)
+        focused: usize = 0,
+        /// Per Tastatur gewähltes Ergebnis; wird wie ein Klick nach dem Layout verarbeitet
+        key_result: ?dialog_mod.DialogResult = null,
     };
 
     allocator: std.mem.Allocator,
@@ -111,6 +116,8 @@ pub const UI = struct {
     agent_confirm_answer: ?bool = null,
     /// Letzter Klick war im Explorer: F2/Entf gelten für den markierten Eintrag
     explorer_focused: bool = false,
+    /// Zuletzt per setClipboard kopierter Text (owned; für Tests ohne Fenster)
+    last_clipboard_text: ?[]u8 = null,
     /// "Open Folder…"-Dialog
     folder_picker: folder_picker_mod.FolderPicker,
     /// Vom Dialog bestätigter Projektordner (owned); main.zig holt ihn per takePendingOpenFolder
@@ -320,6 +327,7 @@ pub const UI = struct {
         if (self.current_directory) |dir| self.allocator.free(dir);
         if (self.pending_open_folder) |p| self.allocator.free(p);
         if (self.agent_confirm) |c| c.deinit(self.allocator);
+        if (self.last_clipboard_text) |t| self.allocator.free(t);
         self.folder_picker.deinit();
         if (self.git_branch.len > 0) self.allocator.free(self.git_branch);
         self.pending_tab_closes.deinit(self.allocator);
@@ -421,30 +429,44 @@ pub const UI = struct {
             if (key == .escape or key == .f1) self.shortcuts_dialog_open = false;
             return;
         }
+        // Modaler Dialog: alle Tasten gehen an den Dialog, nichts an Editor/Explorer
+        if (self.active_dialog) |*ad| {
+            self.handleDialogKey(ad, key);
+            return;
+        }
         if (self.open_menu != null and key == .escape) {
             self.open_menu = null;
             return;
         }
         // Kürzel aus der zentralen Tabelle (shortcuts.zig): global überall,
         // Explorer-Scope nur mit Fokus im Explorer und markiertem Eintrag
-        if (self.active_dialog == null) {
-            if (keyFromButton(key)) |k| {
-                const mods = self.currentMods();
-                if (shortcuts.lookup(k, mods, .global)) |cmd| {
+        // Inline-Umbenennen/Anlegen im Explorer fängt alle Tasten ab
+        if (self.show_file_explorer and self.file_explorer.isEditing()) {
+            self.file_explorer.handleRenameKey(key);
+            return;
+        }
+        const explorer_has_focus = self.show_file_explorer and self.explorer_focused;
+        if (keyFromButton(key)) |k| {
+            const mods = self.currentMods();
+            if (shortcuts.lookup(k, mods, .global)) |cmd| {
+                self.executeCommand(cmd);
+                return;
+            }
+            if (explorer_has_focus) {
+                if (shortcuts.lookup(k, mods, .explorer)) |cmd| {
                     self.executeCommand(cmd);
                     return;
                 }
-                if (self.show_file_explorer and self.explorer_focused and self.file_explorer.selectedNodeIndex() != null) {
-                    if (shortcuts.lookup(k, mods, .explorer)) |cmd| {
-                        self.executeCommand(cmd);
-                        return;
-                    }
-                }
             }
         }
-        // Inline-Umbenennen im Explorer fängt alle Tasten ab
-        if (self.show_file_explorer and self.file_explorer.isRenaming()) {
-            self.file_explorer.handleRenameKey(key);
+        // Fokus im Explorer: Navigation dort, keine Taste erreicht den Editor
+        // (vorher machte ein „d“ die Datei im Editor dirty). Escape gibt den Fokus zurück.
+        if (explorer_has_focus) {
+            if (key == .escape) {
+                self.explorer_focused = false;
+                return;
+            }
+            _ = self.file_explorer.handleNavKey(key, self.is_shift_down);
             return;
         }
 
@@ -524,16 +546,37 @@ pub const UI = struct {
         self.getActiveEditor().handleKeyPress(key);
     }
 
+    fn handleDialogKey(self: *Self, ad: *ActiveDialog, key: wio.Button) void {
+        var labels_buf: [8][]const u8 = undefined;
+        const actions = ad.dialog.actions;
+        const n = @min(actions.len, labels_buf.len);
+        for (actions[0..n], 0..) |a, i| labels_buf[i] = a.label;
+        const name = @tagName(key);
+        const dk: dialog_ops.Key = switch (key) {
+            .enter, .kp_enter => .enter,
+            .escape => .escape,
+            .tab => if (self.is_shift_down) .shift_tab else .tab,
+            else => if (name.len == 1) .letter else return,
+        };
+        switch (dialog_ops.handleKey(labels_buf[0..n], ad.focused, dk, if (name.len == 1) name[0] else 0)) {
+            .none => {},
+            .focus => |i| ad.focused = i,
+            .choose => |i| ad.key_result = actions[i].result,
+        }
+    }
+
     /// Text Input verarbeiten
     pub fn handleChar(self: *Self, char_code: u21) void {
+        if (self.active_dialog != null) return; // Dialog ist modal, Buchstaben sind Buttons
         if (self.folder_picker.visible) {
             self.folder_picker.handleChar(char_code);
             return;
         }
-        if (self.show_file_explorer and self.file_explorer.isRenaming()) {
+        if (self.show_file_explorer and self.file_explorer.isEditing()) {
             self.file_explorer.handleRenameChar(char_code);
             return;
         }
+        if (self.show_file_explorer and self.explorer_focused) return; // Buchstaben sind Explorer-Kürzel
 
         // Forward to chat tab if active
         if (self.isChatTabActive()) {
@@ -662,9 +705,7 @@ pub const UI = struct {
 
         if (self.show_file_explorer) {
             if (self.file_explorer.handleMouseDown(x, y, button)) {
-                if (self.file_explorer.takePendingDelete()) |node_index| {
-                    self.showDeleteConfirmationDialog(node_index);
-                }
+                if (self.file_explorer.takePendingCommand()) |cmd| self.executeCommand(cmd);
                 return;
             }
         }
@@ -851,9 +892,12 @@ pub const UI = struct {
     pub fn update(self: *Self, delta_ms: f32) void {
         // Bestätigtes Löschen im Explorer: vor dem Layout, nie im Dialog-Callback
         self.file_explorer.processPending();
-        if (self.file_explorer.takeFsChange()) |change| {
+        while (self.file_explorer.takeFsChange()) |change| {
             defer change.deinit(self.allocator);
             self.applyFsChange(change);
+        }
+        if (self.file_explorer.takeError()) |msg| {
+            if (self.active_dialog == null) self.showErrorDialog(msg) else self.allocator.free(msg);
         }
         if (self.folder_picker.takeResult()) |path| {
             if (self.pending_open_folder) |old| self.allocator.free(old);
@@ -989,9 +1033,9 @@ pub const UI = struct {
     /// wio-Taste auf die Kürzel-Tabelle abbilden; null = Taste hat dort keine Rolle.
     fn keyFromButton(btn: wio.Button) ?shortcuts.Key {
         return switch (btn) {
-            .a => .a, .b => .b, .c => .c, .f => .f, .k => .k, .n => .n, .o => .o,
-            .s => .s, .v => .v, .w => .w, .x => .x, .y => .y, .z => .z,
-            .tab => .tab, .grave => .grave, .f1 => .f1, .f2 => .f2, .delete => .delete,
+            .a => .a, .b => .b, .c => .c, .d => .d, .f => .f, .k => .k, .n => .n, .o => .o,
+            .p => .p, .r => .r, .s => .s, .v => .v, .w => .w, .x => .x, .y => .y, .z => .z,
+            .tab => .tab, .grave => .grave, .f1 => .f1, .f2 => .f2, .f5 => .f5, .delete => .delete,
             .escape => .escape, .enter, .kp_enter => .enter,
             else => null,
         };
@@ -1029,9 +1073,52 @@ pub const UI = struct {
                 if (self.file_explorer.selectedNodeIndex()) |node| self.file_explorer.startRename(node);
             },
             .delete_entry => {
-                if (self.file_explorer.selectedNodeIndex()) |node| self.showDeleteConfirmationDialog(node);
+                if (self.file_explorer.selectedNodeIndex()) |node| {
+                    self.file_explorer.requestDelete(node);
+                    if (self.file_explorer.takePendingDelete()) |n| self.showDeleteConfirmationDialog(n);
+                }
             },
+            .new_file_entry => self.file_explorer.startCreate(false),
+            .new_folder_entry => self.file_explorer.startCreate(true),
+            .cut_entry => self.file_explorer.copySelection(true),
+            .copy_entry => self.file_explorer.copySelection(false),
+            .paste_entry => self.file_explorer.paste(),
+            .duplicate_entry => self.file_explorer.duplicateSelection(),
+            .copy_path => {
+                if (self.file_explorer.selectedNodeIndex()) |node| self.setClipboard(self.file_explorer.nodes.items[node].path);
+            },
+            .copy_relative_path => {
+                if (self.file_explorer.selectedNodeIndex()) |node| {
+                    const abs = self.file_explorer.nodes.items[node].path;
+                    const root = self.file_explorer.nodes.items[0].path;
+                    const rel = if (std.mem.startsWith(u8, abs, root) and abs.len > root.len + 1) abs[root.len + 1 ..] else abs;
+                    self.setClipboard(rel);
+                }
+            },
+            .reveal_in_file_manager => {
+                const node = self.file_explorer.targetFolder();
+                const dir = self.file_explorer.nodes.items[node].path;
+                var child = std.process.Child.init(&.{ "xdg-open", dir }, self.allocator);
+                child.stdin_behavior = .Ignore;
+                child.stdout_behavior = .Ignore;
+                child.stderr_behavior = .Ignore;
+                child.spawn() catch |err| log.warn("xdg-open '{s}' failed: {}", .{ dir, err });
+            },
+            .open_in_terminal => {
+                const node = self.file_explorer.targetFolder();
+                self.getActiveTabBar().openTerminalIn(self.file_explorer.nodes.items[node].path);
+            },
+            .collapse_all => self.file_explorer.collapseAll(),
+            .refresh_explorer => self.file_explorer.refreshKeepSelection(),
+            .select_all_entries => self.file_explorer.selectAll(),
         }
+    }
+
+    /// Text in die System-Zwischenablage (Fenster) legen; headless nur merken (RPC ui_state).
+    pub fn setClipboard(self: *Self, text: []const u8) void {
+        if (self.window) |win| win.setClipboardText(text);
+        if (self.last_clipboard_text) |old| self.allocator.free(old);
+        self.last_clipboard_text = self.allocator.dupe(u8, text) catch null;
     }
 
     /// Aktiven Tab schließen wie über das × in der Tab-Leiste: geänderte Tabs
@@ -1311,6 +1398,8 @@ pub const UI = struct {
                         &self.file_explorer,
                         t,
                         self.mouse_pressed_this_frame,
+                        self.explorer_focused,
+                        .{ .ctrl = self.is_ctrl_down, .shift = self.is_shift_down },
                     );
                     // Deferred Toggle ausführen (nach Rendering, vor endLayout)
                     self.file_explorer.processPendingToggle();
@@ -1339,7 +1428,8 @@ pub const UI = struct {
         // Must be here so Clay can register element bounds and mouse_pressed_this_frame is still true
         var pending_dialog_result: ?dialog_mod.DialogResult = null;
         if (self.active_dialog) |*ad| {
-            pending_dialog_result = ad.dialog.render(t, self.mouse_pressed_this_frame);
+            pending_dialog_result = ad.dialog.render(t, self.mouse_pressed_this_frame, ad.focused) orelse ad.key_result;
+            ad.key_result = null;
         }
 
         const commands = self.endLayout();
@@ -1924,13 +2014,17 @@ pub const UI = struct {
     fn showDeleteConfirmationDialog(self: *Self, node_index: u32) void {
         if (node_index >= self.file_explorer.nodes.items.len) return;
         const node = self.file_explorer.nodes.items[node_index];
-        const msg = std.fmt.allocPrint(self.allocator, "Delete '{s}'{s}? This cannot be undone.", .{
-            node.name,
-            if (node.is_folder) " and everything inside it" else "",
-        }) catch return;
+        const count = self.file_explorer.deleteCount();
+        const msg = if (count > 1)
+            std.fmt.allocPrint(self.allocator, "Move {d} items to the trash?", .{count}) catch return
+        else
+            std.fmt.allocPrint(self.allocator, "Move '{s}'{s} to the trash?", .{
+                node.name,
+                if (node.is_folder) " and everything inside it" else "",
+            }) catch return;
         self.active_dialog = .{
             .dialog = .{
-                .title = "Delete",
+                .title = "Move to Trash",
                 .message = msg,
                 .actions = &.{
                     .{ .label = "Delete", .result = .yes },
@@ -1943,6 +2037,21 @@ pub const UI = struct {
             .message_needs_free = true,
         };
     }
+
+    /// Fehler einer Explorer-Aktion (Papierkorb, Anlegen, Einfügen) als Dialog statt nur im Log.
+    fn showErrorDialog(self: *Self, msg: []u8) void {
+        self.active_dialog = .{
+            .dialog = .{
+                .title = "Error",
+                .message = msg,
+                .actions = &.{.{ .label = "OK", .result = .cancel }},
+            },
+            .callback = handleErrorDialog,
+            .message_needs_free = true,
+        };
+    }
+
+    fn handleErrorDialog(_: *UI, _: dialog_mod.DialogResult, _: usize, _: ?*anyopaque) void {}
 
     fn handleDeleteConfirmation(ui: *UI, res: dialog_mod.DialogResult, idx: usize, _: ?*anyopaque) void {
         // Nicht hier löschen: Render-Commands dieses Frames zeigen noch auf Knotennamen.
