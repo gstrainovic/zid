@@ -13,6 +13,7 @@ from e2e_shortcuts import key, explorer, explorer_click, explorer_row_center, ui
 
 FX = os.path.join(ROOT, "tmp", "e2e_fx2")
 XDG = os.path.join(ROOT, "tmp", "xdg")
+XDG_CONFIG = os.path.join(ROOT, "tmp", "xdg-config")
 TRASH_FILES = os.path.join(XDG, "Trash", "files")
 
 
@@ -48,6 +49,7 @@ def wait_for(cond, what, timeout=5):
 def setup_fixture():
     shutil.rmtree(FX, ignore_errors=True)
     shutil.rmtree(XDG, ignore_errors=True)
+    shutil.rmtree(XDG_CONFIG, ignore_errors=True)
     os.makedirs(os.path.join(FX, "sub"))
     for n in ("alpha.txt", "beta.txt", "gamma.txt"):
         with open(os.path.join(FX, n), "w") as f:
@@ -196,13 +198,76 @@ def step_context_menu():
     check(not entry("tmp")["expanded"], "Collapse All klappt alles zu")
 
 
-STEPS = [step_focus_and_letters, step_dialog_keyboard_trash, step_navigation, step_create_rename, step_clipboard, step_multi_select, step_context_menu]
+def step_hidden_and_filter():
+    print("--- Versteckte Dateien (.), Filter (/)")
+    with open(os.path.join(FX, ".secret"), "w") as f:
+        f.write("s\n")
+    reveal("gamma.txt", ["tmp", "e2e_fx2"])
+    explorer_click("gamma.txt")
+    key("r", shift=True)  # neu laden
+    check(".secret" not in names(), "versteckte Datei ist standardmäßig weg")
+    key("dot")
+    wait_for(lambda: ".secret" in names(), ". zeigt versteckte Dateien")
+    check(explorer()["show_hidden"], "show_hidden ist gesetzt")
+    key("dot")
+    wait_for(lambda: ".secret" not in names(), ". blendet sie wieder aus")
+    key("slash")
+    check(explorer()["filter_active"], "/ öffnet das Filterfeld")
+    rpc("type_text", ["gam"]); settle()
+    visible = names()
+    check(explorer()["filter"] == "gam" and "gamma.txt" in visible and "renamed.md" not in visible, f"Filter 'gam' zeigt nur Treffer: {visible[-4:]}")
+    check("e2e_fx2" in visible and "tmp" in visible, "Elternordner der Treffer bleiben sichtbar")
+    shot("e2e_explorer_filter.ppm")
+    key("enter")
+    check(not explorer()["filter_active"] and explorer()["filter"] == "gam", "Enter behält den Filter, Fokus zurück zur Navigation")
+    key("slash")
+    key("escape")
+    check(explorer()["filter"] == "" and "renamed.md" in names(), "Escape leert den Filter")
+
+
+def step_drag_drop():
+    print("--- Drag & Drop verschiebt mit Bestätigung")
+    explorer_click("gamma copy.txt")
+    x0, y0 = explorer_row_center("gamma copy.txt")
+    x1, y1 = explorer_row_center("sub")
+    rpc("mouse_down", [x0, y0]); settle()
+    for i in range(1, 6):
+        rpc("move_mouse", [x0, y0 + (y1 - y0) * i / 5]); settle(3)
+    rpc("mouse_up", [x1, y1]); settle(10)
+    check(dialog_open() and ui_state()["dialog"] == "Move", "Drop auf einen Ordner fragt nach")
+    key("enter")
+    wait_for(lambda: os.path.exists(os.path.join(FX, "sub", "gamma copy.txt")), "Move verschiebt die Datei in den Ordner")
+    check(not os.path.exists(os.path.join(FX, "gamma copy.txt")), "Quelle ist weg")
+
+
+def step_sidebar_width_persist():
+    print("--- Sidebar-Breite wird gemerkt, lange Namen mit Tooltip")
+    st = explorer()
+    x = st["viewport"]["x"] + st["viewport"]["w"]
+    y = st["viewport"]["y"] + 100
+    rpc("mouse_down", [x + 1, y]); settle()
+    for i in range(1, 6):
+        rpc("move_mouse", [x + 1 + 60 * i / 5, y]); settle(3)
+    rpc("mouse_up", [x + 61, y]); settle(10)
+    w = explorer()["width"]
+    check(abs(w - (x + 61)) < 20 or w > st["width"] + 30, f"Splitter ziehen setzt die Breite ({st['width']:.0f} → {w:.0f})")
+    state_file = os.path.join(XDG_CONFIG, "vulkan-ed", "state")
+    wait_for(lambda: os.path.exists(state_file) and f"sidebar_width={int(round(w))}" in open(state_file).read(), "Breite steht in der State-Datei")
+    x0, y0 = explorer_row_center("gamma.txt")
+    rpc("move_mouse", [x0, y0]); settle(10)
+    time.sleep(0.9)
+    settle(5)
+    shot("e2e_explorer_tooltip.ppm")
+    check(bounds("fx_tooltip")["found"], "Tooltip mit vollem Pfad nach 700 ms")
+
+
+STEPS = [step_focus_and_letters, step_dialog_keyboard_trash, step_navigation, step_create_rename, step_clipboard, step_multi_select, step_context_menu, step_hidden_and_filter, step_drag_drop, step_sidebar_width_persist]
 
 
 def main():
     setup_fixture()
     log = open(os.path.join(ROOT, "tmp", "e2e_explorer.log"), "w")
-    env = dict(os.environ, XDG_DATA_HOME=XDG)
+    env = dict(os.environ, XDG_DATA_HOME=XDG, XDG_CONFIG_HOME=XDG_CONFIG)
     proc = subprocess.Popen(
         [os.path.join(ROOT, "zig-out", "bin", "vulkan-ed"), "--headless", "--ai=off"],
         cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, env=env,
