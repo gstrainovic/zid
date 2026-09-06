@@ -23,6 +23,7 @@ const pane_mod = @import("pane.zig");
 const dialog_mod = @import("dialog.zig");
 const dialog_ops = @import("dialog_ops.zig");
 const folder_picker_mod = @import("folder_picker.zig");
+const picker_mod = @import("picker.zig");
 const shortcuts = @import("shortcuts");
 const shortcuts_dialog = @import("shortcuts_dialog.zig");
 const ai_tools = @import("ai_tools");
@@ -140,6 +141,8 @@ pub const UI = struct {
     terminal_return_index: ?usize = null,
     /// "Open Folder…"-Dialog
     folder_picker: folder_picker_mod.FolderPicker,
+    /// Schnellöffner (Ctrl+P) und Command Palette (Ctrl+Shift+P)
+    picker: picker_mod.Picker,
     /// Vom Dialog bestätigter Projektordner (owned); main.zig holt ihn per takePendingOpenFolder
     pending_open_folder: ?[]u8 = null,
     pending_tab_closes: std.ArrayListUnmanaged(TabCloseRequest),
@@ -260,6 +263,7 @@ pub const UI = struct {
             .pending_split = null,
             .active_dialog = null,
             .folder_picker = folder_picker_mod.FolderPicker.init(allocator),
+            .picker = picker_mod.Picker.init(allocator),
             .pending_tab_closes = std.ArrayListUnmanaged(TabCloseRequest).empty,
             .open_buffers = open_buffers,
             .open_images = std.StringHashMap(*anyopaque).init(allocator),
@@ -352,6 +356,7 @@ pub const UI = struct {
         self.closed_tabs.deinit(self.allocator);
         if (self.external_change_path) |p| self.allocator.free(p);
         self.folder_picker.deinit();
+        self.picker.deinit();
         if (self.git_branch.len > 0) self.allocator.free(self.git_branch);
         self.pending_tab_closes.deinit(self.allocator);
 
@@ -446,6 +451,10 @@ pub const UI = struct {
         // Offener Ordner-Dialog ist modal
         if (self.folder_picker.visible) {
             self.folder_picker.handleKey(key);
+            return;
+        }
+        if (self.picker.visible) {
+            self.picker.handleKey(key);
             return;
         }
         if (self.shortcuts_dialog_open) {
@@ -615,6 +624,10 @@ pub const UI = struct {
             self.folder_picker.handleChar(char_code);
             return;
         }
+        if (self.picker.visible) {
+            self.picker.handleChar(char_code);
+            return;
+        }
         if (self.show_file_explorer and self.file_explorer.isEditing()) {
             self.file_explorer.handleRenameChar(char_code);
             return;
@@ -717,6 +730,10 @@ pub const UI = struct {
             return;
         }
         // Ordner-Dialog ist modal: alle Klicks gehören ihm
+        if (self.picker.visible) {
+            if (button == .mouse_left) self.picker.handleMouseDown();
+            return;
+        }
         if (self.folder_picker.visible) {
             if (button == .mouse_left) self.folder_picker.handleMouseDown();
             return;
@@ -939,6 +956,10 @@ pub const UI = struct {
             self.folder_picker.handleScroll(delta);
             return;
         }
+        if (self.picker.visible) {
+            self.picker.handleScroll(delta);
+            return;
+        }
         if (self.show_file_explorer and clay.pointerOver(clay.ElementId.ID("file_explorer"))) {
             self.file_explorer.scrollLines(delta);
             return;
@@ -984,6 +1005,18 @@ pub const UI = struct {
         if (self.getActiveEditor().takeError()) |msg| {
             if (self.active_dialog == null) self.showErrorDialog(msg) else self.allocator.free(msg);
         }
+        self.picker.poll();
+        if (self.picker.takeFile()) |rel| {
+            defer self.allocator.free(rel);
+            if (self.picker.root) |root| {
+                const abs = std.fs.path.join(self.allocator, &.{ root, rel }) catch null;
+                if (abs) |a| {
+                    defer self.allocator.free(a);
+                    self.getActiveTabBar().openFile(a) catch |err| log.warn("quick open '{s}' failed: {}", .{ a, err });
+                }
+            }
+        }
+        if (self.picker.takeCommand()) |cmd| self.executeCommand(cmd);
         if (self.folder_picker.takeResult()) |path| {
             if (self.pending_open_folder) |old| self.allocator.free(old);
             self.pending_open_folder = path;
@@ -1241,6 +1274,11 @@ pub const UI = struct {
                 if (self.file_explorer.selected_index == null and self.file_explorer.visible_entries.items.len > 0) self.file_explorer.selectEntry(0);
             },
             .toggle_terminal => self.toggleTerminal(),
+            .quick_open => {
+                const root = if (self.file_explorer.nodes.items.len > 0) self.file_explorer.nodes.items[0].path else (self.current_directory orelse ".");
+                self.picker.openFiles(root);
+            },
+            .command_palette => self.picker.openCommands(),
         }
     }
 
@@ -1814,6 +1852,7 @@ pub const UI = struct {
 
         // "Open Folder…"-Dialog (floating, z_index=2000), modal wie der Dialog unten
         self.folder_picker.render(self.frame_arena.allocator(), t);
+        self.picker.render(self.frame_arena.allocator(), t);
         if (self.shortcuts_dialog_open) shortcuts_dialog.render(t);
 
         // Dialog INSIDE Clay layout (floating, z_index=2000 → overlays everything)

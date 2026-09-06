@@ -176,6 +176,7 @@ pub fn createDispatcher(alloc: std.mem.Allocator, ctx: *E2EContext) !*zigjr.RpcD
     try rpc_dispatcher.addWithCtx("open_folder", ctx, openFolder);
     try rpc_dispatcher.addWithCtx("open_file", ctx, openFile);
     try rpc_dispatcher.addWithCtx("tab_bounds", ctx, tabBounds);
+    try rpc_dispatcher.addWithCtx("picker_state", ctx, pickerState);
     try rpc_dispatcher.addWithCtx("middle_click", ctx, middleClick);
     try rpc_dispatcher.addWithCtx("click_mods", ctx, clickMods);
     try rpc_dispatcher.addWithCtx("mouse_down", ctx, mouseDown);
@@ -555,6 +556,18 @@ fn explorerEntries(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
         , .{ i, node.name, node.path, node.is_folder, e.is_expanded, e.depth, fx.isNodeSelected(e.node_index), fx.selected_index == i });
     }
     try buf.writer.writeAll("]}");
+    return buf.written();
+}
+
+/// Schnellöffner / Command Palette: offen, Modus, Anfrage, Trefferzahl, markierter Eintrag.
+fn pickerState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
+    const pk = &ctx.ui_system.picker;
+    var buf = std.Io.Writer.Allocating.init(dc.arena());
+    try buf.writer.print("{{\"open\": {}, \"scanning\": {}, \"mode\": \"{s}\", \"query\": ", .{ pk.visible, pk.scanning, @tagName(pk.mode) });
+    try std.json.Stringify.value(pk.query(), .{}, &buf.writer);
+    try buf.writer.print(", \"matches\": {d}, \"items\": {d}, \"selected\": {d}, \"selected_label\": ", .{ pk.matchCount(), pk.items.items.len, pk.selected });
+    try std.json.Stringify.value(pk.selectedLabel(), .{}, &buf.writer);
+    try buf.writer.writeAll("}");
     return buf.written();
 }
 

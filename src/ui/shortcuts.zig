@@ -92,6 +92,8 @@ pub const Command = enum {
     focus_pane_down,
     focus_explorer,
     toggle_terminal,
+    quick_open,
+    command_palette,
     show_shortcuts,
 };
 
@@ -167,6 +169,8 @@ pub const bindings = [_]Binding{
     .{ .command = .focus_pane_down, .key = .down, .mods = .{ .ctrl = true, .alt = true } },
     .{ .command = .focus_explorer, .key = .e, .mods = .{ .ctrl = true, .shift = true } },
     .{ .command = .toggle_terminal, .key = .j, .mods = .{ .ctrl = true } },
+    .{ .command = .quick_open, .key = .p, .mods = .{ .ctrl = true } },
+    .{ .command = .command_palette, .key = .p, .mods = .{ .ctrl = true, .shift = true } },
     .{ .command = .show_shortcuts, .key = .f1 },
 };
 
@@ -180,10 +184,10 @@ pub const Menu = struct { title: []const u8, items: []const Command };
 
 /// Menüleiste im Header, in dieser Reihenfolge.
 pub const menus = [_]Menu{
-    .{ .title = "File", .items = &.{ .new_file, .save, .open_folder, .close_tab, .close_all_tabs, .reopen_closed_tab } },
+    .{ .title = "File", .items = &.{ .new_file, .quick_open, .save, .open_folder, .close_tab, .close_all_tabs, .reopen_closed_tab } },
     .{ .title = "Edit", .items = &.{ .undo, .redo, .cut, .copy, .paste, .select_all, .delete_line, .duplicate_line, .move_line_up, .move_line_down, .toggle_comment, .find, .replace, .goto_line, .goto_definition } },
     .{ .title = "View", .items = &.{ .toggle_explorer, .focus_explorer, .split_vertical, .split_horizontal, .md_preview, .new_terminal, .toggle_terminal } },
-    .{ .title = "Help", .items = &.{.show_shortcuts} },
+    .{ .title = "Help", .items = &.{ .command_palette, .show_shortcuts } },
 };
 
 pub fn lookup(key: Key, mods: Mods, scope: Scope) ?Command {
@@ -267,6 +271,8 @@ pub fn label(command: Command) []const u8 {
         .focus_pane_down => "Focus Pane Down",
         .focus_explorer => "Focus Explorer",
         .toggle_terminal => "Toggle Terminal",
+        .quick_open => "Go to File…",
+        .command_palette => "Command Palette…",
         .show_shortcuts => "Keyboard Shortcuts",
     };
 }
@@ -369,6 +375,8 @@ test "Editor- und Pane-Kürzel stehen in der Tabelle" {
     try testing.expectEqual(Command.focus_pane_right, lookup(.right, .{ .ctrl = true, .alt = true }, .global).?);
     try testing.expectEqual(Command.focus_explorer, lookup(.e, .{ .ctrl = true, .shift = true }, .global).?);
     try testing.expectEqual(Command.toggle_terminal, lookup(.j, .{ .ctrl = true }, .global).?);
+    try testing.expectEqual(Command.quick_open, lookup(.p, .{ .ctrl = true }, .global).?);
+    try testing.expectEqual(Command.command_palette, lookup(.p, .{ .ctrl = true, .shift = true }, .global).?);
     try testing.expectEqualStrings("Ctrl+/", shortcutText(.toggle_comment));
     try testing.expectEqualStrings("Alt+↑", shortcutText(.move_line_up));
 }
