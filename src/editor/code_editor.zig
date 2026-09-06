@@ -176,6 +176,9 @@ pub const CodeEditor = struct {
     editor_bounds_width: f32 = 0,
     editor_bounds_height: f32 = 0,
 
+    /// Letzter Fehler (z. B. Speichern), von der UI per takeError abgeholt (owned)
+    last_error: ?[]u8 = null,
+
     /// Text-Messung
     measure_fn: ?MeasureFn = null,
 
@@ -271,10 +274,22 @@ pub const CodeEditor = struct {
         std.log.scoped(.editor).info("Saved file: {s}", .{path});
     }
 
+    fn setError(self: *Self, comptime fmt: []const u8, args: anytype) void {
+        if (self.last_error) |e| self.allocator.free(e);
+        self.last_error = std.fmt.allocPrint(self.allocator, fmt, args) catch null;
+    }
+
+    /// Letzten Fehler abholen (owned, Aufrufer gibt frei).
+    pub fn takeError(self: *Self) ?[]u8 {
+        const e = self.last_error;
+        self.last_error = null;
+        return e;
+    }
+
     /// Setzt Dirty-Flag für Highlighting — OHNE sofortigen Reparse.
     /// MUSS nach Edit-Operationen aufgerufen werden.
     fn markDirty(self: *Self, start_line: usize, end_line: usize) void {
-        std.log.scoped(.highlight).info("markDirty lines {d}..{d}", .{ start_line, end_line });
+        std.log.scoped(.highlight).debug("markDirty lines {d}..{d}", .{ start_line, end_line });
         self.edits_fully_tracked = true;
         if (!self.has_dirty_lines) {
             self.dirty_line_start = start_line;
@@ -341,6 +356,7 @@ pub const CodeEditor = struct {
     }
 
     pub fn deinit(self: *Self) void {
+        if (self.last_error) |e| self.allocator.free(e);
         if (self.bg_parse_thread) |thread| thread.join();
         if (self.highlighter) |hl| hl.destroy();
         if (self.bg_highlighter) |hl| hl.destroy();
@@ -442,7 +458,7 @@ pub const CodeEditor = struct {
             return;
         };
         const end = std.time.nanoTimestamp();
-        std.log.scoped(.highlight).info("synchronous reparse took {d:.3} ms", .{ @as(f64, @floatFromInt(end - start)) / 1_000_000.0 });
+        std.log.scoped(.highlight).debug("synchronous reparse took {d:.3} ms", .{ @as(f64, @floatFromInt(end - start)) / 1_000_000.0 });
         self.last_parsed_root = self.buffer.root;
 
         // Cache invalidieren: komplett bei Full-Reparse, sonst nur Dirty-Range.
@@ -468,7 +484,7 @@ pub const CodeEditor = struct {
             self.bg_mutex.unlock();
         };
         const end = std.time.nanoTimestamp();
-        std.log.scoped(.highlight).info("background reparse took {d:.3} ms", .{ @as(f64, @floatFromInt(end - start)) / 1_000_000.0 });
+        std.log.scoped(.highlight).debug("background reparse took {d:.3} ms", .{ @as(f64, @floatFromInt(end - start)) / 1_000_000.0 });
 
         self.bg_mutex.lock();
         self.bg_parsing = false;
@@ -513,12 +529,12 @@ pub const CodeEditor = struct {
                 self.last_parsed_root = self.bg_snapshot_root;
                 self.has_dirty_lines = (self.last_parsed_root != self.buffer.root);
                 if (self.has_dirty_lines) {
-                    std.log.scoped(.highlight).info("STILL DIRTY after swap (more edits arrived): last={*} current={*}", .{ self.last_parsed_root, self.buffer.root });
+                    std.log.scoped(.highlight).debug("STILL DIRTY after swap (more edits arrived): last={*} current={*}", .{ self.last_parsed_root, self.buffer.root });
                 }
                 self.bg_mutex.unlock();
 
                 const swap_end = std.time.nanoTimestamp();
-                std.log.scoped(.highlight).info("background reparse swapped in {d:.3} ms", .{ @as(f64, @floatFromInt(swap_end - swap_start)) / 1_000_000.0 });
+                std.log.scoped(.highlight).debug("background reparse swapped in {d:.3} ms", .{ @as(f64, @floatFromInt(swap_end - swap_start)) / 1_000_000.0 });
             } else {
                 self.bg_mutex.lock();
                 self.bg_queued_edits.clearRetainingCapacity();
@@ -551,7 +567,7 @@ pub const CodeEditor = struct {
 
         // 4. Background-Parse starten
         const hl = self.highlighter orelse return false;
-        std.log.scoped(.highlight).info("starting background parse: has_dirty={any} tracked={any} root={*} last={*}", .{ self.has_dirty_lines, self.edits_fully_tracked, self.buffer.root, self.last_parsed_root });
+        std.log.scoped(.highlight).debug("starting background parse: has_dirty={any} tracked={any} root={*} last={*}", .{ self.has_dirty_lines, self.edits_fully_tracked, self.buffer.root, self.last_parsed_root });
         
         // Wenn Edits fehlen: resetTree() nötig
         if (!self.edits_fully_tracked) {
@@ -1281,6 +1297,7 @@ pub const CodeEditor = struct {
             .Save => {
                 self.save() catch |err| {
                     std.log.scoped(.editor).err("Failed to save file: {}", .{err});
+                    self.setError("Cannot save '{s}': {s}", .{ std.fs.path.basename(self.buffer.get_file_path()), @errorName(err) });
                 };
             },
         }

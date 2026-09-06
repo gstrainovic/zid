@@ -105,6 +105,12 @@ pub const FileExplorerState = struct {
     selected_nodes: std.AutoHashMap(u32, void),
     /// Datei die geöffnet werden soll (wird von main.zig abgefragt und zurückgesetzt)
     file_to_open: ?[]const u8 = null,
+    /// Öffnen als Vorschau-Tab (Einfachklick/Space) statt fest (Doppelklick/Enter)
+    file_to_open_preview: bool = false,
+    /// Uhr für Doppelklick-Erkennung (von der UI hochgezählt)
+    now_ms: f32 = 0,
+    last_click_ms: f32 = -10_000,
+    last_click_index: ?usize = null,
     /// Deferred Action: Folder-Toggle pending (wird nach Rendering ausgeführt)
     pending_toggle: ?u32 = null,
     /// Kontextmenü (Rechtsklick auf Eintrag)
@@ -481,8 +487,13 @@ pub const FileExplorerState = struct {
         return out.toOwnedSlice(alloc);
     }
 
-    /// Datei öffnen (setzt file_to_open)
+    /// Datei fest öffnen (setzt file_to_open)
     pub fn openSelectedFile(self: *Self) void {
+        self.openSelectedFileAs(false);
+    }
+
+    /// Datei öffnen; `preview` = Vorschau-Tab (Einfachklick), sonst fester Tab.
+    pub fn openSelectedFileAs(self: *Self, preview: bool) void {
         if (self.selected_index) |idx| {
             if (idx < self.visible_entries.items.len) {
                 const entry = self.visible_entries.items[idx];
@@ -490,8 +501,37 @@ pub const FileExplorerState = struct {
 
                 if (!node.is_folder) {
                     self.file_to_open = node.path;
+                    self.file_to_open_preview = preview;
                 }
             }
+        }
+    }
+
+    /// Eintrag mit diesem Pfad sichtbar machen: Elternordner aufklappen, markieren, hinscrollen.
+    /// Pfade außerhalb des Roots werden ignoriert.
+    pub fn revealPath(self: *Self, path: []const u8) void {
+        if (self.nodes.items.len == 0) return;
+        if (!explorer_ops.isPathOrUnder(path, self.nodes.items[0].path)) return;
+        var current: u32 = 0;
+        var guard: usize = 0;
+        while (!std.mem.eql(u8, self.nodes.items[current].path, path) and guard < MAX_TREE_DEPTH) : (guard += 1) {
+            if (!self.expanded_nodes.contains(current)) self.expandNode(current, self.nodes.items[current].path) catch return;
+            const parent = self.nodes.items[current];
+            var child = parent.first_child orelse return;
+            var found: ?u32 = null;
+            var k: u32 = 0;
+            while (k < parent.child_count) : ({ k += 1; child += 1; }) {
+                if (child >= self.nodes.items.len) break;
+                if (explorer_ops.isPathOrUnder(path, self.nodes.items[child].path)) {
+                    found = child;
+                    break;
+                }
+            }
+            current = found orelse return;
+        }
+        if (self.visibleIndexOfNode(current)) |i| {
+            self.selectEntry(i);
+            self.scrollToIndex(i);
         }
     }
 
@@ -577,7 +617,8 @@ pub const FileExplorerState = struct {
                     self.toggleNode(entry.node_index) catch {};
                     self.moveCursor(cur, false);
                 } else {
-                    self.openSelectedFile();
+                    // Enter öffnet fest, Space als Vorschau (wie VS Code)
+                    self.openSelectedFileAs(key == .space);
                 }
             },
             else => return false,
@@ -1312,8 +1353,12 @@ fn renderTreeEntry(
             if (node.is_folder) {
                 state.pending_toggle = entry.node_index;
             } else {
-                state.openSelectedFile();
+                // Einfachklick = Vorschau-Tab, Doppelklick (< 400 ms, gleiche Zeile) = fester Tab
+                const double = state.last_click_index == index and (state.now_ms - state.last_click_ms) < 400;
+                state.openSelectedFileAs(!double);
             }
+            state.last_click_ms = state.now_ms;
+            state.last_click_index = index;
         }
     }
 

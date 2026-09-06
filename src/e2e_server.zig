@@ -31,6 +31,10 @@ const Point = struct { x: f32, y: f32 };
 pub const InputEvent = union(enum) {
     click: Point,
     right_click: Point,
+    middle_click: Point,
+    /// Drücken/Loslassen getrennt (Drag & Drop)
+    press: Point,
+    release: Point,
     move: Point,
     key: struct { btn: @import("wio").Button, ctrl: bool, shift: bool = false },
     char: u21,
@@ -112,8 +116,25 @@ fn applyInput(ui: *ui_mod.UI, ev: InputEvent) void {
             ui.handleMouseUp();
             ui.setPointerState(p.x, p.y, false);
         },
-        .move => |p| {
+        .middle_click => |p| {
+            ui.setPointerState(p.x, p.y, true);
+            ui.handleMouseDown(p.x, p.y, .mouse_middle);
+            ui.handleMouseUp();
             ui.setPointerState(p.x, p.y, false);
+        },
+        .press => |p| {
+            ui.setPointerState(p.x, p.y, true);
+            ui.handleMouseMove(p.x, p.y);
+            ui.handleMouseDown(p.x, p.y, .mouse_left);
+        },
+        .release => |p| {
+            ui.handleMouseMove(p.x, p.y);
+            ui.handleMouseUp();
+            ui.setPointerState(p.x, p.y, false);
+        },
+        .move => |p| {
+            // Gedrückte Taste (mouse_down) bleibt beim Bewegen gedrückt: Drag & Drop
+            ui.setPointerState(p.x, p.y, ui.is_mouse_down);
             ui.handleMouseMove(p.x, p.y);
         },
         .key => |k| {
@@ -139,6 +160,10 @@ pub fn createDispatcher(alloc: std.mem.Allocator, ctx: *E2EContext) !*zigjr.RpcD
 
     try rpc_dispatcher.addWithCtx("open_folder", ctx, openFolder);
     try rpc_dispatcher.addWithCtx("open_file", ctx, openFile);
+    try rpc_dispatcher.addWithCtx("tab_bounds", ctx, tabBounds);
+    try rpc_dispatcher.addWithCtx("middle_click", ctx, middleClick);
+    try rpc_dispatcher.addWithCtx("mouse_down", ctx, mouseDown);
+    try rpc_dispatcher.addWithCtx("mouse_up", ctx, mouseUp);
     try rpc_dispatcher.addWithCtx("close_tab", ctx, closeTab);
     try rpc_dispatcher.addWithCtx("setActiveTab", ctx, setActiveTab);
     try rpc_dispatcher.addWithCtx("click", ctx, click);
@@ -364,6 +389,9 @@ fn buttonFromName(name: []const u8) ?@import("wio").Button {
         .{ "right", .right },       .{ "home", .home },           .{ "end", .end },
         .{ "page_up", .page_up },   .{ "page_down", .page_down }, .{ "f1", .f1 },
         .{ "f2", .f2 },             .{ "f5", .f5 },               .{ "space", .space },
+        .{ "1", .@"1" },            .{ "2", .@"2" },              .{ "3", .@"3" },
+        .{ "4", .@"4" },            .{ "5", .@"5" },              .{ "9", .@"9" },
+        .{ "backslash", .backslash },
     };
     for (named) |entry| {
         if (std.mem.eql(u8, name, entry[0])) return entry[1];
@@ -473,8 +501,8 @@ fn getActiveTabDebug(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     for (tab_bar.tabs.items, 0..) |tab, i| {
         if (i > 0) try buf.writer.writeAll(", ");
         try buf.writer.print(
-            \\{{"index": {d}, "kind": "{s}", "name": "{s}", "is_active": {}, "modified": {}}}
-        , .{ i, @tagName(tab.kind), tab.display_name, tab.is_active, tab.modified });
+            \\{{"index": {d}, "kind": "{s}", "name": "{s}", "is_active": {}, "modified": {}, "preview": {}, "pinned": {}}}
+        , .{ i, @tagName(tab.kind), tab.display_name, tab.is_active, tab.modified, tab.preview, tab.pinned });
     }
     const ed = ctx.ui_system.getActiveEditor();
     try buf.writer.print("], \"editor_modified\": {}, \"editor_file\": \"{s}\"}}", .{ ed.is_modified, ed.buffer.get_file_path() });
@@ -504,6 +532,29 @@ fn explorerEntries(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     }
     try buf.writer.writeAll("]}");
     return buf.written();
+}
+
+/// Bounding-Box des Tab-Kopfs `index` im aktiven Pane (für Klicks/Mittelklick/Rechtsklick).
+fn tabBounds(ctx: *E2EContext, dc: *zigjr.DispatchCtx, index: i64) ![]const u8 {
+    const tb = ctx.ui_system.getActiveTabBar();
+    return boundsJson(dc, clay.getElementData(@import("ui/tab_bar.zig").tabId(tb, @intCast(index))));
+}
+
+/// Mittelklick (gepuffert wie click)
+fn middleClick(ctx: *E2EContext, _: *zigjr.DispatchCtx, x: f64, y: f64) ![]const u8 {
+    dispatchInput(ctx, .{ .middle_click = .{ .x = @floatCast(x), .y = @floatCast(y) } });
+    return "ok";
+}
+
+/// Linke Taste drücken ohne loslassen (Drag-Tests), Gegenstück mouse_up
+fn mouseDown(ctx: *E2EContext, _: *zigjr.DispatchCtx, x: f64, y: f64) ![]const u8 {
+    dispatchInput(ctx, .{ .press = .{ .x = @floatCast(x), .y = @floatCast(y) } });
+    return "ok";
+}
+
+fn mouseUp(ctx: *E2EContext, _: *zigjr.DispatchCtx, x: f64, y: f64) ![]const u8 {
+    dispatchInput(ctx, .{ .release = .{ .x = @floatCast(x), .y = @floatCast(y) } });
+    return "ok";
 }
 
 /// Bounding-Box eines Clay-Elements aus dem letzten Layout (String-ID).
@@ -641,6 +692,7 @@ fn uiState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     try buf.writer.print(", \"clipboard_text\": \"{s}\", \"explorer_selection_count\": {d}, \"dialog_focused\": {d}", .{
         ui.last_clipboard_text orelse "", ui.file_explorer.selectionCount(), if (ui.active_dialog) |ad| ad.focused else 0,
     });
+    try buf.writer.print(", \"last_frame_ms\": {d:.2}, \"max_frame_ms\": {d:.2}", .{ ui.last_frame_ms, ui.takeMaxFrameMs() });
     try buf.writer.writeAll(", \"all_tabs\": [");
     var first_tab = true;
     try writeAllTabs(ui.root_pane, &buf.writer, &first_tab);

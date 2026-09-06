@@ -46,15 +46,13 @@ def open_and_poke(name):
         rpc("key_press", [k, False])
     rpc("key_press", ["end", True])
     settle()
-    t1 = time.time()
+    result_json("ui_state")  # max_frame_ms zurücksetzen
     rpc("type_text", ["Z"])
-    st = {}
-    while time.time() - t1 < 30:
-        st = result_json("editor_state")
-        if "Z" in st.get("text", ""):
-            break
-        time.sleep(0.05)
-    check("Z" in st.get("text", ""), f"{name}: getipptes Zeichen sichtbar nach {time.time() - t1:.2f}s")
+    settle(10)
+    frame = result_json("ui_state")["max_frame_ms"]
+    check(frame < 50, f"{name}: längster Frame nach dem Tippen {frame:.1f} ms (< 50)")
+    st = result_json("editor_state")
+    check("Z" in st.get("text", ""), f"{name}: getipptes Zeichen steht im Text")
     check(st["lines"] >= 1, f"{name}: Editor meldet {st['lines']} Zeilen, Cursor {st.get('cursor')}")
     shot(f"e2e_odd_{name}.ppm")
     check(os.path.getsize(os.path.join(TMP, f"e2e_odd_{name}.ppm")) > 1000, f"{name}: Screenshot geschrieben")

@@ -67,6 +67,9 @@ pub const components = @import("components/mod.zig");
 pub const UI = struct {
     pub const TabCloseRequest = struct { pane: *pane_mod.Pane, index: usize };
     pub const PdfPageChange = struct { path: []const u8, delta: i16 };
+    pub const TabTarget = struct { pane: *pane_mod.Pane, index: usize };
+    pub const TabMenu = struct { pane: *pane_mod.Pane, index: usize, x: f32, y: f32 };
+
     pub const ActiveDialog = struct {
         dialog: dialog_mod.Dialog,
         context_usize: usize = 0,
@@ -118,6 +121,15 @@ pub const UI = struct {
     explorer_focused: bool = false,
     /// Zuletzt per setClipboard kopierter Text (owned; für Tests ohne Fenster)
     last_clipboard_text: ?[]u8 = null,
+    /// Dauer des letzten Frames (Eingabe bis Ende Layout/Render) und Maximum seit dem letzten Abholen
+    last_frame_ms: f32 = 0,
+    max_frame_ms: f32 = 0,
+    /// Pfade zuletzt geschlossener Datei-Tabs (owned, neueste hinten) für Ctrl+Shift+T
+    closed_tabs: std.ArrayListUnmanaged([]u8) = .empty,
+    /// Offenes Tab-Kontextmenü (Rechtsklick auf einen Tab-Kopf)
+    tab_menu: ?TabMenu = null,
+    /// Ziel eines Tab-Kommandos aus dem Kontextmenü; null = aktiver Tab des aktiven Panes
+    tab_cmd_target: ?TabTarget = null,
     /// "Open Folder…"-Dialog
     folder_picker: folder_picker_mod.FolderPicker,
     /// Vom Dialog bestätigter Projektordner (owned); main.zig holt ihn per takePendingOpenFolder
@@ -328,6 +340,8 @@ pub const UI = struct {
         if (self.pending_open_folder) |p| self.allocator.free(p);
         if (self.agent_confirm) |c| c.deinit(self.allocator);
         if (self.last_clipboard_text) |t| self.allocator.free(t);
+        for (self.closed_tabs.items) |p| self.allocator.free(p);
+        self.closed_tabs.deinit(self.allocator);
         self.folder_picker.deinit();
         if (self.git_branch.len > 0) self.allocator.free(self.git_branch);
         self.pending_tab_closes.deinit(self.allocator);
@@ -436,6 +450,10 @@ pub const UI = struct {
         }
         if (self.open_menu != null and key == .escape) {
             self.open_menu = null;
+            return;
+        }
+        if (self.tab_menu != null and key == .escape) {
+            self.tab_menu = null;
             return;
         }
         // Kürzel aus der zentralen Tabelle (shortcuts.zig): global überall,
@@ -700,6 +718,35 @@ pub const UI = struct {
             }
         }
 
+        // Offenes Tab-Kontextmenü: Eintrag ausführen oder schließen
+        if (self.tab_menu) |menu| {
+            self.tab_menu = null;
+            inline for (shortcuts.tab_menu_items) |cmd| {
+                if (clay.pointerOver(tabMenuItemId(cmd))) {
+                    self.tab_cmd_target = .{ .pane = menu.pane, .index = menu.index };
+                    self.executeCommand(cmd);
+                    self.tab_cmd_target = null;
+                    return;
+                }
+            }
+            return;
+        }
+        // Tab-Kopf: Mittelklick schließt, Rechtsklick öffnet das Menü
+        if (button == .mouse_middle or button == .mouse_right) {
+            if (self.findPaneAt(self.root_pane, x, y)) |pane| {
+                if (pane.data == .leaf) {
+                    if (pane.data.leaf.tab_bar.tabIndexAt(x, y)) |i| {
+                        if (button == .mouse_middle) {
+                            self.requestCloseTab(pane, i);
+                        } else {
+                            self.tab_menu = .{ .pane = pane, .index = i, .x = x, .y = y };
+                        }
+                        return;
+                    }
+                }
+            }
+        }
+
         // Tastatur-Fokus folgt dem Klick: Explorer-Kürzel (F2/Entf) nur nach Klick im Explorer
         self.explorer_focused = self.show_file_explorer and self.file_explorer.inSidebar(x);
 
@@ -909,6 +956,9 @@ pub const UI = struct {
         if (self.file_explorer.takeError()) |msg| {
             if (self.active_dialog == null) self.showErrorDialog(msg) else self.allocator.free(msg);
         }
+        if (self.getActiveEditor().takeError()) |msg| {
+            if (self.active_dialog == null) self.showErrorDialog(msg) else self.allocator.free(msg);
+        }
         if (self.folder_picker.takeResult()) |path| {
             if (self.pending_open_folder) |old| self.allocator.free(old);
             self.pending_open_folder = path;
@@ -916,6 +966,7 @@ pub const UI = struct {
         self.driveAgentTools();
         self.anim_manager.update(delta_ms);
         self.getActiveEditor().time_ms += delta_ms;
+        self.file_explorer.now_ms += delta_ms;
         self.ai_chat.updateTimeMs(delta_ms);
     }
 
@@ -1043,10 +1094,15 @@ pub const UI = struct {
     /// wio-Taste auf die Kürzel-Tabelle abbilden; null = Taste hat dort keine Rolle.
     fn keyFromButton(btn: wio.Button) ?shortcuts.Key {
         return switch (btn) {
-            .a => .a, .b => .b, .c => .c, .d => .d, .f => .f, .k => .k, .n => .n, .o => .o,
-            .p => .p, .r => .r, .s => .s, .v => .v, .w => .w, .x => .x, .y => .y, .z => .z,
-            .tab => .tab, .grave => .grave, .f1 => .f1, .f2 => .f2, .f5 => .f5, .delete => .delete,
-            .escape => .escape, .enter, .kp_enter => .enter,
+            .a => .a, .b => .b, .c => .c, .d => .d, .e => .e, .f => .f, .g => .g, .h => .h, .j => .j,
+            .k => .k, .n => .n, .o => .o, .p => .p, .r => .r, .s => .s, .t => .t, .v => .v, .w => .w,
+            .x => .x, .y => .y, .z => .z,
+            .@"1" => .n1, .@"2" => .n2, .@"3" => .n3, .@"4" => .n4, .@"5" => .n5,
+            .@"6" => .n6, .@"7" => .n7, .@"8" => .n8, .@"9" => .n9,
+            .tab => .tab, .grave => .grave, .backslash => .backslash, .f1 => .f1, .f2 => .f2, .f5 => .f5,
+            .delete => .delete, .escape => .escape, .enter, .kp_enter => .enter,
+            .page_up => .page_up, .page_down => .page_down,
+            .left => .left, .right => .right, .up => .up, .down => .down,
             else => null,
         };
     }
@@ -1121,7 +1177,86 @@ pub const UI = struct {
             .collapse_all => self.file_explorer.collapseAll(),
             .refresh_explorer => self.file_explorer.refreshKeepSelection(),
             .select_all_entries => self.file_explorer.selectAll(),
+            .close_other_tabs => if (self.tabTarget()) |t| self.closeTabsWhere(t.pane, t.index, false, false),
+            .close_tabs_right => if (self.tabTarget()) |t| self.closeTabsWhere(t.pane, t.index, true, false),
+            .close_all_tabs => if (self.tabTarget()) |t| self.closeTabsWhere(t.pane, null, false, false),
+            .close_saved_tabs => if (self.tabTarget()) |t| self.closeTabsWhere(t.pane, null, false, true),
+            .pin_tab => if (self.tabTarget()) |t| t.pane.data.leaf.tab_bar.togglePin(t.index),
+            .copy_tab_path => if (self.tabTarget()) |t| self.setClipboard(t.pane.data.leaf.tab_bar.tabs.items[t.index].path),
+            .reveal_in_explorer => if (self.tabTarget()) |t| {
+                self.show_file_explorer = true;
+                self.file_explorer.revealPath(t.pane.data.leaf.tab_bar.tabs.items[t.index].path);
+            },
+            .reopen_closed_tab => self.reopenClosedTab(),
+            .goto_tab_1 => self.gotoTab(0),
+            .goto_tab_2 => self.gotoTab(1),
+            .goto_tab_3 => self.gotoTab(2),
+            .goto_tab_4 => self.gotoTab(3),
+            .goto_tab_5 => self.gotoTab(4),
+            .goto_tab_6 => self.gotoTab(5),
+            .goto_tab_7 => self.gotoTab(6),
+            .goto_tab_8 => self.gotoTab(7),
+            .goto_tab_9 => self.gotoTab(8),
         }
+    }
+
+    fn tabMenuItemId(comptime cmd: shortcuts.Command) clay.ElementId {
+        return clay.ElementId.ID("tab_menu_" ++ @tagName(cmd));
+    }
+
+    /// Kontextmenü eines Tabs (Labels und Kürzel aus der Tabelle), schwebend an der Klickposition.
+    fn renderTabMenu(self: *Self, menu: TabMenu, t: Theme) void {
+        _ = self;
+        clay.UI()(.{
+            .id = clay.ElementId.ID("tab_menu_anchor"),
+            .layout = .{ .sizing = .{ .w = .fixed(0), .h = .fixed(0) } },
+            .floating = .{
+                .attach_to = .to_root,
+                .attach_points = .{ .element = .left_top, .parent = .left_top },
+                .offset = .{ .x = menu.x, .y = menu.y },
+                .z_index = 1000,
+            },
+        })({
+            clay.UI()(.{
+                .id = clay.ElementId.ID("tab_menu_container"),
+                .layout = .{ .sizing = .{ .w = .fit, .h = .fit }, .direction = .top_to_bottom, .padding = .all(4), .child_gap = 2 },
+                .background_color = t.overlay,
+                .border = .{ .width = .all(1), .color = t.border },
+                .corner_radius = .all(4),
+            })({
+                inline for (shortcuts.tab_menu_items) |cmd| {
+                    const item_id = tabMenuItemId(cmd);
+                    const hovered = clay.pointerOver(item_id);
+                    clay.UI()(.{
+                        .id = item_id,
+                        .layout = .{
+                            .sizing = .{ .w = .fixed(300), .h = .fixed(30) },
+                            .padding = .{ .left = 12, .right = 12 },
+                            .child_alignment = .{ .x = .left, .y = .center },
+                            .child_gap = 8,
+                        },
+                        .background_color = if (hovered) t.primary else .{ 0, 0, 0, 0 },
+                        .corner_radius = .all(3),
+                    })({
+                        clay.text(shortcuts.label(cmd), .{ .font_size = 18, .color = if (hovered) t.text_on_primary else t.text, .wrap_mode = .none });
+                        clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow } } })({});
+                        clay.text(shortcuts.shortcutText(cmd), .{ .font_size = 14, .color = if (hovered) t.text_on_primary else t.muted, .wrap_mode = .none });
+                    });
+                }
+            });
+        });
+    }
+
+    pub fn recordFrameTime(self: *Self, ms: f32) void {
+        self.last_frame_ms = ms;
+        if (ms > self.max_frame_ms) self.max_frame_ms = ms;
+    }
+
+    /// Maximale Frame-Dauer seit dem letzten Aufruf (RPC ui_state setzt zurück).
+    pub fn takeMaxFrameMs(self: *Self) f32 {
+        const m = self.max_frame_ms;
+        self.max_frame_ms = 0;
+        return m;
     }
 
     /// Text in die System-Zwischenablage (Fenster) legen; headless nur merken (RPC ui_state).
@@ -1134,14 +1269,61 @@ pub const UI = struct {
     /// Aktiven Tab schließen wie über das × in der Tab-Leiste: geänderte Tabs
     /// fragen nach, alle anderen werden nach dem Layout geschlossen.
     fn requestCloseActiveTab(self: *Self) void {
-        const tb = self.getActiveTabBar();
-        const idx = tb.active_index orelse return;
-        if (idx >= tb.tabs.items.len) return;
-        if (tb.tabs.items[idx].modified) {
-            self.showSaveConfirmationDialog(self.active_pane, idx);
+        const target = self.tabTarget() orelse return;
+        self.requestCloseTab(target.pane, target.index);
+    }
+
+    /// Tab schließen wie über das ×: geänderte Tabs fragen nach.
+    pub fn requestCloseTab(self: *Self, pane: *pane_mod.Pane, index: usize) void {
+        if (pane.data != .leaf) return;
+        const tb = &pane.data.leaf.tab_bar;
+        if (index >= tb.tabs.items.len) return;
+        if (tb.tabs.items[index].modified) {
+            self.showSaveConfirmationDialog(pane, index);
         } else {
-            self.pending_tab_closes.append(self.allocator, .{ .pane = self.active_pane, .index = idx }) catch {};
+            self.pending_tab_closes.append(self.allocator, .{ .pane = pane, .index = index }) catch {};
         }
+    }
+
+    /// Ziel eines Tab-Kommandos: Kontextmenü-Tab oder aktiver Tab des aktiven Panes.
+    fn tabTarget(self: *Self) ?TabTarget {
+        if (self.tab_cmd_target) |t| return t;
+        const tb = self.getActiveTabBar();
+        const idx = tb.active_index orelse return null;
+        if (idx >= tb.tabs.items.len) return null;
+        return .{ .pane = self.active_pane, .index = idx };
+    }
+
+    /// Mehrere Tabs eines Panes schließen: `keep` = Index, der bleibt; `only_right` = nur rechts davon;
+    /// `only_saved` = nur ungeänderte. Geänderte und angepinnte Tabs bleiben immer.
+    fn closeTabsWhere(self: *Self, pane: *pane_mod.Pane, keep: ?usize, only_right: bool, only_saved: bool) void {
+        if (pane.data != .leaf) return;
+        const tb = &pane.data.leaf.tab_bar;
+        // Absteigend einreihen: pending_tab_closes ist ein Stack, höchste Indizes zuerst
+        var i: usize = 0;
+        while (i < tb.tabs.items.len) : (i += 1) {
+            const tab = tb.tabs.items[i];
+            if (keep != null and i == keep.?) continue;
+            if (only_right and (keep == null or i < keep.?)) continue;
+            if (tab.pinned or tab.modified) continue;
+            _ = only_saved;
+            self.pending_tab_closes.append(self.allocator, .{ .pane = pane, .index = i }) catch {};
+        }
+    }
+
+    /// Ctrl+Shift+T: zuletzt geschlossene Datei wieder öffnen (übersprungen, wenn sie nicht mehr existiert).
+    fn reopenClosedTab(self: *Self) void {
+        while (self.closed_tabs.pop()) |path| {
+            defer self.allocator.free(path);
+            std.fs.cwd().access(path, .{}) catch continue;
+            self.getActiveTabBar().openFile(path) catch continue;
+            return;
+        }
+    }
+
+    fn gotoTab(self: *Self, n: usize) void {
+        const tb = self.getActiveTabBar();
+        if (n < tb.tabs.items.len) tb.setActive(n);
     }
 
     /// Nächsten (+1) oder vorherigen (-1) Tab im aktiven Pane aktivieren, zyklisch.
@@ -1436,6 +1618,7 @@ pub const UI = struct {
 
         // Dialog INSIDE Clay layout (floating, z_index=2000 → overlays everything)
         // Must be here so Clay can register element bounds and mouse_pressed_this_frame is still true
+        if (self.tab_menu) |menu| self.renderTabMenu(menu, t);
         var pending_dialog_result: ?dialog_mod.DialogResult = null;
         if (self.active_dialog) |*ad| {
             pending_dialog_result = ad.dialog.render(t, self.mouse_pressed_this_frame, ad.focused) orelse ad.key_result;
@@ -1471,6 +1654,13 @@ pub const UI = struct {
                 .leaf => |*leaf| {
                     log.debug("pending_tab_closes: leaf has {d} tabs, closing index={d}", .{ leaf.tab_bar.tabs.items.len, req.index });
                     if (req.index < leaf.tab_bar.tabs.items.len) {
+                        const closing = leaf.tab_bar.tabs.items[req.index];
+                        if (closing.kind == .text or closing.kind == .image or closing.kind == .pdf or closing.kind == .binary) {
+                            if (self.allocator.dupe(u8, closing.path)) |dup| {
+                                self.closed_tabs.append(self.allocator, dup) catch self.allocator.free(dup);
+                                if (self.closed_tabs.items.len > 20) self.allocator.free(self.closed_tabs.orderedRemove(0));
+                            } else |_| {}
+                        }
                         leaf.tab_bar.closeTab(req.index);
                         // Don't call cancelWait here - causes recursive render with destroyed pane!
                     } else {
@@ -1556,6 +1746,7 @@ pub const UI = struct {
                         &leaf.tab_bar,
                         t,
                         self.mouse_pressed_this_frame,
+                        self.is_mouse_down,
                         self.mouse_x,
                         self.mouse_y,
                     )) |req| {
@@ -1701,6 +1892,7 @@ pub const UI = struct {
                         if (tab_bar.getActiveTab()) |tab| {
                             if (tab.kind == .text) {
                                 tab.modified = leaf.code_editor.is_modified;
+                                if (tab.modified) tab.preview = false;
                             }
                         }
                         leaf.code_editor.render(allocator, self.mouse_pressed_this_frame);
@@ -2049,6 +2241,14 @@ pub const UI = struct {
         };
     }
 
+    /// Fehler formatiert als Dialog zeigen (Laden, Speichern …); bei offenem Dialog nur loggen.
+    pub fn reportError(self: *Self, comptime fmt: []const u8, args: anytype) void {
+        log.err(fmt, args);
+        if (self.active_dialog != null) return;
+        const msg = std.fmt.allocPrint(self.allocator, fmt, args) catch return;
+        self.showErrorDialog(msg);
+    }
+
     /// Fehler einer Explorer-Aktion (Papierkorb, Anlegen, Einfügen) als Dialog statt nur im Log.
     fn showErrorDialog(self: *Self, msg: []u8) void {
         self.active_dialog = .{
@@ -2105,6 +2305,12 @@ pub const UI = struct {
                 ui.pending_tab_closes.append(ui.allocator, .{ .pane = p, .index = idx }) catch {};
             },
             .no => {
+                // Verworfene Änderungen auch im Buffer verwerfen (Buffer überleben das Schließen)
+                const path = leaf.tab_bar.tabs.items[idx].path;
+                if (std.fs.cwd().readFileAlloc(ui.allocator, path, 64 * 1024 * 1024)) |content| {
+                    defer ui.allocator.free(content);
+                    _ = ui.reloadFileFromDisk(path, content);
+                } else |_| {}
                 ui.pending_tab_closes.append(ui.allocator, .{ .pane = p, .index = idx }) catch {};
             },
             .cancel => {},

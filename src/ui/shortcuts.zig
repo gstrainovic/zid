@@ -7,7 +7,11 @@ const std = @import("std");
 
 /// Tasten, die Kürzel verwenden. Spiegel der nötigen wio.Button-Werte, damit
 /// diese Datei ohne wio testbar bleibt; mod.zig übersetzt per keyFromButton.
-pub const Key = enum { a, b, c, d, f, k, n, o, p, r, s, v, w, x, y, z, tab, grave, f1, f2, f5, delete, escape, enter };
+pub const Key = enum {
+    a, b, c, d, e, f, g, h, j, k, n, o, p, r, s, t, v, w, x, y, z,
+    n1, n2, n3, n4, n5, n6, n7, n8, n9,
+    tab, grave, backslash, f1, f2, f5, delete, escape, enter, page_up, page_down, left, right, up, down,
+};
 
 pub const Mods = struct {
     ctrl: bool = false,
@@ -54,6 +58,24 @@ pub const Command = enum {
     collapse_all,
     refresh_explorer,
     select_all_entries,
+    // Tab-Leiste
+    close_other_tabs,
+    close_tabs_right,
+    close_all_tabs,
+    close_saved_tabs,
+    copy_tab_path,
+    reveal_in_explorer,
+    pin_tab,
+    reopen_closed_tab,
+    goto_tab_1,
+    goto_tab_2,
+    goto_tab_3,
+    goto_tab_4,
+    goto_tab_5,
+    goto_tab_6,
+    goto_tab_7,
+    goto_tab_8,
+    goto_tab_9,
     show_shortcuts,
 };
 
@@ -67,7 +89,7 @@ pub const Binding = struct {
 /// Die eine Tabelle. Editor-Bindungen müssen zu src/editor/keymap.zig passen.
 pub const bindings = [_]Binding{
     .{ .command = .new_file, .key = .n, .mods = .{ .ctrl = true } },
-    .{ .command = .save, .key = .s, .mods = .{ .ctrl = true }, .scope = .editor },
+    .{ .command = .save, .key = .s, .mods = .{ .ctrl = true } }, // global: auch mit Fokus im Explorer
     .{ .command = .open_folder, .key = .o, .mods = .{ .ctrl = true } },
     .{ .command = .close_tab, .key = .w, .mods = .{ .ctrl = true } },
     .{ .command = .next_tab, .key = .tab, .mods = .{ .ctrl = true } },
@@ -99,14 +121,33 @@ pub const bindings = [_]Binding{
     .{ .command = .refresh_explorer, .key = .f5, .scope = .explorer },
     .{ .command = .collapse_all, .key = .w, .scope = .explorer },
     .{ .command = .select_all_entries, .key = .a, .mods = .{ .ctrl = true }, .scope = .explorer },
+    // Tab-Leiste
+    .{ .command = .reopen_closed_tab, .key = .t, .mods = .{ .ctrl = true, .shift = true } },
+    .{ .command = .next_tab, .key = .page_down, .mods = .{ .ctrl = true } },
+    .{ .command = .prev_tab, .key = .page_up, .mods = .{ .ctrl = true } },
+    .{ .command = .goto_tab_1, .key = .n1, .mods = .{ .ctrl = true } },
+    .{ .command = .goto_tab_2, .key = .n2, .mods = .{ .ctrl = true } },
+    .{ .command = .goto_tab_3, .key = .n3, .mods = .{ .ctrl = true } },
+    .{ .command = .goto_tab_4, .key = .n4, .mods = .{ .ctrl = true } },
+    .{ .command = .goto_tab_5, .key = .n5, .mods = .{ .ctrl = true } },
+    .{ .command = .goto_tab_6, .key = .n6, .mods = .{ .ctrl = true } },
+    .{ .command = .goto_tab_7, .key = .n7, .mods = .{ .ctrl = true } },
+    .{ .command = .goto_tab_8, .key = .n8, .mods = .{ .ctrl = true } },
+    .{ .command = .goto_tab_9, .key = .n9, .mods = .{ .ctrl = true } },
     .{ .command = .show_shortcuts, .key = .f1 },
+};
+
+/// Kontextmenü eines Tabs (Rechtsklick auf den Tab-Kopf), in dieser Reihenfolge
+pub const tab_menu_items = [_]Command{
+    .close_tab,      .close_other_tabs,  .close_tabs_right,  .close_all_tabs, .close_saved_tabs,
+    .pin_tab,        .copy_tab_path,     .reveal_in_explorer, .split_vertical, .split_horizontal,
 };
 
 pub const Menu = struct { title: []const u8, items: []const Command };
 
 /// Menüleiste im Header, in dieser Reihenfolge.
 pub const menus = [_]Menu{
-    .{ .title = "File", .items = &.{ .new_file, .save, .open_folder, .close_tab } },
+    .{ .title = "File", .items = &.{ .new_file, .save, .open_folder, .close_tab, .close_all_tabs, .reopen_closed_tab } },
     .{ .title = "Edit", .items = &.{ .undo, .redo, .cut, .copy, .paste, .select_all, .delete_line, .find } },
     .{ .title = "View", .items = &.{ .toggle_explorer, .split_vertical, .split_horizontal, .md_preview, .new_terminal } },
     .{ .title = "Help", .items = &.{.show_shortcuts} },
@@ -162,6 +203,23 @@ pub fn label(command: Command) []const u8 {
         .collapse_all => "Collapse All",
         .refresh_explorer => "Refresh",
         .select_all_entries => "Select All Entries",
+        .close_other_tabs => "Close Others",
+        .close_tabs_right => "Close to the Right",
+        .close_all_tabs => "Close All",
+        .close_saved_tabs => "Close Saved",
+        .copy_tab_path => "Copy Path",
+        .reveal_in_explorer => "Reveal in Explorer",
+        .pin_tab => "Pin / Unpin",
+        .reopen_closed_tab => "Reopen Closed Tab",
+        .goto_tab_1 => "Go to Tab 1",
+        .goto_tab_2 => "Go to Tab 2",
+        .goto_tab_3 => "Go to Tab 3",
+        .goto_tab_4 => "Go to Tab 4",
+        .goto_tab_5 => "Go to Tab 5",
+        .goto_tab_6 => "Go to Tab 6",
+        .goto_tab_7 => "Go to Tab 7",
+        .goto_tab_8 => "Go to Tab 8",
+        .goto_tab_9 => "Go to Tab 9",
         .show_shortcuts => "Keyboard Shortcuts",
     };
 }
@@ -184,10 +242,13 @@ pub fn shortcutTextFor(key: Key, mods: Mods) []const u8 {
 
 fn keyName(key: Key) []const u8 {
     return switch (key) {
-        .a => "A", .b => "B", .c => "C", .d => "D", .f => "F", .k => "K", .n => "N", .o => "O",
-        .p => "P", .r => "R", .s => "S", .v => "V", .w => "W", .x => "X", .y => "Y", .z => "Z",
-        .tab => "Tab", .grave => "`", .f1 => "F1", .f2 => "F2", .f5 => "F5", .delete => "Del",
-        .escape => "Esc", .enter => "Enter",
+        .a => "A", .b => "B", .c => "C", .d => "D", .e => "E", .f => "F", .g => "G", .h => "H", .j => "J",
+        .k => "K", .n => "N", .o => "O", .p => "P", .r => "R", .s => "S", .t => "T", .v => "V", .w => "W",
+        .x => "X", .y => "Y", .z => "Z",
+        .n1 => "1", .n2 => "2", .n3 => "3", .n4 => "4", .n5 => "5", .n6 => "6", .n7 => "7", .n8 => "8", .n9 => "9",
+        .tab => "Tab", .grave => "`", .backslash => "\\", .f1 => "F1", .f2 => "F2", .f5 => "F5", .delete => "Del",
+        .escape => "Esc", .enter => "Enter", .page_up => "PgUp", .page_down => "PgDn",
+        .left => "←", .right => "→", .up => "↑", .down => "↓",
     };
 }
 
@@ -239,6 +300,16 @@ test "Explorer-Buchstaben: d löscht, r benennt um, a legt an, Shift+A Ordner, y
     try testing.expectEqualStrings("F2", shortcutText(.rename_entry));
     try testing.expectEqualStrings("A", shortcutText(.new_file_entry));
     try testing.expectEqualStrings("Shift+A", shortcutText(.new_folder_entry));
+}
+
+test "Tab-Kürzel: Ctrl+Shift+T, Ctrl+PgUp/PgDn, Ctrl+1..9" {
+    try testing.expectEqual(Command.reopen_closed_tab, lookup(.t, .{ .ctrl = true, .shift = true }, .global).?);
+    try testing.expectEqual(Command.next_tab, lookup(.page_down, .{ .ctrl = true }, .global).?);
+    try testing.expectEqual(Command.prev_tab, lookup(.page_up, .{ .ctrl = true }, .global).?);
+    try testing.expectEqual(Command.goto_tab_1, lookup(.n1, .{ .ctrl = true }, .global).?);
+    try testing.expectEqual(Command.goto_tab_9, lookup(.n9, .{ .ctrl = true }, .global).?);
+    try testing.expectEqual(Command.save, lookup(.s, .{ .ctrl = true }, .global).?);
+    for (tab_menu_items) |cmd| try testing.expect(label(cmd).len > 0);
 }
 
 test "Tabelle: keine doppelte Belegung innerhalb eines Scopes" {
