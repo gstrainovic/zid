@@ -5,8 +5,6 @@ Belege aus der Sitzung vom 06.09.2026 (Log mit Panic in `gpu_renderer.zig:305`) 
 
 ## Robustheit bei großen und merkwürdigen Dateien
 
-- [ ] **P3 Word-Wrap-Umschalter** im Editor (horizontale Scrollbar, Shift+Mausrad und
-      Cursor-Folgen gibt es seit 06.09.2026).
 ## Explorer
 
 ## Tab-Leiste
