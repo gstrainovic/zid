@@ -36,6 +36,7 @@ pub const FileWatcher = struct {
     root_path: []const u8,
     last_path: []const u8 = "",
     last_tag: ?scheduler_mod.ResultTag = null,
+    last_ms: i64 = 0,
 
     const Self = @This();
 
@@ -186,14 +187,17 @@ pub const FileWatcher = struct {
         const full_path = std.fs.path.join(self.allocator, &.{ parent_path, filename }) catch return;
 
         // Ein Schreibvorgang liefert hunderte IN_MODIFY für dieselbe Datei:
-        // direkt aufeinanderfolgende identische Ereignisse nur einmal melden.
-        if (self.last_tag == tag and std.mem.eql(u8, self.last_path, full_path)) {
+        // identische Ereignisse innerhalb von 100 ms nur einmal melden. Ohne Zeitfenster
+        // ging eine spätere zweite Änderung derselben Datei verloren („changed on disk“).
+        const now = std.time.milliTimestamp();
+        if (self.last_tag == tag and std.mem.eql(u8, self.last_path, full_path) and now - self.last_ms < 100) {
             self.allocator.free(full_path);
             return;
         }
         self.allocator.free(self.last_path);
         self.last_path = full_path;
         self.last_tag = tag;
+        self.last_ms = now;
 
         const owned_path = self.allocator.dupe(u8, full_path) catch return;
 
