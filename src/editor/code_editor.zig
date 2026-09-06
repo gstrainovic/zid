@@ -103,6 +103,8 @@ fn renderHighlightedLine(
     }
 }
 
+pub const ExtraCursor = struct { cursor: flow_core.Cursor, anchor: ?flow_core.Cursor };
+
 pub const CodeEditor = struct {
     allocator: std.mem.Allocator,
 
@@ -211,6 +213,10 @@ pub const CodeEditor = struct {
     bracket_pair: ?[2]flow_core.Cursor = null,
     /// Breite der Minimap-Spalte
     minimap_width: f32 = 84,
+    /// Zusätzliche Cursor (Ctrl+D, Ctrl+Alt+↑/↓); der Hauptcursor ist `cursor`
+    extra_cursors: std.ArrayListUnmanaged(ExtraCursor) = .empty,
+    /// Während einer Mehrfach-Cursor-Operation: Einzelschritte legen keinen eigenen Undo-Punkt an
+    in_multi: bool = false,
 
     /// Referenz auf das Fenster
     window: ?*wio.Window = null,
@@ -407,6 +413,7 @@ pub const CodeEditor = struct {
 
     pub fn deinit(self: *Self) void {
         if (self.last_error) |e| self.allocator.free(e);
+        self.extra_cursors.deinit(self.allocator);
         if (self.bg_parse_thread) |thread| thread.join();
         if (self.highlighter) |hl| hl.destroy();
         if (self.bg_highlighter) |hl| hl.destroy();
@@ -678,6 +685,13 @@ pub const CodeEditor = struct {
         self.buffer.root = new_root;
         self.buffer.file_eol_mode = eol_mode;
         self.buffer.file_utf8_sanitized = utf8_sanitized;
+        // flow-core gibt beim Laden die Leaf-Puffer des alten Baums frei; alle Undo-/Redo-Einträge
+        // zeigen noch dorthin und wären nach einem Undo "switch on corrupt value". Verlauf verwerfen
+        // und die laufende Tipp-Gruppe beenden, damit der nächste Tastendruck wieder einen Snapshot legt.
+        self.buffer.undo_head = null;
+        self.buffer.redo_head = null;
+        self.typing_in_progress = false;
+        self.clearExtraCursors();
 
         self.cursor = .{};
         self.selection_anchor = null;
@@ -765,7 +779,8 @@ pub const CodeEditor = struct {
     // UTF-8 Navigation Helpers (adapted for buffer text)
     // =========================================================================
 
-    fn prevCharBoundary(text: []const u8, pos: usize) usize {
+    fn prevCharBoundary(text: []const u8, pos_: usize) usize {
+        const pos = @min(pos_, text.len);
         if (pos == 0) return 0;
         var i = pos - 1;
         while (i > 0 and (text[i] & 0xC0) == 0x80) {
@@ -924,8 +939,164 @@ pub const CodeEditor = struct {
         self.last_cursor_movement_ms = self.time_ms;
     }
 
+    /// Aktionen, die mit mehreren Cursorn je Cursor ausgeführt werden (kein Zeilenumbruch,
+    /// keine Zeilenoperationen: die würden die Positionen der anderen Cursor verschieben).
+    fn multiSafe(action: actions.Action) bool {
+        return switch (action) {
+            .MoveLeft, .MoveRight, .MoveUp, .MoveDown, .MoveWordLeft, .MoveWordRight, .MoveLineStart, .MoveLineEnd,
+            .SelectLeft, .SelectRight, .SelectUp, .SelectDown, .SelectWordLeft, .SelectWordRight, .SelectLineStart, .SelectLineEnd,
+            .DeleteBack, .DeleteForward, .DeleteWordBack, .DeleteWordForward, .InsertTab => true,
+            else => false,
+        };
+    }
+
     pub fn dispatchAction(self: *Self, action: actions.Action) void {
         switch (action) {
+            .SelectNextOccurrence => return self.selectNextOccurrence(),
+            .AddCursorAbove => return self.addCursorVertical(false),
+            .AddCursorBelow => return self.addCursorVertical(true),
+            else => {},
+        }
+        if (self.extra_cursors.items.len == 0) return self.dispatchSingle(action);
+        if (!multiSafe(action)) {
+            self.clearExtraCursors();
+            return self.dispatchSingle(action);
+        }
+        switch (action) {
+            .DeleteBack, .DeleteForward, .DeleteWordBack, .DeleteWordForward, .InsertTab => {
+                self.typing_in_progress = false;
+                self.snapshotForUndo();
+            },
+            else => {},
+        }
+        self.in_multi = true;
+        defer self.in_multi = false;
+        self.forEachCursor(action, null);
+    }
+
+    pub fn clearExtraCursors(self: *Self) void {
+        self.extra_cursors.clearRetainingCapacity();
+    }
+
+    fn cursorLess(_: void, a: ExtraCursor, b: ExtraCursor) bool {
+        if (a.cursor.row != b.cursor.row) return a.cursor.row > b.cursor.row;
+        return a.cursor.col > b.cursor.col;
+    }
+
+    /// Aktion (oder Zeichen) je Cursor von unten nach oben ausführen, damit Änderungen die
+    /// Positionen der noch nicht bearbeiteten Cursor nicht verschieben. Cursor, die danach
+    /// zusammenfallen, werden verschmolzen.
+    fn forEachCursor(self: *Self, action: ?actions.Action, char_code: ?u21) void {
+        var all: std.ArrayListUnmanaged(ExtraCursor) = .empty;
+        defer all.deinit(self.allocator);
+        all.append(self.allocator, .{ .cursor = self.cursor, .anchor = self.selection_anchor }) catch return;
+        all.appendSlice(self.allocator, self.extra_cursors.items) catch return;
+        std.sort.pdq(ExtraCursor, all.items, {}, cursorLess);
+        for (all.items, 0..) |*c, idx| {
+            self.cursor = c.cursor;
+            self.selection_anchor = c.anchor;
+            const row0 = self.cursor.row;
+            const w0: isize = @intCast(self.lineWidth(row0));
+            const n0: isize = @intCast(self.lineCount());
+            if (action) |a| self.dispatchSingle(a);
+            if (char_code) |cp| self.handleCharSingle(cp);
+            c.cursor = self.cursor;
+            c.anchor = self.selection_anchor;
+            // Schon bearbeitete Cursor (rechts bzw. unterhalb) an die Änderung anpassen:
+            // gleiche Zeile → Spalten um die Breitenänderung, Zeilen verschmolzen/geteilt → Zeilen
+            const dw: isize = @as(isize, @intCast(self.lineWidth(@min(row0, self.lineCount() - 1)))) - w0;
+            const dn: isize = @as(isize, @intCast(self.lineCount())) - n0;
+            for (all.items[0..idx]) |*done| {
+                if (done.cursor.row == row0 and dn == 0) {
+                    done.cursor.col = @intCast(@max(0, @as(isize, @intCast(done.cursor.col)) + dw));
+                    done.cursor.target = done.cursor.col;
+                    if (done.anchor) |*a| {
+                        if (a.row == row0) a.col = @intCast(@max(0, @as(isize, @intCast(a.col)) + dw));
+                    }
+                } else if (done.cursor.row > row0 and dn != 0) {
+                    done.cursor.row = @intCast(@max(0, @as(isize, @intCast(done.cursor.row)) + dn));
+                    if (done.anchor) |*a| a.row = @intCast(@max(0, @as(isize, @intCast(a.row)) + dn));
+                }
+            }
+        }
+        // Erster Eintrag (unterster) wird Hauptcursor, Rest extra; Duplikate verschmelzen
+        self.extra_cursors.clearRetainingCapacity();
+        self.cursor = all.items[0].cursor;
+        self.selection_anchor = all.items[0].anchor;
+        var i: usize = 1;
+        while (i < all.items.len) : (i += 1) {
+            const c = all.items[i];
+            const prev = all.items[i - 1];
+            if (c.cursor.row == prev.cursor.row and c.cursor.col == prev.cursor.col) continue;
+            self.extra_cursors.append(self.allocator, c) catch {};
+        }
+    }
+
+    /// Ctrl+D: ohne Auswahl das Wort am Cursor markieren; mit Auswahl das nächste Vorkommen
+    /// (Groß/Klein exakt) als weiteren Cursor mit Auswahl hinzufügen.
+    pub fn selectNextOccurrence(self: *Self) void {
+        const m = self.metrics();
+        if (!self.hasSelection()) {
+            const line = self.getLine(self.cursor.row);
+            const byte = @min(self.buffer.root.get_line_width_to_pos(self.cursor.row, self.cursor.col, m) catch line.len, line.len);
+            var ws = byte;
+            while (ws > 0 and isWordChar(line[ws - 1])) : (ws -= 1) {}
+            var we = byte;
+            while (we < line.len and isWordChar(line[we])) : (we += 1) {}
+            if (ws == we) return;
+            const c0 = self.buffer.root.pos_to_width(self.cursor.row, ws, m) catch return;
+            const c1 = self.buffer.root.pos_to_width(self.cursor.row, we, m) catch return;
+            self.selection_anchor = .{ .row = self.cursor.row, .col = c0, .target = c0 };
+            self.cursor = .{ .row = self.cursor.row, .col = c1, .target = c1 };
+            return;
+        }
+        const range = self.selectionRange() orelse return;
+        if (range.begin.row != range.end.row) return;
+        const needle = self.getTextInRange(range) catch return;
+        defer if (needle.len > 0) self.allocator.free(needle);
+        if (needle.len == 0) return;
+        // Ab dem untersten Cursor weitersuchen
+        var from: find_ops.Pos = .{ .row = self.cursor.row, .col = self.cursor.col };
+        for (self.extra_cursors.items) |ec| {
+            if (ec.cursor.row > from.row or (ec.cursor.row == from.row and ec.cursor.col > from.col)) from = .{ .row = ec.cursor.row, .col = ec.cursor.col };
+        }
+        const Finder = find_ops.Finder(LineSource);
+        var tries: usize = 0;
+        while (tries < 4) : (tries += 1) {
+            const mm = Finder.findOpts(.{ .ed = self }, needle, from, true, .{ .case_sensitive = true }) orelse return;
+            var taken = (mm.begin.row == range.begin.row and mm.begin.col == range.begin.col);
+            for (self.extra_cursors.items) |ec| {
+                if (ec.anchor) |a| {
+                    if (a.row == mm.begin.row and a.col == mm.begin.col) taken = true;
+                }
+            }
+            if (!taken) {
+                self.extra_cursors.append(self.allocator, .{
+                    .cursor = .{ .row = mm.end.row, .col = mm.end.col, .target = mm.end.col },
+                    .anchor = .{ .row = mm.begin.row, .col = mm.begin.col, .target = mm.begin.col },
+                }) catch {};
+                return;
+            }
+            from = .{ .row = mm.begin.row, .col = mm.begin.col };
+        }
+    }
+
+    /// Ctrl+Alt+↑/↓: Cursor in der Zeile über dem obersten / unter dem untersten Cursor.
+    pub fn addCursorVertical(self: *Self, down: bool) void {
+        var base = self.cursor;
+        for (self.extra_cursors.items) |ec| {
+            if (down and ec.cursor.row > base.row) base = ec.cursor;
+            if (!down and ec.cursor.row < base.row) base = ec.cursor;
+        }
+        if (down and base.row + 1 >= self.lineCount()) return;
+        if (!down and base.row == 0) return;
+        const row = if (down) base.row + 1 else base.row - 1;
+        const col = @min(base.target, self.lineWidth(row));
+        self.extra_cursors.append(self.allocator, .{ .cursor = .{ .row = row, .col = col, .target = base.target }, .anchor = null }) catch {};
+    }
+
+    fn dispatchSingle(self: *Self, action: actions.Action) void {
+        if (!self.in_multi) switch (action) {
             .InsertNewline, .InsertTab,
             .DeleteBack, .DeleteForward, .DeleteWordBack, .DeleteWordForward, .DeleteLine,
             .Cut, .Paste, .IndentLines, .OutdentLines, .ToggleComment, .MoveLineUp, .MoveLineDown, .DuplicateLine => {
@@ -933,7 +1104,7 @@ pub const CodeEditor = struct {
                 self.snapshotForUndo();
             },
             else => {},
-        }
+        };
 
         const m = self.metrics();
         const line_count = self.lineCount();
@@ -1277,6 +1448,7 @@ pub const CodeEditor = struct {
             .GotoLine => self.openGoto(),
             .Replace => self.openReplace(),
             .GotoDefinition => self.gotoDefinition(self.cursor.row, self.cursor.col),
+            .SelectNextOccurrence, .AddCursorAbove, .AddCursorBelow => {}, // im Wrapper dispatchAction behandelt
             .InsertTab => {
                 // Mehrzeilige Auswahl: Zeilen einrücken statt Text ersetzen
                 if (self.selectionRange()) |r| {
@@ -1352,7 +1524,7 @@ pub const CodeEditor = struct {
             .Undo => {
                 std.log.info("Undo: attempting buffer.undo()", .{});
                 const meta = self.buffer.undo() catch |err| {
-                    std.log.err("Undo failed: {}", .{err});
+                    std.log.debug("Undo: nichts mehr rückgängig zu machen ({})", .{err});
                     return;
                 };
                 std.log.info("Undo: success, meta len={}", .{meta.len});
@@ -1856,6 +2028,10 @@ pub const CodeEditor = struct {
             }
             return;
         }
+        if (key == .escape and self.extra_cursors.items.len > 0) {
+            self.clearExtraCursors();
+            return;
+        }
         if (self.keymap) |km| {
             std.log.debug("keymap lookup key={} mods={}", .{ key, self.mods });
             if (km.lookup(key, self.mods)) |action| {
@@ -1939,6 +2115,7 @@ pub const CodeEditor = struct {
 
         const line_idx = self.lineFromY(y);
         const col = self.colFromX(x, line_idx);
+        self.clearExtraCursors();
 
         // Ctrl+Klick: zur Definition im Text springen
         if (self.mods.ctrl) {
@@ -2554,6 +2731,18 @@ pub const CodeEditor = struct {
     }
 
     pub fn handleChar(self: *Self, char_code: u21) void {
+        if (self.extra_cursors.items.len == 0 or self.find.active or self.goto.active) return self.handleCharSingle(char_code);
+        if (char_code < 32 or char_code == 127) return;
+        if (!self.typing_in_progress) {
+            self.snapshotForUndo();
+            self.typing_in_progress = true;
+        }
+        self.in_multi = true;
+        defer self.in_multi = false;
+        self.forEachCursor(null, char_code);
+    }
+
+    fn handleCharSingle(self: *Self, char_code: u21) void {
         if (char_code < 128) {
             std.log.scoped(.editor).debug("handleChar: '{c}'", .{@as(u8, @intCast(char_code))});
         } else {
@@ -2573,7 +2762,7 @@ pub const CodeEditor = struct {
             return;
         }
 
-        if (!self.typing_in_progress) {
+        if (!self.typing_in_progress and !self.in_multi) {
             self.snapshotForUndo();
             self.typing_in_progress = true;
         }
@@ -2813,6 +3002,19 @@ pub const CodeEditor = struct {
 
             if (line_idx == self.cursor.row) {
                 self.renderCursor(arena, offset);
+            }
+            // Zusätzliche Cursor (mit Auswahl) auf dieser Zeile: kurz einwechseln und wie den Hauptcursor zeichnen
+            if (self.extra_cursors.items.len > 0) {
+                const saved_cursor = self.cursor;
+                const saved_anchor = self.selection_anchor;
+                for (self.extra_cursors.items) |ec| {
+                    self.cursor = ec.cursor;
+                    self.selection_anchor = ec.anchor;
+                    if (self.hasSelection()) self.renderSelection(arena, line_idx);
+                    if (ec.cursor.row == line_idx) self.renderCursor(arena, offset);
+                }
+                self.cursor = saved_cursor;
+                self.selection_anchor = saved_anchor;
             }
             self.renderRowOverlays(arena, line_idx, line, self.getLine(line_idx));
         });
@@ -3574,4 +3776,85 @@ test "CRLF-Datei bleibt beim Speichern CRLF" {
     t.ed.handleChar('c');
     const out = t.buffer.store_to_string_cached(t.buffer.root, t.buffer.file_eol_mode);
     try std.testing.expectEqualStrings("a\r\nbc\r\n", out);
+}
+
+test "Mehrfach-Cursor: Ctrl+D markiert Wort und nächstes Vorkommen, Tippen ersetzt beide" {
+    var t = try testEditor(std.testing.allocator, "foo bar foo\nbaz foo");
+    defer t.buffer.deinit();
+    defer t.ed.deinit();
+    t.ed.cursor = .{ .row = 0, .col = 1, .target = 1 };
+    t.ed.dispatchAction(.SelectNextOccurrence);
+    try std.testing.expect(t.ed.hasSelection());
+    try std.testing.expectEqual(@as(usize, 0), t.ed.extra_cursors.items.len);
+    t.ed.dispatchAction(.SelectNextOccurrence);
+    try std.testing.expectEqual(@as(usize, 1), t.ed.extra_cursors.items.len);
+    try std.testing.expectEqual(@as(usize, 8), t.ed.extra_cursors.items[0].anchor.?.col);
+    t.ed.dispatchAction(.SelectNextOccurrence);
+    try std.testing.expectEqual(@as(usize, 2), t.ed.extra_cursors.items.len);
+    t.ed.handleChar('X');
+    const text = try editorText(&t.ed);
+    defer std.testing.allocator.free(text);
+    try std.testing.expectEqualStrings("X bar X\nbaz X", text);
+    t.ed.dispatchAction(.DeleteBack);
+    const text2 = try editorText(&t.ed);
+    defer std.testing.allocator.free(text2);
+    try std.testing.expectEqualStrings(" bar \nbaz ", text2);
+    t.ed.handleKeyPress(.escape);
+    try std.testing.expectEqual(@as(usize, 0), t.ed.extra_cursors.items.len);
+}
+
+test "Mehrfach-Cursor: Cursor darunter, Tippen in beiden Zeilen, Enter löst auf" {
+    var t = try testEditor(std.testing.allocator, "aa\nbb\ncc");
+    defer t.buffer.deinit();
+    defer t.ed.deinit();
+    t.ed.dispatchAction(.AddCursorBelow);
+    t.ed.dispatchAction(.AddCursorBelow);
+    try std.testing.expectEqual(@as(usize, 2), t.ed.extra_cursors.items.len);
+    t.ed.handleChar('-');
+    const text = try editorText(&t.ed);
+    defer std.testing.allocator.free(text);
+    try std.testing.expectEqualStrings("-aa\n-bb\n-cc", text);
+    t.ed.dispatchAction(.InsertNewline);
+    try std.testing.expectEqual(@as(usize, 0), t.ed.extra_cursors.items.len);
+    try std.testing.expectEqual(@as(usize, 4), t.ed.lineCount());
+}
+
+test "Mehrfach-Cursor: Undo nach Eingabe in drei Zeilen stellt den Text her" {
+    var t = try testEditor(std.testing.allocator, "aa\nbb\ncc");
+    defer t.buffer.deinit();
+    defer t.ed.deinit();
+    t.ed.dispatchAction(.AddCursorBelow);
+    t.ed.dispatchAction(.AddCursorBelow);
+    t.ed.handleChar('-');
+    t.ed.handleKeyPress(.escape);
+    t.ed.dispatchAction(.Undo);
+    const text = try editorText(&t.ed);
+    defer std.testing.allocator.free(text);
+    try std.testing.expectEqualStrings("aa\nbb\ncc", text);
+    // Nach dem Undo muss der Buffer weiter benutzbar sein (Zeile lesen, Klammersuche)
+    try std.testing.expectEqualStrings("bb", t.ed.getLine(1));
+    _ = t.ed.findBracketPair();
+}
+
+test "setText nach Tippen: Undo bleibt sicher (alte Undo-Bäume zeigen auf freigegebene Leaf-Puffer)" {
+    var t = try testEditor(std.testing.allocator, "aa\nbb\ncc");
+    defer t.buffer.deinit();
+    defer t.ed.deinit();
+    t.ed.handleChar('x');
+    // Externer Reload ersetzt den Inhalt komplett; flow-core gibt dabei die Leaf-Puffer des alten Baums frei
+    t.ed.setText("neu\nzwei\ndrei");
+    t.ed.dispatchAction(.AddCursorBelow);
+    t.ed.handleChar('-');
+    t.ed.handleKeyPress(.escape);
+    t.ed.dispatchAction(.Undo);
+    const text = try editorText(&t.ed);
+    defer std.testing.allocator.free(text);
+    try std.testing.expectEqualStrings("neu\nzwei\ndrei", text);
+    try std.testing.expectEqualStrings("zwei", t.ed.getLine(1));
+    _ = t.ed.findBracketPair();
+    // Zweites Undo darf nicht in den Zustand vor dem Reload springen (dessen Speicher ist weg)
+    t.ed.dispatchAction(.Undo);
+    const text2 = try editorText(&t.ed);
+    defer std.testing.allocator.free(text2);
+    try std.testing.expectEqualStrings("neu\nzwei\ndrei", text2);
 }

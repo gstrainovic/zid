@@ -638,6 +638,7 @@ fn editorState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     var buf = std.Io.Writer.Allocating.init(dc.arena());
     try buf.writer.print("{{\"lines\": {d}, \"row\": {d}, \"col\": {d}, \"view_row\": {d}, \"view_col\": {d}, \"view_cols\": {d}, \"find_open\": {}, \"find_not_found\": {}, \"find_query\": ", .{ lines, ed.cursor.row, ed.cursor.col, ed.view.row, ed.view.col, ed.view.cols, ed.find.active, ed.find.not_found });
     try std.json.Stringify.value(ed.find.text(), .{}, &buf.writer);
+    try buf.writer.print(", \"extra_cursors\": {d}", .{ed.extra_cursors.items.len});
     try buf.writer.print(", \"minimap\": {}, \"whitespace\": {}, \"indent_guides\": {}, \"find_case\": {}, \"find_word\": {}, \"find_regex\": {}, \"bracket_pair\": ", .{ ed.show_minimap, ed.show_whitespace, ed.show_indent_guides, ed.find.case_sensitive, ed.find.whole_word, ed.find.use_regex });
     if (ed.bracket_pair) |bp| {
         try buf.writer.print("[[{d}, {d}], [{d}, {d}]]", .{ bp[0].row, bp[0].col, bp[1].row, bp[1].col });

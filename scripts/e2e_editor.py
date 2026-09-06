@@ -145,11 +145,8 @@ def step_panes():
     before = ui_state()["active_pane_index"]
     key_alt("left", ctrl=True, alt=True)
     key_alt("right", ctrl=True, alt=True)
-    key_alt("up", ctrl=True, alt=True)
-    key_alt("down", ctrl=True, alt=True)
     after = ui_state()["active_pane_index"]
-    # egal welche Richtung der Split hat: irgendeine der vier Richtungen wechselt
-    check(True, f"Ctrl+Alt+Pfeil: aktives Pane {before} → {after}")
+    check(True, f"Ctrl+Alt+←/→: aktives Pane {before} → {after} (↑/↓ gehören dem Mehrfach-Cursor)")
     key("k", ctrl=True)
     key("left")
     key("k", ctrl=True)
@@ -265,7 +262,40 @@ def step_search_options():
     key("escape")
 
 
-STEPS = [step_autoclose_and_indent, step_comment_move_duplicate, step_goto_replace, step_mouse, step_status_bar, step_panes, step_external_change, step_visuals, step_search_options]
+def step_multicursor():
+    print("--- Mehrfach-Cursor: Ctrl+D, Ctrl+Alt+↓, Tippen, Escape")
+    rpc("click", [700, 300]); settle()
+    key("s", ctrl=True); settle(10)
+    time.sleep(0.4)
+    with open(SRC, "w") as f:
+        f.write("foo bar foo\nbaz foo\nqux\n")
+    t0 = time.time()
+    while time.time() - t0 < 5 and "qux" not in text():
+        time.sleep(0.1)
+    goto_line(1)
+    key("d", ctrl=True)
+    check(ed()["selection"] is not None and ed()["extra_cursors"] == 0, "Ctrl+D markiert das Wort unter dem Cursor")
+    key("d", ctrl=True)
+    key("d", ctrl=True)
+    check(ed()["extra_cursors"] == 2, f"zweimal Ctrl+D: zwei weitere Cursor ({ed()['extra_cursors']})")
+    shot("e2e_editor_multicursor.ppm")
+    rpc("type_text", ["X"]); settle(10)
+    check(text().startswith("X bar X\nbaz X"), f"Tippen ersetzt alle drei: {text()[:20]!r}")
+    key("escape")
+    check(ed()["extra_cursors"] == 0, "Escape löst die Cursor auf")
+    goto_line(1)
+    key_alt("down", ctrl=True, alt=True)
+    key_alt("down", ctrl=True, alt=True)
+    check(ed()["extra_cursors"] == 2, "Ctrl+Alt+↓ zweimal: Cursor in drei Zeilen")
+    rpc("type_text", ["-"]); settle(10)
+    lines = text().split("\n")
+    check(lines[0].startswith("-") and lines[1].startswith("-") and lines[2].startswith("-"), f"Tippen wirkt in drei Zeilen: {lines[:3]}")
+    key("escape")
+    key("z", ctrl=True)
+    check(not text().startswith("-"), "Undo nimmt die Mehrfach-Eingabe in einem Schritt zurück")
+
+
+STEPS = [step_autoclose_and_indent, step_comment_move_duplicate, step_goto_replace, step_mouse, step_status_bar, step_panes, step_external_change, step_visuals, step_search_options, step_multicursor]
 
 
 def main():

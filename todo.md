@@ -18,8 +18,6 @@ Belege aus der Sitzung vom 06.09.2026 (Log mit Panic in `gpu_renderer.zig:305`) 
 - [ ] **P3 LSP anbinden**: `lsp_client.zig` kann definition/hover/completion, wird aber nirgends
       gestartet; Ctrl+Klick/F12 springen heute per Textmuster (`edit_ops.looksLikeDefinition`) nur
       innerhalb der Datei.
-- [ ] **P3 Mehrfach-Cursor** (Ctrl+D nächstes Vorkommen, Ctrl+Alt+↑/↓). (Klammern, Guides,
-      Whitespace, Minimap, Zoom, Theme gibt es seit 06.09.2026.)
 ## Fenster, Splits, Menüs
 
 ## KI-Agent (aus `~/projects/bitnet-colibri-bench/HANDOFF-vulkan-ed.md`, 06.09.2026)
