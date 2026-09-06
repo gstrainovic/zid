@@ -4,6 +4,7 @@
 //! Zeigt offene Dateien als Tabs mit Schließen-Button.
 
 const std = @import("std");
+const tab_mru = @import("tab_mru.zig");
 const clay = @import("clay");
 const ui = @import("../ui/mod.zig");
 const Theme = ui.Theme;
@@ -32,9 +33,8 @@ pub const Tab = struct {
     kind: FileKind = .text,
     /// Optional: cached buffer for text files to preserve modified state
     buffer: ?*@import("flow_core").Buffer = null,
-    /// Vorschau-Tab (Einfachklick im Explorer): wird vom nächsten Vorschau-Öffnen ersetzt,
-    /// Doppelklick, Enter oder eine Änderung machen ihn fest.
-    preview: bool = false,
+    /// Feste Nummer für die „zuletzt benutzt“-Reihenfolge (0 = noch keine vergeben)
+    serial: u32 = 0,
     /// Angepinnt: kein Schließen-Kreuz, von „Close Others/All/Saved“ ausgenommen
     pinned: bool = false,
 };
@@ -46,6 +46,9 @@ pub const TabBarState = struct {
     tabs: std.ArrayListUnmanaged(Tab),
     /// Index des aktiven Tabs (null = keine Datei offen)
     active_index: ?usize = null,
+    /// „Zuletzt benutzt“ (Seriennummern, vorn die jüngste) für Ctrl+Tab und den Tab-Picker
+    mru: tab_mru.Mru = .{},
+    next_serial: u32 = 1,
     /// Pending Pfad für Tab-Wechsel (wird von main.zig abgefragt)
     pending_switch_path: ?[]const u8 = null,
     /// Menü für neuen Tab anzeigen?
@@ -74,6 +77,7 @@ pub const TabBarState = struct {
 
     pub fn deinit(self: *Self) void {
         log.debug("TabBarState.deinit: starting", .{});
+        self.mru.deinit(self.allocator);
         // Cleanup all terminal instances
         var term_iter = self.terminal_instances.iterator();
         while (term_iter.next()) |entry| {
@@ -119,43 +123,53 @@ pub const TabBarState = struct {
         return null;
     }
 
-    /// Neuen Tab öffnen (fester Tab)
+    /// Datei öffnen: schon offen → nur aktivieren, sonst neuer Tab am Ende. Keine Vorschau-Tabs
+    /// (bewusst, 06.09.2026): jede Datei bekommt ihren eigenen Tab.
     pub fn openFile(self: *Self, path: []const u8) !void {
-        return self.openFileAs(path, false);
-    }
-
-    /// Index des Vorschau-Tabs in dieser Leiste, falls vorhanden
-    pub fn previewIndex(self: *const Self) ?usize {
-        for (self.tabs.items, 0..) |tab, i| {
-            if (tab.preview) return i;
-        }
-        return null;
-    }
-
-    /// Tab öffnen; `preview` = Vorschau-Tab (ersetzt einen vorhandenen Vorschau-Tab).
-    pub fn openFileAs(self: *Self, path: []const u8, preview: bool) !void {
-        // Prüfen ob Datei bereits offen ist
         for (self.tabs.items, 0..) |*tab, i| {
             if (std.mem.eql(u8, tab.path, path)) {
-                // Bereits offen → aktivieren; fest öffnen macht einen Vorschau-Tab fest
-                if (!preview) tab.preview = false;
                 self.setActive(i);
                 return;
             }
         }
-        // Vorschau ersetzt die alte Vorschau an derselben Stelle
-        const slot: ?usize = if (preview) self.previewIndex() else null;
-        if (slot) |idx| {
-            self.closeTab(idx);
-        }
-        try self.appendFileTab(path, preview);
-        if (slot) |idx| {
-            if (idx < self.tabs.items.len - 1) self.moveTab(self.tabs.items.len - 1, idx);
-            self.setActive(idx);
-        }
+        try self.appendFileTab(path);
     }
 
-    /// Tab von `from` nach `to` verschieben (Drag & Drop, Vorschau-Slot); aktiver Tab bleibt aktiv.
+    /// Seriennummer eines Tabs (wird beim ersten Zugriff vergeben).
+    fn serialOf(self: *Self, index: usize) u32 {
+        const tab = &self.tabs.items[index];
+        if (tab.serial == 0) {
+            tab.serial = self.next_serial;
+            self.next_serial += 1;
+        }
+        return tab.serial;
+    }
+
+    fn indexOfSerial(self: *const Self, serial: u32) ?usize {
+        for (self.tabs.items, 0..) |tab, i| {
+            if (tab.serial == serial) return i;
+        }
+        return null;
+    }
+
+    /// Tab-Indizes in „zuletzt benutzt“-Reihenfolge (jüngster zuerst); Tabs ohne Eintrag hinten.
+    pub fn mruIndices(self: *Self, alloc: std.mem.Allocator) ![]usize {
+        var out: std.ArrayListUnmanaged(usize) = .empty;
+        errdefer out.deinit(alloc);
+        for (self.mru.items()) |serial| {
+            if (self.indexOfSerial(serial)) |i| try out.append(alloc, i);
+        }
+        for (self.tabs.items, 0..) |_, i| {
+            var seen = false;
+            for (out.items) |o| {
+                if (o == i) seen = true;
+            }
+            if (!seen) try out.append(alloc, i);
+        }
+        return out.toOwnedSlice(alloc);
+    }
+
+    /// Tab von `from` nach `to` verschieben (Drag & Drop); aktiver Tab bleibt aktiv.
     pub fn moveTab(self: *Self, from: usize, to: usize) void {
         const n = self.tabs.items.len;
         if (from >= n or to >= n or from == to) return;
@@ -188,15 +202,9 @@ pub const TabBarState = struct {
     pub fn togglePin(self: *Self, index: usize) void {
         if (index >= self.tabs.items.len) return;
         self.tabs.items[index].pinned = !self.tabs.items[index].pinned;
-        if (self.tabs.items[index].pinned) self.tabs.items[index].preview = false;
     }
 
-    /// Vorschau-Tab fest machen (Doppelklick, Enter, Änderung)
-    pub fn makePermanent(self: *Self, index: usize) void {
-        if (index < self.tabs.items.len) self.tabs.items[index].preview = false;
-    }
-
-    fn appendFileTab(self: *Self, path: []const u8, preview: bool) !void {
+    fn appendFileTab(self: *Self, path: []const u8) !void {
 
         // Check if it's an existing terminal
         if (self.terminal_instances.contains(path)) {
@@ -231,8 +239,6 @@ pub const TabBarState = struct {
             .modified = false,
             .is_active = false,
             .kind = kind,
-            // Terminal/Chat/Preview sind nie Vorschau
-            .preview = preview and (kind == .text or kind == .image or kind == .pdf or kind == .binary),
         });
 
         // Neuen Tab aktivieren
@@ -256,10 +262,13 @@ pub const TabBarState = struct {
                 .modified = tab.modified,
                 .is_active = tab.is_active,
                 .buffer = tab.buffer,
-                .preview = tab.preview,
+                .serial = tab.serial,
                 .pinned = tab.pinned,
             });
         }
+        self.mru.deinit(self.allocator);
+        self.mru = try other.mru.clone(self.allocator);
+        self.next_serial = other.next_serial;
         self.active_index = other.active_index;
     }
 
@@ -460,6 +469,7 @@ pub const TabBarState = struct {
         if (index >= self.tabs.items.len) return;
 
         const tab = self.tabs.orderedRemove(index);
+        if (tab.serial != 0) self.mru.remove(tab.serial);
 
         // Ownership of buffer is in UI.open_buffers
 
@@ -504,6 +514,7 @@ pub const TabBarState = struct {
     pub fn setActive(self: *Self, index: usize) void {
         if (index >= self.tabs.items.len) return;
         self.active_index = index;
+        self.mru.touch(self.allocator, self.serialOf(index)) catch {};
         // Pfad duplizieren damit main.zig ihn owned
         if (self.pending_switch_path) |old| {
             self.allocator.free(old);
@@ -529,7 +540,7 @@ pub fn tabId(state: *const TabBarState, index: usize) clay.ElementId {
 }
 
 /// Anzeigename: bei gleichem Dateinamen in zwei Tabs kommt der Elternordner davor (a/mod.zig).
-fn tabLabel(arena: std.mem.Allocator, state: *const TabBarState, index: usize) []const u8 {
+pub fn tabLabel(arena: std.mem.Allocator, state: *const TabBarState, index: usize) []const u8 {
     const tab = state.tabs.items[index];
     var duplicate = false;
     for (state.tabs.items, 0..) |other, i| {
@@ -860,7 +871,7 @@ fn renderTab(
     const dragging = if (state.drag) |d| (d.index == index and d.moved) else false;
     const bg_color = if (is_active) theme.bg else if (is_tab_hovered) [4]f32{ theme.bg[0], theme.bg[1], theme.bg[2], 128.0 } else theme.surface;
     // Vorschau-Tab: gedämpfte Farbe statt Kursiv (nur eine Font-Face); angepinnt: Akzent
-    const text_color = if (tab.pinned) theme.accent else if (tab.preview) theme.subtext else if (is_active) theme.text else theme.muted;
+    const text_color = if (tab.pinned) theme.accent else if (is_active) theme.text else theme.muted;
     const border_color = if (dragging) theme.primary else if (is_active) theme.accent else .{ 0.0, 0.0, 0.0, 0.0 };
 
     clay.UI()(.{

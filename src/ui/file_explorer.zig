@@ -122,7 +122,6 @@ pub const FileExplorerState = struct {
     /// Datei die geöffnet werden soll (wird von main.zig abgefragt und zurückgesetzt)
     file_to_open: ?[]const u8 = null,
     /// Öffnen als Vorschau-Tab (Einfachklick/Space) statt fest (Doppelklick/Enter)
-    file_to_open_preview: bool = false,
     /// Uhr für Doppelklick-Erkennung (von der UI hochgezählt)
     now_ms: f32 = 0,
     last_click_ms: f32 = -10_000,
@@ -547,22 +546,13 @@ pub const FileExplorerState = struct {
         return out.toOwnedSlice(alloc);
     }
 
-    /// Datei fest öffnen (setzt file_to_open)
+    /// Markierte Datei öffnen (setzt file_to_open; main.zig öffnet den Tab)
     pub fn openSelectedFile(self: *Self) void {
-        self.openSelectedFileAs(false);
-    }
-
-    /// Datei öffnen; `preview` = Vorschau-Tab (Einfachklick), sonst fester Tab.
-    pub fn openSelectedFileAs(self: *Self, preview: bool) void {
         if (self.selected_index) |idx| {
             if (idx < self.visible_entries.items.len) {
                 const entry = self.visible_entries.items[idx];
                 const node = self.nodes.items[entry.node_index];
-
-                if (!node.is_folder) {
-                    self.file_to_open = node.path;
-                    self.file_to_open_preview = preview;
-                }
+                if (!node.is_folder) self.file_to_open = node.path;
             }
         }
     }
@@ -677,8 +667,7 @@ pub const FileExplorerState = struct {
                     self.toggleNode(entry.node_index) catch {};
                     self.moveCursor(cur, false);
                 } else {
-                    // Enter öffnet fest, Space als Vorschau (wie VS Code)
-                    self.openSelectedFileAs(key == .space);
+                    self.openSelectedFile();
                 }
             },
             else => return false,
@@ -1604,9 +1593,7 @@ fn renderTreeEntry(
             if (node.is_folder) {
                 state.pending_toggle = entry.node_index;
             } else {
-                // Einfachklick = Vorschau-Tab, Doppelklick (< 400 ms, gleiche Zeile) = fester Tab
-                const double = state.last_click_index == index and (state.now_ms - state.last_click_ms) < 400;
-                state.openSelectedFileAs(!double);
+                state.openSelectedFile();
             }
             state.last_click_ms = state.now_ms;
             state.last_click_index = index;

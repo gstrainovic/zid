@@ -436,17 +436,21 @@ Seit 06.09.2026 liegt alles im Repo; `~/projects/ki` und das separate Bench-Repo
 - **„+“ (Neu-Menü) sitzt ganz links** vor dem scrollenden Tab-Streifen. Der Streifen hat `.w = .grow`
   mit Clip; stand der Knopf dahinter, wanderte er an den Fensterrand und sein Dropdown wurde
   abgeschnitten (aufgefallen 06.09.2026).
-- **Vorschau-Tabs sind standardmäßig aus** (`UI.preview_tabs`, View → Toggle Preview Tabs,
-  gemerkt in `user_state` als `preview_tabs`). Aus: jede per Einfachklick geöffnete Datei bekommt
-  einen eigenen Tab, ein Klick auf eine schon offene Datei wechselt nur dorthin. An: Verhalten
-  wie VS Code/Zed (Einfachklick = Vorschau, die der nächste Einfachklick ersetzt; Doppelklick,
-  Tippen oder Enter machen fest). main.zig entscheidet mit `file_to_open_preview and preview_tabs`.
-  RPC `ui_state.preview_tabs`; `e2e_tabs.py` prüft beide Zustände.
-
-- **Vorschau-Tabs** (`Tab.preview`): Einfachklick oder Space im Explorer öffnet als Vorschau (Text in
-  `subtext`-Farbe), der nächste Vorschau-Klick ersetzt sie an derselben Stelle; Doppelklick (< 400 ms,
-  `FileExplorerState.now_ms`), Enter, Änderung oder festes Öffnen macht sie fest. `openFileAs(path,
-  preview)`; `openFile` bleibt fest (Agent, RPC). Fest öffnen ersetzt keine Vorschau (wie VS Code).
+- **Keine Vorschau-Tabs** (entfernt 06.09.2026 auf Wunsch des Projektinhabers; VS Code und Zed haben
+  sie standardmäßig an): Einfachklick, Space und Enter im Explorer öffnen jede Datei in einem
+  eigenen Tab, ein Klick auf eine schon offene Datei wechselt nur dorthin (`TabBarState.openFile`).
+- **Ctrl+Tab = zuletzt benutzt** (`recent_tab_next`/`recent_tab_prev`, wie VS Code/Zed): Tabs
+  tragen eine Seriennummer, `TabBarState.mru` (`src/ui/tab_mru.zig`, unit-getestet) hält die
+  Reihenfolge, `setActive` holt nach vorn, `closeTab` entfernt, Split kopiert sie. Der Umschalter
+  (`UI.tab_switcher`, Overlay unter der Leiste) wandert bei gehaltenem Ctrl je Tab eine Position
+  (`cyclePos`), Loslassen von Ctrl wählt (`commitTabSwitcher` in `setCtrlState(false)`). Ein
+  einzelnes Ctrl+Tab springt damit zwischen den zwei jüngsten Tabs. Ctrl+PgUp/PgDn bleiben die
+  Reihenfolge der Leiste (`next_tab`/`prev_tab`).
+- **Ctrl+E = Tab-Picker** (`open_tab_picker`): der Picker im Modus `tabs` listet die offenen Tabs
+  der aktiven Leiste, jüngster zuerst, mit Ordner als Detail; Enter wechselt (`Picker.takeTab`).
+- E2E: `key_press_hold(name, ctrl, shift, alt)` lässt die Modifier gedrückt, `mods_release` löst sie;
+  `ui_state.tab_switcher` ist die Position (−1 = zu). `key_press_mods` löst Ctrl nach der Taste,
+  deshalb wählt dort jedes Ctrl+Tab sofort.
 - **Leiste** scrollt den aktiven Tab per `scroll_x` in den Sichtbereich (`tab_strip` mit Clip);
   Namensgleichheit zeigt den Elternordner (`a/mod.zig`), ungespeichert = „• name“. Mittelklick
   schließt, Rechtsklick öffnet das Menü aus `shortcuts.tab_menu_items` (`tab_menu_<command>`),
@@ -457,7 +461,7 @@ Seit 06.09.2026 liegt alles im Repo; `~/projects/ki` und das separate Bench-Repo
   Ctrl+PgUp/PgDn, Ctrl+S ist global. „Don't Save“ lädt den Buffer von der Platte neu, weil Buffer
   das Schließen überleben. Auto-Reveal: Tab-Wechsel auf eine Textdatei markiert sie im Explorer.
 - RPCs: `tab_bounds(index)`, `middle_click`, `mouse_down`/`mouse_up` (Drag), `move_mouse` hält die
-  gedrückte Taste; Tab-JSON hat `preview`/`pinned`. `python3 scripts/e2e_tabs.py` deckt alles ab.
+  gedrückte Taste; Tab-JSON hat `pinned`. `python3 scripts/e2e_tabs.py` deckt alles ab.
 - Frame-Zeit: `ui_state.last_frame_ms`/`max_frame_ms` (Maximum seit dem letzten Abholen). Die
   frühere „1–2 s Tipp-Latenz“ bei der 5-MB-Datei war der `editor_state`-RPC (5 MB JSON je Abfrage);
   echte Frames liegen bei 1–4 ms. Fehler beim Laden/Speichern zeigt `UI.reportError` als Dialog.

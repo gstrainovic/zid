@@ -40,7 +40,7 @@ def tab_center(name):
 
 def setup():
     shutil.rmtree(FX, ignore_errors=True)
-    shutil.rmtree(os.path.join(ROOT, "tmp", "xdg-config"), ignore_errors=True)  # gemerkte Optionen (preview_tabs) zurücksetzen
+    shutil.rmtree(os.path.join(ROOT, "tmp", "xdg-config"), ignore_errors=True)  # gemerkte Optionen zurücksetzen
     os.makedirs(os.path.join(FX, "a"))
     os.makedirs(os.path.join(FX, "b"))
     for n in ("one.txt", "two.txt", "three.txt", "four.txt", "five.txt"):
@@ -60,11 +60,10 @@ def reveal_fixture():
 
 
 def step_default_own_tab():
-    print("--- Standard: jede Datei bekommt ihren eigenen Tab, kein Vorschau-Ersetzen")
+    print("--- Jede Datei bekommt ihren eigenen Tab")
     reveal_fixture()
-    check(not ui_state()["preview_tabs"], "Vorschau-Tabs sind standardmäßig aus")
     explorer_click("five.txt")
-    check(not [t for t in tabs() if t["name"] == "five.txt"][0]["preview"], "Einfachklick öffnet five.txt als festen Tab")
+    check("five.txt" in tab_names() and active_name() == "five.txt", "Einfachklick öffnet five.txt")
     explorer_click("one.txt")
     names = tab_names()
     check("five.txt" in names and "one.txt" in names, "zweiter Einfachklick öffnet one.txt zusätzlich (five.txt bleibt)")
@@ -78,32 +77,47 @@ def step_default_own_tab():
     check("five.txt" not in tab_names() and "one.txt" not in tab_names(), "aufgeräumt")
 
 
-def step_preview():
-    print("--- Vorschau-Tabs (eingeschaltet): Einfachklick ersetzt, Doppelklick macht fest")
-    key("p", ctrl=True, shift=True); settle()
-    rpc("type_text", ["toggle preview tabs"]); settle(10)
-    key("enter"); settle(10)
-    check(ui_state()["preview_tabs"], "Toggle Preview Tabs schaltet ein")
+def step_recent_switch_and_picker():
+    print("--- Ctrl+Tab in „zuletzt benutzt“-Reihenfolge, Ctrl+E Tab-Picker")
     reveal_fixture()
-    explorer_click("one.txt")
-    t = [t for t in tabs() if t["name"] == "one.txt"][0]
-    check(t["preview"], "Einfachklick öffnet one.txt als Vorschau")
-    explorer_click("two.txt")
-    names = tab_names()
-    check("two.txt" in names and "one.txt" not in names, "zweiter Einfachklick ersetzt die Vorschau (one.txt weg, two.txt da)")
-    explorer_click("two.txt")  # Doppelklick (zwei Klicks kurz nacheinander)
-    check(not [t for t in tabs() if t["name"] == "two.txt"][0]["preview"], "Doppelklick macht two.txt fest")
-    explorer_click("three.txt")
-    check("two.txt" in tab_names() and "three.txt" in tab_names(), "fester Tab bleibt, three.txt kommt als Vorschau dazu")
+    for name in ("one.txt", "two.txt", "three.txt"):
+        explorer_click(name)
     key("space")
     check(ui_state()["explorer_focused"], "Fokus im Explorer")
     key("down")  # four.txt
     key("enter")
     settle(10)
-    t4 = [t for t in tabs() if t["name"] == "four.txt"]
-    # Fest öffnen ersetzt keine Vorschau (wie VS Code): three.txt bleibt als Vorschau stehen
-    check(t4 and not t4[0]["preview"] and "three.txt" in tab_names(), "Enter öffnet four.txt fest, die Vorschau three.txt bleibt")
+    check(active_name() == "four.txt", "Enter öffnet four.txt")
     key("escape")
+    rpc("click", [700, 400]); settle()
+    # Reihenfolge jetzt: four, three, two, one (jüngster zuerst)
+    key("tab", ctrl=True)
+    check(active_name() == "three.txt", "Ctrl+Tab wechselt zum zuletzt benutzten Tab (three.txt)")
+    key("tab", ctrl=True)
+    check(active_name() == "four.txt", "Ctrl+Tab erneut springt zurück (four.txt)")
+    # Ctrl gehalten: zweimal Tab läuft zwei Positionen weiter, Loslassen wählt
+    rpc("key_press_hold", ["tab", True, False, False]); settle()
+    check(ui_state()["tab_switcher"] == 1, "Umschalter offen auf Position 1")
+    rpc("key_press_hold", ["tab", True, False, False]); settle()
+    check(ui_state()["tab_switcher"] == 2, "zweites Tab bei gehaltenem Ctrl: Position 2")
+    shot("e2e_tabs_switcher.ppm")
+    rpc("mods_release"); settle()
+    check(ui_state()["tab_switcher"] == -1 and active_name() == "two.txt", f"Ctrl loslassen wählt den drittjüngsten Tab (two.txt), aktiv: {active_name()}")
+    rpc("key_press_hold", ["tab", True, True, False]); settle()
+    check(ui_state()["tab_switcher"] == len(tabs()) - 1, "Ctrl+Shift+Tab beginnt beim ältesten Tab")
+    rpc("mods_release"); settle()
+    # Picker über offene Tabs
+    key("e", ctrl=True)
+    st = result_json("picker_state")
+    check(st["open"] and st["mode"] == "tabs" and st["matches"] == len(tabs()), f"Ctrl+E zeigt alle {len(tabs())} offenen Tabs")
+    rpc("type_text", ["one"]); settle(10)
+    check(result_json("picker_state")["selected_label"] == "one.txt", "Filter 'one' trifft one.txt")
+    key("enter"); settle(10)
+    check(active_name() == "one.txt", "Enter wechselt zu one.txt")
+    # Für die nächsten Schritte: two/three/four bleiben offen, four.txt aktiv
+    rpc("middle_click", [*tab_center("one.txt")]); settle(5)
+    rpc("click", [*tab_center("four.txt")]); settle()
+    check(active_name() == "four.txt", "four.txt aktiv")
 
 
 def step_dot_and_middle_click():
@@ -204,7 +218,7 @@ def step_reveal():
     check(sel and sel[0]["name"] == tab_names()[0], f"Reveal markiert {tab_names()[0]} im Explorer")
 
 
-STEPS = [step_default_own_tab, step_preview, step_dot_and_middle_click, step_context_menu_and_reopen, step_drag_reorder, step_scroll_active_into_view, step_reveal]
+STEPS = [step_default_own_tab, step_recent_switch_and_picker, step_dot_and_middle_click, step_context_menu_and_reopen, step_drag_reorder, step_scroll_active_into_view, step_reveal]
 
 
 def main():

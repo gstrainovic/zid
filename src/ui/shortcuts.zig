@@ -30,6 +30,11 @@ pub const Command = enum {
     close_tab,
     next_tab,
     prev_tab,
+    /// Ctrl+Tab: Tabs in „zuletzt benutzt“-Reihenfolge (Umschalter bleibt offen, solange Ctrl gehalten wird)
+    recent_tab_next,
+    recent_tab_prev,
+    /// Picker über die offenen Tabs
+    open_tab_picker,
     undo,
     redo,
     cut,
@@ -108,7 +113,6 @@ pub const Command = enum {
     toggle_whitespace,
     toggle_indent_guides,
     toggle_word_wrap,
-    toggle_preview_tabs,
     show_shortcuts,
 };
 
@@ -125,8 +129,9 @@ pub const bindings = [_]Binding{
     .{ .command = .save, .key = .s, .mods = .{ .ctrl = true } }, // global: auch mit Fokus im Explorer
     .{ .command = .open_folder, .key = .o, .mods = .{ .ctrl = true } },
     .{ .command = .close_tab, .key = .w, .mods = .{ .ctrl = true } },
-    .{ .command = .next_tab, .key = .tab, .mods = .{ .ctrl = true } },
-    .{ .command = .prev_tab, .key = .tab, .mods = .{ .ctrl = true, .shift = true } },
+    .{ .command = .recent_tab_next, .key = .tab, .mods = .{ .ctrl = true } },
+    .{ .command = .recent_tab_prev, .key = .tab, .mods = .{ .ctrl = true, .shift = true } },
+    .{ .command = .open_tab_picker, .key = .e, .mods = .{ .ctrl = true } },
     .{ .command = .undo, .key = .z, .mods = .{ .ctrl = true }, .scope = .editor },
     .{ .command = .redo, .key = .y, .mods = .{ .ctrl = true }, .scope = .editor },
     .{ .command = .cut, .key = .x, .mods = .{ .ctrl = true }, .scope = .editor },
@@ -208,7 +213,7 @@ pub const Menu = struct { title: []const u8, items: []const Command };
 pub const menus = [_]Menu{
     .{ .title = "File", .items = &.{ .new_file, .quick_open, .save, .toggle_autosave, .open_folder, .close_tab, .close_all_tabs, .reopen_closed_tab } },
     .{ .title = "Edit", .items = &.{ .undo, .redo, .cut, .copy, .paste, .select_all, .delete_line, .duplicate_line, .move_line_up, .move_line_down, .toggle_comment, .find, .replace, .goto_line, .goto_definition, .select_next_occurrence, .add_cursor_above, .add_cursor_below } },
-    .{ .title = "View", .items = &.{ .toggle_explorer, .focus_explorer, .split_vertical, .split_horizontal, .md_preview, .new_terminal, .toggle_terminal, .toggle_theme, .zoom_in, .zoom_out, .zoom_reset, .toggle_minimap, .toggle_whitespace, .toggle_indent_guides, .toggle_word_wrap, .toggle_preview_tabs } },
+    .{ .title = "View", .items = &.{ .toggle_explorer, .focus_explorer, .split_vertical, .split_horizontal, .md_preview, .new_terminal, .toggle_terminal, .toggle_theme, .zoom_in, .zoom_out, .zoom_reset, .toggle_minimap, .toggle_whitespace, .toggle_indent_guides, .toggle_word_wrap } },
     .{ .title = "Help", .items = &.{ .command_palette, .show_shortcuts } },
 };
 
@@ -234,6 +239,9 @@ pub fn label(command: Command) []const u8 {
         .close_tab => "Close Tab",
         .next_tab => "Next Tab",
         .prev_tab => "Previous Tab",
+        .recent_tab_next => "Switch to Recent Tab",
+        .recent_tab_prev => "Switch to Recent Tab (Backwards)",
+        .open_tab_picker => "Open Tabs…",
         .undo => "Undo",
         .redo => "Redo",
         .cut => "Cut",
@@ -308,7 +316,6 @@ pub fn label(command: Command) []const u8 {
         .toggle_minimap => "Toggle Minimap",
         .toggle_whitespace => "Toggle Render Whitespace",
         .toggle_word_wrap => "Toggle Word Wrap",
-        .toggle_preview_tabs => "Toggle Preview Tabs",
         .toggle_indent_guides => "Toggle Indent Guides",
         .show_shortcuts => "Keyboard Shortcuts",
     };
@@ -352,8 +359,9 @@ test "lookup: Ctrl+O global ist open_folder, ohne Ctrl nichts" {
 }
 
 test "lookup: Modifier müssen exakt passen (Ctrl+Shift+Tab ist nicht Ctrl+Tab)" {
-    try testing.expectEqual(Command.next_tab, lookup(.tab, .{ .ctrl = true }, .global).?);
-    try testing.expectEqual(Command.prev_tab, lookup(.tab, .{ .ctrl = true, .shift = true }, .global).?);
+    try testing.expectEqual(Command.recent_tab_next, lookup(.tab, .{ .ctrl = true }, .global).?);
+    try testing.expectEqual(Command.recent_tab_prev, lookup(.tab, .{ .ctrl = true, .shift = true }, .global).?);
+    try testing.expectEqual(Command.next_tab, lookup(.page_down, .{ .ctrl = true }, .global).?);
     try testing.expect(lookup(.tab, .{ .ctrl = true, .alt = true }, .global) == null);
 }
 
@@ -366,7 +374,8 @@ test "lookup: Scope trennt Explorer-Tasten von globalen" {
 
 test "shortcutText: Anzeige-Text pro Command, leer wenn ohne Taste" {
     try testing.expectEqualStrings("Ctrl+O", shortcutText(.open_folder));
-    try testing.expectEqualStrings("Ctrl+Shift+Tab", shortcutText(.prev_tab));
+    try testing.expectEqualStrings("Ctrl+PgUp", shortcutText(.prev_tab));
+    try testing.expectEqualStrings("Ctrl+Shift+Tab", shortcutText(.recent_tab_prev));
     try testing.expectEqualStrings("Ctrl+`", shortcutText(.new_terminal));
     try testing.expectEqualStrings("F2", shortcutText(.rename_entry));
     try testing.expectEqualStrings("Del", shortcutText(.delete_entry));

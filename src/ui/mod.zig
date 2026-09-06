@@ -13,6 +13,7 @@ const PdfHandler = @import("../rendering/pdf_handler.zig").PdfHandler;
 const PdfViewState = @import("pdf_view.zig").PdfViewState;
 const editor_mod = @import("../editor/mod.zig");
 const lsp_client = @import("lsp_client");
+const tab_mru = @import("tab_mru.zig");
 const lsp_proto = @import("lsp_proto");
 const wio = @import("wio");
 const tab_bar_mod = @import("tab_bar.zig");
@@ -181,8 +182,8 @@ pub const UI = struct {
     is_alt_down: bool,
     /// Language Server (zls) — wird beim ersten Sprung zur Definition in einer .zig-Datei gestartet
     scheduler: ?*@import("scheduler").Scheduler = null,
-    /// Einfachklick im Explorer öffnet Vorschau-Tabs (gemerkt in user_state; Standard aus)
-    preview_tabs: bool = false,
+    /// Ctrl+Tab-Umschalter: Position in der „zuletzt benutzt“-Reihenfolge, solange Ctrl gehalten wird
+    tab_switcher: ?usize = null,
     lsp: ?*lsp_client.LspClient = null,
     lsp_failed: bool = false,
     lsp_pending: ?LspPending = null,
@@ -760,6 +761,7 @@ pub const UI = struct {
 
     pub fn setCtrlState(self: *Self, pressed: bool) void {
         self.is_ctrl_down = pressed;
+        if (!pressed) self.commitTabSwitcher();
         if (self.isTextAreaTabActive()) {
             if (self.getActiveTextArea()) |textarea| {
                 textarea.setCtrlState(pressed);
@@ -1142,6 +1144,7 @@ pub const UI = struct {
                 }
             }
         }
+        if (self.picker.takeTab()) |picked_tab| self.getActiveTabBar().setActive(picked_tab);
         if (self.picker.takeCommand()) |cmd| self.executeCommand(cmd);
         if (self.folder_picker.takeResult()) |path| {
             if (self.pending_open_folder) |old| self.allocator.free(old);
@@ -1303,6 +1306,9 @@ pub const UI = struct {
             .close_tab => self.requestCloseActiveTab(),
             .next_tab => self.cycleTab(1),
             .prev_tab => self.cycleTab(-1),
+            .recent_tab_next => self.recentTabSwitch(1),
+            .recent_tab_prev => self.recentTabSwitch(-1),
+            .open_tab_picker => self.openTabPicker(),
             .toggle_explorer => {
                 self.show_file_explorer = !self.show_file_explorer;
                 if (!self.show_file_explorer) self.explorer_focused = false;
@@ -1434,11 +1440,6 @@ pub const UI = struct {
             .toggle_minimap => self.toggleEditorOption(.minimap),
             .toggle_whitespace => self.toggleEditorOption(.whitespace),
             .toggle_word_wrap => self.toggleEditorOption(.word_wrap),
-            .toggle_preview_tabs => {
-                self.preview_tabs = !self.preview_tabs;
-                self.showToast("Preview tabs {s}", .{if (self.preview_tabs) "on" else "off"});
-                self.saveUserState();
-            },
             .toggle_indent_guides => self.toggleEditorOption(.indent_guides),
         }
     }
@@ -1582,7 +1583,7 @@ pub const UI = struct {
             return;
         }
         const tab_bar = self.getActiveTabBar();
-        tab_bar.openFileAs(target, false) catch {
+        tab_bar.openFile(target) catch {
             pending.editor.gotoDefinitionLocal(pending.row, pending.col);
             return;
         };
@@ -1606,6 +1607,75 @@ pub const UI = struct {
         }
         self.allocator.free(g.path);
         self.lsp_goto = null;
+    }
+
+    // ───────────────────────── Ctrl+Tab (zuletzt benutzt) und Tab-Picker ─────────────────────────
+
+    /// Ctrl+Tab / Ctrl+Shift+Tab: eine Position weiter in der „zuletzt benutzt“-Reihenfolge; die
+    /// Auswahl gilt, sobald Ctrl losgelassen wird (`commitTabSwitcher`). Wie VS Code und Zed.
+    fn recentTabSwitch(self: *Self, dir: i32) void {
+        const n = self.getActiveTabBar().tabs.items.len;
+        if (n < 2) return;
+        self.tab_switcher = tab_mru.cyclePos(self.tab_switcher, dir, n);
+    }
+
+    fn commitTabSwitcher(self: *Self) void {
+        const pos = self.tab_switcher orelse return;
+        self.tab_switcher = null;
+        const tab_bar = self.getActiveTabBar();
+        const order = tab_bar.mruIndices(self.allocator) catch return;
+        defer self.allocator.free(order);
+        if (pos < order.len) tab_bar.setActive(order[pos]);
+    }
+
+    /// Ctrl+E: Picker über die offenen Tabs der aktiven Leiste, jüngster zuerst.
+    fn openTabPicker(self: *Self) void {
+        const tab_bar = self.getActiveTabBar();
+        if (tab_bar.tabs.items.len == 0) return;
+        const order = tab_bar.mruIndices(self.allocator) catch return;
+        defer self.allocator.free(order);
+        const arena_alloc = self.frame_arena.allocator();
+        var labels: std.ArrayListUnmanaged([]const u8) = .empty;
+        var details: std.ArrayListUnmanaged([]const u8) = .empty;
+        for (order) |i| {
+            labels.append(arena_alloc, tab_bar_mod.tabLabel(arena_alloc, tab_bar, i)) catch return;
+            const dir = std.fs.path.dirname(tab_bar.tabs.items[i].path) orelse "";
+            details.append(arena_alloc, dir) catch return;
+        }
+        self.picker.openTabs(labels.items, details.items, order);
+    }
+
+    /// Umschalter-Overlay: offene Tabs in „zuletzt benutzt“-Reihenfolge, Auswahl hervorgehoben.
+    fn renderTabSwitcher(self: *Self, t: Theme) void {
+        const pos = self.tab_switcher orelse return;
+        const tab_bar = self.getActiveTabBar();
+        const arena_alloc = self.frame_arena.allocator();
+        const order = tab_bar.mruIndices(arena_alloc) catch return;
+        clay.UI()(.{
+            .id = clay.ElementId.ID("tab_switcher_backdrop"),
+            .floating = .{ .attach_to = .to_root, .z_index = 2000 },
+            .layout = .{ .sizing = .{ .w = .grow, .h = .grow }, .child_alignment = .{ .x = .center, .y = .top }, .padding = .{ .top = 120 } },
+        })({
+            clay.UI()(.{
+                .id = clay.ElementId.ID("tab_switcher"),
+                .layout = .{ .sizing = .{ .w = .fixed(420) }, .padding = .all(8), .direction = .top_to_bottom, .child_gap = 2 },
+                .background_color = t.surface,
+                .border = .{ .width = .all(1), .color = t.border },
+                .corner_radius = .all(8),
+            })({
+                for (order, 0..) |tab_index, k| {
+                    const active = k == pos;
+                    clay.UI()(.{
+                        .id = clay.ElementId.IDI("tab_switcher_row", @intCast(k)),
+                        .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(30) }, .padding = .axes(0, 10), .child_alignment = .{ .x = .left, .y = .center } },
+                        .background_color = if (active) t.primary else .{ 0, 0, 0, 0 },
+                        .corner_radius = .all(4),
+                    })({
+                        clay.text(tab_bar_mod.tabLabel(arena_alloc, tab_bar, tab_index), .{ .font_size = 18, .color = if (active) t.text_on_primary else t.text, .wrap_mode = .none });
+                    });
+                }
+            });
+        });
     }
 
     /// Neue Editoren (Split) übernehmen Anzeigeoptionen, Schriftgröße und Theme des Ausgangs-Editors;
@@ -1930,7 +2000,6 @@ pub const UI = struct {
             .whitespace = self.getActiveEditor().show_whitespace,
             .indent_guides = self.getActiveEditor().show_indent_guides,
             .word_wrap = self.getActiveEditor().word_wrap,
-            .preview_tabs = self.preview_tabs,
         }) catch |err| log.warn("state save '{s}' failed: {}", .{ path, err });
     }
 
@@ -1942,7 +2011,6 @@ pub const UI = struct {
         self.file_explorer.width = st.sidebar_width;
         self.file_explorer.show_hidden = st.show_hidden;
         self.autosave = st.autosave;
-        self.preview_tabs = st.preview_tabs;
         self.theme = if (st.light_theme) Theme.light() else Theme.dark();
         self.applyThemeToEditors();
         var buf: [32]*pane_mod.Pane = undefined;
@@ -2318,6 +2386,7 @@ pub const UI = struct {
         // "Open Folder…"-Dialog (floating, z_index=2000), modal wie der Dialog unten
         self.folder_picker.render(self.frame_arena.allocator(), t);
         self.picker.render(self.frame_arena.allocator(), t);
+        self.renderTabSwitcher(t);
         if (self.shortcuts_dialog_open) shortcuts_dialog.render(t, self.shortcuts_scroll_y);
         self.renderToasts(t);
 
@@ -2597,7 +2666,6 @@ pub const UI = struct {
                         if (tab_bar.getActiveTab()) |tab| {
                             if (tab.kind == .text) {
                                 tab.modified = leaf.code_editor.is_modified;
-                                if (tab.modified) tab.preview = false;
                             }
                         }
                         // Jeder Editor misst mit dem echten Font (auch Panes, die nach dem Start
