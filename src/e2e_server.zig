@@ -30,13 +30,15 @@ const Point = struct { x: f32, y: f32 };
 /// rennt der Handler in einen laufenden Clay-Layout-Durchgang (Absturz).
 pub const InputEvent = union(enum) {
     click: Point,
+    /// Klick mit gehaltenen Modifiern (Shift-Klick erweitert Auswahl, Ctrl-Klick springt zur Definition)
+    click_mods: struct { x: f32, y: f32, ctrl: bool, shift: bool },
     right_click: Point,
     middle_click: Point,
     /// Drücken/Loslassen getrennt (Drag & Drop)
     press: Point,
     release: Point,
     move: Point,
-    key: struct { btn: @import("wio").Button, ctrl: bool, shift: bool = false },
+    key: struct { btn: @import("wio").Button, ctrl: bool, shift: bool = false, alt: bool = false },
     char: u21,
     /// Mausrad an Position: lines > 0 hoch, < 0 runter
     scroll: struct { x: f32, y: f32, lines: i32 },
@@ -116,6 +118,17 @@ fn applyInput(ui: *ui_mod.UI, ev: InputEvent) void {
             ui.handleMouseUp();
             ui.setPointerState(p.x, p.y, false);
         },
+        .click_mods => |p| {
+            ui.setCtrlState(p.ctrl);
+            ui.setShiftState(p.shift);
+            ui.setPointerState(p.x, p.y, true);
+            ui.handleMouseMove(p.x, p.y);
+            ui.handleMouseDown(p.x, p.y, .mouse_left);
+            ui.handleMouseUp();
+            ui.setPointerState(p.x, p.y, false);
+            ui.setCtrlState(false);
+            ui.setShiftState(false);
+        },
         .middle_click => |p| {
             ui.setPointerState(p.x, p.y, true);
             ui.handleMouseDown(p.x, p.y, .mouse_middle);
@@ -140,9 +153,11 @@ fn applyInput(ui: *ui_mod.UI, ev: InputEvent) void {
         .key => |k| {
             ui.setCtrlState(k.ctrl);
             ui.setShiftState(k.shift);
+            ui.setAltState(k.alt);
             ui.handleKeyPress(k.btn);
             ui.setCtrlState(false);
             ui.setShiftState(false);
+            ui.setAltState(false);
         },
         .char => |cp| ui.handleChar(cp),
         .scroll => |sc| {
@@ -162,6 +177,7 @@ pub fn createDispatcher(alloc: std.mem.Allocator, ctx: *E2EContext) !*zigjr.RpcD
     try rpc_dispatcher.addWithCtx("open_file", ctx, openFile);
     try rpc_dispatcher.addWithCtx("tab_bounds", ctx, tabBounds);
     try rpc_dispatcher.addWithCtx("middle_click", ctx, middleClick);
+    try rpc_dispatcher.addWithCtx("click_mods", ctx, clickMods);
     try rpc_dispatcher.addWithCtx("mouse_down", ctx, mouseDown);
     try rpc_dispatcher.addWithCtx("mouse_up", ctx, mouseUp);
     try rpc_dispatcher.addWithCtx("close_tab", ctx, closeTab);
@@ -173,6 +189,7 @@ pub fn createDispatcher(alloc: std.mem.Allocator, ctx: *E2EContext) !*zigjr.RpcD
     try rpc_dispatcher.addWithCtx("type_text", ctx, typeText);
     try rpc_dispatcher.addWithCtx("key_press", ctx, keyPress);
     try rpc_dispatcher.addWithCtx("key_press_mods", ctx, keyPressMods);
+    try rpc_dispatcher.addWithCtx("key_press_alt", ctx, keyPressAlt);
     try rpc_dispatcher.addWithCtx("open_terminal", ctx, openTerminalRpc);
     try rpc_dispatcher.addWithCtx("open_chat", ctx, openChatRpc);
     try rpc_dispatcher.addWithCtx("get_chat_input", ctx, getChatInput);
@@ -380,6 +397,13 @@ pub fn keyPressMods(ctx: *E2EContext, _: *zigjr.DispatchCtx, key_name: []const u
     return "ok";
 }
 
+/// Wie key_press_mods, zusätzlich Alt (Alt+↑/↓ Zeile verschieben, Alt+Enter Ersetze alle).
+pub fn keyPressAlt(ctx: *E2EContext, _: *zigjr.DispatchCtx, key_name: []const u8, is_ctrl: bool, is_shift: bool, is_alt: bool) ![]const u8 {
+    const b = buttonFromName(key_name) orelse return "error: unknown key";
+    dispatchInput(ctx, .{ .key = .{ .btn = b, .ctrl = is_ctrl, .shift = is_shift, .alt = is_alt } });
+    return "ok";
+}
+
 fn buttonFromName(name: []const u8) ?@import("wio").Button {
     const Button = @import("wio").Button;
     const named = [_]struct { []const u8, Button }{
@@ -391,7 +415,7 @@ fn buttonFromName(name: []const u8) ?@import("wio").Button {
         .{ "f2", .f2 },             .{ "f5", .f5 },               .{ "space", .space },
         .{ "1", .@"1" },            .{ "2", .@"2" },              .{ "3", .@"3" },
         .{ "4", .@"4" },            .{ "5", .@"5" },              .{ "9", .@"9" },
-        .{ "backslash", .backslash },
+        .{ "backslash", .backslash },   .{ "slash", .slash },         .{ "f12", .f12 },
     };
     for (named) |entry| {
         if (std.mem.eql(u8, name, entry[0])) return entry[1];
@@ -540,6 +564,12 @@ fn tabBounds(ctx: *E2EContext, dc: *zigjr.DispatchCtx, index: i64) ![]const u8 {
     return boundsJson(dc, clay.getElementData(@import("ui/tab_bar.zig").tabId(tb, @intCast(index))));
 }
 
+/// Klick mit Modifiern (gepuffert wie click)
+fn clickMods(ctx: *E2EContext, _: *zigjr.DispatchCtx, x: f64, y: f64, is_ctrl: bool, is_shift: bool) ![]const u8 {
+    dispatchInput(ctx, .{ .click_mods = .{ .x = @floatCast(x), .y = @floatCast(y), .ctrl = is_ctrl, .shift = is_shift } });
+    return "ok";
+}
+
 /// Mittelklick (gepuffert wie click)
 fn middleClick(ctx: *E2EContext, _: *zigjr.DispatchCtx, x: f64, y: f64) ![]const u8 {
     dispatchInput(ctx, .{ .middle_click = .{ .x = @floatCast(x), .y = @floatCast(y) } });
@@ -591,6 +621,12 @@ fn editorState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     var buf = std.Io.Writer.Allocating.init(dc.arena());
     try buf.writer.print("{{\"lines\": {d}, \"row\": {d}, \"col\": {d}, \"view_row\": {d}, \"view_col\": {d}, \"view_cols\": {d}, \"find_open\": {}, \"find_not_found\": {}, \"find_query\": ", .{ lines, ed.cursor.row, ed.cursor.col, ed.view.row, ed.view.col, ed.view.cols, ed.find.active, ed.find.not_found });
     try std.json.Stringify.value(ed.find.text(), .{}, &buf.writer);
+    try buf.writer.writeAll(", \"selection\": ");
+    if (ed.selectionRange()) |r| {
+        try buf.writer.print("{{\"begin\": [{d}, {d}], \"end\": [{d}, {d}]}}", .{ r.begin.row, r.begin.col, r.end.row, r.end.col });
+    } else {
+        try buf.writer.writeAll("null");
+    }
     try buf.writer.writeAll(", \"text\": ");
     try std.json.Stringify.value(text, .{}, &buf.writer);
     try buf.writer.writeAll("}");
@@ -654,6 +690,27 @@ fn writeAllTabs(pane: *const @import("ui/pane.zig").Pane, w: *std.Io.Writer, fir
     }
 }
 
+/// Index des aktiven Leaf-Panes in Baumreihenfolge (links/oben zuerst)
+fn activePaneIndex(ui: *ui_mod.UI) usize {
+    var idx: usize = 0;
+    var found: usize = 0;
+    leafIndexOf(ui.root_pane, ui.active_pane, &idx, &found);
+    return found;
+}
+
+fn leafIndexOf(pane: *const @import("ui/pane.zig").Pane, target: *const @import("ui/pane.zig").Pane, idx: *usize, found: *usize) void {
+    switch (pane.data) {
+        .leaf => {
+            if (pane == target) found.* = idx.*;
+            idx.* += 1;
+        },
+        .split => |s| {
+            leafIndexOf(s.children[0], target, idx, found);
+            leafIndexOf(s.children[1], target, idx, found);
+        },
+    }
+}
+
 fn countLeaves(pane: *const @import("ui/pane.zig").Pane) usize {
     return switch (pane.data) {
         .leaf => 1,
@@ -693,6 +750,9 @@ fn uiState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
         ui.last_clipboard_text orelse "", ui.file_explorer.selectionCount(), if (ui.active_dialog) |ad| ad.focused else 0,
     });
     try buf.writer.print(", \"last_frame_ms\": {d:.2}, \"max_frame_ms\": {d:.2}", .{ ui.last_frame_ms, ui.takeMaxFrameMs() });
+    try buf.writer.print(", \"active_pane_index\": {d}", .{activePaneIndex(ui)});
+    try buf.writer.writeAll(", \"status_text\": ");
+    try std.json.Stringify.value(ui.statusText(dc.arena()), .{}, &buf.writer);
     try buf.writer.writeAll(", \"all_tabs\": [");
     var first_tab = true;
     try writeAllTabs(ui.root_pane, &buf.writer, &first_tab);

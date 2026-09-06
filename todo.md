@@ -24,17 +24,12 @@ Belege aus der Sitzung vom 06.09.2026 (Log mit Panic in `gpu_renderer.zig:305`) 
 
 ## Editor
 
-- [ ] **P2 Auto-Indent bei Enter**, Autoclose von Klammern/Anführungszeichen, Tab rückt eine
-      Auswahl ein / Shift+Tab aus (heute fügt Tab immer ein Zeichen ein), Ctrl+/ Kommentar
-      umschalten, Alt+↑/↓ Zeile verschieben, Ctrl+Shift+D Zeile duplizieren.
-- [ ] **P2 Ctrl+G Gehe zu Zeile**, Ctrl+P Datei-Schnellöffner (fuzzy), Ctrl+Shift+P Command Palette
-      über die Kürzel-Tabelle, Ctrl+H Ersetzen in der Suchleiste (Regex/Case-Toggle; `find_ops`
-      zählt Codepoints, Tabs/Breitzeichen fehlen).
-- [ ] **P2 Maus**: Dreifachklick markiert die Zeile, Shift+Klick erweitert die Auswahl, Autoscroll
-      beim Ziehen über den Rand, Ctrl+Klick geht zur Definition (LSP vorhanden).
-- [ ] **P2 Statusleiste**: Zeile:Spalte, Auswahlgröße, Encoding, EOL, Sprache, Einrückung —
-      heute nur Git-Branch im Header.
-- [ ] **P2 Datei außerhalb geändert** → Reload-Hinweis im Tab (File-Watcher läuft bereits).
+- [ ] **P2 Ctrl+P Datei-Schnellöffner** (fuzzy) und **Ctrl+Shift+P Command Palette** über die
+      Kürzel-Tabelle (Ctrl+G und Ctrl+H gibt es seit 06.09.2026; Regex/Case-Toggle in der Suche und
+      Tabs/Breitzeichen in `find_ops` bleiben offen).
+- [ ] **P3 LSP anbinden**: `lsp_client.zig` kann definition/hover/completion, wird aber nirgends
+      gestartet; Ctrl+Klick/F12 springen heute per Textmuster (`edit_ops.looksLikeDefinition`) nur
+      innerhalb der Datei.
 - [ ] **P3 Klammern hervorheben**, Einrück-Guides, Whitespace anzeigen, aktuelle Zeile im Gutter,
       Minimap, Mehrfach-Cursor (Ctrl+D nächstes Vorkommen, Ctrl+Alt+↑/↓), Schriftgröße
       Ctrl+±/Ctrl+0, Theme umschalten.
@@ -42,8 +37,6 @@ Belege aus der Sitzung vom 06.09.2026 (Log mit Panic in `gpu_renderer.zig:305`) 
 
 ## Fenster, Splits, Menüs
 
-- [ ] **P2 Pane-Kürzel**: Ctrl+\ splitten, Ctrl+K ←/→ Fokus wechseln, Pane schließt sich mit dem
-      letzten Tab, Ctrl+Shift+E Fokus in den Explorer, Ctrl+J Terminal-Panel.
 - [ ] **P3 Menüleiste per Tastatur** (Alt+F …, Pfeile, Escape schließt), Kürzel-Dialog scrollbar,
       Toasts für Erfolg/Fehler (gespeichert, gelöscht, Ladefehler).
 
