@@ -15,7 +15,6 @@ Belege aus der Sitzung vom 06.09.2026 (Log mit Panic in `gpu_renderer.zig:305`) 
 
 ## Editor
 
-- [ ] **P3 Suche: Regex/Case-Toggle**, Tabs/Breitzeichen in `find_ops` (zählt Codepoints).
 - [ ] **P3 LSP anbinden**: `lsp_client.zig` kann definition/hover/completion, wird aber nirgends
       gestartet; Ctrl+Klick/F12 springen heute per Textmuster (`edit_ops.looksLikeDefinition`) nur
       innerhalb der Datei.

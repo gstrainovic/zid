@@ -232,7 +232,40 @@ def step_visuals():
     key("enter"); settle(10)
 
 
-STEPS = [step_autoclose_and_indent, step_comment_move_duplicate, step_goto_replace, step_mouse, step_status_bar, step_panes, step_external_change, step_visuals]
+def step_search_options():
+    print("--- Suche: Groß/Klein (Alt+C), Ganzwort (Alt+W), Regex (Alt+R)")
+    rpc("click", [700, 300]); settle()
+    goto_line(1)
+    key("f", ctrl=True)
+    rpc("type_text", ["HELLO"]); settle(10)
+    st = ed()
+    check(st["find_open"] and not st["find_not_found"], "Standard: Groß/Klein egal, HELLO trifft hello")
+    key_alt("c")
+    st = ed()
+    check(st["find_case"] and st["find_not_found"], "Alt+C: exakt → kein Treffer für HELLO")
+    key_alt("c")
+    key("escape")
+    key("left")  # Auswahl aufheben, sonst übernimmt Ctrl+F den markierten Treffer als Suchbegriff
+    key("f", ctrl=True)
+    rpc("type_text", ["hel"]); settle(10)
+    check(not ed()["find_not_found"], "'hel' trifft als Teilwort")
+    key_alt("w")
+    check(ed()["find_word"] and ed()["find_not_found"], "Alt+W: Ganzwort → 'hel' trifft nicht mehr")
+    key_alt("w")
+    key("escape")
+    key("left")
+    key("f", ctrl=True)
+    rpc("type_text", ["h.l+o\\("]); settle(10)
+    check(ed()["find_not_found"], "ohne Regex ist 'h.l+o\\(' kein Text")
+    key_alt("r")
+    st = ed()
+    check(st["find_regex"] and not st["find_not_found"] and st["selection"] is not None, f"Alt+R: Regex trifft 'hello(' (Auswahl {st['selection']})")
+    shot("e2e_editor_regex.ppm")
+    key_alt("r")
+    key("escape")
+
+
+STEPS = [step_autoclose_and_indent, step_comment_move_duplicate, step_goto_replace, step_mouse, step_status_bar, step_panes, step_external_change, step_visuals, step_search_options]
 
 
 def main():

@@ -1429,6 +1429,12 @@ pub const CodeEditor = struct {
         replacement_len: usize = 0,
         /// Letzte Ersetzen-alle-Anzahl für die Anzeige
         replaced_count: ?usize = null,
+        /// Nach dem Öffnen ersetzt das erste getippte Zeichen den alten Begriff (wie VS Code)
+        replace_on_type: bool = false,
+        /// Optionen (Alt+C, Alt+W, Alt+R)
+        case_sensitive: bool = false,
+        whole_word: bool = false,
+        use_regex: bool = false,
 
         pub fn text(self: *const FindState) []const u8 {
             return self.query[0..self.len];
@@ -1448,6 +1454,10 @@ pub const CodeEditor = struct {
 
     pub fn openGoto(self: *Self) void {
         self.goto = .{ .active = true };
+    }
+
+    fn findOptions(self: *const Self) find_ops.Options {
+        return .{ .case_sensitive = self.find.case_sensitive, .whole_word = self.find.whole_word, .regex = self.find.use_regex };
     }
 
     /// Ctrl+H: Suchleiste mit Ersetzen-Zeile öffnen
@@ -1494,7 +1504,7 @@ pub const CodeEditor = struct {
                 // Finder sucht exklusiv ab `from`: vor den Anfang zurücksetzen
                 first = false;
                 start = .{ .row = self.lineCount() -| 1, .col = std.math.maxInt(u32) };
-                const mm = Finder.find(.{ .ed = self }, self.find.text(), start, true) orelse break;
+                const mm = Finder.findOpts(.{ .ed = self }, self.find.text(), start, true, self.findOptions()) orelse break;
                 if (mm.begin.row != 0 or mm.begin.col != 0) {
                     // Erster Treffer liegt nicht am Anfang: normal ab (0,0) exklusiv weitersuchen,
                     // aber den Treffer an (0,0) nicht verpassen
@@ -1515,7 +1525,7 @@ pub const CodeEditor = struct {
                 from = .{ .row = self.cursor.row, .col = self.cursor.col };
                 continue;
             }
-            const mm = Finder.find(.{ .ed = self }, self.find.text(), start, true) orelse break;
+            const mm = Finder.findOpts(.{ .ed = self }, self.find.text(), start, true, self.findOptions()) orelse break;
             // Umbruch am Dateiende: Treffer vor `from` bedeutet, wir sind einmal durch
             if (mm.begin.row < from.row or (mm.begin.row == from.row and mm.begin.col < from.col)) break;
             self.selection_anchor = .{ .row = mm.begin.row, .col = mm.begin.col, .target = mm.begin.col };
@@ -1544,6 +1554,7 @@ pub const CodeEditor = struct {
     pub fn openFind(self: *Self) void {
         self.find.active = true;
         self.find.not_found = false;
+        self.find.replace_on_type = true;
         // Markierten Text als Suchbegriff übernehmen (einzeilig)
         if (self.selectionRange()) |r| {
             if (r.begin.row == r.end.row) {
@@ -1576,7 +1587,11 @@ pub const CodeEditor = struct {
                 from = .{ .row = self.lineCount() -| 1, .col = std.math.maxInt(u32) };
             }
         }
-        const m = Finder.find(.{ .ed = self }, self.find.text(), from, forward) orelse {
+        const m = Finder.findOpts(.{ .ed = self }, self.find.text(), from, forward, .{
+            .case_sensitive = self.find.case_sensitive,
+            .whole_word = self.find.whole_word,
+            .regex = self.find.use_regex,
+        }) orelse {
             self.find.not_found = self.find.len > 0;
             return;
         };
@@ -1604,6 +1619,18 @@ pub const CodeEditor = struct {
     }
 
     fn handleFindKey(self: *Self, key: wio.Button) void {
+        // Alt+C Groß/Klein, Alt+W Ganzwort, Alt+R Regex (wie VS Code)
+        if (self.mods.alt and (key == .c or key == .w or key == .r)) {
+            switch (key) {
+                .c => self.find.case_sensitive = !self.find.case_sensitive,
+                .w => self.find.whole_word = !self.find.whole_word,
+                else => self.find.use_regex = !self.find.use_regex,
+            }
+            self.find.last_match = null;
+            self.find.not_found = false;
+            if (self.find.len > 0) self.findStep(true, true);
+            return;
+        }
         switch (key) {
             .escape => self.closeFind(),
             .tab => if (self.find.replace_mode) {
@@ -1648,6 +1675,11 @@ pub const CodeEditor = struct {
             @memcpy(self.find.replacement[self.find.replacement_len .. self.find.replacement_len + n], tmp[0..n]);
             self.find.replacement_len += n;
             return;
+        }
+        if (self.find.replace_on_type) {
+            self.find.len = 0;
+            self.find.last_match = null;
+            self.find.replace_on_type = false;
         }
         if (self.find.len + n > self.find.query.len) return;
         @memcpy(self.find.query[self.find.len .. self.find.len + n], tmp[0..n]);
@@ -1697,9 +1729,22 @@ pub const CodeEditor = struct {
             else
                 "";
             if (status.len > 0) clay.text(status, .{ .font_size = 16, .color = if (self.find.not_found) .{ 220, 90, 90, 255 } else .{ 150, 150, 170, 255 }, .wrap_mode = .none });
-            clay.text("Enter ↓  Shift+Enter ↑  Esc", .{ .font_size = 14, .color = .{ 120, 120, 140, 255 }, .wrap_mode = .none });
+            renderFindToggle("Aa", self.find.case_sensitive);
+            renderFindToggle("W", self.find.whole_word);
+            renderFindToggle(".*", self.find.use_regex);
+            clay.text("Enter ↓  Shift+Enter ↑  Alt+C/W/R  Esc", .{ .font_size = 14, .color = .{ 120, 120, 140, 255 }, .wrap_mode = .none });
         });
         if (self.find.replace_mode) self.renderReplaceRow(arena, editor_id);
+    }
+
+    fn renderFindToggle(label: []const u8, on: bool) void {
+        clay.UI()(.{
+            .layout = .{ .padding = .{ .left = 6, .right = 6, .top = 2, .bottom = 2 } },
+            .background_color = if (on) .{ 120, 140, 220, 255 } else .{ 60, 60, 80, 255 },
+            .corner_radius = .all(3),
+        })({
+            clay.text(label, .{ .font_size = 14, .color = if (on) .{ 20, 20, 30, 255 } else .{ 170, 170, 190, 255 }, .wrap_mode = .none });
+        });
     }
 
     fn renderReplaceRow(self: *Self, arena: std.mem.Allocator, editor_id: clay.ElementId) void {
