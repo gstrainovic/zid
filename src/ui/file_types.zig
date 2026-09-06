@@ -7,8 +7,6 @@ pub const FileKind = enum {
     terminal,
     markdown_preview,
     chat,
-    textarea,
-    chat2,
     /// Inhalt sieht nicht nach Text aus: der Tab zeigt nur einen Hinweis, kein Buffer wird geladen.
     binary,
 };
