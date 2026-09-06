@@ -94,6 +94,173 @@ pub fn pathAfterRename(alloc: std.mem.Allocator, path: []const u8, old_root: []c
     return try std.mem.concat(alloc, u8, &.{ new_root, path[old_root.len..] });
 }
 
+pub const NameError = error{ InvalidName, PathAlreadyExists };
+
+fn validName(name: []const u8) bool {
+    if (name.len == 0 or name.len > max_name_len) return false;
+    if (std.mem.eql(u8, name, ".") or std.mem.eql(u8, name, "..")) return false;
+    return std.mem.indexOfAny(u8, name, "/\\") == null;
+}
+
+fn exists(path: []const u8) bool {
+    std.fs.accessAbsolute(path, .{}) catch return false;
+    return true;
+}
+
+fn isDir(path: []const u8) bool {
+    const st = std.fs.cwd().statFile(path) catch return false;
+    return st.kind == .directory;
+}
+
+/// Legt `name` als Datei oder Ordner in `parent_dir` an (exklusiv, nie überschreiben).
+/// Liefert den neuen absoluten Pfad (owned).
+pub fn createEntry(alloc: std.mem.Allocator, parent_dir: []const u8, name: []const u8, is_folder: bool) ![]u8 {
+    if (!validName(name)) return error.InvalidName;
+    const path = try std.fs.path.join(alloc, &.{ parent_dir, name });
+    errdefer alloc.free(path);
+    if (is_folder) {
+        std.fs.makeDirAbsolute(path) catch |err| return if (err == error.PathAlreadyExists) error.PathAlreadyExists else err;
+    } else {
+        const f = std.fs.createFileAbsolute(path, .{ .exclusive = true }) catch |err|
+            return if (err == error.PathAlreadyExists) error.PathAlreadyExists else err;
+        f.close();
+    }
+    return path;
+}
+
+/// Freier Zielpfad für `name` in `dir`: existiert er schon, „name copy.ext“,
+/// „name copy 2.ext“ … (owned). Ordnernamen werden nicht an Punkten getrennt.
+pub fn uniqueDestination(alloc: std.mem.Allocator, dir: []const u8, name: []const u8) ![]u8 {
+    if (!validName(name)) return error.InvalidName;
+    const first = try std.fs.path.join(alloc, &.{ dir, name });
+    if (!exists(first)) return first;
+    const first_is_dir = isDir(first);
+    alloc.free(first);
+
+    const ext = if (first_is_dir) "" else std.fs.path.extension(name);
+    const stem = name[0 .. name.len - ext.len];
+    var i: usize = 1;
+    while (i < 10_000) : (i += 1) {
+        const candidate_name = if (i == 1)
+            try std.fmt.allocPrint(alloc, "{s} copy{s}", .{ stem, ext })
+        else
+            try std.fmt.allocPrint(alloc, "{s} copy {d}{s}", .{ stem, i, ext });
+        defer alloc.free(candidate_name);
+        const candidate = try std.fs.path.join(alloc, &.{ dir, candidate_name });
+        if (!exists(candidate)) return candidate;
+        alloc.free(candidate);
+    }
+    return error.PathAlreadyExists;
+}
+
+fn copyTree(alloc: std.mem.Allocator, src: []const u8, dst: []const u8) !void {
+    try std.fs.makeDirAbsolute(dst);
+    var dir = try std.fs.openDirAbsolute(src, .{ .iterate = true });
+    defer dir.close();
+    var it = dir.iterate();
+    while (try it.next()) |entry| {
+        const s = try std.fs.path.join(alloc, &.{ src, entry.name });
+        defer alloc.free(s);
+        const d = try std.fs.path.join(alloc, &.{ dst, entry.name });
+        defer alloc.free(d);
+        if (entry.kind == .directory) {
+            try copyTree(alloc, s, d);
+        } else {
+            try std.fs.copyFileAbsolute(s, d, .{});
+        }
+    }
+}
+
+/// Kopiert Datei oder Ordner (rekursiv) nach `dst_dir`, Name bleibt oder wird eindeutig.
+/// Liefert den Zielpfad (owned).
+pub fn copyPath(alloc: std.mem.Allocator, src: []const u8, dst_dir: []const u8) ![]u8 {
+    if (isPathOrUnder(dst_dir, src) and isDir(src)) return error.InvalidName; // Ordner nicht in sich selbst
+    const dst = try uniqueDestination(alloc, dst_dir, std.fs.path.basename(src));
+    errdefer alloc.free(dst);
+    if (isDir(src)) {
+        try copyTree(alloc, src, dst);
+    } else {
+        try std.fs.copyFileAbsolute(src, dst, .{});
+    }
+    return dst;
+}
+
+/// Verschiebt Datei oder Ordner nach `dst_dir` (eindeutiger Name). Ziel gleich Quelle → No-op.
+pub fn movePath(alloc: std.mem.Allocator, src: []const u8, dst_dir: []const u8) ![]u8 {
+    const src_dir = std.fs.path.dirname(src) orelse return error.InvalidName;
+    if (std.mem.eql(u8, src_dir, dst_dir)) return try alloc.dupe(u8, src);
+    if (isPathOrUnder(dst_dir, src)) return error.InvalidName;
+    const dst = try uniqueDestination(alloc, dst_dir, std.fs.path.basename(src));
+    errdefer alloc.free(dst);
+    try std.fs.renameAbsolute(src, dst);
+    return dst;
+}
+
+fn writeTrashInfo(alloc: std.mem.Allocator, info_path: []const u8, original: []const u8) !void {
+    const f = try std.fs.createFileAbsolute(info_path, .{ .exclusive = true });
+    defer f.close();
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(alloc);
+    try buf.appendSlice(alloc, "[Trash Info]\nPath=");
+    for (original) |c| {
+        const keep = std.ascii.isAlphanumeric(c) or c == '/' or c == '-' or c == '_' or c == '.' or c == '~';
+        if (keep) try buf.append(alloc, c) else try buf.writer(alloc).print("%{X:0>2}", .{c});
+    }
+    const secs: u64 = @intCast(@max(0, std.time.timestamp()));
+    const es = std.time.epoch.EpochSeconds{ .secs = secs };
+    const day = es.getEpochDay();
+    const yd = day.calculateYearDay();
+    const md = yd.calculateMonthDay();
+    const ds = es.getDaySeconds();
+    try buf.writer(alloc).print("\nDeletionDate={d:0>4}-{d:0>2}-{d:0>2}T{d:0>2}:{d:0>2}:{d:0>2}\n", .{
+        yd.year, md.month.numeric(), md.day_index + 1, ds.getHoursIntoDay(), ds.getMinutesIntoHour(), ds.getSecondsIntoMinute(),
+    });
+    try f.writeAll(buf.items);
+}
+
+/// Verschiebt `path` in den freedesktop-Papierkorb unter `trash_root`
+/// (`files/` + `info/<name>.trashinfo`). Liefert den Namen im Papierkorb (owned).
+/// DeletionDate steht in UTC (kein Zeitzonen-Support in std).
+pub fn trashPath(alloc: std.mem.Allocator, path: []const u8, trash_root: []const u8) ![]u8 {
+    const files_dir = try std.fs.path.join(alloc, &.{ trash_root, "files" });
+    defer alloc.free(files_dir);
+    const info_dir = try std.fs.path.join(alloc, &.{ trash_root, "info" });
+    defer alloc.free(info_dir);
+    try std.fs.cwd().makePath(files_dir);
+    try std.fs.cwd().makePath(info_dir);
+
+    const base = std.fs.path.basename(path);
+    var n: usize = 1;
+    while (n < 10_000) : (n += 1) {
+        const name = if (n == 1) try alloc.dupe(u8, base) else try std.fmt.allocPrint(alloc, "{s}.{d}", .{ base, n });
+        errdefer alloc.free(name);
+        const dest = try std.fs.path.join(alloc, &.{ files_dir, name });
+        defer alloc.free(dest);
+        const info = try std.fmt.allocPrint(alloc, "{s}/{s}.trashinfo", .{ info_dir, name });
+        defer alloc.free(info);
+        if (exists(dest) or exists(info)) {
+            alloc.free(name);
+            continue;
+        }
+        try writeTrashInfo(alloc, info, path);
+        std.fs.renameAbsolute(path, dest) catch |err| {
+            std.fs.deleteFileAbsolute(info) catch {};
+            return err;
+        };
+        return name;
+    }
+    return error.PathAlreadyExists;
+}
+
+/// Standard-Papierkorb: $XDG_DATA_HOME/Trash oder ~/.local/share/Trash (owned).
+pub fn defaultTrashRoot(alloc: std.mem.Allocator) ![]u8 {
+    if (std.posix.getenv("XDG_DATA_HOME")) |x| {
+        if (x.len > 0) return std.fs.path.join(alloc, &.{ x, "Trash" });
+    }
+    const home = std.posix.getenv("HOME") orelse return error.InvalidName;
+    return std.fs.path.join(alloc, &.{ home, ".local", "share", "Trash" });
+}
+
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 const testing = std.testing;
@@ -194,4 +361,143 @@ test "pathAfterRename: Datei, Ordner mit Kindern, unbeteiligte Pfade" {
 
     try testing.expect((try pathAfterRename(testing.allocator, "/p/dirx/f.zig", "/p/dir", "/p/renamed")) == null);
     try testing.expect((try pathAfterRename(testing.allocator, "/q/other", "/p/dir", "/p/renamed")) == null);
+}
+
+fn joinT(root: []const u8, sub: []const u8) ![]u8 {
+    return std.fs.path.join(testing.allocator, &.{ root, sub });
+}
+
+test "createEntry: Datei und Ordner anlegen, vorhandenes nie überschreiben" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root);
+
+    const f = try createEntry(testing.allocator, root, "neu.txt", false);
+    defer testing.allocator.free(f);
+    try testing.expectEqualStrings(std.fs.path.basename(f), "neu.txt");
+    try tmp.dir.access("neu.txt", .{});
+    try testing.expectError(error.PathAlreadyExists, createEntry(testing.allocator, root, "neu.txt", false));
+
+    const d = try createEntry(testing.allocator, root, "ordner", true);
+    defer testing.allocator.free(d);
+    const st = try tmp.dir.statFile("ordner");
+    try testing.expectEqual(std.fs.File.Kind.directory, st.kind);
+
+    try testing.expectError(error.InvalidName, createEntry(testing.allocator, root, "", false));
+    try testing.expectError(error.InvalidName, createEntry(testing.allocator, root, "a/b", false));
+}
+
+test "uniqueDestination: frei → gleicher Name, belegt → ' copy', dann ' copy 2'" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root);
+
+    const free_path = try uniqueDestination(testing.allocator, root, "a.txt");
+    defer testing.allocator.free(free_path);
+    try testing.expectEqualStrings("a.txt", std.fs.path.basename(free_path));
+
+    try tmp.dir.writeFile(.{ .sub_path = "a.txt", .data = "1" });
+    const c1 = try uniqueDestination(testing.allocator, root, "a.txt");
+    defer testing.allocator.free(c1);
+    try testing.expectEqualStrings("a copy.txt", std.fs.path.basename(c1));
+
+    try tmp.dir.writeFile(.{ .sub_path = "a copy.txt", .data = "2" });
+    const c2 = try uniqueDestination(testing.allocator, root, "a.txt");
+    defer testing.allocator.free(c2);
+    try testing.expectEqualStrings("a copy 2.txt", std.fs.path.basename(c2));
+
+    try tmp.dir.makePath("dir");
+    const cd = try uniqueDestination(testing.allocator, root, "dir");
+    defer testing.allocator.free(cd);
+    try testing.expectEqualStrings("dir copy", std.fs.path.basename(cd));
+}
+
+test "copyPath: Datei ins selbe Verzeichnis dupliziert, Ordner rekursiv" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root);
+    try tmp.dir.writeFile(.{ .sub_path = "a.txt", .data = "hallo" });
+    try tmp.dir.makePath("d/sub");
+    try tmp.dir.writeFile(.{ .sub_path = "d/sub/x.txt", .data = "x" });
+    try tmp.dir.makePath("ziel");
+
+    const a = try joinT(root, "a.txt");
+    defer testing.allocator.free(a);
+    const dup = try copyPath(testing.allocator, a, root);
+    defer testing.allocator.free(dup);
+    try testing.expectEqualStrings("a copy.txt", std.fs.path.basename(dup));
+    const content = try tmp.dir.readFileAlloc(testing.allocator, "a copy.txt", 100);
+    defer testing.allocator.free(content);
+    try testing.expectEqualStrings("hallo", content);
+
+    const d = try joinT(root, "d");
+    defer testing.allocator.free(d);
+    const ziel = try joinT(root, "ziel");
+    defer testing.allocator.free(ziel);
+    const copied = try copyPath(testing.allocator, d, ziel);
+    defer testing.allocator.free(copied);
+    try testing.expectEqualStrings("d", std.fs.path.basename(copied));
+    try tmp.dir.access("ziel/d/sub/x.txt", .{});
+    try tmp.dir.access("d/sub/x.txt", .{}); // Quelle bleibt
+}
+
+test "movePath: verschiebt, gleiches Verzeichnis ist No-op" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root);
+    try tmp.dir.writeFile(.{ .sub_path = "a.txt", .data = "1" });
+    try tmp.dir.makePath("ziel");
+    const a = try joinT(root, "a.txt");
+    defer testing.allocator.free(a);
+    const ziel = try joinT(root, "ziel");
+    defer testing.allocator.free(ziel);
+
+    const same = try movePath(testing.allocator, a, root);
+    defer testing.allocator.free(same);
+    try testing.expectEqualStrings(a, same);
+    try tmp.dir.access("a.txt", .{});
+
+    const moved = try movePath(testing.allocator, a, ziel);
+    defer testing.allocator.free(moved);
+    try tmp.dir.access("ziel/a.txt", .{});
+    try testing.expectError(error.FileNotFound, tmp.dir.access("a.txt", .{}));
+}
+
+test "trashPath: Datei landet in files/, info/ bekommt trashinfo mit Pfad" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root);
+    try tmp.dir.writeFile(.{ .sub_path = "weg.txt", .data = "bye" });
+    try tmp.dir.makePath("ordner/inner");
+    const trash = try joinT(root, "Trash");
+    defer testing.allocator.free(trash);
+    const f = try joinT(root, "weg.txt");
+    defer testing.allocator.free(f);
+
+    const name = try trashPath(testing.allocator, f, trash);
+    defer testing.allocator.free(name);
+    try testing.expectEqualStrings("weg.txt", name);
+    try testing.expectError(error.FileNotFound, tmp.dir.access("weg.txt", .{}));
+    try tmp.dir.access("Trash/files/weg.txt", .{});
+    const info = try tmp.dir.readFileAlloc(testing.allocator, "Trash/info/weg.txt.trashinfo", 4096);
+    defer testing.allocator.free(info);
+    try testing.expect(std.mem.startsWith(u8, info, "[Trash Info]\nPath="));
+    try testing.expect(std.mem.indexOf(u8, info, "weg.txt\n") != null);
+    try testing.expect(std.mem.indexOf(u8, info, "DeletionDate=20") != null);
+
+    // Gleicher Name nochmal → eindeutiger Name im Papierkorb, Ordner rekursiv
+    try tmp.dir.writeFile(.{ .sub_path = "weg.txt", .data = "again" });
+    const name2 = try trashPath(testing.allocator, f, trash);
+    defer testing.allocator.free(name2);
+    try testing.expect(!std.mem.eql(u8, name, name2));
+    const o = try joinT(root, "ordner");
+    defer testing.allocator.free(o);
+    const oname = try trashPath(testing.allocator, o, trash);
+    defer testing.allocator.free(oname);
+    try tmp.dir.access("Trash/files/ordner/inner", .{});
 }

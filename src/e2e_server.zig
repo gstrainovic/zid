@@ -363,7 +363,7 @@ fn buttonFromName(name: []const u8) ?@import("wio").Button {
         .{ "up", .up },             .{ "down", .down },           .{ "left", .left },
         .{ "right", .right },       .{ "home", .home },           .{ "end", .end },
         .{ "page_up", .page_up },   .{ "page_down", .page_down }, .{ "f1", .f1 },
-        .{ "f2", .f2 },
+        .{ "f2", .f2 },             .{ "f5", .f5 },               .{ "space", .space },
     };
     for (named) |entry| {
         if (std.mem.eql(u8, name, entry[0])) return entry[1];
@@ -486,20 +486,21 @@ fn explorerEntries(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     const fx = &ctx.ui_system.file_explorer;
     var buf = std.Io.Writer.Allocating.init(dc.arena());
     try buf.writer.print(
-        \\{{"viewport": {{"x": {d:.1}, "y": {d:.1}, "w": {d:.1}, "h": {d:.1}}}, "row_height": {d:.1}, "scroll": {d:.1}, "renaming": {}, "menu_open": {}, "menu_x": {d:.1}, "menu_y": {d:.1}, "entries": [
+        \\{{"viewport": {{"x": {d:.1}, "y": {d:.1}, "w": {d:.1}, "h": {d:.1}}}, "row_height": {d:.1}, "scroll": {d:.1}, "renaming": {}, "creating": {}, "menu_open": {}, "menu_x": {d:.1}, "menu_y": {d:.1}, "entries": [
     , .{
         fx.viewport_x,                                     fx.viewport_y,
         fx.viewport_width,                                 fx.viewport_height,
         @import("ui/file_explorer.zig").ROW_HEIGHT,        fx.scroll_offset_y,
-        fx.isRenaming(),                                   fx.context_menu != null,
+        fx.isRenaming(),                                   fx.isCreating(),
+        fx.context_menu != null,
         if (fx.context_menu) |m| m.x else @as(f32, 0),     if (fx.context_menu) |m| m.y else @as(f32, 0),
     });
     for (fx.visible_entries.items, 0..) |e, i| {
         const node = fx.nodes.items[e.node_index];
         if (i > 0) try buf.writer.writeAll(", ");
         try buf.writer.print(
-            \\{{"index": {d}, "name": "{s}", "path": "{s}", "is_folder": {}, "expanded": {}, "depth": {d}}}
-        , .{ i, node.name, node.path, node.is_folder, e.is_expanded, e.depth });
+            \\{{"index": {d}, "name": "{s}", "path": "{s}", "is_folder": {}, "expanded": {}, "depth": {d}, "selected": {}, "cursor": {}}}
+        , .{ i, node.name, node.path, node.is_folder, e.is_expanded, e.depth, fx.isNodeSelected(e.node_index), fx.selected_index == i });
     }
     try buf.writer.writeAll("]}");
     return buf.written();
@@ -637,6 +638,9 @@ fn uiState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
         try buf.writer.writeAll("null");
     }
     try buf.writer.print(", \"pane_count\": {d}, \"agent_confirm_pending\": {}", .{ countLeaves(ui.root_pane), ui.agent_confirm != null });
+    try buf.writer.print(", \"clipboard_text\": \"{s}\", \"explorer_selection_count\": {d}, \"dialog_focused\": {d}", .{
+        ui.last_clipboard_text orelse "", ui.file_explorer.selectionCount(), if (ui.active_dialog) |ad| ad.focused else 0,
+    });
     try buf.writer.writeAll(", \"all_tabs\": [");
     var first_tab = true;
     try writeAllTabs(ui.root_pane, &buf.writer, &first_tab);

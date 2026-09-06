@@ -21,9 +21,10 @@ pub const Dialog = struct {
     actions: []const DialogAction,
     
     pub fn render(
-        self: @This(), 
-        theme: ui_mod.Theme, 
+        self: @This(),
+        theme: ui_mod.Theme,
         mouse_pressed: bool,
+        focused: usize,
     ) ?DialogResult {
         var result: ?DialogResult = null;
 
@@ -58,6 +59,7 @@ pub const Dialog = struct {
 
                 // Message
                 clay.text(self.message, .{ .font_size = 20, .color = theme.muted });
+                clay.text("Enter bestätigt · Esc bricht ab · Tab wechselt · Anfangsbuchstabe wählt", .{ .font_size = 14, .color = theme.muted });
 
                 // Actions
                 clay.UI()(.{
@@ -68,14 +70,16 @@ pub const Dialog = struct {
                         .child_gap = 12,
                     },
                 })({
-                    for (self.actions) |action| {
+                    for (self.actions, 0..) |action, i| {
                         const btn_id = clay.ElementId.ID(action.label);
                         const is_hovered = clay.pointerOver(btn_id);
-                        
+                        const is_focused = i == focused;
+
                         clay.UI()(.{
                             .id = btn_id,
                             .layout = .{ .padding = .{ .left = 16, .right = 16, .top = 8, .bottom = 8 } },
                             .background_color = if (is_hovered) theme.secondary else theme.primary,
+                            .border = .{ .width = .all(2), .color = if (is_focused) theme.border_focus else .{ 0, 0, 0, 0 } },
                             .corner_radius = .{ .top_left = 4, .top_right = 4, .bottom_left = 4, .bottom_right = 4 },
                         })({
                             clay.text(action.label, .{ .font_size = 18, .color = theme.text });

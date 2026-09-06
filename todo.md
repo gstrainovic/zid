@@ -30,28 +30,6 @@ Belege aus der Sitzung vom 06.09.2026 (Log mit Panic in `gpu_renderer.zig:305`) 
 
 ## Explorer
 
-- [ ] **P1 Löschen per Tastatur bestätigen**: der Delete-Dialog (und alle anderen Dialoge) reagiert nur
-      auf Maus — Enter oder `d` bestätigt, Escape bricht ab, Tab wechselt den Button, Fokus sichtbar.
-      `dialog.zig` hat kein Key-Handling, `UI.handleKeyPress` blockt bei offenem Dialog nur die Kürzel.
-- [ ] **P1 Buchstaben-Kürzel im Explorer-Scope** wie nvim-tree/yazi/Zed: `d` löschen, `r` umbenennen,
-      `a` neue Datei, `A` neuer Ordner, `y` kopieren, `x` ausschneiden, `p` einfügen, `c` Pfad
-      kopieren, `R` neu laden. Heute landet `d` im Editor und macht die Datei dirty (Log:
-      `handleChar: 'd'` direkt nach dem Explorer-Klick). Voraussetzung: mit `explorer_focused` gehen
-      Tasten nicht mehr an den Editor, und der Fokus ist sichtbar (Rahmen/Hintergrund der Sidebar).
-- [ ] **P1 Löschen in den Papierkorb** (freedesktop Trash / `gio trash`) statt unwiderruflich;
-      Dialogtext entsprechend („In den Papierkorb verschieben“), Undo im Idealfall.
-- [ ] **P2 Mehrfachauswahl**: Ctrl+Klick toggelt, Shift+Klick markiert einen Bereich (der User hat im
-      Log mehrfach Shift gedrückt), Ctrl+A im Explorer; Löschen/Ausschneiden/Kopieren wirken auf die
-      Auswahl, Dialog nennt die Anzahl. `selected_index` ist heute ein einzelner Index.
-- [ ] **P2 Tastaturnavigation**: ↑/↓ markieren, ←/→ zu-/aufklappen bzw. zum Elternordner, Enter
-      öffnet, Space öffnet als Vorschau, Home/End, PageUp/PageDown, Tipp-zum-Springen (type-ahead).
-- [ ] **P2 Ordner-Klick markiert nicht**: `renderTreeEntry` setzt für Ordner nur `pending_toggle`,
-      `selectEntry` läuft nur für Dateien — F2/Entf auf Ordnern gehen erst nach Rechtsklick.
-- [ ] **P2 Neue Datei / neuer Ordner** im Kontextmenü, per Kürzel und mit Inline-Eingabe des Namens
-      am richtigen Ort (Ctrl+N legt heute „New File.txt“ ohne Ort und ohne Namensabfrage an).
-- [ ] **P2 Kontextmenü erweitern**: New File, New Folder, Cut, Copy, Paste, Duplicate, Copy Path,
-      Copy Relative Path, Reveal in File Manager, Open in Terminal, Collapse All (heute nur
-      Rename/Delete).
 - [ ] **P2 Vorschau-Tabs**: Einfachklick öffnet heute sofort einen festen Tab; Zed/VS Code öffnen
       einen Preview-Tab (kursiv, wird vom nächsten Klick ersetzt), Doppelklick oder Bearbeiten macht
       ihn fest. Gehört zusammen mit der Tab-Leiste umgesetzt.
@@ -59,8 +37,8 @@ Belege aus der Sitzung vom 06.09.2026 (Log mit Panic in `gpu_renderer.zig:305`) 
       Ellipsis + Tooltip mit vollem Pfad, oder Sidebar horizontal scrollen; Sidebar-Breite merken.
 - [ ] **P3 Versteckte Dateien** (`.`-Einträge werden in `loadDirectory` übersprungen) und
       .gitignore-Einträge umschaltbar anzeigen (ausgegraut statt versteckt).
-- [ ] **P3 Collapse All**, „Reveal active file“ (Explorer folgt dem aktiven Tab, klappt auf),
-      Filterfeld (Tippen filtert den Baum).
+- [ ] **P3 „Reveal active file“** (Explorer folgt dem aktiven Tab, klappt auf), Filterfeld
+      (Tippen filtert den Baum).
 - [ ] **P3 Drag & Drop** zum Verschieben (mit Bestätigung), Duplizieren.
 - [ ] **P3 Icons nach Dateityp** (heute Blitz/Seite), Git-Status-Farbe auch für Ordner
       (Propagation nach oben).
