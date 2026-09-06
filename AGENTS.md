@@ -195,6 +195,28 @@ echo -e "open ./README.md\nget-state\nshutdown" | zig build run -- --interactive
 - Anzeige: Assistant-Aufrufe als `🔧 name(args)`, Ergebnisse als `✅/⚠️ name → JSON…`.
 - Kein `run_shell` (bewusst, erst mit Sandbox). Kein Diff-Review vor dem Schreiben (Zed zeigt
   Agent-Änderungen erst als Vorschlag); wäre der nächste Schritt nach dem Dock.
+- **Kontextgrenze:** llama-server (`-c 8192`) kürzt nicht still, sondern antwortet HTTP 400
+  `exceed_context_size_error` (gemessen 06.09.2026: 24 017 Tokens abgelehnt; ein 8014-Token-Prompt
+  brauchte auf der P1000 123 s). `agent.zig` macht daraus `error.ContextTooLong`, der Chat zeigt
+  einen verständlichen Hinweis. Vorbeugend schickt `submitCompletion` nur das jüngste Stück der
+  Historie, das in `history_budget_chars` (12 000 Zeichen ≈ 3–4 k Tokens; Tools-Schema 6 501 Zeichen
+  und Systemprompt kosten ~2 k Tokens) passt: `src/ai/history.zig` (`keepFrom`, unit-getestet)
+  behält die aktuelle Frage immer und beginnt nie mit einem verwaisten `tool`-Ergebnis. Die
+  Anzeige im Chat bleibt vollständig. `read_file` liefert weiter bis 200 KB; eine so große Datei
+  sprengt das Fenster trotzdem, dann kommt der Hinweis.
+- **Gemessene Grenzen (Bench `~/projects/bitnet-colibri-bench`, Engine b10524 Commit 9ee9fc0,
+  Qwen3-4B-Instruct-2507-Q4_K_M sha256 3605803b982cb64a…):** Ein-Datei-Fix gelingt; Ursachen über
+  einen Import hinweg scheitern (Qwen3 bricht gefahrlos ab, Llama-3.2-3B schrieb destruktiv). Der
+  Agent soll nur in Git-Repos ändern: nur die Bestätigungsdialoge sichern, eine Warnung außerhalb
+  eines Repos ist eine offene Produktentscheidung. Prompt-Verarbeitung auf der P1000 ~96 tok/s.
+- **Temperatur bleibt 0.7, auch mit Tools** (negatives Ergebnis 06.09.2026): `bench/agent_eval.py`
+  Werkzeugwahl bei 0.7 dreimal 10/10, bei 0.0 ebenfalls 10/10 — kein Unterschied, keine Sonderregel.
+- **CPU ohne `-tb`** (negatives Ergebnis 06.09.2026, `-dev none -ngl 0`, Prompt 6×-Absatz):
+  `-t 8` prompt 52,9 tok/s / gen 10,8 tok/s; `-t 8 -tb 12` prompt 50,6 / gen 11,5 — im Rauschen,
+  `agent.zig` bleibt bei `-t min(Kerne, 8)`.
+- Nach jeder Änderung an `agent.zig` muss `python3 scripts/e2e_ai_tools.py` grün bleiben; Messzahlen
+  immer mit Engine-Commit und Modell-sha256 notieren, Referenz
+  `bitnet-colibri-bench/results/linux-i7-8850H-gpu-und-neue-modelle.md`.
 - RPCs: `focus_chat` (Chat-Tab in irgendeinem Pane aktivieren), `file_text(path)` (Inhalt des
   offenen Buffers), `ui_state.pane_count`,
   `ui_state.all_tabs`, `ui_state.agent_confirm_pending`, `chat_state.tool_rounds/pending_tools`,
