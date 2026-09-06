@@ -1,351 +1,183 @@
-//! LSP Client — JSON-RPC über stdio.
+//! LSP-Client: JSON-RPC über stdio zu einem Language Server (zls).
 //!
-//! Dedicated Reader Thread für stdout → JSON-RPC parsen → result_queue.
-//! Schreiben auf stdin = synchron (buffered, Main Thread oder Worker).
-
+//! Schreiben passiert synchron auf dem Main-Thread (kleine Nachrichten, gepufferte Pipe).
+//! Ein Reader-Thread liest stdout, zerlegt die Rahmen (`lsp_proto`) und schiebt Antworten
+//! als `TaskResult` in die Scheduler-Ergebnisschlange; Server-Requests bekommen sofort
+//! `result: null`, damit der Server nie auf uns wartet. Dokumente werden vor jeder Anfrage
+//! komplett synchronisiert (didOpen/didChange Full) — kein Verkehr pro Tastendruck.
 const std = @import("std");
 const scheduler_mod = @import("scheduler");
+const proto = @import("lsp_proto");
 
 const log = std.log.scoped(.lsp_client);
 
-pub const ResultTag = enum {
-    lsp_completion,
-    lsp_diagnostics,
-    lsp_hover,
-    lsp_definition,
-    lsp_show_message,
-};
+pub const Method = enum { initialize, definition, hover, completion, other };
 
 pub const LspClient = struct {
     allocator: std.mem.Allocator,
     child: std.process.Child,
-    should_stop: std.atomic.Value(bool),
     scheduler: *scheduler_mod.Scheduler,
-    thread: std.Thread,
-    next_id: std.atomic.Value(i32),
+    thread: ?std.Thread = null,
+    next_id: i64 = 1,
+    /// id → Methode, damit die Antwort dem richtigen Tag zugeordnet wird
+    pending: std.AutoHashMapUnmanaged(i64, Method) = .empty,
+    pending_mutex: std.Thread.Mutex = .{},
+    write_mutex: std.Thread.Mutex = .{},
+    /// Geöffnete Dokumente (URI, owned) → Version
+    opened: std.StringHashMapUnmanaged(i64) = .empty,
+    initialized: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
 
     const Self = @This();
 
-    pub fn start(
-        allocator: std.mem.Allocator,
-        scheduler_ptr: *scheduler_mod.Scheduler,
-        cmd: []const []const u8,
-        root_path: []const u8,
-    ) !*Self {
+    /// Server starten (`cmd`, z. B. {"zls"}) und `initialize` für `root_path` schicken.
+    pub fn start(allocator: std.mem.Allocator, sched: *scheduler_mod.Scheduler, cmd: []const []const u8, root_path: []const u8) !*Self {
         const self = try allocator.create(Self);
         errdefer allocator.destroy(self);
+        self.* = .{ .allocator = allocator, .child = std.process.Child.init(cmd, allocator), .scheduler = sched };
+        self.child.stdin_behavior = .Pipe;
+        self.child.stdout_behavior = .Pipe;
+        self.child.stderr_behavior = .Ignore;
+        try self.child.spawn();
+        errdefer {
+            _ = self.child.kill() catch {};
+        }
+        self.thread = try std.Thread.spawn(.{}, runLoop, .{self});
 
-        self.* = .{
-            .allocator = allocator,
-            .child = undefined,
-            .should_stop = std.atomic.Value(bool).init(false),
-            .scheduler = scheduler_ptr,
-            .thread = undefined,
-            .next_id = std.atomic.Value(i32).init(0),
-        };
-
-        var child = std.process.Child.init(cmd, allocator);
-        child.stdout_behavior = .pipe;
-        child.stdin_behavior = .pipe;
-        child.stderr_behavior = .ignore;
-
-        try child.spawn();
-        self.child = child;
-
-        self.thread = std.Thread.spawn(.{}, runLoop, .{self}) catch |err| {
-            self.cleanup();
-            return err;
-        };
-
-        try self.initialize(root_path);
-
+        const root_uri = try proto.pathToUri(allocator, root_path);
+        defer allocator.free(root_uri);
+        const params = try proto.initializeParams(allocator, root_uri);
+        defer allocator.free(params);
+        try self.sendRequest(.initialize, "initialize", params);
         return self;
     }
 
-    fn initialize(self: *Self, root_path: []const u8) !void {
-        try self.sendRequest("initialize", .{
-            .processId = @as(?i32, null),
-            .rootUri = root_path,
-            .capabilities = .{
-                .textDocument = .{
-                    .synchronization = .{
-                        .didSave = true,
-                    },
-                    .completion = .{
-                        .dynamicRegistration = false,
-                        .completionItem = .{
-                            .snippetSupport = false,
-                        },
-                    },
-                    .hover = .{
-                        .dynamicRegistration = false,
-                    },
-                    .definition = .{
-                        .dynamicRegistration = false,
-                    },
-                    .diagnostic = .{
-                        .dynamicRegistration = false,
-                    },
-                },
-                .workspace = .{
-                    .applyEdit = false,
-                    .workspaceFolders = false,
-                },
-            },
-        });
-        try self.sendNotification("initialized", .{});
-    }
-
-    pub fn stop(self: *Self) void {
-        self.should_stop.store(true, .release);
-        self.thread.join();
-    }
-
     pub fn deinit(self: *Self) void {
-        self.stop();
-        self.cleanup();
-    }
-
-    fn cleanup(self: *Self) void {
+        // Prozess zuerst beenden: dann liefert read() 0 und der Thread endet
         _ = self.child.kill() catch {};
-        self.child.wait() catch {};
+        if (self.thread) |t| t.join();
+        _ = self.child.wait() catch {};
+        var it = self.opened.keyIterator();
+        while (it.next()) |k| self.allocator.free(k.*);
+        self.opened.deinit(self.allocator);
+        self.pending.deinit(self.allocator);
         self.allocator.destroy(self);
     }
 
-    fn sendRequest(self: *Self, method: []const u8, params: std.json.Value) !void {
-        const id = self.next_id.fetchAdd(1, .monotonic);
-        const json_body = try std.json.stringifyAlloc(self.allocator, .{
-            .jsonrpc = "2.0",
-            .id = id,
-            .method = method,
-            .params = params,
-        }, .{});
-        defer self.allocator.free(json_body);
-
-        var header_buf: [128]u8 = undefined;
-        const header = std.fmt.bufPrint(&header_buf, "Content-Length: {d}\r\nContent-Type: application/vscode-jsonrpc; charset=utf-8\r\n\r\n", .{json_body.len}) catch return;
-
-        const writer = self.child.stdin.?.writer();
-        try writer.writeAll(header);
-        try writer.writeAll(json_body);
-        try writer.flush();
+    pub fn isReady(self: *const Self) bool {
+        return self.initialized.load(.acquire);
     }
 
-    fn sendNotification(self: *Self, method: []const u8, params: std.json.Value) !void {
-        const json_body = try std.json.stringifyAlloc(self.allocator, .{
-            .jsonrpc = "2.0",
-            .method = method,
-            .params = params,
-        }, .{});
-        defer self.allocator.free(json_body);
-
-        var header_buf: [128]u8 = undefined;
-        const header = std.fmt.bufPrint(&header_buf, "Content-Length: {d}\r\nContent-Type: application/vscode-jsonrpc; charset=utf-8\r\n\r\n", .{json_body.len}) catch return;
-
-        const writer = self.child.stdin.?.writer();
-        try writer.writeAll(header);
-        try writer.writeAll(json_body);
-        try writer.flush();
+    /// Dokument dem Server bekannt machen bzw. seinen Text aktualisieren (Full Sync).
+    pub fn syncDocument(self: *Self, path: []const u8, language_id: []const u8, text: []const u8) !void {
+        const uri = try proto.pathToUri(self.allocator, path);
+        defer self.allocator.free(uri);
+        if (self.opened.getPtr(uri)) |version| {
+            version.* += 1;
+            const params = try proto.didChangeParams(self.allocator, uri, version.*, text);
+            defer self.allocator.free(params);
+            try self.sendNotification("textDocument/didChange", params);
+        } else {
+            const params = try proto.didOpenParams(self.allocator, uri, language_id, text);
+            defer self.allocator.free(params);
+            try self.sendNotification("textDocument/didOpen", params);
+            try self.opened.put(self.allocator, try self.allocator.dupe(u8, uri), 1);
+        }
     }
 
-    pub fn completion(self: *Self, uri: []const u8, position: Position) !void {
-        try self.sendRequest("textDocument/completion", .{
-            .textDocument = .{ .uri = uri },
-            .position = position,
-        });
+    /// `textDocument/definition`; die Antwort kommt als `lsp_definition`-Ergebnis (Payload = JSON).
+    pub fn definition(self: *Self, path: []const u8, line: u32, character: u32) !void {
+        const uri = try proto.pathToUri(self.allocator, path);
+        defer self.allocator.free(uri);
+        const params = try proto.definitionParams(self.allocator, uri, line, character);
+        defer self.allocator.free(params);
+        try self.sendRequest(.definition, "textDocument/definition", params);
     }
 
-    pub fn hover(self: *Self, uri: []const u8, position: Position) !void {
-        try self.sendRequest("textDocument/hover", .{
-            .textDocument = .{ .uri = uri },
-            .position = position,
-        });
+    fn sendRequest(self: *Self, method: Method, name: []const u8, params: []const u8) !void {
+        const id = self.next_id;
+        self.next_id += 1;
+        {
+            self.pending_mutex.lock();
+            defer self.pending_mutex.unlock();
+            try self.pending.put(self.allocator, id, method);
+        }
+        const body = try proto.request(self.allocator, id, name, params);
+        defer self.allocator.free(body);
+        try self.write(body);
     }
 
-    pub fn definition(self: *Self, uri: []const u8, position: Position) !void {
-        try self.sendRequest("textDocument/definition", .{
-            .textDocument = .{ .uri = uri },
-            .position = position,
-        });
+    fn sendNotification(self: *Self, name: []const u8, params: []const u8) !void {
+        const body = try proto.notification(self.allocator, name, params);
+        defer self.allocator.free(body);
+        try self.write(body);
     }
 
-    pub fn didOpen(self: *Self, uri: []const u8, language_id: []const u8, content: []const u8) !void {
-        try self.sendNotification("textDocument/didOpen", .{
-            .textDocument = .{
-                .uri = uri,
-                .languageId = language_id,
-                .text = content,
-            },
-        });
-    }
-
-    pub fn didChange(self: *Self, uri: []const u8, content: []const u8) !void {
-        try self.sendNotification("textDocument/didChange", .{
-            .textDocument = .{
-                .uri = uri,
-                .text = content,
-            },
-            .contentChanges = &[_]std.json.Value{.{ .string = content }},
-        });
+    fn write(self: *Self, body: []const u8) !void {
+        const framed = try proto.frame(self.allocator, body);
+        defer self.allocator.free(framed);
+        self.write_mutex.lock();
+        defer self.write_mutex.unlock();
+        const stdin = self.child.stdin orelse return error.NoStdin;
+        try stdin.writeAll(framed);
     }
 
     fn runLoop(self: *Self) void {
-        var recv_buf: [8192]u8 = undefined;
-        var unparsed: usize = 0;
-
-        while (!self.should_stop.load(.acquire)) {
-            const bytes_read = self.child.stdout.?.read(&recv_buf[unparsed..]) catch |err| {
-                log.err("stdout read error: {}", .{err});
-                break;
+        const stdout = self.child.stdout orelse return;
+        var buf: std.ArrayListUnmanaged(u8) = .empty;
+        defer buf.deinit(self.allocator);
+        var chunk: [16 * 1024]u8 = undefined;
+        while (true) {
+            const n = stdout.read(&chunk) catch |err| {
+                log.debug("stdout read ended: {}", .{err});
+                return;
             };
-
-            if (bytes_read == 0) break;
-
-            unparsed += bytes_read;
-
-            while (true) {
-                const consumed = self.processBuffer(recv_buf[0..unparsed]) catch |err| {
-                    log.err("JSON-RPC parse error: {}", .{err});
-                    break;
-                };
-                if (consumed == 0) break;
-                std.mem.copyForwards(u8, &recv_buf, recv_buf[consumed..unparsed]);
-                unparsed -= consumed;
+            if (n == 0) return;
+            buf.appendSlice(self.allocator, chunk[0..n]) catch return;
+            while (proto.parseFrame(buf.items)) |f| {
+                self.handleBody(f.body);
+                const rest = buf.items.len - f.consumed;
+                std.mem.copyForwards(u8, buf.items[0..rest], buf.items[f.consumed..]);
+                buf.items.len = rest;
             }
-
-            if (unparsed >= recv_buf.len) {
-                log.warn("LSP receive buffer full, draining", .{});
-                unparsed = 0;
-            }
-
-            std.Thread.sleep(std.time.ns_per_ms * 10);
         }
     }
 
-    fn processBuffer(self: *Self, data: []u8) !usize {
-        const sep = "\r\n\r\n";
-        const headers_end = std.mem.indexOf(u8, data, sep) orelse return 0;
-
-        var content_length: usize = 0;
-        var pos: usize = 0;
-        while (pos < headers_end) : (pos += 1) {
-            const line_end = std.mem.indexOfScalar(u8, data[pos..], '\r') orelse break;
-            const line = data[pos..pos + line_end];
-            if (std.mem.startsWith(u8, line, "Content-Length: ")) {
-                const len_str = line["Content-Length: ".len..];
-                content_length = std.fmt.parseInt(usize, len_str, 10) catch break;
+    fn handleBody(self: *Self, body: []const u8) void {
+        const msg = (proto.parseMessage(self.allocator, body) catch return) orelse return;
+        defer msg.deinit(self.allocator);
+        if (msg.method) |m| {
+            if (msg.id) |id| {
+                // Server-Request: mit null beantworten, wir bieten keine dieser Fähigkeiten an
+                log.debug("server request {s} → null", .{m});
+                const resp = proto.nullResponse(self.allocator, id) catch return;
+                defer self.allocator.free(resp);
+                self.write(resp) catch {};
             }
-            pos += line_end + 2;
+            return;
         }
-
-        const body_start = headers_end + sep.len;
-        if (data.len < body_start + content_length) return 0;
-
-        const body = data[body_start..body_start + content_length];
-        try self.handleMessage(body);
-
-        return body_start + content_length;
-    }
-
-    fn handleMessage(self: *Self, body: []u8) !void {
-        var parser = std.json.Parser.init(self.allocator, .{});
-        defer parser.deinit();
-
-        const parsed = try parser.parse(body);
-        defer parsed.deinit();
-
-        const method = if (parsed.value.get("method")) |m| m.string else null;
-        const id = parsed.value.get("id");
-        const params = if (parsed.value.get("params")) |p| p else null;
-        const result = if (parsed.value.get("result")) |r| r else null;
-        const error_val = if (parsed.value.get("error")) |e| e else null;
-        _ = error_val;
-
-        if (method) |m| {
-            if (std.mem.eql(u8, m, "textDocument/publishDiagnostics")) {
-                try self.handlePublishDiagnostics(params.?);
-            } else if (std.mem.eql(u8, m, "window/showMessage")) {
-                try self.handleShowMessage(params.?);
-            }
-        }
-
-        if (id != null and result != null) {
-            const id_num = if (id.?.value == .number) id.?.number else return;
-            try self.handleResponse(id_num, result.?, method orelse "");
-        }
-    }
-
-    fn handlePublishDiagnostics(self: *Self, params: std.json.Value) !void {
-        const uri = if (params.get("uri")) |u| u.string else return;
-        const diagnostics = if (params.get("diagnostics")) |d| d else return;
-
-        const payload = try std.json.stringifyAlloc(self.allocator, .{
-            .uri = uri,
-            .diagnostics = diagnostics,
-        }, .{});
-        defer self.allocator.free(payload);
-
-        const tag: scheduler_mod.ResultTag = .lsp_diagnostics;
-        const result = scheduler_mod.TaskResult{
-            .tag = tag,
-            .payload = payload,
-            .allocator = self.allocator,
+        const id = msg.id orelse return;
+        const method = blk: {
+            self.pending_mutex.lock();
+            defer self.pending_mutex.unlock();
+            const kv = self.pending.fetchRemove(id) orelse break :blk Method.other;
+            break :blk kv.value;
         };
-
-        if (!self.scheduler.pushResult(result)) {
-            self.allocator.free(payload);
-            log.warn("result queue full", .{});
+        switch (method) {
+            .initialize => {
+                self.initialized.store(true, .release);
+                self.sendNotification("initialized", "{}") catch {};
+            },
+            .definition => self.push(.lsp_definition, msg.result orelse "null"),
+            .hover => self.push(.lsp_hover, msg.result orelse "null"),
+            .completion => self.push(.lsp_completion, msg.result orelse "null"),
+            .other => {},
         }
     }
 
-    fn handleShowMessage(self: *Self, params: std.json.Value) !void {
-        const msg_type = if (params.get("type")) |t| t.number else return;
-        const message = if (params.get("message")) |m| m.string else return;
-
-        const payload = try std.json.stringifyAlloc(self.allocator, .{
-            .type = msg_type,
-            .message = message,
-        }, .{});
-        defer self.allocator.free(payload);
-
-        const result = scheduler_mod.TaskResult{
-            .tag = .lsp_show_message,
-            .payload = payload,
-            .allocator = self.allocator,
-        };
-
-        if (!self.scheduler.pushResult(result)) {
+    fn push(self: *Self, tag: scheduler_mod.ResultTag, json: []const u8) void {
+        const payload = self.allocator.dupe(u8, json) catch return;
+        if (!self.scheduler.pushResult(.{ .tag = tag, .payload = payload, .allocator = self.allocator })) {
             self.allocator.free(payload);
-            log.warn("result queue full", .{});
         }
     }
-
-    fn handleResponse(self: *Self, _: f64, result: std.json.Value, method: []const u8) !void {
-        const tag: scheduler_mod.ResultTag = if (std.mem.eql(u8, method, "textDocument/completion"))
-            .lsp_completion
-        else if (std.mem.eql(u8, method, "textDocument/hover"))
-            .lsp_hover
-        else if (std.mem.eql(u8, method, "textDocument/definition"))
-            .lsp_definition
-        else return;
-
-        const payload = try std.json.stringifyAlloc(self.allocator, result, .{});
-        defer self.allocator.free(payload);
-
-        const task_result = scheduler_mod.TaskResult{
-            .tag = tag,
-            .payload = payload,
-            .allocator = self.allocator,
-        };
-
-        if (!self.scheduler.pushResult(task_result)) {
-            self.allocator.free(payload);
-            log.warn("result queue full", .{});
-        }
-    }
-};
-
-pub const Position = struct {
-    line: u32,
-    character: u32,
 };
