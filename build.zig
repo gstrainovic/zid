@@ -297,6 +297,16 @@ pub fn build(b: *std.Build) void {
     lsp_client_mod.addImport("lsp_proto", lsp_proto_mod);
     exe_mod.addImport("lsp_client", lsp_client_mod);
 
+    const ai_paths_mod = b.createModule(.{
+        .root_source_file = b.path("src/ai/paths.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    exe_mod.addImport("ai_paths", ai_paths_mod);
+    const ai_paths_tests = b.addTest(.{ .root_module = ai_paths_mod });
+    const run_ai_paths_tests = b.addRunArtifact(ai_paths_tests);
+    run_ai_paths_tests.has_side_effects = true;
+
     const ai_history_mod = b.createModule(.{
         .root_source_file = b.path("src/ai/history.zig"),
         .target = target,
@@ -481,6 +491,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_lsp_proto_tests.step);
     test_step.dependOn(&run_device_select_tests.step);
     test_step.dependOn(&run_ai_history_tests.step);
+    test_step.dependOn(&run_ai_paths_tests.step);
     test_step.dependOn(&run_ai_tools_tests.step);
 
     const run_word_wrap_tests = b.addRunArtifact(word_wrap_tests);

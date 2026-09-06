@@ -8,11 +8,11 @@ verändert; es liefert nur die Messungen und den Regressionstest.
 ## Ausgangslage
 
 `vulkan-ed` hat den Kern der Messungen übernommen. Belegt in
-`../vulkan-ed/src/ai/agent.zig`, `../vulkan-ed/src/ui/mod.zig:194-199` und der
+`src/ai/agent.zig`, `src/ui/mod.zig:194-199` und der
 `AGENTS.md` dort (Abschnitte „KI-Chat" und „Agent-Werkzeuge"):
 
 - Standardmodell Qwen3-4B-Instruct-2507 Q4_K_M, Engine llama.cpp-Vulkan
-  b10524 unter `~/projects/ki/llama.cpp-vulkan/`.
+  b10524 unter `engines/llama.cpp-vulkan/`.
 - Serverstart `--jinja -c 8192 --log-disable`, GPU mit `-dev VulkanN -ngl 99`,
   Gerätewahl per `device_select.zig` (diskrete GPU ab 3 GB, iGPU übersprungen).
 - Natives OpenAI-Tool-Calling, ein Endpunkt auf Port 8080.

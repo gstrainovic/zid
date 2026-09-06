@@ -124,9 +124,11 @@ echo -e "open ./README.md\nget-state\nshutdown" | zig build run -- --interactive
 ## KI-Chat (llama-server / Ollama)
 
 - **Backend-Wahl beim Start** (`UI.init`, sofern nicht `--ai=off`): Standard ist der
-  llama.cpp-Vulkan-Build `~/projects/ki/llama.cpp-vulkan/build/bin/llama-server` mit
-  `~/projects/ki/BitNet/models/_compare/Qwen3-4B-Instruct-2507-Q4_K_M.gguf`. Fehlt der Build,
-  Fallback auf Ollama mit `gemma4:e2b`. `LLAMA_SERVER_PATH` (Pfad oder `ollama`) und
+  llama.cpp-Vulkan-Build `engines/llama.cpp-vulkan/build/bin/llama-server` mit
+  `models/Qwen3-4B-Instruct-2507-Q4_K_M.gguf`, beides relativ zur Repo-Wurzel (`src/ai/paths.zig`,
+  unit-getestet: Wurzel aus `<repo>/zig-out/bin` der ausführbaren Datei, sonst das
+  Arbeitsverzeichnis; nichts mehr über `$HOME`). Fehlt der Build, Fallback auf Ollama mit
+  `gemma4:e2b`. `LLAMA_SERVER_PATH` (Pfad oder `ollama`) und
   `LLAMA_MODEL_PATH` überschreiben. Der Init-Block war seit Commit 8a5c7fb auskommentiert.
 - **Warum Qwen3-4B:** Messung auf diesem Laptop (i7-8850H, Quadro P1000 4 GB) mit der Frage
   "hallo, was kannst du alles?": gemma4:e2b über Ollama 232 s für 1022 Tokens (4,4 tok/s, das
@@ -158,6 +160,42 @@ echo -e "open ./README.md\nget-state\nshutdown" | zig build run -- --interactive
   erstes Delta 2,3 s, PONG 0,8 s.
 - Keine Unit-Tests für `ai_chat.zig`: die Datei importiert `components/textarea.zig`, das
   `../../editor/actions.zig` zieht, also kein eigenes Test-Root möglich. Logik dort klein halten.
+
+## Engines und Modelle (`engines/`, `models/`, `llm-bench/`)
+
+Seit 06.09.2026 liegt alles im Repo; `~/projects/ki` und das separate Bench-Repo gibt es nicht mehr.
+
+- **Layout:** `engines/BitNet` (Submodul, gepinnt `01eb415`, Submodul `3rdparty/llama.cpp`
+  `1f86f05` = b3962, `.gitmodules` mit `ignore = dirty`, weil `src/ggml-bitnet-mad.cpp` den
+  lokalen Patch `llm-bench/patches/bitnet-mad-const-y_col.patch` trägt) und
+  `engines/llama.cpp-vulkan` (Submodul, `9ee9fc0` = b10524, Build mit `GGML_VULKAN=ON`). Die Builds
+  liegen unbeobachtet in `engines/*/build/`. `models/` hält alle GGUFs flach (per `*.gguf`
+  ignoriert, nie committen), das BitNet-Referenzmodell unter
+  `models/bitnet-b1.58-2B-4T/ggml-model-i2_s.gguf`. In `engines/BitNet/models/` zeigen zwei
+  Symlinks (`_compare`, `BitNet-b1.58-2B-4T`) auf `models/`, damit BitNets eigene Skripte laufen.
+- **`llm-bench/`** ist das frühere Repo `bitnet-colibri-bench` als `git subtree` (Historie
+  erhalten, Rohlogs unter `results/logs/`). `results/*.md` sind historische Protokolle und werden
+  nicht angefasst; `bench/olmoe_*.py` bleiben als Messprotokoll (colibri ist gelöscht).
+  `llm-bench/setup/serve-coding-agent.sh` und `setup/linux.sh` rechnen mit den Repo-Pfaden.
+- **Die Engine ist gepinnt, und das ist keine Vorsicht.** Der aktuelle Stand von
+  microsoft/BitNet zeigt mit seinem Submodul auf einen Fork-Branch, mit dem BitNet-b1.58-2B-4T
+  unbrauchbar ist (Endlosschleife, Perplexity ×3,7, Werkzeugwahl 0/10) — bei unauffälligem
+  Durchsatz. Vor jeder Messung `./engines/BitNet/build/bin/llama-bench -m <i2_s.gguf> -p 8 -n 8
+  -r 1`: `I2_S - 2 bpw ternary` in der Modellspalte heißt brauchbar, `Q1_0` heißt nicht messen.
+- **BitNet braucht `--override-kv tokenizer.ggml.pre=str:llama-bpe`** (dem GGUF fehlt das
+  Feld; ohne Override zerfallen Werkzeugnamen, 8–9/10 → 4/10). Nur für BitNet.
+- **Feste Engine-Zuordnung:** BitNet i2_s nur auf der gepinnten BitNet-Engine (auf b10524 ist
+  i2_s kaputt); Qwen3/Phi-4/Gemma-3 nur auf b10524 (b3962 kennt die Architekturen nicht und hat
+  kein taugliches Vulkan); Llama-3.2-3B läuft auf beiden und ist die Brücke (tg64 13,64 gegen
+  12,22, pp128 36,73 gegen 49,30) — Zahlen nie ohne diese Verschiebung über die Engine-Grenze
+  vergleichen.
+- **Jede Zahl braucht drei Kennungen:** Engine-Commit, Submodul-Commit, Modell-sha256
+  (Referenz BitNet `4221b252…`, 1 187 801 280 Bytes; Perplexity nur mit `llm-bench/bench/ppl-corpus.txt`
+  bei `-c 512`). Entscheidungen des Projektinhabers (keine Fehlerberichte an fremde Projekte, keine
+  weiteren Läufe) und die Liste „nicht erneut aufrollen“ stehen in `llm-bench/CLAUDE.md`.
+- **Standardmodell des Chats** ist Qwen3-4B-Instruct-2507 (Pflicht); Llama-3.2-3B und das
+  BitNet-Referenzmodell sind sinnvoll; die fünf reinen Bench-Modelle (Qwen3.5-4B/2B, xLAM,
+  Gemma-3, Phi-4-mini, ~10 GB) bleiben, bis der Projektinhaber entscheidet.
 
 ## Agent-Werkzeuge: der Agent kann, was der Editor kann
 

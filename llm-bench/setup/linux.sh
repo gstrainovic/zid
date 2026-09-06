@@ -1,18 +1,21 @@
 #!/usr/bin/env bash
-# Baut BitNet und colibri auf Linux und holt die Modelle, mit denen auf der
+# Baut die gepinnte BitNet-Engine auf Linux und holt die Modelle, mit denen auf der
 # Windows-Kiste gemessen wurde. Idempotent: was schon da ist, wird uebersprungen.
+# Seit 06.09.2026 liegt alles im vulkan-ed-Repo: Engine unter engines/BitNet
+# (Submodul), Modelle flach unter models/ (colibri wurde geloescht).
 #
-#   ./setup/linux.sh [zielverzeichnis]
+#   ./setup/linux.sh [repo-wurzel]
 #
 # Vorher: build-essential (oder clang), cmake >= 3.22, ninja, git, python3.
-# Braucht rund 25 GB Platte; OLMoE ist der grosse Posten.
+# Braucht rund 5 GB Platte.
 set -euo pipefail
 
-ROOT="${1:-$HOME/projects/ki}"
 BENCH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="${1:-$(cd "$BENCH_DIR/.." && pwd)}"
+MODELS="$ROOT/models"
 
-mkdir -p "$ROOT"
-cd "$ROOT"
+mkdir -p "$ROOT/engines" "$MODELS/bitnet-b1.58-2B-4T"
+cd "$ROOT/engines"
 
 say() { printf '\n=== %s\n' "$*"; }
 
@@ -104,22 +107,26 @@ for prog in llama-cli llama-server llama-bench llama-quantize; do
     [ -x "build/bin/$prog" ] || { echo "fehlt nach dem Bauen: build/bin/$prog" >&2; exit 1; }
 done
 
-say "Modelle holen"
-mkdir -p models/BitNet-b1.58-2B-4T models/_compare
-if [ ! -s models/BitNet-b1.58-2B-4T/ggml-model-i2_s.gguf ]; then
-    curl -L --retry 3 -o models/BitNet-b1.58-2B-4T/ggml-model-i2_s.gguf \
+say "Modelle holen (nach $MODELS)"
+BITNET_GGUF="$MODELS/bitnet-b1.58-2B-4T/ggml-model-i2_s.gguf"
+if [ ! -s "$BITNET_GGUF" ]; then
+    curl -L --retry 3 -o "$BITNET_GGUF" \
         https://huggingface.co/microsoft/BitNet-b1.58-2B-4T-gguf/resolve/main/ggml-model-i2_s.gguf
 fi
 # Vergleichsmodell: gleiche Engine, gewoehnliche 4-Bit-Quantisierung.
-if [ ! -s models/_compare/Llama-3.2-3B-Instruct-Q4_K_M.gguf ]; then
-    curl -L --retry 3 -o models/_compare/Llama-3.2-3B-Instruct-Q4_K_M.gguf \
+if [ ! -s "$MODELS/Llama-3.2-3B-Instruct-Q4_K_M.gguf" ]; then
+    curl -L --retry 3 -o "$MODELS/Llama-3.2-3B-Instruct-Q4_K_M.gguf" \
         https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf
 fi
+# BitNets eigene Skripte erwarten models/ im Engine-Ordner: zwei Symlinks auf models/
+mkdir -p models
+[ -e models/_compare ] || ln -s ../../../models models/_compare
+[ -e models/BitNet-b1.58-2B-4T ] || ln -s ../../../models/bitnet-b1.58-2B-4T models/BitNet-b1.58-2B-4T
 
 # Modell identifizieren, nicht nur "ist da". Beide bisherigen Laeufe haben
 # genau diese Datei vermessen.
 BITNET_SHA=4221b252fdd5fd25e15847adfeb5ee88886506ba50b8a34548374492884c2162
-got_sha="$(sha256sum models/BitNet-b1.58-2B-4T/ggml-model-i2_s.gguf | cut -d' ' -f1)"
+got_sha="$(sha256sum "$BITNET_GGUF" | cut -d' ' -f1)"
 if [ "$got_sha" != "$BITNET_SHA" ]; then
     echo "WARNUNG: BitNet-GGUF hat sha256 $got_sha, erwartet $BITNET_SHA" >&2
     echo "Andere Datei — Zahlen sind nicht mit results/ vergleichbar." >&2
@@ -128,38 +135,12 @@ fi
 say "Engine pruefen"
 # Laedt die Engine i2_s richtig? Steht in der Modellspalte Q1_0 statt
 # "I2_S - 2 bpw ternary", ist jede weitere Zahl wertlos.
-if ./build/bin/llama-bench -m models/BitNet-b1.58-2B-4T/ggml-model-i2_s.gguf \
+if ./build/bin/llama-bench -m "$BITNET_GGUF" \
         -p 8 -n 8 -r 1 2>/dev/null | grep -q "I2_S"; then
     echo "  i2_s wird korrekt erkannt"
 else
     echo "  FEHLER: Engine liest i2_s nicht korrekt — nicht messen!" >&2
     exit 1
-fi
-
-cd "$ROOT"
-
-# --- colibri -----------------------------------------------------------------
-
-say "colibri holen und bauen"
-if [ ! -d colibri ]; then
-    git clone --depth 1 https://github.com/JustVugg/colibri.git
-fi
-cd colibri/c
-[ -x ./colibri ] || make colibri ARCH=native
-[ -x ./olmoe ]   || make olmoe   ARCH=native
-
-cd "$ROOT/colibri"
-
-say "OLMoE konvertieren (laedt und loescht Shard fuer Shard)"
-if [ ! -d olmoe_merged ]; then
-    python3 -m venv .venv-conv
-    ./.venv-conv/bin/pip install --quiet --upgrade pip
-    ./.venv-conv/bin/pip install --quiet torch --index-url https://download.pytorch.org/whl/cpu
-    ./.venv-conv/bin/pip install --quiet safetensors huggingface_hub numpy
-    ./.venv-conv/bin/python c/tools/convert_olmoe_merged.py \
-        --repo allenai/OLMoE-1B-7B-0125-Instruct \
-        --out ./olmoe_merged \
-        --min-free-gb 20
 fi
 
 say "fertig"
@@ -168,23 +149,17 @@ cat <<EOF
 Naechste Schritte — siehe README.md des Bench-Repos:
 
   # BitNet messen
-  cd $ROOT/BitNet
-  ./build/bin/llama-bench -m models/BitNet-b1.58-2B-4T/ggml-model-i2_s.gguf \\
+  cd $ROOT/engines/BitNet
+  ./build/bin/llama-bench -m $BITNET_GGUF \\
       -p 128 -n 64 -t 4,8,12,16 -r 2
 
   # Fragebogen: Server starten, dann die zwei Skripte.
   # --override-kv ist NICHT optional: dem GGUF fehlt tokenizer.ggml.pre,
   # ohne den Override zerfallen Werkzeugnamen und BitNet faellt von 8-9/10
   # auf 4/10. Siehe results/linux-i7-8850H.md.
-  ./build/bin/llama-server -m models/BitNet-b1.58-2B-4T/ggml-model-i2_s.gguf \\
+  ./build/bin/llama-server -m $BITNET_GGUF \\
       -t 4 -tb 12 -c 4096 --port 8080 \\
       --override-kv tokenizer.ggml.pre=str:llama-bpe &
   python3 $BENCH_DIR/bench/agent_eval.py --port 8080 --label BitNet-2B-4T
   python3 $BENCH_DIR/bench/probe.py      --port 8080 --label BitNet-2B-4T
-
-  # colibri
-  python3 $BENCH_DIR/bench/olmoe_eval.py \\
-      --engine $ROOT/colibri/c/olmoe --snap $ROOT/colibri/olmoe_merged
-  python3 $BENCH_DIR/bench/olmoe_speed.py \\
-      --engine $ROOT/colibri/c/olmoe --snap $ROOT/colibri/olmoe_merged
 EOF

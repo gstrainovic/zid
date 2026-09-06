@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Dekodier-Durchsatz der colibri-Engine im eingeschwungenen Zustand.
+"""Messprotokoll: colibri wurde am 06.09.2026 geloescht, dieses Skript ist nicht mehr lauffaehig.
+
+Dekodier-Durchsatz der colibri-Engine im eingeschwungenen Zustand.
 
     python3 bench/olmoe_speed.py --engine ~/colibri/c/olmoe --snap ~/colibri/olmoe_merged
 

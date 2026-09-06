@@ -12,8 +12,10 @@ MODELL="${1:-qwen3}"
 GERAET="${2:-gpu}"
 PORT="${3:-8080}"
 
-ENGINE="$HOME/projects/ki/llama.cpp-vulkan/build/bin/llama-server"
-MODELLE="$HOME/projects/ki/BitNet/models/_compare"
+# Engine und Modelle liegen im vulkan-ed-Repo (engines/, models/), zwei Ebenen ueber setup/.
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+ENGINE="$REPO/engines/llama.cpp-vulkan/build/bin/llama-server"
+MODELLE="$REPO/models"
 
 case "$MODELL" in
   qwen3)  DATEI="Qwen3-4B-Instruct-2507-Q4_K_M.gguf" ;;

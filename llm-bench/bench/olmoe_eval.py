@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Dieselben Tests gegen colibris OLMoE-Engine.
+"""Messprotokoll: colibri wurde am 06.09.2026 geloescht, dieses Skript ist nicht mehr lauffaehig.
+
+Dieselben Tests gegen colibris OLMoE-Engine.
 
     python3 bench/olmoe_eval.py --engine ~/colibri/c/olmoe --snap ~/colibri/olmoe_merged
 

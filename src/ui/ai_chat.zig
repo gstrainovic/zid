@@ -322,7 +322,7 @@ pub const AIChatState = struct {
         if (self.agent_status == .ready and self.agent != null) return null;
         var buf: [400]u8 = undefined;
         const msg: []const u8 = switch (self.agent_status) {
-            .ready, .none => "AI is not connected. Start vulkan-ed without --ai=off. Default: llama-server + Qwen3-4B from ~/projects/ki, fallback Ollama; LLAMA_SERVER_PATH / LLAMA_MODEL_PATH override.",
+            .ready, .none => "AI is not connected. Start vulkan-ed without --ai=off. Default: llama-server + Qwen3-4B from engines/ and models/ in the repo, fallback Ollama; LLAMA_SERVER_PATH / LLAMA_MODEL_PATH override.",
             .model_missing => std.fmt.bufPrint(&buf, "Model '{s}' is not installed in Ollama. Click 'Pull model' above or run: ollama pull {s}", .{ self.model_path, self.model_path }) catch "Model is not installed in Ollama.",
             .initializing => "AI agent is still initializing, please try again in a moment.",
             .failed => std.fmt.bufPrint(&buf, "AI agent failed to start: {s}", .{self.statusDetail()}) catch "AI agent failed to start.",
