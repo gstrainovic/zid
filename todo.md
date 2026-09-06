@@ -11,15 +11,8 @@ Belege aus der Sitzung vom 06.09.2026 (Log mit Panic in `gpu_renderer.zig:305`) 
       statt als Status im Chat-Kopf.
 ## Explorer
 
-- [ ] **P2 Lange Namen werden hart abgeschnitten** (Screenshot: `test_dat`, `referenc`, `CLAUDE.m`):
-      Ellipsis + Tooltip mit vollem Pfad, oder Sidebar horizontal scrollen; Sidebar-Breite merken.
-- [ ] **P3 Versteckte Dateien** (`.`-Einträge werden in `loadDirectory` übersprungen) und
-      .gitignore-Einträge umschaltbar anzeigen (ausgegraut statt versteckt).
-- [ ] **P3 Filterfeld im Explorer** (Tippen filtert den Baum).
-- [ ] **P3 Drag & Drop** zum Verschieben (mit Bestätigung), Duplizieren.
-- [ ] **P3 Icons nach Dateityp** (heute Blitz/Seite), Git-Status-Farbe auch für Ordner
-      (Propagation nach oben).
-
+- [ ] **P3 .gitignore-Einträge ausgegraut** zeigen (versteckte Dateien schaltet `.` seit 06.09.2026
+      um; ignorierte Dateien bräuchten `git status --ignored` im Git-Worker).
 ## Tab-Leiste
 
 ## Editor

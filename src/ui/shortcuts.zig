@@ -10,7 +10,7 @@ const std = @import("std");
 pub const Key = enum {
     a, b, c, d, e, f, g, h, j, k, n, o, p, r, s, t, v, w, x, y, z,
     n1, n2, n3, n4, n5, n6, n7, n8, n9,
-    tab, grave, backslash, slash, f1, f2, f5, f12, delete, escape, enter, page_up, page_down, left, right, up, down,
+    tab, grave, backslash, slash, dot, f1, f2, f5, f12, delete, escape, enter, page_up, page_down, left, right, up, down,
 };
 
 pub const Mods = struct {
@@ -58,6 +58,8 @@ pub const Command = enum {
     collapse_all,
     refresh_explorer,
     select_all_entries,
+    toggle_hidden_files,
+    filter_explorer,
     // Tab-Leiste
     close_other_tabs,
     close_tabs_right,
@@ -139,6 +141,8 @@ pub const bindings = [_]Binding{
     .{ .command = .refresh_explorer, .key = .f5, .scope = .explorer },
     .{ .command = .collapse_all, .key = .w, .scope = .explorer },
     .{ .command = .select_all_entries, .key = .a, .mods = .{ .ctrl = true }, .scope = .explorer },
+    .{ .command = .toggle_hidden_files, .key = .dot, .scope = .explorer },
+    .{ .command = .filter_explorer, .key = .slash, .scope = .explorer },
     // Tab-Leiste
     .{ .command = .reopen_closed_tab, .key = .t, .mods = .{ .ctrl = true, .shift = true } },
     .{ .command = .next_tab, .key = .page_down, .mods = .{ .ctrl = true } },
@@ -240,6 +244,8 @@ pub fn label(command: Command) []const u8 {
         .collapse_all => "Collapse All",
         .refresh_explorer => "Refresh",
         .select_all_entries => "Select All Entries",
+        .toggle_hidden_files => "Toggle Hidden Files",
+        .filter_explorer => "Filter…",
         .close_other_tabs => "Close Others",
         .close_tabs_right => "Close to the Right",
         .close_all_tabs => "Close All",
@@ -299,7 +305,7 @@ fn keyName(key: Key) []const u8 {
         .k => "K", .n => "N", .o => "O", .p => "P", .r => "R", .s => "S", .t => "T", .v => "V", .w => "W",
         .x => "X", .y => "Y", .z => "Z",
         .n1 => "1", .n2 => "2", .n3 => "3", .n4 => "4", .n5 => "5", .n6 => "6", .n7 => "7", .n8 => "8", .n9 => "9",
-        .tab => "Tab", .grave => "`", .backslash => "\\", .slash => "/", .f1 => "F1", .f2 => "F2", .f5 => "F5", .f12 => "F12", .delete => "Del",
+        .tab => "Tab", .grave => "`", .backslash => "\\", .slash => "/", .dot => ".", .f1 => "F1", .f2 => "F2", .f5 => "F5", .f12 => "F12", .delete => "Del",
         .escape => "Esc", .enter => "Enter", .page_up => "PgUp", .page_down => "PgDn",
         .left => "←", .right => "→", .up => "↑", .down => "↓",
     };

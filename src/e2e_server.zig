@@ -417,6 +417,7 @@ fn buttonFromName(name: []const u8) ?@import("wio").Button {
         .{ "1", .@"1" },            .{ "2", .@"2" },              .{ "3", .@"3" },
         .{ "4", .@"4" },            .{ "5", .@"5" },              .{ "9", .@"9" },
         .{ "backslash", .backslash },   .{ "slash", .slash },         .{ "f12", .f12 },
+        .{ "dot", .dot },
     };
     for (named) |entry| {
         if (std.mem.eql(u8, name, entry[0])) return entry[1];
@@ -539,12 +540,14 @@ fn explorerEntries(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     const fx = &ctx.ui_system.file_explorer;
     var buf = std.Io.Writer.Allocating.init(dc.arena());
     try buf.writer.print(
-        \\{{"viewport": {{"x": {d:.1}, "y": {d:.1}, "w": {d:.1}, "h": {d:.1}}}, "row_height": {d:.1}, "scroll": {d:.1}, "renaming": {}, "creating": {}, "menu_open": {}, "menu_x": {d:.1}, "menu_y": {d:.1}, "entries": [
+        \\{{"viewport": {{"x": {d:.1}, "y": {d:.1}, "w": {d:.1}, "h": {d:.1}}}, "row_height": {d:.1}, "scroll": {d:.1}, "renaming": {}, "creating": {}, "show_hidden": {}, "filter_active": {}, "filter": "{s}", "width": {d:.1}, "menu_open": {}, "menu_x": {d:.1}, "menu_y": {d:.1}, "entries": [
     , .{
         fx.viewport_x,                                     fx.viewport_y,
         fx.viewport_width,                                 fx.viewport_height,
         @import("ui/file_explorer.zig").ROW_HEIGHT,        fx.scroll_offset_y,
         fx.isRenaming(),                                   fx.isCreating(),
+        fx.show_hidden,                                    fx.filter_active,
+        fx.filter.text(),                                  fx.width,
         fx.context_menu != null,
         if (fx.context_menu) |m| m.x else @as(f32, 0),     if (fx.context_menu) |m| m.y else @as(f32, 0),
     });

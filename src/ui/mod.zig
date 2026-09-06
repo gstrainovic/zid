@@ -24,6 +24,7 @@ const dialog_mod = @import("dialog.zig");
 const dialog_ops = @import("dialog_ops.zig");
 const folder_picker_mod = @import("folder_picker.zig");
 const picker_mod = @import("picker.zig");
+const user_state = @import("user_state.zig");
 const shortcuts = @import("shortcuts");
 const shortcuts_dialog = @import("shortcuts_dialog.zig");
 const ai_tools = @import("ai_tools");
@@ -137,6 +138,8 @@ pub const UI = struct {
     chord_k_until_ms: f32 = -1,
     /// Pfad, für den der „Datei außerhalb geändert“-Dialog offen ist (owned)
     external_change_path: ?[]u8 = null,
+    /// Drag & Drop im Explorer: bestätigungspflichtiges Verschieben
+    pending_move: ?file_explorer_mod.PendingMove = null,
     /// Tab-Index vor dem letzten Wechsel ins Terminal (Ctrl+J zurück)
     terminal_return_index: ?usize = null,
     /// "Open Folder…"-Dialog
@@ -355,6 +358,7 @@ pub const UI = struct {
         for (self.closed_tabs.items) |p| self.allocator.free(p);
         self.closed_tabs.deinit(self.allocator);
         if (self.external_change_path) |p| self.allocator.free(p);
+        if (self.pending_move) |m| m.deinit(self.allocator);
         self.folder_picker.deinit();
         self.picker.deinit();
         if (self.git_branch.len > 0) self.allocator.free(self.git_branch);
@@ -1002,6 +1006,13 @@ pub const UI = struct {
         if (self.file_explorer.takeError()) |msg| {
             if (self.active_dialog == null) self.showErrorDialog(msg) else self.allocator.free(msg);
         }
+        if (self.file_explorer.takePendingMove()) |mv| {
+            if (self.active_dialog != null or self.pending_move != null) {
+                mv.deinit(self.allocator);
+            } else {
+                self.showMoveDialog(mv);
+            }
+        }
         if (self.getActiveEditor().takeError()) |msg| {
             if (self.active_dialog == null) self.showErrorDialog(msg) else self.allocator.free(msg);
         }
@@ -1158,7 +1169,7 @@ pub const UI = struct {
             .x => .x, .y => .y, .z => .z,
             .@"1" => .n1, .@"2" => .n2, .@"3" => .n3, .@"4" => .n4, .@"5" => .n5,
             .@"6" => .n6, .@"7" => .n7, .@"8" => .n8, .@"9" => .n9,
-            .tab => .tab, .grave => .grave, .backslash => .backslash, .slash => .slash, .f1 => .f1, .f2 => .f2, .f5 => .f5, .f12 => .f12,
+            .tab => .tab, .grave => .grave, .backslash => .backslash, .slash => .slash, .dot => .dot, .f1 => .f1, .f2 => .f2, .f5 => .f5, .f12 => .f12,
             .delete => .delete, .escape => .escape, .enter, .kp_enter => .enter,
             .page_up => .page_up, .page_down => .page_down,
             .left => .left, .right => .right, .up => .up, .down => .down,
@@ -1236,6 +1247,15 @@ pub const UI = struct {
             .collapse_all => self.file_explorer.collapseAll(),
             .refresh_explorer => self.file_explorer.refreshKeepSelection(),
             .select_all_entries => self.file_explorer.selectAll(),
+            .toggle_hidden_files => {
+                self.file_explorer.toggleHidden();
+                self.saveUserState();
+            },
+            .filter_explorer => {
+                self.show_file_explorer = true;
+                self.explorer_focused = true;
+                self.file_explorer.startFilter();
+            },
             .close_other_tabs => if (self.tabTarget()) |t| self.closeTabsWhere(t.pane, t.index, false, false),
             .close_tabs_right => if (self.tabTarget()) |t| self.closeTabsWhere(t.pane, t.index, true, false),
             .close_all_tabs => if (self.tabTarget()) |t| self.closeTabsWhere(t.pane, null, false, false),
@@ -1411,6 +1431,37 @@ pub const UI = struct {
         };
     }
 
+    fn showMoveDialog(self: *Self, mv: file_explorer_mod.PendingMove) void {
+        const msg = std.fmt.allocPrint(self.allocator, "Move '{s}' into '{s}'?", .{
+            std.fs.path.basename(mv.src), std.fs.path.basename(mv.dst_dir),
+        }) catch {
+            mv.deinit(self.allocator);
+            return;
+        };
+        self.pending_move = mv;
+        self.active_dialog = .{
+            .dialog = .{
+                .title = "Move",
+                .message = msg,
+                .actions = &.{
+                    .{ .label = "Move", .result = .yes },
+                    .{ .label = "Cancel", .result = .cancel },
+                },
+            },
+            .callback = handleMoveDialog,
+            .message_needs_free = true,
+        };
+    }
+
+    fn handleMoveDialog(ui: *UI, res: dialog_mod.DialogResult, _: usize, _: ?*anyopaque) void {
+        const mv = ui.pending_move orelse return;
+        defer {
+            mv.deinit(ui.allocator);
+            ui.pending_move = null;
+        }
+        if (res == .yes) ui.file_explorer.performMove(mv.src, mv.dst_dir);
+    }
+
     fn handleExternalChangeDialog(ui: *UI, res: dialog_mod.DialogResult, _: usize, _: ?*anyopaque) void {
         const path = ui.external_change_path orelse return;
         defer {
@@ -1492,6 +1543,25 @@ pub const UI = struct {
         const m = self.max_frame_ms;
         self.max_frame_ms = 0;
         return m;
+    }
+
+    /// Sidebar-Breite und Hidden-Flag in ~/.config/vulkan-ed/state schreiben.
+    pub fn saveUserState(self: *Self) void {
+        const path = user_state.defaultPath(self.allocator) catch return;
+        defer self.allocator.free(path);
+        user_state.saveTo(self.allocator, path, .{
+            .sidebar_width = self.file_explorer.width,
+            .show_hidden = self.file_explorer.show_hidden,
+        }) catch |err| log.warn("state save '{s}' failed: {}", .{ path, err });
+    }
+
+    /// Gemerkten Zustand anwenden (beim Start).
+    pub fn loadUserState(self: *Self) void {
+        const path = user_state.defaultPath(self.allocator) catch return;
+        defer self.allocator.free(path);
+        const st = user_state.loadFrom(self.allocator, path);
+        self.file_explorer.width = st.sidebar_width;
+        self.file_explorer.show_hidden = st.show_hidden;
     }
 
     /// Text in die System-Zwischenablage (Fenster) legen; headless nur merken (RPC ui_state).
@@ -1811,6 +1881,7 @@ pub const UI = struct {
                     if (self.file_explorer.is_resizing) {
                         if (!self.is_mouse_down) {
                             self.file_explorer.is_resizing = false;
+                            self.saveUserState();
                         } else {
                             self.file_explorer.width = self.mouse_x;
                             if (self.file_explorer.width < 100) self.file_explorer.width = 100;
@@ -1830,6 +1901,7 @@ pub const UI = struct {
                         self.mouse_pressed_this_frame,
                         self.explorer_focused,
                         .{ .ctrl = self.is_ctrl_down, .shift = self.is_shift_down },
+                        .{ .x = self.mouse_x, .y = self.mouse_y, .down = self.is_mouse_down },
                     );
                     // Deferred Toggle ausführen (nach Rendering, vor endLayout)
                     self.file_explorer.processPendingToggle();

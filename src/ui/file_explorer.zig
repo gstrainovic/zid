@@ -30,7 +30,7 @@ pub const context_menu_items = [_]shortcuts.Command{
     .new_file_entry,   .new_folder_entry, .rename_entry,      .delete_entry,
     .cut_entry,        .copy_entry,       .paste_entry,       .duplicate_entry,
     .copy_path,        .copy_relative_path, .reveal_in_file_manager, .open_in_terminal,
-    .collapse_all,
+    .collapse_all,     .toggle_hidden_files, .filter_explorer,
 };
 const context_menu_row: f32 = 30;
 const context_menu_height: f32 = context_menu_items.len * (context_menu_row + 2) + 8;
@@ -55,6 +55,22 @@ pub const FsChange = struct {
 
 /// Zwischenablage des Explorers (Kopieren/Ausschneiden von Einträgen)
 pub const Clipboard = struct { paths: [][]u8, cut: bool };
+
+/// Laufendes Ziehen eines Eintrags (Drag & Drop zum Verschieben)
+pub const DragState = struct { node: u32, start_x: f32, start_y: f32, moved: bool = false, over: ?u32 = null };
+
+/// Vom Drop angefordertes Verschieben; die UI fragt nach und ruft performMove
+pub const PendingMove = struct {
+    src: []u8,
+    dst_dir: []u8,
+    pub fn deinit(self: PendingMove, alloc: std.mem.Allocator) void {
+        alloc.free(self.src);
+        alloc.free(self.dst_dir);
+    }
+};
+
+/// Eingabepuffer des Filterfelds
+pub const FilterEdit = explorer_ops.EditBuffer(64);
 
 /// Ein Knoten im Dateibaum
 pub const TreeNode = struct {
@@ -131,6 +147,17 @@ pub const FileExplorerState = struct {
     clipboard: ?Clipboard = null,
     /// Letzter Fehler einer Dateisystem-Aktion (Anzeige in der UI)
     last_error: ?[]u8 = null,
+    /// Versteckte Einträge (`.name`) anzeigen (Taste `.`)
+    show_hidden: bool = false,
+    /// Filterfeld (Taste `/`): nur Einträge, deren Name den Text enthält, plus ihre Elternordner
+    filter: FilterEdit = .{},
+    filter_active: bool = false,
+    /// Tooltip: Zeile, über der die Maus steht, und seit wann
+    hover_index: ?usize = null,
+    hover_since_ms: f32 = 0,
+    /// Drag & Drop
+    drag: ?DragState = null,
+    pending_move: ?PendingMove = null,
     /// Viewport-Bounds des letzten Frames (Hit-Test für Einträge)
     viewport_x: f32 = 0,
     viewport_y: f32 = 0,
@@ -177,6 +204,7 @@ pub const FileExplorerState = struct {
     }
 
     pub fn deinit(self: *Self) void {
+        if (self.pending_move) |m| m.deinit(self.allocator);
         for (self.pending_fs_changes.items) |c| c.deinit(self.allocator);
         self.pending_fs_changes.deinit(self.allocator);
         self.clearClipboard();
@@ -270,8 +298,8 @@ pub const FileExplorerState = struct {
 
         // Kinder sammeln
         while (try iter.next()) |entry| {
-            // Versteckte Dateien überspringen (optional)
-            if (std.mem.startsWith(u8, entry.name, ".")) continue;
+            // Versteckte Einträge nur mit show_hidden (Taste `.`)
+            if (!self.show_hidden and std.mem.startsWith(u8, entry.name, ".")) continue;
 
             const child_path = try std.fs.path.join(self.allocator, &.{ dir_path, entry.name });
             const child_name = try self.allocator.dupe(u8, entry.name);
@@ -345,13 +373,32 @@ pub const FileExplorerState = struct {
         }
     }
 
+    /// Filter: Name enthält den Text (Groß/Klein egal) oder ein geladener Nachfahre passt.
+    fn nodeMatchesFilter(self: *const Self, node_index: u32) bool {
+        const needle = self.filter.text();
+        if (needle.len == 0) return true;
+        const node = self.nodes.items[node_index];
+        if (std.ascii.indexOfIgnoreCase(node.name, needle) != null) return true;
+        if (!node.is_folder) return false;
+        var child = node.first_child orelse return false;
+        var k: u32 = 0;
+        while (k < node.child_count) : ({ k += 1; child += 1; }) {
+            if (child >= self.nodes.items.len) break;
+            if (self.nodeMatchesFilter(child)) return true;
+        }
+        return false;
+    }
+
     /// Einen Knoten und seine sichtbaren Nachfahren flattieren
     fn flattenNode(self: *Self, node_index: u32, depth: u32, has_next_sibling: bool, ancestry_mask: u32) void {
         if (node_index >= self.nodes.items.len) return;
         if (depth >= MAX_TREE_DEPTH) return;
 
         const node = &self.nodes.items[node_index];
-        const is_expanded = self.expanded_nodes.contains(node_index);
+        const filtering = self.filter.text().len > 0;
+        if (filtering and node_index != 0 and !self.nodeMatchesFilter(node_index)) return;
+        // Mit Filter: Ordner mit Treffern aufgeklappt zeigen
+        const is_expanded = self.expanded_nodes.contains(node_index) or (filtering and node.is_folder);
 
         self.visible_entries.append(self.allocator, .{
             .node_index = node_index,
@@ -688,9 +735,68 @@ pub const FileExplorerState = struct {
         return self.creating != null;
     }
 
-    /// Umbenennen oder Anlegen läuft: alle Tasten gehören dem Eingabefeld.
+    /// Umbenennen, Anlegen oder Filtern läuft: alle Tasten gehören dem Eingabefeld.
     pub fn isEditing(self: *const Self) bool {
-        return self.rename != null or self.creating != null;
+        return self.rename != null or self.creating != null or self.filter_active;
+    }
+
+    /// Taste `/`: Filterfeld fokussieren (Enter behält den Filter, Escape leert ihn).
+    pub fn startFilter(self: *Self) void {
+        self.rename = null;
+        self.creating = null;
+        self.filter_active = true;
+    }
+
+    pub fn clearFilter(self: *Self) void {
+        self.filter = .{};
+        self.filter_active = false;
+        self.rebuildVisible();
+    }
+
+    pub fn toggleHidden(self: *Self) void {
+        self.show_hidden = !self.show_hidden;
+        self.refreshKeepSelection();
+    }
+
+    /// Drop angefordert: die UI fragt nach und ruft performMove (owned, Aufrufer gibt frei).
+    pub fn takePendingMove(self: *Self) ?PendingMove {
+        const m = self.pending_move;
+        self.pending_move = null;
+        return m;
+    }
+
+    /// Verschieben nach bestätigtem Drop.
+    pub fn performMove(self: *Self, src: []const u8, dst_dir: []const u8) void {
+        const dst = explorer_ops.movePath(self.allocator, src, dst_dir) catch |err| {
+            self.setError("move '{s}' failed: {s}", .{ std.fs.path.basename(src), @errorName(err) });
+            return;
+        };
+        defer self.allocator.free(dst);
+        if (!std.mem.eql(u8, src, dst)) self.pushFsChange(.renamed, src, dst);
+        self.refresh(dst);
+    }
+
+    /// Git-Status eines Ordners aus seinen Nachfahren (C > M > A > ?), null wenn nichts.
+    pub fn folderStatus(self: *const Self, dir_path: []const u8) ?u8 {
+        var best: ?u8 = null;
+        var it = self.git_status.iterator();
+        while (it.next()) |kv| {
+            if (!explorer_ops.isPathOrUnder(kv.key_ptr.*, dir_path) or kv.key_ptr.*.len == dir_path.len) continue;
+            const code = kv.value_ptr.*;
+            const rank_new = statusRank(code);
+            if (best == null or rank_new > statusRank(best.?)) best = code;
+        }
+        return best;
+    }
+
+    fn statusRank(code: u8) u8 {
+        return switch (code) {
+            'C' => 4,
+            'M' => 3,
+            'A' => 2,
+            '?' => 1,
+            else => 0,
+        };
     }
 
     /// Zielordner für neue Einträge und Einfügen: markierter Ordner, sonst dessen Elternordner, sonst Root.
@@ -711,6 +817,22 @@ pub const FileExplorerState = struct {
     }
 
     pub fn handleRenameKey(self: *Self, key: wio.Button) void {
+        if (self.filter_active) {
+            switch (key) {
+                .enter, .kp_enter => self.filter_active = false,
+                .escape => self.clearFilter(),
+                .backspace => {
+                    self.filter.backspace();
+                    self.rebuildVisible();
+                },
+                .up, .down => {
+                    self.filter_active = false;
+                    _ = self.handleNavKey(key, false);
+                },
+                else => {},
+            }
+            return;
+        }
         if (self.creating != null) {
             const st = &self.creating.?;
             switch (key) {
@@ -732,6 +854,11 @@ pub const FileExplorerState = struct {
 
     pub fn handleRenameChar(self: *Self, cp: u21) void {
         if (cp < 32 or cp == 127) return;
+        if (self.filter_active) {
+            self.filter.insertCodepoint(cp);
+            self.rebuildVisible();
+            return;
+        }
         if (self.creating) |*st| st.edit.insertCodepoint(cp);
         if (self.rename) |*st| st.edit.insertCodepoint(cp);
     }
@@ -1114,6 +1241,9 @@ pub const FileExplorerState = struct {
 /// Klick-Modifier des Frames (Ctrl toggelt, Shift markiert Bereich)
 pub const ClickMods = struct { ctrl: bool = false, shift: bool = false };
 
+/// Mausposition und -taste des Frames (Drag & Drop, Tooltip)
+pub const MouseState = struct { x: f32 = 0, y: f32 = 0, down: bool = false };
+
 /// File Explorer Sidebar rendern
 pub fn renderFileExplorer(
     arena: std.mem.Allocator,
@@ -1122,7 +1252,41 @@ pub fn renderFileExplorer(
     mouse_pressed: bool,
     focused: bool,
     mods: ClickMods,
+    mouse: MouseState,
 ) void {
+    // Drag & Drop: Bewegung erkennen, Ziel bestimmen, beim Loslassen Verschieben anfordern
+    if (state.drag) |*d| {
+        if (!d.moved and (@abs(mouse.x - d.start_x) > 6 or @abs(mouse.y - d.start_y) > 6)) d.moved = true;
+        d.over = null;
+        if (d.moved) {
+            if (state.entryAt(mouse.x, mouse.y)) |idx| {
+                const target = state.visible_entries.items[idx].node_index;
+                const target_dir: u32 = if (state.nodes.items[target].is_folder) target else (state.nodes.items[target].parent orelse 0);
+                const src = state.nodes.items[d.node];
+                const dst = state.nodes.items[target_dir];
+                const same_parent = if (src.parent) |p| p == target_dir else false;
+                if (target_dir != d.node and !same_parent and !explorer_ops.isPathOrUnder(dst.path, src.path)) d.over = target_dir;
+            }
+        }
+        if (!mouse.down) {
+            if (d.moved) {
+                if (d.over) |dst_dir| {
+                    const src_dup = state.allocator.dupe(u8, state.nodes.items[d.node].path) catch null;
+                    const dst_dup = state.allocator.dupe(u8, state.nodes.items[dst_dir].path) catch null;
+                    if (src_dup != null and dst_dup != null) {
+                        if (state.pending_move) |old| old.deinit(state.allocator);
+                        state.pending_move = .{ .src = src_dup.?, .dst_dir = dst_dup.? };
+                    } else {
+                        if (src_dup) |p| state.allocator.free(p);
+                        if (dst_dup) |p| state.allocator.free(p);
+                    }
+                }
+            }
+            state.drag = null;
+        }
+    }
+    if (!clay.pointerOver(clay.ElementId.ID("file_explorer"))) state.hover_index = null;
+
     // Update layout info from previous frame
     const clip_data = clay.getElementData(clay.ElementId.ID("file_tree_viewport"));
     const content_data = clay.getElementData(clay.ElementId.ID("file_tree_content"));
@@ -1158,6 +1322,7 @@ pub fn renderFileExplorer(
         // Fokus sichtbar: Tastatur (↑↓, d, r, a …) wirkt hier, nicht im Editor
         .border = .{ .width = .{ .right = 1, .left = 2 }, .color = if (focused) theme.border_focus else theme.border },
     })({
+        if (state.filter_active or state.filter.text().len > 0) renderFilterRow(arena, state, theme);
         clay.UI()(.{
             .id = clay.ElementId.ID("file_tree_viewport"),
             .layout = .{
@@ -1174,7 +1339,7 @@ pub fn renderFileExplorer(
                 },
             })({
                 for (state.visible_entries.items, 0..) |entry, i| {
-                    renderTreeEntry(arena, state, entry, i, theme, effective_press, in_sidebar, mods);
+                    renderTreeEntry(arena, state, entry, i, theme, effective_press, in_sidebar, mods, mouse);
                     if (state.creating) |cs| {
                         if (cs.parent == entry.node_index) renderCreateRow(arena, cs, entry.depth + 1, theme);
                     }
@@ -1189,6 +1354,53 @@ pub fn renderFileExplorer(
     });
 
     if (state.context_menu) |menu| renderContextMenu(menu, theme);
+}
+
+/// Filterfeld über dem Baum (Taste `/`)
+fn renderFilterRow(arena: std.mem.Allocator, state: *FileExplorerState, theme: Theme) void {
+    clay.UI()(.{
+        .id = clay.ElementId.ID("fx_filter_row"),
+        .layout = .{
+            .sizing = .{ .w = .grow, .h = .fixed(ROW_HEIGHT) },
+            .padding = .{ .left = 8, .right = 8 },
+            .child_alignment = .{ .y = .center },
+            .child_gap = 6,
+        },
+        .background_color = theme.surface,
+    })({
+        clay.text("Filter", .{ .font_size = 16, .color = theme.muted, .wrap_mode = .none });
+        clay.UI()(.{
+            .id = clay.ElementId.ID("fx_filter_box"),
+            .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(28) }, .padding = .{ .left = 6, .right = 6 }, .child_alignment = .{ .y = .center } },
+            .clip = .{ .horizontal = true },
+            .background_color = theme.overlay,
+            .border = .{ .width = .all(1), .color = if (state.filter_active) theme.border_focus else theme.border },
+            .corner_radius = .all(3),
+        })({
+            const shown = if (state.filter_active)
+                std.fmt.allocPrint(arena, "{s}|", .{state.filter.text()}) catch state.filter.text()
+            else
+                state.filter.text();
+            clay.text(shown, .{ .font_size = 18, .color = theme.text, .wrap_mode = .none });
+        });
+    });
+}
+
+/// Name auf `max_width` kürzen („…“ am Ende), wenn er nicht in die Sidebar passt.
+fn ellipsize(arena: std.mem.Allocator, name: []const u8, font_size: f32, max_width: f32) []const u8 {
+    if (max_width <= 0) return name;
+    if (ui.measureTextWidth(name, font_size) <= max_width) return name;
+    const ell_w = ui.measureTextWidth("…", font_size);
+    var end: usize = 0;
+    var last_fit: usize = 0;
+    while (end < name.len) {
+        var next = end + 1;
+        while (next < name.len and (name[next] & 0xC0) == 0x80) next += 1;
+        if (ui.measureTextWidth(name[0..next], font_size) + ell_w > max_width) break;
+        last_fit = next;
+        end = next;
+    }
+    return std.fmt.allocPrint(arena, "{s}…", .{name[0..last_fit]}) catch name;
 }
 
 fn contextItemId(comptime cmd: shortcuts.Command) clay.ElementId {
@@ -1330,11 +1542,13 @@ fn renderTreeEntry(
     mouse_pressed: bool,
     in_sidebar: bool,
     mods: ClickMods,
+    mouse: MouseState,
 ) void {
     const node = state.nodes.items[entry.node_index];
     const is_selected = state.isNodeSelected(entry.node_index);
     const is_cursor = state.selected_index == index;
     const is_cut = state.isCut(node.path);
+    const is_hidden = node.name.len > 0 and node.name[0] == '.';
     const indent = @as(f32, @floatFromInt(entry.depth)) * DEFAULT_INDENT_PX + 8.0;
 
     const entry_id_str = std.fmt.allocPrint(arena, "tree_entry_{d}", .{index}) catch return;
@@ -1359,12 +1573,24 @@ fn renderTreeEntry(
             }
             state.last_click_ms = state.now_ms;
             state.last_click_index = index;
+            // Ziehen beginnt hier (Root nie); ob es ein Klick bleibt, entscheidet die Bewegung
+            if (entry.node_index != 0) state.drag = .{ .node = entry.node_index, .start_x = mouse.x, .start_y = mouse.y };
         }
     }
+    if (is_hovered) {
+        if (state.hover_index != index) {
+            state.hover_index = index;
+            state.hover_since_ms = state.now_ms;
+        }
+    }
+    const drag_source = if (state.drag) |d| (d.node == entry.node_index and d.moved) else false;
+    const drop_target = if (state.drag) |d| (d.moved and d.over == entry.node_index) else false;
 
-    const fg: clay.Color = if (is_selected) theme.text_on_primary else if (is_cut) theme.muted else theme.text;
+    const fg: clay.Color = if (is_selected) theme.text_on_primary else if (is_cut or is_hidden) theme.muted else theme.text;
     const bg: clay.Color = if (is_selected)
         theme.primary
+    else if (drop_target)
+        .{ theme.accent[0], theme.accent[1], theme.accent[2], 90.0 }
     else if (is_hovered)
         .{ theme.primary[0], theme.primary[1], theme.primary[2], 50.0 }
     else
@@ -1380,8 +1606,8 @@ fn renderTreeEntry(
             .padding = .{ .left = 0, .right = 8 },
         },
         .background_color = bg,
-        // Cursor ohne Markierung (nach Ctrl+Klick-Abwahl) bleibt als Rahmen sichtbar
-        .border = .{ .width = .all(1), .color = if (is_cursor and !is_selected) theme.border_focus else .{ 0, 0, 0, 0 } },
+        // Cursor ohne Markierung (nach Ctrl+Klick-Abwahl) bleibt als Rahmen sichtbar; gezogener Eintrag in Akzent
+        .border = .{ .width = .all(1), .color = if (drag_source) theme.accent else if (is_cursor and !is_selected) theme.border_focus else .{ 0, 0, 0, 0 } },
     })({
         // Indent Spacer
         clay.UI()(.{
@@ -1418,8 +1644,9 @@ fn renderTreeEntry(
         const icon_path = if (node.is_folder) svg.Lucide.folder else fileIcon(node.name);
         svg.Svg(arena, icon_id, icon_path, 24, fg);
 
-        // Git-Status Indikator (vorne)
-        if (state.git_status.get(node.path)) |code| {
+        // Git-Status Indikator (vorne); Ordner erben den Status ihrer Nachfahren
+        const git_code: ?u8 = state.git_status.get(node.path) orelse (if (node.is_folder) state.folderStatus(node.path) else null);
+        if (git_code) |code| {
             const git_color: [4]f32 = switch (code) {
                 'A' => theme.success,
                 'M' => theme.warning,
@@ -1457,25 +1684,67 @@ fn renderTreeEntry(
                 clay.text(shown, .{ .font_size = 22, .color = theme.text });
             });
         } else {
-            clay.text(node.name, .{
+            // Verfügbare Breite: Sidebar minus Einrückung, Chevron, Icon, Git-Marker, Abstände, Scrollbar
+            const used = indent + 24 + 24 + 4 * 3 + 8 + state.scrollbar_width + (if (git_code != null) @as(f32, 30) else 0);
+            const shown = ellipsize(arena, node.name, 24, state.viewport_width - used);
+            clay.text(shown, .{
                 .font_size = 24,
                 .color = fg,
+                .wrap_mode = .none,
             });
         }
     });
+
+    // Tooltip mit vollem Pfad nach 700 ms über derselben Zeile
+    if (state.hover_index == index and state.drag == null and (state.now_ms - state.hover_since_ms) > 700) {
+        clay.UI()(.{
+            .id = clay.ElementId.ID("fx_tooltip"),
+            .floating = .{
+                .attach_to = .to_element_with_id,
+                .parentId = element_id.id,
+                .attach_points = .{ .element = .left_top, .parent = .left_bottom },
+                .offset = .{ .x = 24, .y = 2 },
+                .z_index = 1500,
+            },
+            .layout = .{ .padding = .{ .left = 8, .right = 8, .top = 4, .bottom = 4 } },
+            .background_color = theme.overlay,
+            .border = .{ .width = .all(1), .color = theme.border },
+            .corner_radius = .all(3),
+        })({
+            clay.text(node.path, .{ .font_size = 16, .color = theme.text, .wrap_mode = .none });
+        });
+    }
 }
 
 /// Datei-Icon basierend auf Extension
 fn fileIcon(filename: []const u8) []const u8 {
     const ext = std.fs.path.extension(filename);
     const svg = @import("components/svg.zig");
-    if (std.mem.eql(u8, ext, ".zig")) return svg.Lucide.zap;
-    if (std.mem.eql(u8, ext, ".md")) return svg.Lucide.file_text;
-    if (std.mem.eql(u8, ext, ".json")) return svg.Lucide.file_code;
-    if (std.mem.eql(u8, ext, ".toml")) return svg.Lucide.settings;
-    if (std.mem.eql(u8, ext, ".svg")) return svg.Lucide.palette;
-    if (std.mem.eql(u8, ext, ".png") or std.mem.eql(u8, ext, ".jpg")) return svg.Lucide.image;
-    if (std.mem.eql(u8, ext, ".pdf")) return svg.Lucide.file_text;
-    if (std.mem.eql(u8, ext, ".log")) return svg.Lucide.clipboard;
-    return svg.Lucide.file;
+    const L = svg.Lucide;
+    const Row = struct { []const u8, []const u8 };
+    const table = [_]Row{
+        .{ ".zig", L.zap },          .{ ".md", L.file_text },     .{ ".txt", L.file_text },   .{ ".rst", L.file_text },
+        .{ ".json", L.braces },      .{ ".json5", L.braces },     .{ ".toml", L.settings },   .{ ".yaml", L.settings },
+        .{ ".yml", L.settings },     .{ ".ini", L.settings },     .{ ".conf", L.settings },   .{ ".cfg", L.settings },
+        .{ ".svg", L.palette },      .{ ".png", L.image },        .{ ".jpg", L.image },       .{ ".jpeg", L.image },
+        .{ ".gif", L.image },        .{ ".bmp", L.image },        .{ ".webp", L.image },      .{ ".ico", L.image },
+        .{ ".pdf", L.book_open },    .{ ".log", L.clipboard },    .{ ".sh", L.terminal },     .{ ".bash", L.terminal },
+        .{ ".zsh", L.terminal },     .{ ".fish", L.terminal },    .{ ".ps1", L.terminal },    .{ ".sql", L.database },
+        .{ ".db", L.database },      .{ ".sqlite", L.database },  .{ ".lock", L.lock },       .{ ".zip", L.archive },
+        .{ ".tar", L.archive },      .{ ".gz", L.archive },       .{ ".xz", L.archive },      .{ ".7z", L.archive },
+        .{ ".rar", L.archive },      .{ ".gguf", L.binary },      .{ ".bin", L.binary },      .{ ".wasm", L.binary },
+        .{ ".so", L.binary },        .{ ".o", L.binary },         .{ ".a", L.binary },        .{ ".ppm", L.image },
+        .{ ".py", L.file_code },     .{ ".js", L.file_code },     .{ ".ts", L.file_code },    .{ ".tsx", L.file_code },
+        .{ ".jsx", L.file_code },    .{ ".rs", L.file_code },     .{ ".go", L.file_code },    .{ ".c", L.file_code },
+        .{ ".h", L.file_code },      .{ ".cpp", L.file_code },    .{ ".hpp", L.file_code },   .{ ".java", L.file_code },
+        .{ ".kt", L.file_code },     .{ ".rb", L.file_code },     .{ ".lua", L.file_code },   .{ ".html", L.file_code },
+        .{ ".css", L.file_code },    .{ ".xml", L.file_code },    .{ ".glsl", L.file_code },  .{ ".wgsl", L.file_code },
+        .{ ".zon", L.package },      .{ ".nix", L.package },      .{ ".cbor", L.binary },
+    };
+    for (table) |row| {
+        if (std.ascii.eqlIgnoreCase(ext, row[0])) return row[1];
+    }
+    const base = std.fs.path.basename(filename);
+    if (std.ascii.eqlIgnoreCase(base, "Makefile") or std.ascii.eqlIgnoreCase(base, "Dockerfile")) return L.file_cog;
+    return L.file;
 }
