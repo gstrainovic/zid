@@ -200,6 +200,10 @@ Seit 06.09.2026 liegt alles im Repo; `~/projects/ki` und das separate Bench-Repo
   (Referenz BitNet `4221b252…`, 1 187 801 280 Bytes; Perplexity nur mit `llm-bench/bench/ppl-corpus.txt`
   bei `-c 512`). Entscheidungen des Projektinhabers (keine Fehlerberichte an fremde Projekte, keine
   weiteren Läufe) und die Liste „nicht erneut aufrollen“ stehen in `llm-bench/CLAUDE.md`.
+- **Nachweis nach dem Umzug (06.09.2026):** `scripts/e2e_ai_chat.py` grün (llama-server aus
+  `engines/`), BitNet `llama-bench` zeigt `I2_S - 2 bpw ternary` (pp8 97,6, tg8 21,9 tok/s, 6 Threads),
+  `serve-coding-agent.sh llama gpu 8081` + `agent_eval.py` 9/10 wie in `results/`. Das GitHub-Repo
+  `gstrainovic/bitnet-colibri-bench` ist archiviert.
 - **Standardmodell des Chats** ist Qwen3-4B-Instruct-2507 (Pflicht); Llama-3.2-3B und das
   BitNet-Referenzmodell sind sinnvoll; die fünf reinen Bench-Modelle (Qwen3.5-4B/2B, xLAM,
   Gemma-3, Phi-4-mini, ~10 GB) bleiben, bis der Projektinhaber entscheidet.
