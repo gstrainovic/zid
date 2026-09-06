@@ -1,0 +1,58 @@
+===== BitNet-2B-4T :: 1-tool-call-json | prompt=135 gen=20 | 2.0s | 9.90 tok/s
+{"tool": "list_dir", "args": {"path": "/etc/hosts"}}
+
+===== BitNet-2B-4T :: 2-code-python | prompt=42 gen=89 | 4.5s | 19.94 tok/s
+```python
+def quicksort(a):
+    if len(a) <= 1:
+        return a
+    pivot = a[len(a) // 2]
+    left = [x for x in a if x < pivot]
+    middle = [x for x in a if x == pivot]
+    right = [x for x in a if x > pivot]
+    return quicksort(left) + middle + quicksort(right)
+```
+
+===== BitNet-2B-4T :: 3-instruction-strict | prompt=32 gen=2 | 0.4s | 5.15 tok/s | erwartet 'BERN': NEIN
+Bern
+
+===== BitNet-2B-4T :: 4-german | prompt=46 gen=105 | 6.0s | 17.58 tok/s
+Ein Index in einer relationalen Datenbank bedeutet, dass die Suche nach bestimmten Daten in einer Datenbank erleichtert wird. Daher kann die Daten im Index recherchiert werden, die für die Anwendung verwendet werden. Dies kann die Daten im Index vorgelegt werden, um die Zeit der Suche zu reduzieren. Beispiel: Wenn du ein Index für die Name der Kunden in einer Datenbank hinzufügen, kannst du sofort die Namen recherchiert, die für dich relevante sind.
+
+===== BitNet-2B-4T :: 5-reasoning | prompt=60 gen=140 | 7.9s | 17.68 tok/s | erwartet '15': ja
+Step 1: Determine the cost of 21 pens.
+Since the pens are sold at 3 for 5 francs, we need to find out how many sets of 3 pens are in 21 pens.
+21 pens / 3 pens per set = 7 sets
+
+Step 2: Calculate the total cost of 21 pens.
+Each set of 3 pens costs 5 francs, so:
+7 sets * 5 francs per set = 35 francs
+
+Step 3: Calculate the change from the 50 franc note.
+50 francs - 35 francs = 15 francs
+
+ANSWER: You get 15 francs in change.
+
+===== BitNet-2B-4T :: 6-agent-multistep | prompt=91 gen=300 | 16.9s | 17.74 tok/s
+1. read_1_file("utils.py")
+2. edit_1_file("utils.py", "lenght", "length")
+3. edit_2_file("utils.py", "lenght", "length")
+4. edit_3_file("utils.py", "lenght", "length")
+5. run_1_tests("utils.py")
+6. edit_4_file("utils.py", "lenght", "length")
+7. edit_5_file("utils.py", "lenght", "length")
+8. run_2_tests("utils.py")
+9. edit_6_file("utils.py", "lenght", "length")
+10. edit_7_file("utils.py", "lenght", "length")
+11. run_3_tests("utils.py")
+12. edit_8_file("utils.py", "lenght", "length")
+13. edit_9_file("utils.py", "lenght", "length")
+14. run_4_tests("utils.py")
+15. edit_10_file("utils.py", "lenght", "length")
+16. edit_11_file("utils.py", "lenght", "length")
+17. run_5_tests("utils.py")
+18. edit_12_file("utils.py", "lenght", "length")
+19. edit_13_file("utils.py", "lenght", "length")
+20. run_6_tests("utils.py")
+21. edit_14_file("utils.py
+

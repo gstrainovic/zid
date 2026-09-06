@@ -1,0 +1,10 @@
+| model                          |       size |     params | backend    | threads |          test |                  t/s |
+| ------------------------------ | ---------: | ---------: | ---------- | ------: | ------------: | -------------------: |
+| bitnet-b1.58 2B I2_S - 2 bpw ternary |   1.71 GiB |     2.74 B | CPU        |       4 |         pp128 |        133.04 ± 0.72 |
+| bitnet-b1.58 2B I2_S - 2 bpw ternary |   1.71 GiB |     2.74 B | CPU        |       4 |          tg64 |         22.44 ± 0.02 |
+| bitnet-b1.58 2B I2_S - 2 bpw ternary |   1.71 GiB |     2.74 B | CPU        |       8 |         pp128 |        147.60 ± 1.05 |
+| bitnet-b1.58 2B I2_S - 2 bpw ternary |   1.71 GiB |     2.74 B | CPU        |       8 |          tg64 |         22.09 ± 0.19 |
+| bitnet-b1.58 2B I2_S - 2 bpw ternary |   1.71 GiB |     2.74 B | CPU        |      12 |         pp128 |        175.38 ± 1.17 |
+| bitnet-b1.58 2B I2_S - 2 bpw ternary |   1.71 GiB |     2.74 B | CPU        |      12 |          tg64 |         22.25 ± 0.01 |
+
+build: 1f86f058 (3962)

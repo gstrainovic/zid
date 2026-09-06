@@ -1,0 +1,15 @@
+===== BitNet-2B-4T @ Engine 01eb415/b3639 :: Agent-Tauglichkeit (10 Aufgaben, temp=0)
+   1. [TOOL] erwartet=read_file  bekommen=read__file     | {"tool": "read__file", "args": {"path": "README.md"}}
+   2. [OK  ] erwartet=list_dir   bekommen=list_dir       | {"tool": "list_dir", "args": {"path": "src"}}
+   3. [TOOL] erwartet=write_file bekommen=write_ file    | {"tool": "write_ file", "args": {"path": "notes.txt", "text": "hello"}}
+   4. [TOOL] erwartet=search     bekommen=list_dir       | {"tool": "list_dir", "args": {"path": "./app"}}
+   5. [OK  ] erwartet=run_shell  bekommen=run_shell      | {"tool": "run_shell", "args": {"cmd": "pytest"}}
+   6. [OK  ] erwartet=read_file  bekommen=read_file      | ```json { "tool": "read_file", "args": { "path": "config/settings.yaml" } } ```
+   7. [JSON] erwartet=list_dir   bekommen=-              | {"tool": "list_dir", "args": {...}}
+   8. [TOOL] erwartet=write_file bekommen=write_ file    | {"tool": "write_ file", "args": {"path": "status.log", "text": "build ok"}}
+   9. [TOOL] erwartet=search     bekommen=read__file     | ```json {"tool": "read__file", "args": { "path": "/path/to/parse_args.py" }} ```
+  10. [OK  ] erwartet=run_shell  bekommen=run_shell      | {"tool": "run_shell", "args": {"cmd": "npm install"}}
+
+  gueltiges JSON:        9 / 10
+  richtiges Werkzeug:    4 / 10
+

@@ -1,0 +1,21 @@
+0.00.002.438 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)
+0.00.004.248 I srv    load_model: loading model 'models/_compare/Llama-3.2-3B-Instruct-Q4_K_M.gguf'
+0.02.059.104 I srv    load_model: initializing, n_slots = 4, n_ctx_slot = 4096, kv_unified = 'true'
+0.02.064.840 I srv  llama_server: model loaded
+0.02.064.848 I srv  llama_server: listening on http://127.0.0.1:8081
+0.03.029.799 I slot get_availabl: id  3 | task -1 | selected slot by LRU, t_last = -1
+0.03.029.895 I slot launch_slot_: id  3 | task 0 | processing task, is_child = 0
+0.04.162.887 I slot print_timing: id  3 | task 0 | prompt eval time =     648.29 ms /    54 tokens (   12.01 ms per token,    83.30 tokens per second)
+0.04.162.892 I slot print_timing: id  3 | task 0 |        eval time =     484.62 ms /     8 tokens (   60.58 ms per token,    16.51 tokens per second)
+0.04.162.893 I slot print_timing: id  3 | task 0 |       total time =    1132.91 ms /    62 tokens
+0.04.162.895 I slot print_timing: id  3 | task 0 |    graphs reused =          7
+0.04.162.931 I slot      release: id  3 | task 0 | stop processing: n_tokens = 61, truncated = 0
+1.14.367.759 W check_double_bos_eos: Added a BOS token to the prompt as specified by the model but the prompt also starts with a BOS token. So now the final prompt starts with 2 BOS tokens. Are you sure this is what you want?
+1.14.367.823 I slot get_availabl: id  2 | task -1 | selected slot by LRU, t_last = -1
+1.14.367.845 I slot launch_slot_: id  2 | task 10 | processing task, is_child = 0
+1.15.333.637 I slot print_timing: id  2 | task 10 | prompt eval time =     477.18 ms /    35 tokens (   13.63 ms per token,    73.35 tokens per second)
+1.15.333.644 I slot print_timing: id  2 | task 10 |        eval time =     483.82 ms /     8 tokens (   60.48 ms per token,    16.54 tokens per second)
+1.15.333.645 I slot print_timing: id  2 | task 10 |       total time =     961.00 ms /    43 tokens
+1.15.333.646 I slot print_timing: id  2 | task 10 |    graphs reused =         13
+1.15.333.681 I slot      release: id  2 | task 10 | stop processing: n_tokens = 42, truncated = 0
+2.11.501.213 I srv    operator(): operator(): cleaning up before exit...

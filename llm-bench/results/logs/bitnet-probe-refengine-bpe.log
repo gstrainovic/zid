@@ -1,0 +1,41 @@
+===== BitNet-2B-4T + llama-bpe :: 1-tool-call-json | prompt=116 gen=19 | 1.8s | 10.81 tok/s
+{"tool": "read_file", "args": {"path": "/etc/hosts"}}
+
+===== BitNet-2B-4T + llama-bpe :: 2-code-python | prompt=40 gen=89 | 4.5s | 19.74 tok/s
+```python
+def quicksort(a):
+    if len(a) <= 1:
+        return a
+    pivot = a[len(a) // 2]
+    left = [x for x in a if x < pivot]
+    middle = [x for x in a if x == pivot]
+    right = [x for x in a if x > pivot]
+    return quicksort(left) + middle + quicksort(right)
+```
+
+===== BitNet-2B-4T + llama-bpe :: 3-instruction-strict | prompt=31 gen=4 | 0.4s | 9.51 tok/s | erwartet 'BERN': NEIN
+ZURICH
+
+===== BitNet-2B-4T + llama-bpe :: 4-german | prompt=45 gen=177 | 8.9s | 19.92 tok/s
+1. Ein Index in einer relationalen Datenbank wirkt wie ein Index in einer Bibliothek. Es hilft, die Suche effizienter zu machen. Wenn du in einer Bibliothek suchen wirst, wird manchmal eine Liste der Bände und Seiten genommen, um die richtige Abschnitt zu finden. Das ist genau das, was ein Index in einer Datenbank wirkt: Es hilft, die Suche effizienter zu machen.
+
+2. Wenn du in einer Datenbank suchen wirst, und du siehst, dass es keine Liste oder Index hast, dann wird manchmal eine Liste der Bände und Seiten genommen, um die richtige Abschnitt zu finden. Das ist genau das, was ein Index in einer relationalen Datenbank wirkt: Es hilft, die Suche effizienter zu machen.
+
+===== BitNet-2B-4T + llama-bpe :: 5-reasoning | prompt=59 gen=154 | 7.9s | 19.51 tok/s | erwartet '15': ja
+Step 1: Determine the cost of one pen.
+The shop sells pens at 3 for 5 francs. To find the cost of one pen, divide 5 francs by 3 pens.
+5 francs / 3 pens = 1.67 francs per pen.
+
+Step 2: Calculate the total cost of 21 pens.
+Multiply the cost of one pen by the number of pens you bought.
+1.67 francs per pen * 21 pens = 35 francs.
+
+Step 3: Calculate the change you receive.
+Subtract the total cost of the pens from the amount you paid.
+50 francs - 35 francs = 15 francs.
+
+ANSWER: You get 15 francs in change.
+
+===== BitNet-2B-4T + llama-bpe :: 6-agent-multistep | prompt=80 gen=16 | 1.4s | 11.65 tok/s
+1. edit_file("utils.py", "lenght", "length").
+
