@@ -10,5 +10,8 @@ __pycache__/
 # private Einstellungen dieses Rechners
 .claude/
 
+# Agenten-Spielwiese ist ein eigenes Git-Repo (siehe CODING-AGENTEN.md)
+spielwiese/
+
 # das Perplexity-Korpus gehoert bewusst ins Repo (siehe CLAUDE.md)
 !bench/ppl-corpus.txt
