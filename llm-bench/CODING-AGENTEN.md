@@ -108,7 +108,7 @@ nachgeprüft. Schönheitsfehler: die Abschluss-Zusammenfassung beschreibt den
 eigenen Zwischenversuch, als wäre er der Originalfehler gewesen. Laufzeit:
 wenige Minuten für einen Ein-Zeilen-Bug.
 
-Spielwiese: `~/projects/pi-lokal-test` — eigenes Git-Repo, damit jeder
+Spielwiese: `llm-bench/spielwiese/` — eigenes Git-Repo, damit jeder
 Agentenpatzer per `git restore` rückholbar ist. Neue Experimente immer nur
 in Repos mit Git-Historie.
 
