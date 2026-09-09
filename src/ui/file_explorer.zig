@@ -28,10 +28,10 @@ pub const ContextMenu = struct { x: f32, y: f32, node_index: u32 };
 
 /// Einträge des Kontextmenüs, in dieser Reihenfolge (Labels/Kürzel aus shortcuts.zig)
 pub const context_menu_items = [_]shortcuts.Command{
-    .new_file_entry,   .new_folder_entry, .rename_entry,      .delete_entry,
-    .cut_entry,        .copy_entry,       .paste_entry,       .duplicate_entry,
-    .copy_path,        .copy_relative_path, .reveal_in_file_manager, .open_in_terminal,
-    .collapse_all,     .toggle_hidden_files, .filter_explorer,
+    .new_file_entry, .new_folder_entry,    .rename_entry,           .delete_entry,
+    .cut_entry,      .copy_entry,          .paste_entry,            .duplicate_entry,
+    .copy_path,      .copy_relative_path,  .reveal_in_file_manager, .open_in_terminal,
+    .collapse_all,   .toggle_hidden_files, .filter_explorer,
 };
 const context_menu_height: f32 = ctx_menu.height(context_menu_items.len);
 
@@ -170,6 +170,10 @@ pub const FileExplorerState = struct {
     is_resizing: bool = false,
     /// Git-Status pro absolutem Pfad: 'A' staged, 'M' modified, '?' untracked, 'C' conflict, 'S' submodule
     git_status: std.StringHashMap(u8),
+    /// Schützt `git_status`. Der Main-Thread ersetzt die Map in `updateGitStatus`
+    /// (Keys werden freigegeben), während der E2E-Server-Thread sie in
+    /// `explorer_entries` liest — das war ein Segfault in `isIgnored`.
+    git_status_mutex: std.Thread.Mutex = .{},
 
     /// Scrolling state
     scroll_offset_y: f32 = 0,
@@ -228,6 +232,9 @@ pub const FileExplorerState = struct {
     /// Git-Status aus Payload-Format aktualisieren ("~:src/main.zig\n...")
     /// repo_root: absoluter Pfad des Repo-Wurzelverzeichnisses
     pub fn updateGitStatus(self: *Self, payload: []const u8, repo_root: []const u8) void {
+        self.git_status_mutex.lock();
+        defer self.git_status_mutex.unlock();
+
         // Alte Keys freigeben bevor wir die Map leeren
         var it = self.git_status.keyIterator();
         while (it.next()) |key| self.allocator.free(key.*);
@@ -394,7 +401,10 @@ pub const FileExplorerState = struct {
         if (!node.is_folder) return false;
         var child = node.first_child orelse return false;
         var k: u32 = 0;
-        while (k < node.child_count) : ({ k += 1; child += 1; }) {
+        while (k < node.child_count) : ({
+            k += 1;
+            child += 1;
+        }) {
             if (child >= self.nodes.items.len) break;
             if (self.nodeMatchesFilter(child)) return true;
         }
@@ -570,7 +580,10 @@ pub const FileExplorerState = struct {
             var child = parent.first_child orelse return;
             var found: ?u32 = null;
             var k: u32 = 0;
-            while (k < parent.child_count) : ({ k += 1; child += 1; }) {
+            while (k < parent.child_count) : ({
+                k += 1;
+                child += 1;
+            }) {
                 if (child >= self.nodes.items.len) break;
                 if (explorer_ops.isPathOrUnder(path, self.nodes.items[child].path)) {
                     found = child;
@@ -778,8 +791,19 @@ pub const FileExplorerState = struct {
         self.refresh(dst);
     }
 
+    /// Status-Code eines Pfades, unter der Sperre. Nie direkt auf `git_status`
+    /// zugreifen: die Map wird im Main-Thread ersetzt, gelesen wird auch aus dem
+    /// E2E-Server-Thread.
+    pub fn statusFor(self: *Self, path: []const u8) ?u8 {
+        self.git_status_mutex.lock();
+        defer self.git_status_mutex.unlock();
+        return self.git_status.get(path);
+    }
+
     /// Von .gitignore ausgeschlossen: der Eintrag selbst oder ein Vorfahr steht als `I` im Status.
-    pub fn isIgnored(self: *const Self, path: []const u8) bool {
+    pub fn isIgnored(self: *Self, path: []const u8) bool {
+        self.git_status_mutex.lock();
+        defer self.git_status_mutex.unlock();
         var it = self.git_status.iterator();
         while (it.next()) |kv| {
             if (kv.value_ptr.* == 'I' and explorer_ops.isPathOrUnder(path, kv.key_ptr.*)) return true;
@@ -789,7 +813,9 @@ pub const FileExplorerState = struct {
 
     /// Git-Status eines Ordners aus seinen Nachfahren (C > M > A > ?), null wenn nichts.
     /// Ignorierte Einträge zählen nicht (sie grauen nur ihren eigenen Teilbaum aus).
-    pub fn folderStatus(self: *const Self, dir_path: []const u8) ?u8 {
+    pub fn folderStatus(self: *Self, dir_path: []const u8) ?u8 {
+        self.git_status_mutex.lock();
+        defer self.git_status_mutex.unlock();
         var best: ?u8 = null;
         var it = self.git_status.iterator();
         while (it.next()) |kv| {
@@ -1581,9 +1607,10 @@ fn renderTreeEntry(
         // Cursor ohne Markierung (nach Ctrl+Klick-Abwahl) bleibt als Rahmen sichtbar; gezogener Eintrag in Akzent
         .border = .{ .width = .all(1), .color = if (drag_source) theme.accent else if (is_cursor and !is_selected) theme.border_focus else .{ 0, 0, 0, 0 } },
     })({
-        // Indent Spacer
+        // Indent Spacer. Ohne ID: die Schleife legt ihn je Zeile neu an, eine
+        // feste ID war deshalb in jedem Frame rund 45 mal dieselbe und Clay
+        // meldete `duplicate_id`. Abgefragt wird der Spacer nirgends.
         clay.UI()(.{
-            .id = clay.ElementId.ID("indent"),
             .layout = .{
                 .sizing = .{ .w = .fixed(indent), .h = .grow },
             },
@@ -1617,7 +1644,7 @@ fn renderTreeEntry(
         svg.Svg(arena, icon_id, icon_path, 24, fg);
 
         // Git-Status Indikator (vorne); Ordner erben den Status ihrer Nachfahren
-        const git_code: ?u8 = state.git_status.get(node.path) orelse (if (node.is_folder) state.folderStatus(node.path) else null);
+        const git_code: ?u8 = state.statusFor(node.path) orelse (if (node.is_folder) state.folderStatus(node.path) else null);
         if (git_code) |code| if (code != 'I') {
             const git_color: [4]f32 = switch (code) {
                 'A' => theme.success,
@@ -1708,23 +1735,23 @@ fn fileIcon(filename: []const u8) []const u8 {
     const L = svg.Lucide;
     const Row = struct { []const u8, []const u8 };
     const table = [_]Row{
-        .{ ".zig", L.zap },          .{ ".md", L.file_text },     .{ ".txt", L.file_text },   .{ ".rst", L.file_text },
-        .{ ".json", L.braces },      .{ ".json5", L.braces },     .{ ".toml", L.settings },   .{ ".yaml", L.settings },
-        .{ ".yml", L.settings },     .{ ".ini", L.settings },     .{ ".conf", L.settings },   .{ ".cfg", L.settings },
-        .{ ".svg", L.palette },      .{ ".png", L.image },        .{ ".jpg", L.image },       .{ ".jpeg", L.image },
-        .{ ".gif", L.image },        .{ ".bmp", L.image },        .{ ".webp", L.image },      .{ ".ico", L.image },
-        .{ ".pdf", L.book_open },    .{ ".log", L.clipboard },    .{ ".sh", L.terminal },     .{ ".bash", L.terminal },
-        .{ ".zsh", L.terminal },     .{ ".fish", L.terminal },    .{ ".ps1", L.terminal },    .{ ".sql", L.database },
-        .{ ".db", L.database },      .{ ".sqlite", L.database },  .{ ".lock", L.lock },       .{ ".zip", L.archive },
-        .{ ".tar", L.archive },      .{ ".gz", L.archive },       .{ ".xz", L.archive },      .{ ".7z", L.archive },
-        .{ ".rar", L.archive },      .{ ".gguf", L.binary },      .{ ".bin", L.binary },      .{ ".wasm", L.binary },
-        .{ ".so", L.binary },        .{ ".o", L.binary },         .{ ".a", L.binary },        .{ ".ppm", L.image },
-        .{ ".py", L.file_code },     .{ ".js", L.file_code },     .{ ".ts", L.file_code },    .{ ".tsx", L.file_code },
-        .{ ".jsx", L.file_code },    .{ ".rs", L.file_code },     .{ ".go", L.file_code },    .{ ".c", L.file_code },
-        .{ ".h", L.file_code },      .{ ".cpp", L.file_code },    .{ ".hpp", L.file_code },   .{ ".java", L.file_code },
-        .{ ".kt", L.file_code },     .{ ".rb", L.file_code },     .{ ".lua", L.file_code },   .{ ".html", L.file_code },
-        .{ ".css", L.file_code },    .{ ".xml", L.file_code },    .{ ".glsl", L.file_code },  .{ ".wgsl", L.file_code },
-        .{ ".zon", L.package },      .{ ".nix", L.package },      .{ ".cbor", L.binary },
+        .{ ".zig", L.zap },       .{ ".md", L.file_text },    .{ ".txt", L.file_text },  .{ ".rst", L.file_text },
+        .{ ".json", L.braces },   .{ ".json5", L.braces },    .{ ".toml", L.settings },  .{ ".yaml", L.settings },
+        .{ ".yml", L.settings },  .{ ".ini", L.settings },    .{ ".conf", L.settings },  .{ ".cfg", L.settings },
+        .{ ".svg", L.palette },   .{ ".png", L.image },       .{ ".jpg", L.image },      .{ ".jpeg", L.image },
+        .{ ".gif", L.image },     .{ ".bmp", L.image },       .{ ".webp", L.image },     .{ ".ico", L.image },
+        .{ ".pdf", L.book_open }, .{ ".log", L.clipboard },   .{ ".sh", L.terminal },    .{ ".bash", L.terminal },
+        .{ ".zsh", L.terminal },  .{ ".fish", L.terminal },   .{ ".ps1", L.terminal },   .{ ".sql", L.database },
+        .{ ".db", L.database },   .{ ".sqlite", L.database }, .{ ".lock", L.lock },      .{ ".zip", L.archive },
+        .{ ".tar", L.archive },   .{ ".gz", L.archive },      .{ ".xz", L.archive },     .{ ".7z", L.archive },
+        .{ ".rar", L.archive },   .{ ".gguf", L.binary },     .{ ".bin", L.binary },     .{ ".wasm", L.binary },
+        .{ ".so", L.binary },     .{ ".o", L.binary },        .{ ".a", L.binary },       .{ ".ppm", L.image },
+        .{ ".py", L.file_code },  .{ ".js", L.file_code },    .{ ".ts", L.file_code },   .{ ".tsx", L.file_code },
+        .{ ".jsx", L.file_code }, .{ ".rs", L.file_code },    .{ ".go", L.file_code },   .{ ".c", L.file_code },
+        .{ ".h", L.file_code },   .{ ".cpp", L.file_code },   .{ ".hpp", L.file_code },  .{ ".java", L.file_code },
+        .{ ".kt", L.file_code },  .{ ".rb", L.file_code },    .{ ".lua", L.file_code },  .{ ".html", L.file_code },
+        .{ ".css", L.file_code }, .{ ".xml", L.file_code },   .{ ".glsl", L.file_code }, .{ ".wgsl", L.file_code },
+        .{ ".zon", L.package },   .{ ".nix", L.package },     .{ ".cbor", L.binary },
     };
     for (table) |row| {
         if (std.ascii.eqlIgnoreCase(ext, row[0])) return row[1];

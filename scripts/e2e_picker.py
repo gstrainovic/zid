@@ -86,6 +86,20 @@ def step_long_paths():
     check(st["matches"] >= 1, f"Treffer fuer einen tief liegenden Pfad: {label!r}")
     check("/" in label, f"Treffer liegt in Unterordnern: {label!r}")
 
+    # Der eigentliche Fehler war die Geometrie, nicht der Text: Text ohne Umbruch
+    # meldet seine volle Breite als Mindestmass und zog Zeile und Liste ueber den
+    # Kasten hinaus (gemessen 1236 statt 720).
+    box = bounds("pk_box")
+    for i in range(3):
+        row = result_json("element_bounds_i", ["pk_row", i])
+        if not row["found"]:
+            continue
+        check(row["w"] <= box["w"], f"Zeile {i} bleibt im Kasten ({row['w']:.0f} <= {box['w']:.0f})")
+        check(
+            row["x"] + row["w"] <= box["x"] + box["w"] + 0.5,
+            f"Zeile {i} endet nicht rechts vom Kasten",
+        )
+
     shown = st["selected_dir_shown"]
     name = label.rsplit("/", 1)[-1]
     directory = label.rsplit("/", 1)[0]

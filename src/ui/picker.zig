@@ -9,6 +9,7 @@ const fuzzy = @import("fuzzy.zig");
 const shortcuts = @import("shortcuts");
 const explorer_ops = @import("explorer_ops.zig");
 const path_display = @import("path_display.zig");
+const ui_mod = @import("mod.zig");
 const Theme = @import("theme.zig").Theme;
 
 const log = std.log.scoped(.picker);
@@ -17,9 +18,12 @@ pub const ROW_HEIGHT: f32 = 32;
 const VISIBLE_ROWS: usize = 12;
 const LIST_HEIGHT: f32 = VISIBLE_ROWS * ROW_HEIGHT;
 const BOX_WIDTH: f32 = 720;
-/// Zeichen, die in eine Zeile passen. Die einzige Schrift ist eine Monospace,
-/// bei 18 px sind das rund 10,8 px je Zeichen; 12 px Innenabstand je Seite.
-const ROW_CHARS: usize = @intFromFloat((BOX_WIDTH - 2 * 12 - 2 * 10) / 10.8);
+const NAME_SIZE: f32 = 18;
+const DIR_SIZE: f32 = 14;
+/// Nutzbare Breite einer Zeile: Box minus Innenabstand der Box (12 je Seite),
+/// minus Innenabstand der Zeile (10 je Seite), minus etwas Luft zwischen Name
+/// und Ordner.
+const ROW_WIDTH: f32 = BOX_WIDTH - 2 * 12 - 2 * 10 - 16;
 /// Obergrenze der Projektdateien (große Bäume wie ~/projects). Breitensuche: flache
 /// Projektdateien stehen vor tiefen Abhängigkeiten (libs/…), falls die Grenze greift.
 const MAX_FILES: usize = 100_000;
@@ -346,13 +350,21 @@ pub const Picker = struct {
         return self.items.items[self.matches.items[self.selected].index].label;
     }
 
+    fn measureDir(text: []const u8) f32 {
+        return ui_mod.measureTextWidth(text, DIR_SIZE);
+    }
+
     /// Ordneranteil eines Treffers, gekürzt wie ihn die Zeile zeichnet.
     /// Eine Quelle für Render und E2E, damit der Test das Sichtbare prüft.
+    ///
+    /// Gemessen statt gezählt: Name und Ordner stehen in verschiedenen
+    /// Schriftgrößen, ein Zeichenbudget für beide schätzte daneben und der
+    /// Ordner lief rechts aus dem Kasten.
     fn dirShown(label: []const u8, buf: []u8) []const u8 {
         const parts = path_display.split(label);
         if (parts.dir.len == 0) return "";
-        const room = ROW_CHARS -| (parts.name.len + 2);
-        return path_display.truncateMiddle(buf, parts.dir, room);
+        const room = ROW_WIDTH - ui_mod.measureTextWidth(parts.name, NAME_SIZE);
+        return path_display.truncateToWidth(buf, parts.dir, room, measureDir);
     }
 
     /// Gezeichneter Ordneranteil des ausgewählten Treffers (E2E).
@@ -496,22 +508,34 @@ pub const Picker = struct {
                             clay.UI()(.{
                                 .id = id,
                                 .layout = .{
-                                    .sizing = .{ .w = .grow, .h = .fixed(ROW_HEIGHT) },
+                                    // Obergrenze wie `max-width` in CSS. Ohne sie meldet
+                                    // Text ohne Umbruch seine volle Breite als Mindestmaß
+                                    // und zieht Zeile und Liste über den Kasten hinaus.
+                                    .sizing = .{
+                                        .w = .growMinMax(.{ .min = 0, .max = ROW_WIDTH }),
+                                        .h = .fixed(ROW_HEIGHT),
+                                    },
                                     .padding = .axes(0, 10),
                                     .child_gap = 10,
                                     .child_alignment = .{ .y = .center },
                                 },
+                                // Kein eigenes .clip auf der Zeile: ein verschachteltes
+                                // Clip ersetzt im Renderer das äußere, statt sich damit
+                                // zu schneiden, und dann läuft die Liste unten aus dem
+                                // Kasten. Die Breite hält allein die Messung in dirShown.
                                 .background_color = if (active) t.primary else if (hover) t.overlay else .{ 0, 0, 0, 0 },
                                 .corner_radius = .all(3),
                             })({
                                 const fg = if (active) t.text_on_primary else t.text;
                                 const dim = if (active) t.text_on_primary else t.muted;
                                 if (self.mode == .files) {
-                                    // Dateiname zuerst, Ordner gedimmt dahinter und
-                                    // mittig gekürzt: sonst schneidet die Zeile genau
-                                    // den Teil ab, der die Treffer unterscheidet.
+                                    // Dateiname links, Ordner rechtsbündig und mittig
+                                    // gekürzt. Der Ordner darf nicht am Namen kleben,
+                                    // sonst wandert er mit dessen Länge und der rechte
+                                    // Rand franst über die Zeilen aus.
                                     const parts = path_display.split(item.label);
                                     clay.text(parts.name, .{ .font_size = 18, .color = fg, .wrap_mode = .none });
+                                    clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow } } })({});
                                     if (parts.dir.len > 0) {
                                         // Reicht der Arena der Speicher nicht, bleibt der
                                         // Ordner ungekürzt — der Name steht ohnehin schon da.
@@ -521,7 +545,6 @@ pub const Picker = struct {
                                             parts.dir;
                                         clay.text(shown_dir, .{ .font_size = 14, .color = dim, .wrap_mode = .none });
                                     }
-                                    clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow } } })({});
                                 } else {
                                     clay.text(item.label, .{ .font_size = 18, .color = fg, .wrap_mode = .none });
                                     clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow } } })({});

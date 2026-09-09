@@ -28,6 +28,37 @@ pub fn split(path: []const u8) Parts {
     return .{ .name = path[cut + 1 ..], .dir = path[0..cut] };
 }
 
+/// Wie `truncateMiddle`, aber mit einer Breite in Pixeln statt in Zeichen.
+/// `measure` misst einen Text; damit stimmt das Ergebnis auch dann, wenn Name
+/// und Ordner in verschiedenen Schriftgrößen gezeichnet werden.
+pub fn truncateToWidth(
+    buf: []u8,
+    text: []const u8,
+    max_width: f32,
+    measure: *const fn ([]const u8) f32,
+) []const u8 {
+    if (max_width <= 0) return "";
+    if (measure(text) <= max_width) return text;
+
+    const total = std.unicode.utf8CountCodepoints(text) catch return text;
+    // Binäre Suche über die Zeichenzahl: die Breite wächst monoton mit ihr.
+    var lo: usize = 1;
+    var hi: usize = total;
+    var best: usize = 1;
+    while (lo <= hi) {
+        const mid = lo + (hi - lo) / 2;
+        const candidate = truncateMiddle(buf, text, mid);
+        if (measure(candidate) <= max_width) {
+            best = mid;
+            lo = mid + 1;
+        } else {
+            if (mid == 1) break;
+            hi = mid - 1;
+        }
+    }
+    return truncateMiddle(buf, text, best);
+}
+
 /// Kürzt `text` auf höchstens `max_chars` Zeichen, indem die Mitte durch ein
 /// Auslassungszeichen ersetzt wird. Schreibt nach `buf` und liefert den Teil
 /// davon zurück; passt der Text schon, kommt er unverändert zurück.
@@ -145,6 +176,42 @@ test "truncateMiddle bei winziger Obergrenze" {
     var buf: [128]u8 = undefined;
     const out = truncateMiddle(&buf, "abcdefghij", 1);
     try testing.expectEqualStrings(ellipsis, out);
+}
+
+/// Testschrift: acht Pixel je Zeichen, das Auslassungszeichen zählt als eins.
+fn eightPxPerChar(text: []const u8) f32 {
+    const n = std.unicode.utf8CountCodepoints(text) catch text.len;
+    return @as(f32, @floatFromInt(n)) * 8.0;
+}
+
+test "truncateToWidth lässt Passendes in Ruhe" {
+    var buf: [128]u8 = undefined;
+    const out = truncateToWidth(&buf, "src/ui", 100, eightPxPerChar);
+    try testing.expectEqualStrings("src/ui", out);
+}
+
+test "truncateToWidth hält die Pixelgrenze ein" {
+    var buf: [256]u8 = undefined;
+    const long = "engines/BitNet/3rdparty/llama.cpp/examples/llama.android/app/src/main";
+    for ([_]f32{ 320, 160, 80, 24 }) |limit| {
+        const out = truncateToWidth(&buf, long, limit, eightPxPerChar);
+        try testing.expect(eightPxPerChar(out) <= limit);
+        try testing.expect(std.unicode.utf8ValidateSlice(out));
+    }
+}
+
+test "truncateToWidth nutzt den Platz aus" {
+    var buf: [256]u8 = undefined;
+    const long = "engines/BitNet/3rdparty/llama.cpp/examples";
+    const out = truncateToWidth(&buf, long, 160, eightPxPerChar);
+    // Ein Zeichen mehr würde die Grenze reißen.
+    try testing.expect(eightPxPerChar(out) <= 160);
+    try testing.expect(eightPxPerChar(out) > 160 - 8);
+}
+
+test "truncateToWidth ohne Platz liefert nichts" {
+    var buf: [64]u8 = undefined;
+    try testing.expectEqualStrings("", truncateToWidth(&buf, "src/ui", 0, eightPxPerChar));
 }
 
 test "commonPrefix findet den gemeinsamen Ordner" {
