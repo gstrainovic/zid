@@ -207,7 +207,7 @@ def cmd_scan(zon_path: str) -> None:
 
 def main(argv: list[str]) -> int:
     import subprocess
-    print("Building vulkan-ed...")
+    print("Building zid...")
     subprocess.run(["zig", "build"])
 
     if len(argv) < 2:

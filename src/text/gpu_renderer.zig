@@ -1,4 +1,4 @@
-//! GPU Text Renderer für vulkan-ed
+//! GPU Text Renderer für zid
 //!
 //! Rendert Text als GPU-Quads mit Glyph-Atlas Textur.
 

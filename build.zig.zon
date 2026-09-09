@@ -1,6 +1,8 @@
 .{
-    .fingerprint = 0xe53b65ee4e846b20,
-    .name = .vulkan_ed,
+    // Neu berechnet beim Umbenennen von vulkan-ed auf zid: der Fingerprint
+    // hängt am Paketnamen.
+    .fingerprint = 0x58c7413b2cab22c0,
+    .name = .zid,
     .version = "0.1.0",
     .minimum_zig_version = "0.15.2",
     .dependencies = .{

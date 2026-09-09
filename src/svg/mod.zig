@@ -1,4 +1,4 @@
-//! SVG Rendering Module for vulkan-ed
+//! SVG Rendering Module for zid
 //!
 //! Provides atlas-cached SVG icon rendering with pure-Zig scanline rasterization.
 //! Adapted from Gooey's SVG pipeline.

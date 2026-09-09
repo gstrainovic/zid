@@ -1,5 +1,5 @@
 //! Gemerkter UI-Zustand zwischen Sitzungen (Sidebar-Breite, versteckte Dateien):
-//! `$XDG_CONFIG_HOME/vulkan-ed/state` bzw. `~/.config/vulkan-ed/state`, Zeilen `key=value`.
+//! `$XDG_CONFIG_HOME/zid/state` bzw. `~/.config/zid/state`, Zeilen `key=value`.
 //! Parsen/Formatieren ist rein und unit-getestet; Laden/Speichern nimmt einen expliziten Pfad.
 
 const std = @import("std");
@@ -53,7 +53,7 @@ pub fn parse(text: []const u8) State {
 }
 
 pub fn format(alloc: std.mem.Allocator, st: State) ![]u8 {
-    return std.fmt.allocPrint(alloc, "# vulkan-ed state\nsidebar_width={d}\nshow_hidden={s}\ntheme={s}\nfont_size={d}\nautosave={s}\nminimap={s}\nwhitespace={s}\nindent_guides={s}\nword_wrap={s}\n", .{
+    return std.fmt.allocPrint(alloc, "# zid state\nsidebar_width={d}\nshow_hidden={s}\ntheme={s}\nfont_size={d}\nautosave={s}\nminimap={s}\nwhitespace={s}\nindent_guides={s}\nword_wrap={s}\n", .{
         @as(u32, @intFromFloat(@round(st.sidebar_width))), if (st.show_hidden) "true" else "false",
         if (st.light_theme) "light" else "dark",                 st.font_size,
         if (st.autosave) "true" else "false",                    if (st.minimap) "true" else "false",
@@ -62,13 +62,13 @@ pub fn format(alloc: std.mem.Allocator, st: State) ![]u8 {
     });
 }
 
-/// Pfad der State-Datei (owned): $XDG_CONFIG_HOME/vulkan-ed/state oder ~/.config/vulkan-ed/state.
+/// Pfad der State-Datei (owned): $XDG_CONFIG_HOME/zid/state oder ~/.config/zid/state.
 pub fn defaultPath(alloc: std.mem.Allocator) ![]u8 {
     if (std.posix.getenv("XDG_CONFIG_HOME")) |x| {
-        if (x.len > 0) return std.fs.path.join(alloc, &.{ x, "vulkan-ed", "state" });
+        if (x.len > 0) return std.fs.path.join(alloc, &.{ x, "zid", "state" });
     }
     const home = std.posix.getenv("HOME") orelse return error.NoHome;
-    return std.fs.path.join(alloc, &.{ home, ".config", "vulkan-ed", "state" });
+    return std.fs.path.join(alloc, &.{ home, ".config", "zid", "state" });
 }
 
 pub fn loadFrom(alloc: std.mem.Allocator, path: []const u8) State {
@@ -102,7 +102,7 @@ test "format und loadFrom/saveTo sind umkehrbar" {
     const a = testing.allocator;
     const text = try format(a, .{ .sidebar_width = 301.4, .show_hidden = true });
     defer a.free(text);
-    try testing.expectEqualStrings("# vulkan-ed state\nsidebar_width=301\nshow_hidden=true\ntheme=dark\nfont_size=24\nautosave=false\nminimap=true\nwhitespace=false\nindent_guides=true\nword_wrap=false\n", text);
+    try testing.expectEqualStrings("# zid state\nsidebar_width=301\nshow_hidden=true\ntheme=dark\nfont_size=24\nautosave=false\nminimap=true\nwhitespace=false\nindent_guides=true\nword_wrap=false\n", text);
     const st3 = parse("minimap=false\nwhitespace=true\nindent_guides=0\nword_wrap=true\n");
     try testing.expect(!st3.minimap and st3.whitespace and !st3.indent_guides and st3.word_wrap);
     const st2 = parse("theme=light\nfont_size=30\nautosave=1\nfont_size=99\n");
@@ -113,7 +113,7 @@ test "format und loadFrom/saveTo sind umkehrbar" {
     defer tmp.cleanup();
     const root = try tmp.dir.realpathAlloc(a, ".");
     defer a.free(root);
-    const path = try std.fs.path.join(a, &.{ root, "cfg", "vulkan-ed", "state" });
+    const path = try std.fs.path.join(a, &.{ root, "cfg", "zid", "state" });
     defer a.free(path);
     try saveTo(a, path, .{ .sidebar_width = 180, .show_hidden = false });
     const back = loadFrom(a, path);

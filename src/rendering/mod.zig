@@ -1,4 +1,4 @@
-//! Rendering-Modul für vulkan-ed
+//! Rendering-Modul für zid
 //!
 //! Verwendet WGPU für cross-platform GPU Rendering.
 

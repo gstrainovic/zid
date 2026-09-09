@@ -1,6 +1,6 @@
-//! Interactive Mode für vulkan-ed
+//! Interactive Mode für zid
 //!
-//! Starten mit: vulkan-ed --interactive
+//! Starten mit: zid --interactive
 //!
 //! Commands (line-based, Text statt JSON):
 //!   open <path>              Öffnet Datei in neuem Tab
@@ -17,7 +17,7 @@
 //!   shutdown                 Beendet die App
 //!
 //! Example:
-//!   vulkan-ed --interactive
+//!   zid --interactive
 //!   > open ./README.md
 //!   OK
 //!   > key ctrl+k
@@ -245,7 +245,7 @@ pub fn runInteractiveLoop(ctx: *e2e_server.E2EContext) void {
     var stdout_writer = std.fs.File.stdout().writer(&stdout_buf);
     const out = &stdout_writer.interface;
 
-    out.writeAll("=== vulkan-ed interactive mode ===\n") catch return;
+    out.writeAll("=== zid interactive mode ===\n") catch return;
     out.writeAll("Commands: open, close-tab, switch-tab, click, right-click, key, type, screenshot, split, show-menu, get-state, shutdown\n") catch return;
     out.writeAll("> ") catch return;
     out.flush() catch return;

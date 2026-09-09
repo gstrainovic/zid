@@ -93,7 +93,7 @@ damit auf dem Testrechner nichts zu installieren ist.
 
 ```bash
 git clone <dieses-repo> && cd bitnet-colibri-bench
-./setup/linux.sh            # Repo-Wurzel von vulkan-ed ist die Vorgabe
+./setup/linux.sh            # Repo-Wurzel von zid ist die Vorgabe
 ```
 
 Das holt und baut BitNet (mit Patch) und colibri, lädt BitNet-b1.58-2B-4T, das

@@ -1,4 +1,4 @@
-//! Tab-Bar Component für vulkan-ed
+//! Tab-Bar Component für zid
 //!
 //! Von Gooey's tabs.zig adaptiert für Clay + wgpu.
 //! Zeigt offene Dateien als Tabs mit Schließen-Button.

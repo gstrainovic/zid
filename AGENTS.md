@@ -6,13 +6,13 @@
 
 ## Logging
 
-- Debug-Zeilen nur mit `VULKAN_ED_DEBUG=1` (`logFn` in main.zig filtert zur Laufzeit). Ohne
+- Debug-Zeilen nur mit `ZID_DEBUG=1` (`logFn` in main.zig filtert zur Laufzeit). Ohne
   Variable bleiben info/warn/err; vorher waren es tausende Zeilen pro Sitzung.
 
 ## Build Commands
 
 ```bash
-zig build run              # Run vulkan-ed
+zig build run              # Run zid
 zig build run -- --headless  # Headless mode (screenshots via RPC port 9999)
 zig build run -- --interactive  # Interactive mode (stdin/stdout command interface)
 zig build -Doptimize=ReleaseSafe  # Release build
@@ -324,8 +324,8 @@ Seit 06.09.2026 liegt alles im Repo; `~/projects/ki` und das separate Bench-Repo
   bleiben, Ordner mit Treffern gelten als aufgeklappt; nur geladene Knoten werden durchsucht; Enter
   behält den Filter, Escape leert ihn). Drag & Drop: Ziehen eines Eintrags auf einen Ordner (oder eine
   Datei darin) fragt „Move 'a' into 'b'?“ und ruft `performMove` (`drag`/`pending_move`).
-- **Gemerkter Zustand** (`src/ui/user_state.zig`, unit-getestet): `$XDG_CONFIG_HOME/vulkan-ed/state`
-  bzw. `~/.config/vulkan-ed/state` mit `sidebar_width` und `show_hidden`; geschrieben nach dem
+- **Gemerkter Zustand** (`src/ui/user_state.zig`, unit-getestet): `$XDG_CONFIG_HOME/zid/state`
+  bzw. `~/.config/zid/state` mit `sidebar_width` und `show_hidden`; geschrieben nach dem
   Splitter-Ziehen und beim Umschalten, gelesen in `UI.loadUserState` nach `setupClay`. E2E setzt
   `XDG_CONFIG_HOME=tmp/xdg-config`.
 - **Kontextmenü** ist datengetrieben (`context_menu_items`, Labels/Kürzel aus der Tabelle, IDs
@@ -413,7 +413,7 @@ Seit 06.09.2026 liegt alles im Repo; `~/projects/ki` und das separate Bench-Repo
 - **Clay `getElementData` vergisst nichts:** IDs, die nicht mehr gerendert werden, bleiben `found`
   mit alter Geometrie. E2E-Prüfungen auf „Element ist weg“ sind wertlos; Zustand per RPC prüfen.
 - **E2E immer mit `XDG_CONFIG_HOME=tmp/xdg-config`:** `e2e_editor.py` lief ohne und hat
-  `~/.config/vulkan-ed/state` mit Testwerten (Word-Wrap an) überschrieben; jetzt setzen alle
+  `~/.config/zid/state` mit Testwerten (Word-Wrap an) überschrieben; jetzt setzen alle
   Skripte beide XDG-Variablen.
 - **setText verwirft den Undo-Verlauf.** `libs/flow-core` gibt in `Buffer.load` die Leaf-Puffer des
   vorherigen Ladevorgangs frei (Leak-Fix gegenüber upstream flow). Alle Undo-/Redo-Knoten zeigen aber
@@ -432,7 +432,7 @@ Seit 06.09.2026 liegt alles im Repo; `~/projects/ki` und das separate Bench-Repo
 - **Zoom:** Ctrl+=/Ctrl+-/Ctrl+0 (`zoom_in/out/reset`, 10–48, `setFontSizeAll` für alle Panes).
 - **Autosave:** File → Toggle Autosave (`UI.autosave`), speichert 1 s nach der letzten Änderung
   (`CodeEditor.last_edit_ms`) nur Text-Tabs mit Pfad. Jedes Speichern legt vorher eine Sicherung
-  unter `$XDG_DATA_HOME/vulkan-ed/backup/<name>.<hash>.bak` ab (`src/editor/backup.zig`, eine je
+  unter `$XDG_DATA_HOME/zid/backup/<name>.<hash>.bak` ab (`src/editor/backup.zig`, eine je
   Datei, wird ersetzt). CRLF-Dateien bleiben CRLF (`file_eol_mode`, Test im Editor).
 - **Gemerkt** (`user_state`): `theme`, `font_size`, `autosave` zusätzlich zu Breite/Hidden.
 - **Toasts:** `UI.showToast` (3 s, unten rechts, max. 4): „Saved x“ (`CodeEditor.takeSaved`),
@@ -497,6 +497,59 @@ Seit 06.09.2026 liegt alles im Repo; `~/projects/ki` und das separate Bench-Repo
 - Markdown-Preview hält je Sprache einen Highlighter (`code_highlighters`-Map); vorher wurde bei
   jedem Sprachwechsel ein neuer Tree-sitter-Parser gebaut, viermal pro Frame bei vier Sprachen.
 
+## Marp: Folien aus Markdown, Export nach PDF
+
+- **Parser** `src/ui/marp.zig` (Modul `marp`, rein, 15 Tests): Front-Matter mit `marp: true`,
+  Folientrennung an `---` (nicht im Code-Zaun, nicht bei Setext-Überschriften), `headingDivider`,
+  globale Direktiven (`theme`, `style`, `size`, `headingDivider`) und lokale mit Vererbung
+  (`_`-Präfix = nur diese Folie). Kommentare ohne Direktiven werden Notizen. Das `Deck` hält eine
+  eigene Arena, die Quelle darf danach weg.
+- **HTML** `src/ui/marp_html.zig` (Modul `marp_html`): Folie → HTML-Fragment über zigdowns
+  `HtmlRenderer` (`body_only`) plus CSS. Bewusst CSS 2.1, MuPDFs Story-Engine kennt weder
+  Flexbox noch Grid noch Custom Properties.
+- **PDF** `src/rendering/marp_pdf.zig`: eine Seite je Folie in Foliengröße über `fz_story` und
+  `fz_new_document_writer`. Hintergrund, Kopf-/Fußzeile und Seitenzahl zeichnet das Modul selbst,
+  weil MuPDFs CSS kein `position` kennt. Die Wrapper dafür stehen in `mupdf_wrapper/fitz-z.c`
+  (setjmp-Kapselung wie beim Lesen).
+- **Folienvorschau:** `MarkdownView` parst ihren Text beim Anlegen als Deck (`deck`-Feld).
+  Gelingt das, zeigt sie statt des Fließtexts eine Folie im Seitenverhältnis des Decks
+  (`md_slide`) plus Blätterleiste (`md_slide_prev`, `md_slide_counter`, `md_slide_next`).
+  Geblättert wird per Pfeil links/rechts, Bild auf/ab, Pos1/Ende, Mausrad und den beiden
+  Schaltflächen. Es ist immer nur eine Folie geparst (`slide_arena`/`slide_parsed`), der
+  Folienwechsel wirft sie weg. `UI.activeSlideDeckView` liefert die Vorschau des aktiven Tabs,
+  wenn sie ein Deck zeigt; darüber laufen Tasten und der RPC `slide_state`
+  (`deck`, `slides`, `current`, `scale`, `font_size`, `overflow`).
+- **Rahmengröße von Hand:** `renderDeck` rechnet Breite und Höhe der Folie selbst aus der Fläche
+  des Wurzelelements (`markdown_view_root`, letzter Frame) und setzt sie als `.fixed`. Mit Clays
+  `.aspect_ratio` plus `.w = .grow` blieb der Rahmen auf Inhaltsgröße stehen und war im Fenster
+  winzig; im Headless-Test fiel das nicht auf, weil dort nur Verhältnisse geprüft wurden. Der
+  E2E prüft deshalb jetzt auch, dass der Rahmen die Breite ausfüllt.
+- **Maßstab:** Der Rahmen wird im Verhältnis `Rahmenbreite / Deckbreite` gezeichnet, Ränder und
+  Grundschrift stammen aus denselben Konstanten wie der Export (`pdf_margin_x`, `pdf_margin_y`,
+  `pdf_content_em`, gespiegelt aus `marp_pdf.zig`); die Überschriftenfaktoren in `renderBlock`
+  (2.0 / 1.5 / 1.2) entsprechen dem Export-CSS. Untergrenze 6 px, sonst wird die Vorschau in
+  kleinen Panes unleserlich.
+- **Überlauf:** `marp_pdf.slideFits` legt die Folie mit `fz_place_story` aus und zeichnet nichts;
+  bleibt Inhalt übrig, meldet die Vorschau „Inhalt passt nicht auf die Folie" (`md_slide_overflow`).
+  Clay kann das nicht beantworten: der Rahmen clippt, die gemessene Höhe geht darum nie über die
+  Innenhöhe hinaus.
+- **Bedienung:** Command `md_export_pdf` („Export to PDF") in `shortcuts.zig`, sichtbar im
+  Tab-Kontextmenü, im Editor-Kontextmenü, im Kontextmenü der Vorschau und im View-Menü; wie
+  `md_preview` bei Nicht-`.md`-Tabs ausgeblendet. Das Ergebnis landet neben der Quelle
+  (`deck.md` → `deck.pdf`) und wird sofort als PDF-Tab geöffnet, die Vorschau ist damit das,
+  was rauskommt. Fehlt `marp: true`, kommt ein Fehlerdialog statt einer Datei.
+- **E2E:** `python3 scripts/e2e_marp_pdf.py` (headless) deckt Sichtbarkeit des Menüeintrags,
+  Export, Seitenzahl, PDF-Tab, den Nicht-Deck-Fall und die Folienvorschau samt Blättern ab. Fixture: `test_data/marp_test.md`.
+  Einzelne Seiten prüfen: `mutool draw -F txt -o - DATEI.pdf SEITE`.
+- **Grenzen:** Der Streifen für Kopf-/Fußzeile muss eine Zeile samt Abstand fassen, sonst
+  platziert `fz_place_story` gar nichts (deshalb `chrome_h = 40` und `p { margin: 0 }`).
+  Inhalt, der nicht auf die Folie passt, wird abgeschnitten statt verkleinert. zigdown maskiert
+  nur Textstücke mit spitzer Klammer, ein alleinstehendes `&` bleibt roh. Mehrzeiliges YAML im
+  Front-Matter (`style: |`) wird nicht zusammengefasst. `![bg]`-Hintergrundbilder bleiben im
+  Markdown stehen. Die Vorschau bildet den Umbruch nach, ist aber keine Pixelkopie: sie zeichnet
+  mit der Editor-Schrift (JetBrainsMono), das PDF mit MuPDFs Serifenlosen. Die Grenze meldet
+  deshalb `slideFits`, nicht das Auge.
+
 ## LSP (zls): Sprung zur Definition
 
 - **Aufbau:** `src/lsp/lsp_proto.zig` (reine Logik, unit-getestet: `Content-Length`-Rahmen,
@@ -506,7 +559,7 @@ Seit 06.09.2026 liegt alles im Repo; `~/projects/ki` und das separate Bench-Repo
   mit `result: null` beantwortet). Der alte Client nutzte die std.json-API von 0.13 und gab Payloads
   vor dem Lesen frei; er wurde ersetzt.
 - **Start:** lazy beim ersten F12/Ctrl+Klick in einer `.zig`-Datei (`UI.ensureLsp`): `ZLS_PATH`,
-  sonst `~/.local/bin/zls`, sonst `zls` im PATH; `VULKAN_ED_LSP=off` schaltet ab. Root ist
+  sonst `~/.local/bin/zls`, sonst `zls` im PATH; `ZID_LSP=off` schaltet ab. Root ist
   `current_directory`. Solange `initialize` nicht beantwortet ist, springt der Editor per Textmuster
   (`gotoDefinitionLocal`). RPC `ui_state.lsp` = off/starting/ready/failed.
 - **Ablauf:** `CodeEditor.definition_hook` (vom UI in `ensureEditorHooks` jedem Editor gesetzt, weil
@@ -599,10 +652,10 @@ Seit 06.09.2026 liegt alles im Repo; `~/projects/ki` und das separate Bench-Repo
 - **Werkzeug:** Headless fasst jeden Text-Command per `pwrite` in ein memfd an
   (`src/debug/text_probe.zig`; `/dev/null` liest den Puffer nicht, EFAULT bleibt aus). Zeigt ein
   Command auf unmapped Speicher, panict der Loop mit Command-Index, Bounding-Box und dem
-  vorigen Text. Mit `--page-alloc` oder `VULKAN_ED_PAGE_ALLOC=1` läuft alles über
+  vorigen Text. Mit `--page-alloc` oder `ZID_PAGE_ALLOC=1` läuft alles über
   `src/debug/free_log.zig` (page_allocator: jede Freigabe = munmap, kein In-Place-Remap) und
   die Meldung enthält den Stack-Trace der Freigabe. So laufen lassen:
-  `VULKAN_ED_PAGE_ALLOC=1 python3 scripts/e2e_explorer.py` (jede E2E-Suite geht) oder
+  `ZID_PAGE_ALLOC=1 python3 scripts/e2e_explorer.py` (jede E2E-Suite geht) oder
   `python3 scripts/e2e_repro_text_uaf.py --page-alloc` (Ordnerwechsel, Bilder, Tooltip,
   Picker-Klicks, Tab-Schließen). Der GPA unmappt kleine Buckets erst, wenn sie ganz leer sind,
   darum fällt der Fehler im Fenster nur sporadisch auf.

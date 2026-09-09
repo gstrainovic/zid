@@ -63,6 +63,21 @@ pub fn build(b: *std.Build) void {
     });
     const zigdown_mod = zigdown_dep.module("zigdown");
 
+    // Marp: Deck-Parser und HTML-Aufbereitung. Eigene Module, weil sowohl das
+    // Executable als auch der PDF-Export sie brauchen.
+    const marp_mod = b.createModule(.{
+        .root_source_file = b.path("src/ui/marp.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const marp_html_mod = b.createModule(.{
+        .root_source_file = b.path("src/ui/marp_html.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    marp_html_mod.addImport("zigdown", zigdown_mod);
+    marp_html_mod.addImport("marp", marp_mod);
+
     const exe_mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
@@ -105,6 +120,8 @@ pub fn build(b: *std.Build) void {
     exe_mod.addImport("syntax", syntax_mod);
     exe_mod.addImport("nanosvg", nanosvg_mod);
     exe_mod.addImport("zigdown", zigdown_mod);
+    exe_mod.addImport("marp", marp_mod);
+    exe_mod.addImport("marp_html", marp_html_mod);
 
     // ghostty-vt: Terminal emulator library
     if (b.lazyDependency("ghostty", .{
@@ -133,7 +150,7 @@ pub fn build(b: *std.Build) void {
     b.getInstallStep().dependOn(&syntax_test_install.step);
 
     const exe = b.addExecutable(.{
-        .name = "vulkan-ed",
+        .name = "zid",
         .root_module = exe_mod,
     });
 
@@ -215,7 +232,7 @@ pub fn build(b: *std.Build) void {
         run_cmd.addArgs(args);
     }
 
-    const run_step = b.step("run", "Run vulkan-ed");
+    const run_step = b.step("run", "Run zid");
     run_step.dependOn(&run_cmd.step);
 
     // Tests
@@ -493,6 +510,35 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     }) });
 
+    const marp_tests = b.addTest(.{ .root_module = marp_mod });
+    const run_marp_tests = b.addRunArtifact(marp_tests);
+    run_marp_tests.has_side_effects = true;
+
+    const marp_html_tests = b.addTest(.{ .root_module = marp_html_mod });
+    const run_marp_html_tests = b.addRunArtifact(marp_html_tests);
+    run_marp_html_tests.has_side_effects = true;
+
+    // PDF-Export: braucht dieselbe MuPDF-Anbindung wie das Executable.
+    const marp_pdf_mod = b.createModule(.{
+        .root_source_file = b.path("src/rendering/marp_pdf.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    marp_pdf_mod.addImport("marp", marp_mod);
+    marp_pdf_mod.addImport("marp_html", marp_html_mod);
+    marp_pdf_mod.addIncludePath(b.path("src/rendering/mupdf_wrapper"));
+    marp_pdf_mod.link_libc = true;
+    const marp_pdf_tests = b.addTest(.{ .root_module = marp_pdf_mod });
+    if (target.result.os.tag == .linux) {
+        marp_pdf_mod.linkSystemLibrary("mupdf", .{ .use_pkg_config = .no });
+        marp_pdf_tests.addCSourceFile(.{
+            .file = b.path("src/rendering/mupdf_wrapper/fitz-z.c"),
+            .flags = &[_][]const u8{ "-std=c99", "-w" },
+        });
+    }
+    const run_marp_pdf_tests = b.addRunArtifact(marp_pdf_tests);
+    run_marp_pdf_tests.has_side_effects = true;
+
     const test_step = b.step("test", "Run tests");
 
     const run_async_tests = b.addRunArtifact(async_tests);
@@ -524,6 +570,9 @@ pub fn build(b: *std.Build) void {
     run_word_wrap_tests.has_side_effects = true;
     test_step.dependOn(&run_word_wrap_tests.step);
     test_step.dependOn(&run_glyph_layout_tests.step);
+    test_step.dependOn(&run_marp_tests.step);
+    test_step.dependOn(&run_marp_html_tests.step);
+    if (target.result.os.tag == .linux) test_step.dependOn(&run_marp_pdf_tests.step);
     test_step.dependOn(&run_file_types_tests.step);
     test_step.dependOn(&run_dialog_ops_tests.step);
     test_step.dependOn(&run_edit_ops_tests.step);

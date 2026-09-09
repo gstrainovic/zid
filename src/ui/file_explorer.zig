@@ -1,4 +1,4 @@
-//! File Explorer Sidebar für vulkan-ed
+//! File Explorer Sidebar für zid
 //!
 //! Zeigt Verzeichnisbaum an (Tree-Widget). Von Gooey's tree_list.zig adaptiert für Clay + wgpu.
 //! Auswahl ist eine Menge von Knoten (Ctrl+Klick toggelt, Shift+Klick Bereich), `selected_index`

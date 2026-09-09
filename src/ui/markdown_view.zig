@@ -4,6 +4,8 @@ const zigdown = @import("zigdown");
 const word_wrap = @import("word_wrap.zig");
 const ui_mod = @import("mod.zig");
 const shortcuts = @import("shortcuts");
+const marp = @import("marp");
+const marp_pdf = @import("../rendering/marp_pdf.zig");
 const ctx_menu = @import("context_menu");
 const Theme = ui_mod.Theme;
 const ImageTexture = @import("../clay_renderer/image_renderer.zig").ImageTexture;
@@ -24,6 +26,19 @@ pub const MarkdownView = struct {
     /// Obergrenze für die Umbruchbreite. Nötig in horizontal scrollbaren
     /// Viewports, wo Clay dem Container die volle Inhaltsbreite meldet.
     wrap_width_hint: ?f32 = null,
+
+    /// Marp-Deck, falls `text` eines ist (`marp: true` im Front-Matter). Dann
+    /// zeigt die Vorschau Folien statt eines durchgehenden Dokuments.
+    deck: ?marp.Deck = null,
+    current_slide: usize = 0,
+    /// Maßstab Rahmen zu Foliengröße aus dem letzten Frame (1.0 = unbekannt).
+    slide_scale: f32 = 1.0,
+    /// Inhalt der gezeigten Folie ragt über den Rahmen hinaus (wird im PDF abgeschnitten).
+    slide_overflow: bool = false,
+    /// Parse-Ergebnis der gezeigten Folie. Eigene Arena, wird beim Folienwechsel
+    /// verworfen — es ist immer nur eine Folie im Blick.
+    slide_arena: ?*std.heap.ArenaAllocator = null,
+    slide_parsed: ?*zigdown.parser.ParseResult = null,
 
     /// View for scrolling
     view: flow_core.View,
@@ -52,6 +67,7 @@ pub const MarkdownView = struct {
 
     pending_split_v: bool = false,
     pending_split_h: bool = false,
+    pending_export_pdf: bool = false,
 
     /// Geparster Dokumentbaum, einmal pro View erzeugt. Arena und Ergebnis
     /// liegen auf dem Heap: Views leben in ArrayLists und dürfen wandern,
@@ -84,11 +100,18 @@ pub const MarkdownView = struct {
             .allocator = allocator,
             .text = allocator.dupe(u8, text) catch "",
             .base_path = allocator.dupe(u8, base_path) catch "",
+            // Kein Deck ist der Normalfall, nicht der Fehlerfall.
+            .deck = marp.parse(allocator, text) catch null,
             .view = .{},
         };
     }
 
     pub fn deinit(self: *Self) void {
+        self.dropSlideDocument();
+        if (self.deck) |*d| {
+            d.deinit();
+            self.deck = null;
+        }
         if (self.parsed) |pr| {
             self.allocator.destroy(pr);
             self.parsed = null;
@@ -118,6 +141,11 @@ pub const MarkdownView = struct {
     }
 
     pub fn scrollLines(self: *Self, delta: i32) void {
+        // Im Deck blättert das Rad, es gibt nichts zu scrollen.
+        if (self.deck != null) {
+            if (delta < 0) self.nextSlide() else if (delta > 0) self.prevSlide();
+            return;
+        }
         const scroll_speed: f32 = 60.0;
         if (delta > 0) {
             self.scroll_offset_y = @max(0, self.scroll_offset_y - @as(f32, @floatFromInt(delta)) * scroll_speed);
@@ -134,10 +162,23 @@ pub const MarkdownView = struct {
                 switch (cmd) {
                     .split_vertical => self.pending_split_v = true,
                     .split_horizontal => self.pending_split_h = true,
+                    .md_export_pdf => self.pending_export_pdf = true,
                     else => {},
                 }
                 return true;
             }
+        }
+
+        if (self.deck != null) {
+            if (hitElement("md_slide_prev", x, y)) {
+                self.prevSlide();
+                return true;
+            }
+            if (hitElement("md_slide_next", x, y)) {
+                self.nextSlide();
+                return true;
+            }
+            return false;
         }
 
         if (self.content_height <= self.viewport_height) return false;
@@ -168,6 +209,14 @@ pub const MarkdownView = struct {
         }
 
         return true;
+    }
+
+    /// Liegt (x, y) in der Bounding-Box des Elements aus dem letzten Frame?
+    fn hitElement(id: []const u8, x: f32, y: f32) bool {
+        const data = clay.getElementData(clay.ElementId.ID(id));
+        if (!data.found) return false;
+        const b = data.bounding_box;
+        return x >= b.x and x <= b.x + b.width and y >= b.y and y <= b.y + b.height;
     }
 
     pub fn handleScrollbarMouseMove(self: *Self, x: f32, y: f32) void {
@@ -235,6 +284,73 @@ pub const MarkdownView = struct {
         return &pr.parser.document;
     }
 
+    /// Anzahl Folien; 0 wenn der Text kein Marp-Deck ist.
+    pub fn slideCount(self: *const Self) usize {
+        const d = self.deck orelse return 0;
+        return d.slides.len;
+    }
+
+    fn dropSlideDocument(self: *Self) void {
+        if (self.slide_parsed) |pr| {
+            self.allocator.destroy(pr);
+            self.slide_parsed = null;
+        }
+        if (self.slide_arena) |arena| {
+            arena.deinit();
+            self.allocator.destroy(arena);
+            self.slide_arena = null;
+        }
+    }
+
+    /// Blättert zur Folie `index` (geklemmt) und wirft den alten Parse weg.
+    pub fn showSlide(self: *Self, index: usize) void {
+        const count = self.slideCount();
+        if (count == 0) return;
+        const clamped = @min(index, count - 1);
+        if (clamped == self.current_slide and self.slide_parsed != null) return;
+        self.current_slide = clamped;
+        self.slide_overflow = false;
+        self.dropSlideDocument();
+        self.scroll_offset_y = 0;
+    }
+
+    pub fn nextSlide(self: *Self) void {
+        if (self.current_slide + 1 < self.slideCount()) self.showSlide(self.current_slide + 1);
+    }
+
+    pub fn prevSlide(self: *Self) void {
+        if (self.current_slide > 0) self.showSlide(self.current_slide - 1);
+    }
+
+    /// Wie `cachedDocument`, nur für die gerade gezeigte Folie.
+    fn cachedSlideDocument(self: *Self) ?*Block {
+        if (self.slide_parsed) |pr| return &pr.parser.document;
+        const d = self.deck orelse return null;
+        if (self.current_slide >= d.slides.len) return null;
+
+        const arena = self.allocator.create(std.heap.ArenaAllocator) catch return null;
+        arena.* = std.heap.ArenaAllocator.init(self.allocator);
+        const pr = self.allocator.create(zigdown.parser.ParseResult) catch {
+            arena.deinit();
+            self.allocator.destroy(arena);
+            return null;
+        };
+        pr.* = zigdown.parser.timedParse(arena.allocator(), d.slides[self.current_slide].markdown, false) catch |err| {
+            std.log.scoped(.markdown).err("Failed to parse slide: {any}", .{err});
+            self.allocator.destroy(pr);
+            arena.deinit();
+            self.allocator.destroy(arena);
+            return null;
+        };
+        self.slide_arena = arena;
+        self.slide_parsed = pr;
+        // Ob die Folie aufs Blatt passt, beantwortet die Story-Engine des
+        // Exports — Clay kann es nicht, weil der Rahmen den Inhalt abschneidet
+        // und die gemessene Höhe damit nie über die Innenhöhe geht.
+        self.slide_overflow = !marp_pdf.slideFits(self.allocator, d, self.current_slide);
+        return &pr.parser.document;
+    }
+
     pub fn renderDocument(self: *Self, arena: std.mem.Allocator, theme: Theme, ui_ptr: *ui_mod.UI) void {
         const doc = self.cachedDocument() orelse return;
         var effective_theme = theme;
@@ -243,7 +359,177 @@ pub const MarkdownView = struct {
         self.renderBlock(doc, arena, effective_theme, ui_ptr);
     }
 
+    /// Folienvorschau: eine Folie im 16:9-Rahmen plus Blätterleiste. Der Rahmen
+    /// hat die Seitenverhältnisse des Decks, damit man sieht, was ins PDF passt.
+    fn renderDeck(self: *Self, arena: std.mem.Allocator, theme: Theme, ui_ptr: *ui_mod.UI) void {
+        const d = self.deck.?;
+        const deck_w: f32 = @floatFromInt(d.global.size.w);
+        const aspect: f32 = if (d.global.size.h > 0)
+            deck_w / @as(f32, @floatFromInt(d.global.size.h))
+        else
+            16.0 / 9.0;
+
+        // Rahmengröße selbst rechnen statt Clays Aspect-Ratio zu überlassen:
+        // mit `.w = .grow` blieb der Rahmen auf Inhaltsgröße stehen, also winzig.
+        // Grundlage ist die Fläche des Wurzelelements aus dem letzten Frame; das
+        // Wurzelelement clippt, sonst wüchse es mit dem Rahmen mit und der
+        // nächste Frame rechnete daraus einen noch größeren Rahmen.
+        const root = clay.getElementData(clay.ElementId.ID("markdown_view_root"));
+        const bar = clay.getElementData(clay.ElementId.ID("md_slide_bar"));
+        const reserve: f32 = if (bar.found) bar.bounding_box.height + 16 else chrome_reserve;
+        const avail_w = if (root.found) @max(120.0, root.bounding_box.width - 2 * root_padding) else deck_w;
+        const avail_h = if (root.found)
+            @max(80.0, root.bounding_box.height - 2 * root_padding - reserve)
+        else
+            deck_w / aspect;
+        const frame_w = @min(avail_w, avail_h * aspect);
+        const frame_h = frame_w / aspect;
+
+        const scale: f32 = frame_w / deck_w;
+        self.slide_scale = scale;
+
+        clay.UI()(.{
+            .id = clay.ElementId.ID("markdown_view_root"),
+            .layout = .{
+                .sizing = .grow,
+                .direction = .top_to_bottom,
+                .padding = .all(root_padding),
+                .child_gap = 16,
+                .child_alignment = .{ .x = .center, .y = .center },
+            },
+            // Clippt, damit der Rahmen das Wurzelelement nicht aufblähen kann.
+            .clip = .{ .vertical = true, .horizontal = true },
+            .background_color = theme.bg,
+        })({
+            clay.UI()(.{
+                .id = clay.ElementId.ID("md_slide"),
+                .layout = .{
+                    .sizing = .{ .w = .fixed(frame_w), .h = .fixed(frame_h) },
+                    .direction = .top_to_bottom,
+                    // Dieselben Ränder wie im PDF, nur im Maßstab des Rahmens.
+                    .padding = .{
+                        .left = scaled(pdf_margin_x, scale),
+                        .right = scaled(pdf_margin_x, scale),
+                        .top = scaled(pdf_margin_y, scale),
+                        .bottom = scaled(pdf_margin_y, scale),
+                    },
+                    .child_gap = scaled(10, scale),
+                },
+                .clip = .{ .vertical = true, .horizontal = true },
+                .background_color = theme.surface,
+                .border = .{ .color = theme.border, .width = .all(1) },
+                .corner_radius = .all(theme.radius_sm),
+            })({
+                clay.UI()(.{
+                    .id = clay.ElementId.ID("md_slide_content"),
+                    .layout = .{
+                        .sizing = .{ .w = .grow, .h = .fit },
+                        .direction = .top_to_bottom,
+                        .child_gap = scaled(10, scale),
+                    },
+                })({
+                const doc = self.cachedSlideDocument();
+                if (doc) |block| {
+                    var effective_theme = theme;
+                    if (self.text_color) |cc| effective_theme.text = cc;
+                    self.run_counter = 0;
+                    // Grundschrift wie im Export, skaliert auf den Rahmen. Die
+                    // Überschriften-Faktoren in renderBlock (2.0 / 1.5 / 1.2)
+                    // sind dieselben wie im Export-CSS.
+                    const outer = self.font_size;
+                    self.font_size = @max(6, scaled(pdf_content_em, scale));
+                    self.wrap_width_hint = @max(0, frame_w - 2 * @as(f32, @floatFromInt(scaled(pdf_margin_x, scale))));
+                    self.renderBlock(block, arena, effective_theme, ui_ptr);
+                    self.font_size = outer;
+                }
+                });
+            });
+
+            // Blätterleiste: ‹ Folie / Gesamt ›
+            clay.UI()(.{
+                .id = clay.ElementId.ID("md_slide_bar"),
+                .layout = .{
+                    .sizing = .{ .w = .fit, .h = .fit },
+                    .child_gap = 16,
+                    .child_alignment = .{ .x = .center, .y = .center },
+                },
+            })({
+                self.renderSlideButton("md_slide_prev", "<", self.current_slide > 0, theme);
+                var buf: [48]u8 = undefined;
+                const label = std.fmt.bufPrint(&buf, "{d} / {d}", .{ self.current_slide + 1, d.slides.len }) catch "";
+                clay.UI()(.{
+                    .id = clay.ElementId.ID("md_slide_counter"),
+                    .layout = .{ .sizing = .{ .w = .fit, .h = .fit } },
+                })({
+                    clay.text(arena.dupe(u8, label) catch "", .{
+                        .font_size = self.font_size,
+                        .color = theme.subtext,
+                    });
+                });
+                self.renderSlideButton("md_slide_next", ">", self.current_slide + 1 < d.slides.len, theme);
+            });
+
+            if (self.slide_overflow) {
+                clay.UI()(.{
+                    .id = clay.ElementId.ID("md_slide_overflow"),
+                    .layout = .{ .sizing = .{ .w = .fit, .h = .fit } },
+                })({
+                    clay.text("Inhalt passt nicht auf die Folie", .{
+                        .font_size = self.font_size - 4,
+                        .color = theme.warning,
+                    });
+                });
+            }
+
+            // Die Fußzeile der Folie steht bewusst nicht unter dem Rahmen: sie
+            // gehört ins PDF, nicht in die Bedienleiste der Vorschau.
+        });
+
+        self.renderContextMenu(theme);
+    }
+
+    /// Ränder und Schriftgrößen des Exports (`rendering/marp_pdf.zig`), damit
+    /// Vorschau und PDF denselben Umbruch zeigen.
+    const pdf_margin_x: f32 = 70;
+    const pdf_margin_y: f32 = 78;
+    const pdf_content_em: f32 = 26;
+
+    /// Rand um die Folie und Platz für Blätterleiste, Warnung und Fußzeile.
+    const root_padding: u16 = 24;
+    const chrome_reserve: f32 = 110;
+
+    /// Grundschriftgröße, in der die Folie gezeichnet wird (E2E-Sicht).
+    pub fn slideFontSize(self: *const Self) u16 {
+        return @max(6, scaled(pdf_content_em, self.slide_scale));
+    }
+
+    fn scaled(value: f32, scale: f32) u16 {
+        const px = @round(value * scale);
+        if (px <= 0) return 0;
+        return @intFromFloat(@min(px, 4000));
+    }
+
+    fn renderSlideButton(self: *Self, id: []const u8, label: []const u8, enabled: bool, theme: Theme) void {
+        _ = self;
+        clay.UI()(.{
+            .id = clay.ElementId.ID(id),
+            .layout = .{
+                .sizing = .{ .w = .fixed(36), .h = .fixed(28) },
+                .child_alignment = .{ .x = .center, .y = .center },
+            },
+            .background_color = if (enabled) theme.overlay else theme.bg,
+            .corner_radius = .all(theme.radius_sm),
+        })({
+            clay.text(label, .{
+                .font_size = 20,
+                .color = if (enabled) theme.text else theme.muted,
+            });
+        });
+    }
+
     pub fn render(self: *Self, arena: std.mem.Allocator, theme: Theme, ui_ptr: *ui_mod.UI) void {
+        if (self.deck != null) return self.renderDeck(arena, theme, ui_ptr);
+
         // Update layout info from previous frame
         const clip_data = clay.getElementData(clay.ElementId.ID("md_viewport"));
         const content_data = clay.getElementData(clay.ElementId.ID("md_content"));

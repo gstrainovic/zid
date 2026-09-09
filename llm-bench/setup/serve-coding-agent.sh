@@ -12,7 +12,7 @@ MODELL="${1:-qwen3}"
 GERAET="${2:-gpu}"
 PORT="${3:-8080}"
 
-# Engine und Modelle liegen im vulkan-ed-Repo (engines/, models/), zwei Ebenen ueber setup/.
+# Engine und Modelle liegen im zid-Repo (engines/, models/), zwei Ebenen ueber setup/.
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ENGINE="$REPO/engines/llama.cpp-vulkan/build/bin/llama-server"
 MODELLE="$REPO/models"

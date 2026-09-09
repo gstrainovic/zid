@@ -1,4 +1,4 @@
-//! Platform-Abstraktion für vulkan-ed
+//! Platform-Abstraktion für zid
 //!
 //! Verwendet wio für cross-platform Window Management und Input.
 //! Stellt Window Handle für WGPU Surface Creation bereit.
@@ -17,7 +17,7 @@ const log = std.log.scoped(.platform);
 
 /// Platform-spezifische Konfiguration
 pub const PlatformConfig = struct {
-    title: []const u8 = "vulkan-ed",
+    title: []const u8 = "zid",
     width: u32 = 1200,
     height: u32 = 800,
     min_width: u32 = 400,

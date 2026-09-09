@@ -1,6 +1,6 @@
 //! TerminalInstance — High-level terminal combining ConPTY + ghostty-vt
 //!
-//! This is the main API for embedded terminal tabs in vulkan-ed.
+//! This is the main API for embedded terminal tabs in zid.
 //! It manages:
 //! - PTY lifecycle (spawn shell, read/write)
 //! - VT emulation via ghostty-vt (Terminal state machine)

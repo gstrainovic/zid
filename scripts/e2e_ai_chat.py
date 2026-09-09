@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Headless-E2E für den KI-Chat.
 
-Lauf A (Standard): vulkan-ed ohne --ai=off gegen das konfigurierte Backend
+Lauf A (Standard): zid ohne --ai=off gegen das konfigurierte Backend
 (Default: llama-server + Qwen3-4B aus ~/projects/ki, sonst Ollama). Prüft:
 Warmup, Streaming (erstes Textstück kommt schnell), Escape bricht ab,
 kurze Frage wird vollständig beantwortet.
@@ -33,7 +33,7 @@ def wait_for(pred, timeout_s, what):
 def start(extra_args, log_name):
     log = open(os.path.join(ROOT, "tmp", log_name), "w")
     proc = subprocess.Popen(
-        [os.path.join(ROOT, "zig-out", "bin", "vulkan-ed"), "--headless"] + extra_args,
+        [os.path.join(ROOT, "zig-out", "bin", "zid"), "--headless"] + extra_args,
         cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
     )
     wait_port(proc)

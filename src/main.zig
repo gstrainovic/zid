@@ -37,7 +37,7 @@ fn logFn(
     if (scope == .stream or scope == .terminal) {
         if (level == .debug) return;
     }
-    // Debug-Zeilen nur mit VULKAN_ED_DEBUG=1: ohne Filter sind es tausende Zeilen
+    // Debug-Zeilen nur mit ZID_DEBUG=1: ohne Filter sind es tausende Zeilen
     // pro Sitzung (jeder Tastendruck, jedes Resize, jeder Frame-Klick).
     if (level == .debug and !debugLogEnabled()) return;
 
@@ -64,7 +64,7 @@ var debug_log_state: enum { unknown, off, on } = .unknown;
 
 fn debugLogEnabled() bool {
     if (debug_log_state == .unknown) {
-        debug_log_state = if (std.posix.getenv("VULKAN_ED_DEBUG")) |v| (if (v.len > 0 and v[0] != '0') .on else .off) else .off;
+        debug_log_state = if (std.posix.getenv("ZID_DEBUG")) |v| (if (v.len > 0 and v[0] != '0') .on else .off) else .off;
     }
     return debug_log_state == .on;
 }
@@ -75,7 +75,7 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     // --page-alloc: jede Allokation auf eigenen Seiten, Freigaben mit Stack-Trace protokolliert
     // (Use-after-free-Suche zusammen mit der Text-Probe im Headless-Loop).
-    var page_alloc_mode = std.posix.getenv("VULKAN_ED_PAGE_ALLOC") != null;
+    var page_alloc_mode = std.posix.getenv("ZID_PAGE_ALLOC") != null;
     for (std.os.argv) |a| {
         if (std.mem.eql(u8, std.mem.span(a), "--page-alloc")) page_alloc_mode = true;
     }
@@ -128,7 +128,7 @@ pub fn main() !void {
             var stdout_f = std.fs.File.stdout();
             var stdout_writer = stdout_f.writer(&buf);
             const w = &stdout_writer.interface;
-            try w.writeAll("Usage: vulkan-ed [OPTIONS] [FILE]\n\n");
+            try w.writeAll("Usage: zid [OPTIONS] [FILE]\n\n");
             try w.writeAll("Options:\n");
             try w.writeAll("  --theme light|dark    Override theme\n");
             try w.writeAll("  --e2e                 Enable E2E mode (RPC on port 9999)\n");
@@ -137,7 +137,7 @@ pub fn main() !void {
             try w.writeAll("  --ai=off              Disable AI chat (llama-server)\n");
             try w.writeAll("  --help, -h            Show this help\n");
             try w.writeAll("\nEnvironment:\n");
-            try w.writeAll("  VULKAN_ED_DEBUG=1     Enable debug log lines\n");
+            try w.writeAll("  ZID_DEBUG=1     Enable debug log lines\n");
             try w.writeAll("  LLAMA_SERVER_PATH     llama-server binary (default: ollama)\n");
             try w.writeAll("  LLAMA_MODEL_PATH      GGUF path or Ollama model (default: gemma4:e2b)\n");
             try w.flush();
@@ -180,7 +180,7 @@ pub fn main() !void {
         log.info("No default file — using built-in content", .{});
     }
 
-    log.info("=== vulkan-ed starting ===", .{});
+    log.info("=== zid starting ===", .{});
     log.info("Platform: {s}-{s}", .{
         @tagName(builtin.cpu.arch),
         @tagName(builtin.os.tag),
@@ -202,7 +202,7 @@ pub fn main() !void {
     // 2. Platform initialisieren (wio - NACH wgpu, vermeidet EGL-Konflikt)
     // Headless: kein Platform/Window/Surface nötig
     var plat: platform.Platform = if (headless_mode) undefined else try platform.Platform.init(allocator, .{
-        .title = "vulkan-ed",
+        .title = "zid",
         .width = 1200,
         .height = 800,
     });
@@ -380,7 +380,7 @@ pub fn main() !void {
     renderer.width = viewport_width;
     renderer.height = viewport_height;
 
-    log.info("=== vulkan-ed ready ===", .{});
+    log.info("=== zid ready ===", .{});
     log.info("Press Ctrl+C to exit (or close window)", .{});
 
     // E2E RPC Server starten falls --e2e Flag
@@ -398,13 +398,13 @@ pub fn main() !void {
 
     // Interactive mode (stdin/stdout) hat keinen Frame-Loop: Handler laufen direkt.
     if (headless_mode and interactive_mode) {
-        log.info("=== vulkan-ed headless ready ===", .{});
+        log.info("=== zid headless ready ===", .{});
         log.info("Interactive mode — stdin/stdout command interface", .{});
         e2e_interactive.runInteractiveLoop(&e2e_ctx.?);
         log.info("Interactive mode ended", .{});
         return;
     }
-    if (headless_mode) log.info("=== vulkan-ed headless ready — frame loop without window, RPC on port 9999 ===", .{});
+    if (headless_mode) log.info("=== zid headless ready — frame loop without window, RPC on port 9999 ===", .{});
 
     // Render Loop
     var frame_count: u32 = 0;
@@ -905,7 +905,7 @@ pub fn main() !void {
         }
     }
 
-    log.info("=== vulkan-ed exiting ===", .{});
+    log.info("=== zid exiting ===", .{});
 
     } // Ende des inneren GPU-Scope → alle GPU-defers laufen hier
 

@@ -1,7 +1,7 @@
-//! E2E Test JSON-RPC Server für vulkan-ed
+//! E2E Test JSON-RPC Server für zid
 //!
 //! Erlaubt programmatische Steuerung der App während sie läuft.
-//! Starten mit: ./vulkan-ed --e2e
+//! Starten mit: ./zid --e2e
 //!
 //! Commands:
 //!   open_folder(path)  - Ordner im File Explorer öffnen (direkt, ohne UI)
@@ -214,6 +214,7 @@ pub fn createDispatcher(alloc: std.mem.Allocator, ctx: *E2EContext) !*zigjr.RpcD
     try rpc_dispatcher.addWithCtx("element_bounds", ctx, elementBounds);
     try rpc_dispatcher.addWithCtx("element_bounds_i", ctx, elementBoundsIndexed);
     try rpc_dispatcher.addWithCtx("folder_picker_state", ctx, folderPickerState);
+    try rpc_dispatcher.addWithCtx("slide_state", ctx, slideState);
     try rpc_dispatcher.addWithCtx("ui_state", ctx, uiState);
     try rpc_dispatcher.addWithCtx("editor_lines", ctx, editorLines);
     try rpc_dispatcher.addWithCtx("editor_state", ctx, editorState);
@@ -819,6 +820,20 @@ fn uiState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
 }
 
 /// Zustand des "Open Folder…"-Dialogs: offen, Pfadfeld, Fehlermeldung, Unterordner.
+/// Zustand der Folienvorschau des aktiven Tabs. `deck` ist false, wenn der Tab
+/// keine Vorschau ist oder der Text kein Marp-Deck.
+fn slideState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
+    var buf = std.Io.Writer.Allocating.init(dc.arena());
+    if (ctx.ui_system.activeSlideDeckView()) |v| {
+        try buf.writer.print(
+            \\{{"deck": true, "slides": {d}, "current": {d}, "scale": {d:.4}, "font_size": {d}, "overflow": {}}}
+        , .{ v.slideCount(), v.current_slide, v.slide_scale, v.slideFontSize(), v.slide_overflow });
+    } else {
+        try buf.writer.writeAll("{\"deck\": false, \"slides\": 0, \"current\": 0}");
+    }
+    return buf.written();
+}
+
 fn folderPickerState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     const fp = &ctx.ui_system.folder_picker;
     var buf = std.Io.Writer.Allocating.init(dc.arena());

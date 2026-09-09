@@ -260,7 +260,7 @@ def step_sidebar_width_persist():
     rpc("mouse_up", [x + 61, y]); settle(10)
     w = explorer()["width"]
     check(abs(w - (x + 61)) < 20 or w > st["width"] + 30, f"Splitter ziehen setzt die Breite ({st['width']:.0f} → {w:.0f})")
-    state_file = os.path.join(XDG_CONFIG, "vulkan-ed", "state")
+    state_file = os.path.join(XDG_CONFIG, "zid", "state")
     wait_for(lambda: os.path.exists(state_file) and f"sidebar_width={int(round(w))}" in open(state_file).read(), "Breite steht in der State-Datei")
     x0, y0 = explorer_row_center("gamma.txt")
     rpc("move_mouse", [x0, y0]); settle(10)
@@ -278,7 +278,7 @@ def main():
     log = open(os.path.join(ROOT, "tmp", "e2e_explorer.log"), "w")
     env = dict(os.environ, XDG_DATA_HOME=XDG, XDG_CONFIG_HOME=XDG_CONFIG)
     proc = subprocess.Popen(
-        [os.path.join(ROOT, "zig-out", "bin", "vulkan-ed"), "--headless", "--ai=off"],
+        [os.path.join(ROOT, "zig-out", "bin", "zid"), "--headless", "--ai=off"],
         cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, env=env,
     )
     try:

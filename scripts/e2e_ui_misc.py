@@ -55,7 +55,7 @@ def step_theme_zoom():
     check(ui_state()["font_size"] == 26, "Ctrl+- verkleinert")
     key("0", ctrl=True)
     check(ui_state()["font_size"] == 24, "Ctrl+0 setzt zurück")
-    state_file = os.path.join(XDG_CONFIG, "vulkan-ed", "state")
+    state_file = os.path.join(XDG_CONFIG, "zid", "state")
     check(os.path.exists(state_file) and "theme=light" in open(state_file).read(), "Theme steht in der State-Datei")
     palette("toggle light")
     check(not ui_state()["light_theme"], "zurück auf dunkel")
@@ -69,7 +69,7 @@ def step_autosave_toast():
     key("s", ctrl=True); settle(10)
     check("Saved note.txt" in ui_state()["toast"], f"Ctrl+S zeigt einen Toast: {ui_state()['toast']!r}")
     check(open(SRC).read().startswith("Xhello") or "X" in open(SRC).read(), "Datei ist gespeichert")
-    backup_dir = os.path.join(XDG, "vulkan-ed", "backup")
+    backup_dir = os.path.join(XDG, "zid", "backup")
     check(os.path.isdir(backup_dir) and any(n.startswith("note.txt.") for n in os.listdir(backup_dir)), "Sicherung der alten Version liegt im Backup-Ordner")
     palette("toggle autosave")
     check(ui_state()["autosave"] and "Autosave on" in ui_state()["toast"], "Autosave eingeschaltet")
@@ -120,7 +120,7 @@ def main():
     setup()
     log = open(os.path.join(ROOT, "tmp", "e2e_ui_misc.log"), "w")
     proc = subprocess.Popen(
-        [os.path.join(ROOT, "zig-out", "bin", "vulkan-ed"), "--headless", "--ai=off"],
+        [os.path.join(ROOT, "zig-out", "bin", "zid"), "--headless", "--ai=off"],
         cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
         env=dict(os.environ, XDG_DATA_HOME=XDG, XDG_CONFIG_HOME=XDG_CONFIG),
     )

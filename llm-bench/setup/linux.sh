@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Baut die gepinnte BitNet-Engine auf Linux und holt die Modelle, mit denen auf der
 # Windows-Kiste gemessen wurde. Idempotent: was schon da ist, wird uebersprungen.
-# Seit 06.09.2026 liegt alles im vulkan-ed-Repo: Engine unter engines/BitNet
+# Seit 06.09.2026 liegt alles im zid-Repo: Engine unter engines/BitNet
 # (Submodul), Modelle flach unter models/ (colibri wurde geloescht).
 #
 #   ./setup/linux.sh [repo-wurzel]

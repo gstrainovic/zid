@@ -54,7 +54,7 @@ def main():
     setup()
     log = open(os.path.join(ROOT, "tmp", "e2e_lsp.log"), "w")
     env = dict(os.environ, XDG_DATA_HOME=os.path.join(ROOT, "tmp", "xdg"), XDG_CONFIG_HOME=os.path.join(ROOT, "tmp", "xdg-config"))
-    proc = subprocess.Popen([os.path.join(ROOT, "zig-out", "bin", "vulkan-ed"), "--headless", "--ai=off"],
+    proc = subprocess.Popen([os.path.join(ROOT, "zig-out", "bin", "zid"), "--headless", "--ai=off"],
                             cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, env=env)
     try:
         wait_port(proc)

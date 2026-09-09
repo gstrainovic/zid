@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Headless-E2E für Tastenkürzel und Menüs (todo.md: Kürzel sichtbar machen).
 
-Startet vulkan-ed mit --headless --ai=off und prüft pro Punkt der todo.md,
+Startet zid mit --headless --ai=off und prüft pro Punkt der todo.md,
 dass Taste und Menüeintrag dasselbe tun. Aufruf: python3 scripts/e2e_shortcuts.py
 """
 import os, subprocess, sys, time
@@ -324,7 +324,7 @@ STEPS = [item1_table_drives_ctrl_o, item2_explorer_f2_delete, item3_tabs, item4_
 def main():
     log = open(os.path.join(ROOT, "tmp", "e2e_shortcuts.log"), "w")
     proc = subprocess.Popen(
-        [os.path.join(ROOT, "zig-out", "bin", "vulkan-ed"), "--headless", "--ai=off"],
+        [os.path.join(ROOT, "zig-out", "bin", "zid"), "--headless", "--ai=off"],
         cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
         env=dict(os.environ, XDG_DATA_HOME=os.path.join(ROOT, "tmp", "xdg"), XDG_CONFIG_HOME=os.path.join(ROOT, "tmp", "xdg-config")),  # Papierkorb unter tmp/
     )

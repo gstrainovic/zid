@@ -1,4 +1,4 @@
-//! Thread-Pool Scheduler für async Tasks in vulkan-ed.
+//! Thread-Pool Scheduler für async Tasks in zid.
 //!
 //! Main Thread: submit(task) → non-blocking
 //! Main Thread: pollResults(buf) → non-blocking drain
