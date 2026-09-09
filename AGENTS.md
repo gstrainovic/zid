@@ -456,8 +456,17 @@ Seit 06.09.2026 liegt alles im Repo; `~/projects/ki` und das separate Bench-Repo
   liegen in einer Arena: 30 000 einzelne `free()` mit dem Debug-Allocator dauerten Sekunden und
   blockierten den Main-Thread. Cache 10 s je Root. Der Picker erscheint sofort, „Scanning…“ im Hinweis.
 - `filter()` tauscht die Trefferliste erst nach dem Ranking (der RPC-Thread liest nebenläufig).
-- RPC `picker_state` (open, scanning, mode, query, matches, items, selected, selected_label);
-  `python3 scripts/e2e_picker.py`.
+- **Zeilenlayout bei Dateien** (`src/ui/path_display.zig`, unit-getestet): Dateiname zuerst in
+  Textfarbe, Ordner gedimmt dahinter und mittig gekürzt (`truncateMiddle`, Auslassungszeichen,
+  zählt Zeichen statt Bytes). Vorher stand der ganze Pfad von links in der Zeile und wurde rechts
+  abgeschnitten; in tiefen Bäumen sahen dadurch alle Treffer gleich aus, weil genau der
+  unterscheidende Teil wegfiel. VS Code und Zed stellen den Namen ebenfalls nach vorn, snacks.picker
+  kürzt standardmäßig in der Mitte. `ROW_CHARS` rechnet das Zeichenbudget aus `BOX_WIDTH` — zulässig,
+  weil die einzige Schrift eine Monospace ist. `commonPrefix` liegt bereit für Zeds Ansatz
+  (gemeinsame Segmente aller Treffer wegkürzen), ist aber noch nicht verdrahtet.
+- `Picker.dirShown` ist die eine Quelle für Render und RPC, damit der E2E prüft, was gezeichnet wird.
+- RPC `picker_state` (open, scanning, mode, query, matches, items, selected, selected_label,
+  selected_dir_shown); `python3 scripts/e2e_picker.py`.
 
 ## Tab-Leiste
 

@@ -67,7 +67,42 @@ def step_command_palette():
     key("escape")
 
 
-STEPS = [step_quick_open, step_command_palette]
+def step_long_paths():
+    """Der Dateiname muss sichtbar bleiben. Vorher stand der ganze Pfad von links
+    in der Zeile und wurde rechts abgeschnitten, womit alle Zeilen gleich aussahen."""
+    print("--- Lange Pfade: Name zuerst, Ordner gekuerzt")
+    key("p", ctrl=True); settle()
+    t0 = time.time()
+    while time.time() - t0 < 20 and picker()["scanning"]:
+        time.sleep(0.1)
+    rpc("type_text", ["gradleproperties"]); settle(10)
+    t0 = time.time()
+    while time.time() - t0 < 5 and picker()["query"] != "gradleproperties":
+        time.sleep(0.05)
+    settle(10)
+
+    st = picker()
+    label = st["selected_label"]
+    check(st["matches"] >= 1, f"Treffer fuer einen tief liegenden Pfad: {label!r}")
+    check("/" in label, f"Treffer liegt in Unterordnern: {label!r}")
+
+    shown = st["selected_dir_shown"]
+    name = label.rsplit("/", 1)[-1]
+    directory = label.rsplit("/", 1)[0]
+    check(shown != "", "Ordner wird angezeigt")
+    check(len(shown) <= len(directory), "gezeigter Ordner ist nicht laenger als der echte")
+    if len(directory) > len(shown):
+        check("…" in shown, f"gekuerzt mit Auslassungszeichen: {shown!r}")
+        check(shown.startswith(directory[:4]), "Anfang des Pfades bleibt stehen")
+        check(shown.endswith(directory[-4:]), "Ende des Pfades bleibt stehen")
+    # Name plus gezeigter Ordner muessen in eine Zeile passen.
+    check(len(name) + len(shown) < 90, f"Zeile bleibt im Rahmen ({len(name) + len(shown)} Zeichen)")
+    shot("e2e_picker_long_paths.ppm")
+    key("escape")
+    check(not picker()["open"], "Escape schliesst")
+
+
+STEPS = [step_quick_open, step_command_palette, step_long_paths]
 
 
 def main():

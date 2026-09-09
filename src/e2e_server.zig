@@ -596,6 +596,10 @@ fn pickerState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     try std.json.Stringify.value(pk.query(), .{}, &buf.writer);
     try buf.writer.print(", \"matches\": {d}, \"items\": {d}, \"selected\": {d}, \"selected_label\": ", .{ pk.matchCount(), pk.items.items.len, pk.selected });
     try std.json.Stringify.value(pk.selectedLabel(), .{}, &buf.writer);
+    // Der Ordner so, wie die Zeile ihn zeichnet — gekürzt, mit Auslassungszeichen.
+    var dir_buf: [std.fs.max_path_bytes + 8]u8 = undefined;
+    try buf.writer.writeAll(", \"selected_dir_shown\": ");
+    try std.json.Stringify.value(pk.selectedDirShown(&dir_buf), .{}, &buf.writer);
     try buf.writer.writeAll("}");
     return buf.written();
 }
