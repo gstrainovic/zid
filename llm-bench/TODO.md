@@ -6,7 +6,7 @@ des Projekts steht in `FAZIT.md`.
 - [x] **LM Studio aufgeräumt** — 20.08. erledigt: `~/.lmstudio/models`
   (23 GB, mit ~11 GB Duplikaten) gelöscht, nachdem die
   Qwen3.5-Testkandidaten gemessen und nach
-  `models/` (vulkan-ed-Repo) gesichert waren; toter
+  `models/` (zid-Repo) gesichert waren; toter
   KoboldCpp-Symlink mit entfernt. Platte: **77 %, 56 GB frei** (am Morgen
   waren es 88 % / 31 GB).
 
@@ -28,7 +28,7 @@ des Projekts steht in `FAZIT.md`.
   denkt kostenpflichtig; 2B fällt mit 6/10 durch. Testsieger bleibt
   Qwen3-4B-2507. Nachtrag 2 in
   `results/linux-i7-8850H-gpu-und-neue-modelle.md`; beide GGUFs nach
-  `models/` (vulkan-ed-Repo) gesichert.
+  `models/` (zid-Repo) gesichert.
 - [x] **Ollama-Modelle und HF-Cache aufgeräumt** — 20.08. erledigt: 17
   Ollama-Modelle plus HF-Hub gelöscht, Platte von 91 % auf **79 % (53 GB
   frei)**. Inventar mit allen Namen und Inspirations-Notizen:

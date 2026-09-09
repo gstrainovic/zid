@@ -1,4 +1,4 @@
-//! Text Rendering Modul für vulkan-ed
+//! Text Rendering Modul für zid
 //!
 //! Platform-spezifisches Text Rendering:
 //! - Windows: DirectWrite (ClearType Subpixel-Rendering)

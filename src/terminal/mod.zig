@@ -1,4 +1,4 @@
-//! Terminal module for vulkan-ed
+//! Terminal module for zid
 //!
 //! Integrates ghostty-vt for VT emulation with platform PTY for
 //! actual shell process management. Provides a high-level API for

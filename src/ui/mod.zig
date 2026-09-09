@@ -1,4 +1,4 @@
-//! UI Modul für vulkan-ed
+//! UI Modul für zid
 //!
 //! Verwendet Clay für Layout und migrierte Gooey Components.
 
@@ -10,6 +10,7 @@ const Animation = animation.Animation;
 const AnimationType = animation.AnimationType;
 const AnimationManager = animation.AnimationManager;
 const PdfHandler = @import("../rendering/pdf_handler.zig").PdfHandler;
+const marp_pdf = @import("../rendering/marp_pdf.zig");
 const PdfViewState = @import("pdf_view.zig").PdfViewState;
 const editor_mod = @import("../editor/mod.zig");
 const lsp_client = @import("lsp_client");
@@ -566,6 +567,16 @@ pub const UI = struct {
         if (self.tab_menu != null and key == .escape) {
             self.tab_menu = null;
             return;
+        }
+        // Folienvorschau: Pfeile und Bild auf/ab blättern durch die Folien.
+        if (self.activeSlideDeckView()) |v| {
+            switch (key) {
+                .left, .page_up => return v.prevSlide(),
+                .right, .page_down => return v.nextSlide(),
+                .home => return v.showSlide(0),
+                .end => return v.showSlide(v.slideCount() - 1),
+                else => {},
+            }
         }
         // Kürzel aus der zentralen Tabelle (shortcuts.zig): global überall,
         // Explorer-Scope nur mit Fokus im Explorer und markiertem Eintrag
@@ -1269,6 +1280,7 @@ pub const UI = struct {
             .split_horizontal => self.getActiveEditor().dispatchAction(.SplitHorizontal),
             // Aus dem Tab-Menü: Vorschau des angeklickten Tabs, sonst des aktiven Editors
             .md_preview => if (self.tab_cmd_target) |t| self.requestMarkdownPreview(t.pane.data.leaf.tab_bar.tabs.items[t.index].path) else self.getActiveEditor().dispatchAction(.MdPreview),
+            .md_export_pdf => if (self.tab_cmd_target) |t| self.exportMarpPdf(t.pane.data.leaf.tab_bar.tabs.items[t.index].path) else self.getActiveEditor().dispatchAction(.MdExportPdf),
             .terminal_copy => if (self.getActiveTerminal()) |term| term.copyToClipboard() catch |err| log.err("terminal copy failed: {}", .{err}),
             .terminal_paste => if (self.getActiveTerminal()) |term| term.pasteFromClipboard() catch |err| log.err("terminal paste failed: {}", .{err}),
             .find => self.getActiveEditor().dispatchAction(.Search),
@@ -1450,11 +1462,11 @@ pub const UI = struct {
     }
 
     /// zls starten, falls möglich: `ZLS_PATH`, sonst `~/.local/bin/zls`, sonst `zls` im PATH.
-    /// `VULKAN_ED_LSP=off` schaltet ab.
+    /// `ZID_LSP=off` schaltet ab.
     fn ensureLsp(self: *Self) ?*lsp_client.LspClient {
         if (self.lsp) |l| return l;
         if (self.lsp_failed) return null;
-        if (std.posix.getenv("VULKAN_ED_LSP")) |v| {
+        if (std.posix.getenv("ZID_LSP")) |v| {
             if (std.mem.eql(u8, v, "off")) {
                 self.lsp_failed = true;
                 return null;
@@ -1879,7 +1891,10 @@ pub const UI = struct {
         var hidden = ctx_menu.none;
         const tabs = menu.pane.data.leaf.tab_bar.tabs.items;
         const is_md = menu.index < tabs.len and tabs[menu.index].kind == .text and std.mem.endsWith(u8, tabs[menu.index].path, ".md");
-        if (!is_md) hidden.insert(.md_preview);
+        if (!is_md) {
+            hidden.insert(.md_preview);
+            hidden.insert(.md_export_pdf);
+        }
         return hidden;
     }
 
@@ -1901,7 +1916,7 @@ pub const UI = struct {
         return m;
     }
 
-    /// Sidebar-Breite und Hidden-Flag in ~/.config/vulkan-ed/state schreiben.
+    /// Sidebar-Breite und Hidden-Flag in ~/.config/zid/state schreiben.
     pub fn saveUserState(self: *Self) void {
         const path = user_state.defaultPath(self.allocator) catch return;
         defer self.allocator.free(path);
@@ -1977,6 +1992,44 @@ pub const UI = struct {
         };
         if (self.pending_tab_switch) |old| self.allocator.free(old);
         self.pending_tab_switch = preview_path;
+    }
+
+    /// Die Markdown-Vorschau des aktiven Tabs, falls sie ein Marp-Deck zeigt.
+    pub fn activeSlideDeckView(self: *Self) ?*markdown_view_mod.MarkdownView {
+        const tb = self.getActiveTabBar();
+        const tab = tb.getActiveTab() orelse return null;
+        if (tab.kind != .markdown_preview) return null;
+        const v = self.open_markdown_views.get(tab.path) orelse return null;
+        if (v.slideCount() == 0) return null;
+        return v;
+    }
+
+    /// Exportiert `path` als Marp-Deck nach PDF und öffnet das Ergebnis als Tab.
+    /// Nicht-Decks (kein `marp: true` im Front-Matter) melden das als Dialog.
+    fn exportMarpPdf(self: *Self, path: []const u8) void {
+        if (path.len == 0) return;
+        const stripped = if (std.mem.startsWith(u8, path, "preview://")) path["preview://".len..] else path;
+
+        const out_path = marp_pdf.defaultOutputPath(self.allocator, stripped) catch |err| {
+            self.reportError("PDF-Export fehlgeschlagen: {t}", .{err});
+            return;
+        };
+        defer self.allocator.free(out_path);
+
+        marp_pdf.exportFile(self.allocator, stripped, out_path) catch |err| {
+            if (err == error.NotAMarpDeck) {
+                self.reportError("Kein Marp-Deck: im Front-Matter fehlt 'marp: true'", .{});
+            } else {
+                self.reportError("PDF-Export fehlgeschlagen: {t}", .{err});
+            }
+            return;
+        };
+        log.info("Marp-PDF geschrieben: {s}", .{out_path});
+
+        // Ergebnis im PDF-Tab zeigen — die Vorschau ist damit das, was rauskommt.
+        const owned = self.allocator.dupe(u8, out_path) catch return;
+        if (self.pending_tab_switch) |old| self.allocator.free(old);
+        self.pending_tab_switch = owned;
     }
 
     /// Ziel eines Tab-Kommandos: Kontextmenü-Tab oder aktiver Tab des aktiven Panes.
@@ -2284,7 +2337,7 @@ pub const UI = struct {
                     })({});
                 }
 
-                clay.text("VULKAN-ED", .{ .font_size = 24, .color = t.text });
+                clay.text("ZID", .{ .font_size = 24, .color = t.text });
                 self.renderMenuBar(t);
             });
 
@@ -2480,6 +2533,10 @@ pub const UI = struct {
                         leaf.code_editor.pending_md_preview = false;
                         self.requestMarkdownPreview(leaf.code_editor.buffer.get_file_path());
                     }
+                    if (leaf.code_editor.pending_md_export_pdf) {
+                        leaf.code_editor.pending_md_export_pdf = false;
+                        self.exportMarpPdf(leaf.code_editor.buffer.get_file_path());
+                    }
 
                     // Aktiven Tab prüfen
                     var special_active = false;
@@ -2539,6 +2596,10 @@ pub const UI = struct {
                                     if (v.pending_split_h) {
                                         v.pending_split_h = false;
                                         self.pending_split = .horizontal;
+                                    }
+                                    if (v.pending_export_pdf) {
+                                        v.pending_export_pdf = false;
+                                        self.exportMarpPdf(tab.path["preview://".len..]);
                                     }
                                     special_active = true;
                                 }

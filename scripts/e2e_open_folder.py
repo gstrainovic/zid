@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Headless-E2E: File-Menü → "Open Folder…" → Pfad tippen → Explorer-Root wechselt.
 
-Startet vulkan-ed mit --headless --ai=off (kein Fenster), fährt den Dialog
+Startet zid mit --headless --ai=off (kein Fenster), fährt den Dialog
 über RPC und prüft, dass der Explorer danach den neuen Ordner zeigt.
 Aufruf: python3 scripts/e2e_open_folder.py [zielordner]  (Default: ~/projects)
 """
@@ -35,7 +35,7 @@ def wait_port(proc, timeout=60):
     t0 = time.time()
     while time.time() - t0 < timeout:
         if proc.poll() is not None:
-            raise RuntimeError("vulkan-ed beendet sich vor RPC-Start")
+            raise RuntimeError("zid beendet sich vor RPC-Start")
         try:
             with socket.create_connection((HOST, PORT), timeout=1):
                 return

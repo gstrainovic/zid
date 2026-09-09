@@ -1,4 +1,4 @@
-//! Simple Modal Dialog for vulkan-ed
+//! Simple Modal Dialog for zid
 
 const std = @import("std");
 const clay = @import("clay");

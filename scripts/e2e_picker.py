@@ -73,7 +73,7 @@ STEPS = [step_quick_open, step_command_palette]
 def main():
     log = open(os.path.join(ROOT, "tmp", "e2e_picker.log"), "w")
     proc = subprocess.Popen(
-        [os.path.join(ROOT, "zig-out", "bin", "vulkan-ed"), "--headless", "--ai=off"],
+        [os.path.join(ROOT, "zig-out", "bin", "zid"), "--headless", "--ai=off"],
         cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
         env=dict(os.environ, XDG_DATA_HOME=os.path.join(ROOT, "tmp", "xdg"), XDG_CONFIG_HOME=os.path.join(ROOT, "tmp", "xdg-config")),
     )

@@ -1,5 +1,5 @@
 //! Sicherungskopie vor dem Überschreiben beim Speichern: eine Kopie je Datei unter
-//! `$XDG_DATA_HOME/vulkan-ed/backup/<name>.<hash>.bak` (bzw. ~/.local/share/…), wird bei jedem
+//! `$XDG_DATA_HOME/zid/backup/<name>.<hash>.bak` (bzw. ~/.local/share/…), wird bei jedem
 //! Speichern ersetzt. Kein Verlauf, kein Müll neben der Datei. Reine Pfadlogik ist unit-getestet.
 
 const std = @import("std");
@@ -8,7 +8,7 @@ const std = @import("std");
 pub fn backupPathFor(alloc: std.mem.Allocator, data_home: []const u8, file_path: []const u8) ![]u8 {
     const base = std.fs.path.basename(file_path);
     const hash = std.hash.Wyhash.hash(0, file_path);
-    return std.fmt.allocPrint(alloc, "{s}/vulkan-ed/backup/{s}.{x}.bak", .{ data_home, base, hash });
+    return std.fmt.allocPrint(alloc, "{s}/zid/backup/{s}.{x}.bak", .{ data_home, base, hash });
 }
 
 /// $XDG_DATA_HOME oder ~/.local/share (owned).
@@ -48,7 +48,7 @@ test "backupPathFor: Name bleibt lesbar, Hash trennt gleichnamige Dateien" {
     defer a.free(p1);
     const p2 = try backupPathFor(a, "/data", "/proj/b/mod.zig");
     defer a.free(p2);
-    try testing.expect(std.mem.startsWith(u8, p1, "/data/vulkan-ed/backup/mod.zig."));
+    try testing.expect(std.mem.startsWith(u8, p1, "/data/zid/backup/mod.zig."));
     try testing.expect(std.mem.endsWith(u8, p1, ".bak"));
     try testing.expect(!std.mem.eql(u8, p1, p2));
 }

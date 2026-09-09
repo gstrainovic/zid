@@ -4,7 +4,7 @@ import time
 import sys
 import subprocess
 
-print("Building vulkan-ed...")
+print("Building zid...")
 subprocess.run(["zig", "build"], check=True)
 
 def send_rpc(method, params=[]):
@@ -19,7 +19,7 @@ def send_rpc(method, params=[]):
         return None
 
 # Wait for app to be ready if it was just started
-# In our tests, we start vulkan-ed and wait in the bash script, so maybe we don't need a long delay here.
+# In our tests, we start zid and wait in the bash script, so maybe we don't need a long delay here.
 # But let's keep a small delay just in case.
 time.sleep(0.5)
 

@@ -1,4 +1,4 @@
-//! Code Editor Component für vulkan-ed
+//! Code Editor Component für zid
 //!
 //! Code Editor mit Line Numbers, Syntax Highlighting, Cursor und Text Input.
 //! Verwendet flow_core.Buffer für Text-Speicherung.
@@ -161,6 +161,7 @@ pub const CodeEditor = struct {
     typing_in_progress: bool = false,
 
     pending_md_preview: bool = false,
+    pending_md_export_pdf: bool = false,
     /// Suchleiste (Ctrl+F)
     find: FindState = .{},
     /// Gehe zu Zeile (Ctrl+G)
@@ -306,7 +307,7 @@ pub const CodeEditor = struct {
         const path = self.buffer.get_file_path();
         if (path.len == 0) return error.NoFilePath;
 
-        // Sicherung der alten Version (eine je Datei unter ~/.local/share/vulkan-ed/backup)
+        // Sicherung der alten Version (eine je Datei unter ~/.local/share/zid/backup)
         backup.backup(self.allocator, path) catch |err| std.log.scoped(.editor).warn("backup for '{s}' failed: {}", .{ path, err });
         try self.buffer.store_to_file_and_clean(path);
 
@@ -1557,6 +1558,9 @@ pub const CodeEditor = struct {
             .MdPreview => {
                 self.pending_md_preview = true;
             },
+            .MdExportPdf => {
+                self.pending_md_export_pdf = true;
+            },
             .Search => self.openFind(),
             .SplitVertical => {
                 self.pending_split_v = true;
@@ -2092,6 +2096,7 @@ pub const CodeEditor = struct {
                     .copy => self.dispatchAction(.Copy),
                     .paste => self.dispatchAction(.Paste),
                     .md_preview => self.dispatchAction(.MdPreview),
+                    .md_export_pdf => self.dispatchAction(.MdExportPdf),
                     .split_vertical => self.dispatchAction(.SplitVertical),
                     .split_horizontal => self.dispatchAction(.SplitHorizontal),
                     else => {},
@@ -3394,7 +3399,10 @@ pub const CodeEditor = struct {
     fn menuHidden(self: *Self) ctx_menu.Hidden {
         var hidden = ctx_menu.none;
         const is_md = std.mem.endsWith(u8, self.buffer.get_file_path(), ".md");
-        if (!is_md or self.compact_menu) hidden.insert(.md_preview);
+        if (!is_md or self.compact_menu) {
+            hidden.insert(.md_preview);
+            hidden.insert(.md_export_pdf);
+        }
         if (self.compact_menu) {
             hidden.insert(.split_vertical);
             hidden.insert(.split_horizontal);

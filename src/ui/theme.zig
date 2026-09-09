@@ -1,4 +1,4 @@
-//! Theme System für vulkan-ed
+//! Theme System für zid
 //!
 //! Catppuccin Light/Dark Themes für UI Components.
 //! Verwendet 0-255 Bereich für Clay Kompatibilität.

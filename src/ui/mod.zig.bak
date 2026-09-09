@@ -1,4 +1,4 @@
-//! UI Modul für vulkan-ed
+//! UI Modul für zid
 //!
 //! Verwendet Clay für Layout und migrierte Gooey Components.
 
@@ -495,7 +495,7 @@ pub const UI = struct {
                     })({});
                 }
 
-                clay.text("VULKAN-ED", .{ .font_size = 24, .color = t.text });
+                clay.text("ZID", .{ .font_size = 24, .color = t.text });
             });
 
             // Main Content Area (Sidebar + Editor)

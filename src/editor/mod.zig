@@ -1,4 +1,4 @@
-//! Editor Modul für vulkan-ed
+//! Editor Modul für zid
 //!
 //! Code Editor mit Line Numbers und Syntax Highlighting.
 

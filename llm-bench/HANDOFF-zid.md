@@ -1,13 +1,13 @@
-# Handoff: Bench-Erkenntnisse gegen vulkan-ed prüfen
+# Handoff: Bench-Erkenntnisse gegen zid prüfen
 
 Stand 06.09.2026. Auftrag an den nächsten Agenten: prüfen, ob die drei unten
-genannten Lücken echt sind, und sie dann in `~/projects/vulkan-ed` schliessen.
+genannten Lücken echt sind, und sie dann in `~/projects/zid` schliessen.
 Dieses Repo (`bitnet-colibri-bench`) ist abgeschlossen und wird nicht
 verändert; es liefert nur die Messungen und den Regressionstest.
 
 ## Ausgangslage
 
-`vulkan-ed` hat den Kern der Messungen übernommen. Belegt in
+`zid` hat den Kern der Messungen übernommen. Belegt in
 `src/ai/agent.zig`, `src/ui/mod.zig:194-199` und der
 `AGENTS.md` dort (Abschnitte „KI-Chat" und „Agent-Werkzeuge"):
 
@@ -20,14 +20,14 @@ verändert; es liefert nur die Messungen und den Regressionstest.
 Bewusst **nicht** übernommen und auch nicht nachzuholen: BitNet als
 CPU-Option (braucht die gepinnte Engine und den Tokenizer-Override aus
 `CLAUDE.md`, die gepinnte Engine kann kein Vulkan) und `bench/agent_eval.py`
-als Bestandteil von vulkan-ed (der Test bleibt hier, vulkan-ed prüft mit
+als Bestandteil von zid (der Test bleibt hier, zid prüft mit
 eigenen E2E-Skripten nur die Integration).
 
 ## Die drei Lücken
 
 ### 1. Temperatur 0.7 statt der gemessenen 0
 
-- vulkan-ed: `src/ai/agent.zig:256-257`, `buildPayload` schreibt fest
+- zid: `src/ai/agent.zig:256-257`, `buildPayload` schreibt fest
   `temperature: 0.7` in jede Anfrage, auch in Werkzeugrunden.
 - Bench: `bench/agent_eval.py:50` misst mit `temperature=0.0`; die 10/10
   Werkzeugwahl von Qwen3-4B gelten für diesen Wert. `TODO.md` hält fest, dass
@@ -48,11 +48,11 @@ cp bench/common.py bench/tasks.py /tmp/ && python3 /tmp/agent_eval_t07.py --port
   Quote unter 10/10, gehört in `agent.zig` eine Temperatur pro Anfrageart:
   0 für Anfragen mit `tools`, 0.7 darf für reine Chat-Antworten bleiben.
   Bleibt sie bei 10/10 in allen drei Läufen, den Befund in der AGENTS.md von
-  vulkan-ed als negatives Ergebnis notieren und den Code lassen.
+  zid als negatives Ergebnis notieren und den Code lassen.
 
 ### 2. CPU-Fallback ohne Batch-Threads
 
-- vulkan-ed: `src/ai/agent.zig:107` und `:117`, `-t min(Kerne, 8)`, kein `-tb`.
+- zid: `src/ai/agent.zig:107` und `:117`, `-t min(Kerne, 8)`, kein `-tb`.
 - Bench: `setup/serve-coding-agent.sh`, CPU-Zweig `-t 8 -tb 12`, vermessen in
   `results/linux-i7-8850H-gpu-und-neue-modelle.md` (Qwen3-4B CPU 9.9 tok/s).
 - Betrifft nur Maschinen ohne brauchbare GPU. Prüfen, ob `-tb 12` auf dem
@@ -60,9 +60,9 @@ cp bench/common.py bench/tasks.py /tmp/ && python3 /tmp/agent_eval_t07.py --port
   je `-p 128 -n 64`); wenn ja, in `agent.zig` ergänzen, Wert an die Kernzahl
   koppeln statt fest 12.
 
-### 3. Gemessene Grenzen fehlen in der AGENTS.md von vulkan-ed
+### 3. Gemessene Grenzen fehlen in der AGENTS.md von zid
 
-Nichts davon ist Code, aber der nächste Agent in vulkan-ed sollte es wissen,
+Nichts davon ist Code, aber der nächste Agent in zid sollte es wissen,
 ohne dieses Repo zu lesen. Quelle: `FAZIT.md` und `CODING-AGENTEN.md`,
 Abschnitt „Härtegrad 2".
 
@@ -70,18 +70,18 @@ Abschnitt „Härtegrad 2".
   Import hinweg liegt, scheitert die 3-4B-Klasse. Qwen3 scheitert dabei
   gefahrlos (analysiert, ändert nichts), Llama-3.2-3B destruktiv.
 - Prompt-Verarbeitung auf der P1000 liegt bei 96 tok/s; mit jeder
-  Werkzeugrunde wächst der Kontext. vulkan-ed begrenzt auf 8 Runden
+  Werkzeugrunde wächst der Kontext. zid begrenzt auf 8 Runden
   (`src/ui/ai_chat.zig:32`), kürzt aber keine Chat-Historie. Bei `-c 8192`
   läuft ein längerer Chat mit Werkzeugergebnissen in die Kontextgrenze;
   prüfen, was llama-server dann tut (Fehler oder stilles Abschneiden), und
-  entscheiden, ob vulkan-ed alte Runden verwerfen soll.
+  entscheiden, ob zid alte Runden verwerfen soll.
 - Regel aus dem Praxistest: Agenten-Änderungen nur in Git-Repos, `git restore`
-  hat einen zerstörten Test in einer Sekunde geheilt. vulkan-ed sichert nur
+  hat einen zerstörten Test in einer Sekunde geheilt. zid sichert nur
   über Bestätigungsdialoge. Mindestens dokumentieren; ob der Agent ausserhalb
   eines Git-Repos zusätzlich warnen soll, ist eine Produktentscheidung des
   Projektinhabers, nicht des Agenten.
 
-## Arbeitsregeln für vulkan-ed
+## Arbeitsregeln für zid
 
 - Arbeitsbaum dort ist **nicht sauber**: geänderte `build.zig`,
   `src/ui/dialog.zig`, `src/ui/explorer_ops.zig`, `src/ui/mod.zig` und neue
@@ -93,6 +93,6 @@ Abschnitt „Härtegrad 2".
   Werkzeugrunden und muss nach jeder Änderung an `agent.zig` grün bleiben.
 - TDD gilt: für Punkt 1 und 2 erst einen Unit-Test auf `buildPayload`
   beziehungsweise den argv-Aufbau, dann der Eingriff.
-- Wissen nach AGENTS.md von vulkan-ed, nicht in deren `todo.md`.
+- Wissen nach AGENTS.md von zid, nicht in deren `todo.md`.
 - Jede Messzahl mit Engine-Commit und Modell-sha256 (Regel aus `CLAUDE.md`
   hier); Referenzwerte stehen in `results/linux-i7-8850H-gpu-und-neue-modelle.md`.

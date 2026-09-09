@@ -28,18 +28,18 @@ pub fn defaultModel(alloc: std.mem.Allocator, root: []const u8) ![]u8 {
 const testing = std.testing;
 
 test "repoRootFromExeDir: zig-out/bin → Repo-Wurzel, sonst null" {
-    try testing.expectEqualStrings("/x/vulkan-ed", repoRootFromExeDir("/x/vulkan-ed/zig-out/bin").?);
-    try testing.expectEqualStrings("/x/vulkan-ed", repoRootFromExeDir("/x/vulkan-ed/zig-out/bin/").?);
+    try testing.expectEqualStrings("/x/zid", repoRootFromExeDir("/x/zid/zig-out/bin").?);
+    try testing.expectEqualStrings("/x/zid", repoRootFromExeDir("/x/zid/zig-out/bin/").?);
     try testing.expect(repoRootFromExeDir("/usr/local/bin") == null);
 }
 
 test "Standardpfade liegen unter engines/ und models/ des Repos, nicht unter HOME" {
     const a = testing.allocator;
-    const e = try defaultEngine(a, "/x/vulkan-ed");
+    const e = try defaultEngine(a, "/x/zid");
     defer a.free(e);
-    try testing.expectEqualStrings("/x/vulkan-ed/engines/llama.cpp-vulkan/build/bin/llama-server", e);
-    const m = try defaultModel(a, "/x/vulkan-ed");
+    try testing.expectEqualStrings("/x/zid/engines/llama.cpp-vulkan/build/bin/llama-server", e);
+    const m = try defaultModel(a, "/x/zid");
     defer a.free(m);
-    try testing.expectEqualStrings("/x/vulkan-ed/models/Qwen3-4B-Instruct-2507-Q4_K_M.gguf", m);
+    try testing.expectEqualStrings("/x/zid/models/Qwen3-4B-Instruct-2507-Q4_K_M.gguf", m);
     try testing.expect(std.mem.indexOf(u8, e, "projects/ki") == null);
 }

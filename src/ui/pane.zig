@@ -1,4 +1,4 @@
-//! Pane System for vulkan-ed
+//! Pane System for zid
 //!
 //! Implements a recursive binary split-view system.
 

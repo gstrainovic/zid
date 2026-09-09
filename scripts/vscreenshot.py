@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Vulkan-Editor Visual Debugging Interface
+Ziditor Visual Debugging Interface
 
 Usage:
     python3 vscreenshot.py "Frage an Gemini"
@@ -30,13 +30,13 @@ from pathlib import Path
 HOST = "127.0.0.1"
 PORT = 9999
 REPO_ROOT = Path(__file__).parent.parent.resolve()
-ZIG_BUILD = REPO_ROOT / "zig-out" / "bin" / "vulkan-ed"
+ZIG_BUILD = REPO_ROOT / "zig-out" / "bin" / "zid"
 TMP_DIR = REPO_ROOT / "tmp"
 TMP_DIR.mkdir(exist_ok=True)
 
 # === RPC Helper ===
 def rpc_call(method: str, params: list = None) -> dict:
-    """Send RPC call to vulkan-ed, return response."""
+    """Send RPC call to zid, return response."""
     if params is None:
         params = []
 
@@ -165,8 +165,8 @@ def interactive_mode():
     print("  q           - Quit")
     print()
 
-    # Build and start vulkan-ed
-    print("[*] Building vulkan-ed...")
+    # Build and start zid
+    print("[*] Building zid...")
     build_result = subprocess.run(
         ["zig", "build", "-Doptimize=ReleaseSafe"],
         cwd=REPO_ROOT,
@@ -177,7 +177,7 @@ def interactive_mode():
         print(f"[-] Build failed:\n{build_result.stderr[-500:]}")
         return 1
 
-    print("[*] Starting vulkan-ed in headless mode...")
+    print("[*] Starting zid in headless mode...")
     proc = subprocess.Popen(
         [str(ZIG_BUILD), "--headless"],
         cwd=REPO_ROOT,
@@ -271,7 +271,7 @@ def interactive_mode():
 # === One-shot Mode ===
 def oneshot_mode(question: str):
     """One-shot: build, screenshot, Gemini, exit."""
-    print("[*] Building vulkan-ed...")
+    print("[*] Building zid...")
     build_result = subprocess.run(
         ["zig", "build", "-Doptimize=ReleaseSafe"],
         cwd=REPO_ROOT,
@@ -282,7 +282,7 @@ def oneshot_mode(question: str):
         print(f"[-] Build failed:\n{build_result.stderr[-500:]}")
         return 1
 
-    print("[*] Starting vulkan-ed in headless mode...")
+    print("[*] Starting zid in headless mode...")
     proc = subprocess.Popen(
         [str(ZIG_BUILD), "--headless"],
         cwd=REPO_ROOT,

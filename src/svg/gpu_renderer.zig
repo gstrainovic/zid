@@ -1,4 +1,4 @@
-//! GPU SVG Renderer für vulkan-ed
+//! GPU SVG Renderer für zid
 //!
 //! Rendert SVG Icons aus einem Texture Atlas.
 //! Basierend auf dem TextRendererGPU.

@@ -76,6 +76,7 @@ pub const Action = enum {
     ScrollDown,
     ShowContextMenu,
     MdPreview,
+    MdExportPdf,
     SplitVertical,
     SplitHorizontal,
     // Bearbeiten

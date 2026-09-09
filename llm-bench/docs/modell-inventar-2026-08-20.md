@@ -7,7 +7,7 @@ erst Liste als Referenz/Inspiration, dann löschen.
 
 | Modell | Grösse laut ollama | Notiz / Inspiration |
 |---|---|---|
-| gemma4:e2b | 7.2 GB | multimodal; als GGUF+mmproj weiterhin in `~/projects/vulkan-ed/models/` |
+| gemma4:e2b | 7.2 GB | multimodal; als GGUF+mmproj weiterhin in `~/projects/zid/models/` |
 | qwen2.5-coder:7b | 4.7 GB | Coder-7B; passt nicht ganz in 4 GB VRAM (März-Erfahrung: ~10–15 tok/s im Split) |
 | qwen2.5-coder-fix:latest | 1.9 GB | eigener Modelfile-Fix (Tool-Calling-Workaround?) |
 | qwen2.5-coder:3b | 1.9 GB | Code-3B |
@@ -47,6 +47,6 @@ llama-server ersetzt, der Symlink stirbt mit.
 
 ## Behalten (aktiv genutzt)
 
-- `models/` im vulkan-ed-Repo (seit 06.09.2026; vorher `~/projects/ki/BitNet/models/`) — Benchmark-Modelle mit sha256 in `results/`
+- `models/` im zid-Repo (seit 06.09.2026; vorher `~/projects/ki/BitNet/models/`) — Benchmark-Modelle mit sha256 in `results/`
 - `engines/llama.cpp-vulkan` (vorher `~/projects/ki/llama.cpp-vulkan`) — Engine b10524
-- `~/projects/vulkan-ed/models/` — gemma-4-E2B für den Editor
+- `~/projects/zid/models/` — gemma-4-E2B für den Editor

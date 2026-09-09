@@ -174,7 +174,7 @@ def main():
     target = os.path.expanduser("~/projects")
     log = open(LOG_PATH, "w")
     env = dict(os.environ, XDG_CONFIG_HOME=os.path.join(ROOT, "tmp", "xdg-config"), XDG_DATA_HOME=os.path.join(ROOT, "tmp", "xdg"))
-    args = [os.path.join(ROOT, "zig-out", "bin", "vulkan-ed"), "--headless"] + ([] if ai_on else ["--ai=off"]) + extra
+    args = [os.path.join(ROOT, "zig-out", "bin", "zid"), "--headless"] + ([] if ai_on else ["--ai=off"]) + extra
     PROC = subprocess.Popen(args, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, env=env)
     try:
         wait_port(PROC)

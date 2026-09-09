@@ -48,6 +48,7 @@ pub const Command = enum {
     split_vertical,
     split_horizontal,
     md_preview,
+    md_export_pdf,
     rename_entry,
     delete_entry,
     new_file_entry,
@@ -205,18 +206,18 @@ pub const bindings = [_]Binding{
 };
 
 /// Kontextmenü eines Tabs (Rechtsklick auf den Tab-Kopf), in dieser Reihenfolge.
-/// `md_preview` blendet die UI bei Nicht-Markdown-Tabs aus.
+/// `md_preview` und `md_export_pdf` blendet die UI bei Nicht-Markdown-Tabs aus.
 pub const tab_menu_items = [_]Command{
     .close_tab,      .close_other_tabs,  .close_tabs_right,  .close_all_tabs, .close_saved_tabs,
-    .pin_tab,        .copy_tab_path,     .reveal_in_explorer, .md_preview,    .split_vertical,
-    .split_horizontal,
+    .pin_tab,        .copy_tab_path,     .reveal_in_explorer, .md_preview,    .md_export_pdf,
+    .split_vertical, .split_horizontal,
 };
 
 /// Kontextmenü im Editor-Text (`md_preview` nur bei .md, im Chat-Eingabefeld nur Cut/Copy/Paste)
-pub const editor_menu_items = [_]Command{ .cut, .copy, .paste, .md_preview, .split_vertical, .split_horizontal };
+pub const editor_menu_items = [_]Command{ .cut, .copy, .paste, .md_preview, .md_export_pdf, .split_vertical, .split_horizontal };
 
 /// Kontextmenü der Markdown-Vorschau
-pub const markdown_menu_items = [_]Command{ .split_vertical, .split_horizontal };
+pub const markdown_menu_items = [_]Command{ .md_export_pdf, .split_vertical, .split_horizontal };
 
 /// Kontextmenü des Terminals (eigene Commands: Ctrl+C/V gehen dort an die Shell)
 pub const terminal_menu_items = [_]Command{ .terminal_copy, .terminal_paste };
@@ -227,7 +228,7 @@ pub const Menu = struct { title: []const u8, items: []const Command };
 pub const menus = [_]Menu{
     .{ .title = "File", .items = &.{ .new_file, .quick_open, .save, .toggle_autosave, .open_folder, .close_tab, .close_all_tabs, .reopen_closed_tab } },
     .{ .title = "Edit", .items = &.{ .undo, .redo, .cut, .copy, .paste, .select_all, .delete_line, .duplicate_line, .move_line_up, .move_line_down, .toggle_comment, .find, .replace, .goto_line, .goto_definition, .select_next_occurrence, .add_cursor_above, .add_cursor_below } },
-    .{ .title = "View", .items = &.{ .toggle_explorer, .focus_explorer, .split_vertical, .split_horizontal, .md_preview, .new_terminal, .toggle_terminal, .toggle_theme, .zoom_in, .zoom_out, .zoom_reset, .toggle_minimap, .toggle_whitespace, .toggle_indent_guides, .toggle_word_wrap } },
+    .{ .title = "View", .items = &.{ .toggle_explorer, .focus_explorer, .split_vertical, .split_horizontal, .md_preview, .md_export_pdf, .new_terminal, .toggle_terminal, .toggle_theme, .zoom_in, .zoom_out, .zoom_reset, .toggle_minimap, .toggle_whitespace, .toggle_indent_guides, .toggle_word_wrap } },
     .{ .title = "Help", .items = &.{ .command_palette, .show_shortcuts } },
 };
 
@@ -269,6 +270,7 @@ pub fn label(command: Command) []const u8 {
         .split_vertical => "Split Vertically",
         .split_horizontal => "Split Horizontally",
         .md_preview => "Markdown Preview",
+        .md_export_pdf => "Export to PDF",
         .rename_entry => "Rename",
         .delete_entry => "Move to Trash",
         .new_file_entry => "New File",

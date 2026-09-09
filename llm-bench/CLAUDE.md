@@ -1,6 +1,6 @@
 # CLAUDE.md — llm-bench (früher bitnet-colibri-bench)
 
-Seit 06.09.2026 als `git subtree` Teil des vulkan-ed-Repos: Engines unter `engines/`, Modelle
+Seit 06.09.2026 als `git subtree` Teil des zid-Repos: Engines unter `engines/`, Modelle
 flach unter `models/` (BitNet-Referenz `models/bitnet-b1.58-2B-4T/`), colibri gelöscht.
 
 ## Projektstand: abgeschlossen (20.08.2026)
@@ -72,7 +72,7 @@ Bytes) bei `-c 512` — sonst nicht vergleichbar.
 
 Seit der zweiten Laptop-Runde gibt es eine zweite Engine: llama.cpp Tag
 `b10524` (Commit `9ee9fc04c136ef2ae729bfc60d18961b23c13ddf`), Build mit
-`GGML_VULKAN=ON` unter `engines/llama.cpp-vulkan/` (Submodul des vulkan-ed-Repos). Sie existiert, weil die
+`GGML_VULKAN=ON` unter `engines/llama.cpp-vulkan/` (Submodul des zid-Repos). Sie existiert, weil die
 gepinnte b3962 die Architekturen von Qwen3, Phi-4 und Gemma-3 nicht kennt
 und kein taugliches Vulkan hat. Die Zuordnung ist fest:
 

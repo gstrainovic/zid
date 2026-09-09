@@ -1,5 +1,5 @@
 #!/bin/bash
-# Sync-Script fuer vulkan-ed: Submodule + Superproject synchronisieren.
+# Sync-Script fuer zid: Submodule + Superproject synchronisieren.
 # Aufruf bei jedem PC-Wechsel oder vor/nach groesseren Arbeitsabschnitten.
 #
 # Usage:

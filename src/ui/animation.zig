@@ -1,4 +1,4 @@
-//! Animation System für vulkan-ed
+//! Animation System für zid
 //!
 //! Einfache Animationen für UI Components: Fade, Slide, Scale.
 
