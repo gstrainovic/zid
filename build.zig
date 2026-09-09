@@ -510,6 +510,14 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     }) });
 
+    const path_display_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("src/ui/path_display.zig"),
+        .target = target,
+        .optimize = optimize,
+    }) });
+    const run_path_display_tests = b.addRunArtifact(path_display_tests);
+    run_path_display_tests.has_side_effects = true;
+
     const marp_tests = b.addTest(.{ .root_module = marp_mod });
     const run_marp_tests = b.addRunArtifact(marp_tests);
     run_marp_tests.has_side_effects = true;
@@ -570,6 +578,7 @@ pub fn build(b: *std.Build) void {
     run_word_wrap_tests.has_side_effects = true;
     test_step.dependOn(&run_word_wrap_tests.step);
     test_step.dependOn(&run_glyph_layout_tests.step);
+    test_step.dependOn(&run_path_display_tests.step);
     test_step.dependOn(&run_marp_tests.step);
     test_step.dependOn(&run_marp_html_tests.step);
     if (target.result.os.tag == .linux) test_step.dependOn(&run_marp_pdf_tests.step);

@@ -8,6 +8,7 @@ const wio = @import("wio");
 const fuzzy = @import("fuzzy.zig");
 const shortcuts = @import("shortcuts");
 const explorer_ops = @import("explorer_ops.zig");
+const path_display = @import("path_display.zig");
 const Theme = @import("theme.zig").Theme;
 
 const log = std.log.scoped(.picker);
@@ -16,6 +17,9 @@ pub const ROW_HEIGHT: f32 = 32;
 const VISIBLE_ROWS: usize = 12;
 const LIST_HEIGHT: f32 = VISIBLE_ROWS * ROW_HEIGHT;
 const BOX_WIDTH: f32 = 720;
+/// Zeichen, die in eine Zeile passen. Die einzige Schrift ist eine Monospace,
+/// bei 18 px sind das rund 10,8 px je Zeichen; 12 px Innenabstand je Seite.
+const ROW_CHARS: usize = @intFromFloat((BOX_WIDTH - 2 * 12 - 2 * 10) / 10.8);
 /// Obergrenze der Projektdateien (große Bäume wie ~/projects). Breitensuche: flache
 /// Projektdateien stehen vor tiefen Abhängigkeiten (libs/…), falls die Grenze greift.
 const MAX_FILES: usize = 100_000;
@@ -342,6 +346,20 @@ pub const Picker = struct {
         return self.items.items[self.matches.items[self.selected].index].label;
     }
 
+    /// Ordneranteil eines Treffers, gekürzt wie ihn die Zeile zeichnet.
+    /// Eine Quelle für Render und E2E, damit der Test das Sichtbare prüft.
+    fn dirShown(label: []const u8, buf: []u8) []const u8 {
+        const parts = path_display.split(label);
+        if (parts.dir.len == 0) return "";
+        const room = ROW_CHARS -| (parts.name.len + 2);
+        return path_display.truncateMiddle(buf, parts.dir, room);
+    }
+
+    /// Gezeichneter Ordneranteil des ausgewählten Treffers (E2E).
+    pub fn selectedDirShown(self: *const Self, buf: []u8) []const u8 {
+        return dirShown(self.selectedLabel(), buf);
+    }
+
     pub fn handleKey(self: *Self, key: wio.Button) void {
         const n = self.matches.items.len;
         switch (key) {
@@ -487,9 +505,28 @@ pub const Picker = struct {
                                 .corner_radius = .all(3),
                             })({
                                 const fg = if (active) t.text_on_primary else t.text;
-                                clay.text(item.label, .{ .font_size = 18, .color = fg, .wrap_mode = .none });
-                                clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow } } })({});
-                                if (item.detail.len > 0) clay.text(item.detail, .{ .font_size = 14, .color = if (active) t.text_on_primary else t.muted, .wrap_mode = .none });
+                                const dim = if (active) t.text_on_primary else t.muted;
+                                if (self.mode == .files) {
+                                    // Dateiname zuerst, Ordner gedimmt dahinter und
+                                    // mittig gekürzt: sonst schneidet die Zeile genau
+                                    // den Teil ab, der die Treffer unterscheidet.
+                                    const parts = path_display.split(item.label);
+                                    clay.text(parts.name, .{ .font_size = 18, .color = fg, .wrap_mode = .none });
+                                    if (parts.dir.len > 0) {
+                                        // Reicht der Arena der Speicher nicht, bleibt der
+                                        // Ordner ungekürzt — der Name steht ohnehin schon da.
+                                        const shown_dir = if (arena.alloc(u8, parts.dir.len + path_display.ellipsis.len)) |buf|
+                                            dirShown(item.label, buf)
+                                        else |_|
+                                            parts.dir;
+                                        clay.text(shown_dir, .{ .font_size = 14, .color = dim, .wrap_mode = .none });
+                                    }
+                                    clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow } } })({});
+                                } else {
+                                    clay.text(item.label, .{ .font_size = 18, .color = fg, .wrap_mode = .none });
+                                    clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow } } })({});
+                                    if (item.detail.len > 0) clay.text(item.detail, .{ .font_size = 14, .color = dim, .wrap_mode = .none });
+                                }
                             });
                         }
                     });
