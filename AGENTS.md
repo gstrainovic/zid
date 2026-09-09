@@ -59,6 +59,11 @@ echo -e "open ./README.md\nget-state\nshutdown" | zig build run -- --interactive
   (`drainInputs` / `serviceScreenshot`); `close_active_tab` geht über `pending_tab_closes`.
   Nur `--interactive` (stdin) wendet Handler direkt an, dort gibt es keinen Loop.
   `open_file`, `split_pane`, `show_context_menu` mutieren noch direkt aus dem Server-Thread.
+- **Lesende RPCs laufen weiterhin im Server-Thread.** Gemeinsame Daten brauchen deshalb eine
+  Sperre: `file_explorer.git_status` hängt an `git_status_mutex`, weil der Main-Thread die Map in
+  `updateGitStatus` ersetzt (Keys werden freigegeben) und `explorer_entries` sie gleichzeitig liest
+  — das war ein Segfault in `isIgnored`. Zugriff nur über `statusFor`, `isIgnored`, `folderStatus`,
+  nie direkt auf die Map.
 - Headless-Screenshot ist 1200x800, Tab-Kopf liegt bei y≈105, Inhalt ab y≈130.
 - Explorer testen: `explorer_entries` liefert Viewport-Bounds, `row_height`, `scroll` und die
   sichtbaren Zeilen mit Index; Zeilenmitte = `viewport.y + index*row_height + row_height/2 - scroll`.
@@ -84,6 +89,10 @@ echo -e "open ./README.md\nget-state\nshutdown" | zig build run -- --interactive
 - Bestätigt → `UI.pending_open_folder`; `main.zig` holt es per `takePendingOpenFolder` und
   ruft `openProjectFolder` (auch beim Start): Explorer-Root, `current_directory`,
   Git-Branch/-Status und File-Watcher wechseln. Offene Tabs bleiben erhalten.
+- **Ordner ohne Repo bekommen keine git-Tasks.** `git_worker.isInsideRepo` (unit-getestet) sucht
+  `.git` aufwärts; schlägt das fehl, bleibt `git_repo_path` null und weder Branch noch Status
+  werden eingereiht. `runGitCwd` loggt bei Fehlern Befehl, Ordner und stderr — „git exited 128"
+  allein sagte nicht, woran es lag.
 - Kein nativer Dialog (zenity/kdialog/Portal): der In-App-Dialog ist headless testbar
   und braucht keine Systemabhängigkeit.
 - File-Watcher registriert seinen Baum im eigenen Thread (`~/projects` hat tausende
@@ -97,6 +106,14 @@ echo -e "open ./README.md\nget-state\nshutdown" | zig build run -- --interactive
   neue Icons erscheinen daher erst im zweiten Screenshot (das Skript rendert zweimal).
 - Logs: `logFn` schreibt per `writerStreaming`; mit `File.writer()` wurde eine umgeleitete
   Log-Datei (`2>log`) laufend ab Offset 0 überschrieben.
+
+## Clay-Layout
+
+Regeln und Fallstricke stehen in der Skill `.claude/skills/clay-layout/SKILL.md`
+(Elementgrenze, Mindestbreite von Text ohne Umbruch, verschachteltes Clipping, IDs in
+Schleifen, Fehlerhandler, Virtualisierung). `UI.MAX_CLAY_ELEMENTS` und `UI.clayError`
+liegen in `src/ui/mod.zig`, das Virtualisierungsmuster in
+`MarkdownView.renderDocumentVirtualized`. E2E: `python3 scripts/e2e_md_preview.py`.
 
 ## Tastenkürzel und Menüs: eine Quelle
 
@@ -117,6 +134,15 @@ echo -e "open ./README.md\nget-state\nshutdown" | zig build run -- --interactive
   sind eigene Commands `terminal_copy`/`terminal_paste` ohne Kürzel (Ctrl+C/V gehen an die Shell).
   `md_preview` aus dem Tab-Menü öffnet die Vorschau des angeklickten Tabs
   (`requestMarkdownPreview`), aus dem Editor die des aktiven Buffers.
+- **Breite der Aufklappmenüs ist dynamisch:** der Rahmen `menu_dropdown` ist `.w = .fit`, die
+  Einträge sind `.w = .grow` mit `child_gap = 32`. Clay misst den breitesten Eintrag und zieht alle
+  anderen darauf; die Kürzel stehen dadurch rechtsbündig, ohne dass jemand selbst misst. Vorher war
+  der Eintrag fest 380 breit und lange Labels stießen an ihr Kürzel („Toggle Line Comment"
+  überlappte „Ctrl+/"). Gemessene Breiten: File 523, Edit 687, View 475, Help 507.
+- **Wann `fit`/`grow` reicht und wann nicht:** beim Menü darf der Rahmen mitwachsen, die Einträge
+  sind eine kurze bekannte Liste. Im Picker ist der Kasten bewusst fest (720) und der Inhalt
+  unbegrenzt lang (Pfade) — dort braucht es die Obergrenze `growMinMax` plus Kürzen. Erst prüfen,
+  ob der Rahmen mitwachsen darf; nur wenn nicht, selbst messen.
 - Globale und Explorer-Kürzel löst `UI.handleKeyPress` über `shortcuts.lookup` auf und führt sie
   mit `executeCommand` aus; Menüklicks gehen denselben Weg. Editor-Kürzel (Scope `editor`) liegen
   weiterhin in `src/editor/keymap.zig` und müssen zur Tabelle passen (Save, Undo/Redo, Cut/Copy/
@@ -136,109 +162,26 @@ echo -e "open ./README.md\nget-state\nshutdown" | zig build run -- --interactive
 
 ## KI-Chat (llama-server / Ollama)
 
-- **Backend-Wahl beim Start** (`UI.init`, sofern nicht `--ai=off`): Standard ist der
-  llama.cpp-Vulkan-Build `engines/llama.cpp-vulkan/build/bin/llama-server` mit
-  `models/Qwen3-4B-Instruct-2507-Q4_K_M.gguf`, beides relativ zur Repo-Wurzel (`src/ai/paths.zig`,
-  unit-getestet: Wurzel aus `<repo>/zig-out/bin` der ausführbaren Datei, sonst das
-  Arbeitsverzeichnis; nichts mehr über `$HOME`). Fehlt der Build, Fallback auf Ollama mit
-  `gemma4:e2b`. `LLAMA_SERVER_PATH` (Pfad oder `ollama`) und
-  `LLAMA_MODEL_PATH` überschreiben. Der Init-Block war seit Commit 8a5c7fb auskommentiert.
-- **Warum Qwen3-4B:** Messung auf diesem Laptop (i7-8850H, Quadro P1000 4 GB) mit der Frage
-  "hallo, was kannst du alles?": gemma4:e2b über Ollama 232 s für 1022 Tokens (4,4 tok/s, das
-  5,2-GB-Modell passt nicht in den VRAM); Qwen3-4B Q4 über llama-server auf der P1000 27 s für
-  494 Tokens (18,8 tok/s). Deckt sich mit `~/projects/bitnet-colibri-bench` (Testsieger, 10/10
-  Werkzeugwahl). Ohne GPU läuft dasselbe Modell auf der CPU mit ~7–10 tok/s; BitNet-b1.58 wäre
-  auf reiner CPU ~2× schneller, braucht aber die gepinnte Engine (siehe dort) und ist nur Option.
-- **llama-server-Start** (`agent.zig`): prüft Engine- und Modelldatei, fragt
-  `--list-devices` ab und wählt per `device_select.zig` (unit-getestet) eine diskrete GPU mit
-  ≥ 3 GB, sonst CPU (`-dev none -t N`). iGPUs (Intel UHD …) werden übersprungen: laut Bench ein
-  Drittel der CPU. Argumente: `--jinja -c 8192 --log-disable`, GPU `-dev VulkanN -ngl 99`.
-  Port 8080 (`default_llama_port`); Ollama bleibt auf 11434. Ohne `-dev` landete das Modell
-  womöglich auf der iGPU, ohne `--jinja` stimmt das Qwen3-Chat-Template nicht.
-- **Streaming:** `streamChatCompletion` (SSE, `stream: true`) → Worker pusht jedes Delta per
-  `Scheduler.pushResult` als `ai_chat_delta`, der Chat zeigt die wachsende Antwort
-  (`stream_text`, Markdown wird bei neuem Text neu gebaut). Finale Antwort kommt als
-  `ai_chat_reply` mit dem ganzen Text. **Escape** setzt `cancel_flag`, der Worker beendet den
-  Stream → `ai_chat_cancelled`, der Teiltext bleibt mit "(abgebrochen)".
-- `AgentStatus` (`none`, `model_missing`, `initializing`, `ready`, `failed`) ist der echte
-  Verbindungszustand: Statuspunkt, Kopfzeile (`agentTitle`: Modell · Gerät) und `sendMessage`
-  (antwortet ohne bereiten Agent sofort mit Erklärung) hängen daran. Warmup schickt "ping" mit
-  `max_tokens = 1` (ohne Limit dauerte der Start minutenlang).
-- Fehlt das Ollama-Modell, wird nicht synchron gepullt; der Chat zeigt "Pull model with Ollama"
-  (`ai_worker.taskOllamaPull`). Lokales GGUF ohne Download registrieren:
-  `printf 'FROM /abs/pfad/model.gguf\n' > Modelfile && ollama create NAME -f Modelfile`.
-- RPC `chat_state`: Status, Detail, Titel, loading/initializing/downloading, `streaming_len`,
-  alle Nachrichten. E2E: `python3 scripts/e2e_ai_chat.py` (Warmup, erstes Delta < 30 s, Escape,
-  kurze Antwort; `--only-off` nur den `--ai=off`-Pfad). Messwerte 05.09.2026: Warmup 2,0 s,
-  erstes Delta 2,3 s, PONG 0,8 s.
-- **Codeblock-Antworten brachten zigdown zum Absturz** (06.09.2026): endet der Text genau mit
-  ``` ohne Zeilenumbruch (Antwort nur aus einem Codeblock, oder ein Streaming-Stand), erzeugt
-  `handleLineCode` einen leeren Tag und greift auf `tag[0]` zu (`libs/zigdown`, Submodul, nicht
-  gepatcht). `chat_markdown.finishForParser` hängt deshalb immer einen Zeilenumbruch an und
-  schließt einen offenen Zaun; `toDisplayMarkdown`/`wrapToolResult` laufen darüber. Test mit
-  echtem zigdown-Parse in `chat_markdown.zig`, E2E `code_only_answer` in `e2e_ai_chat.py`.
-- **Chat-Eingabe ist der CodeEditor** (seit 06.09.2026; vorher `components/textarea.zig`, eine
-  2140-Zeilen-Kopie des Editors vom April, gelöscht): `AIChatState.input_editor` mit
-  `show_gutter = false`, `show_minimap = false`, `compact_menu = true` (Kontextmenü nur
-  Cut/Copy/Paste) und `word_wrap = true`. Enter sendet, Shift+Enter fügt eine Zeile ein
-  (`dispatchAction(.InsertNewline)`, die Keymap kennt Enter nur ohne Modifier). Das UI reicht
-  Shift/Ctrl/Alt auch an den Chat-Editor weiter, `applyThemeToEditors` färbt ihn mit. Editor-
-  Neuerungen gelten damit automatisch auch im Chat. E2E `input_newline_and_send` in
-  `e2e_ai_chat.py` (läuft im `--ai=off`-Teil).
-- Keine Unit-Tests für `ai_chat.zig`: die Datei importiert den CodeEditor und die UI, also kein
-  eigenes Test-Root möglich. Logik dort klein halten.
+Details in der Skill `.claude/skills/llm-local/SKILL.md`: Backend- und Gerätewahl,
+llama-server-Argumente, Streaming und `AgentStatus`, Chat-Eingabe als CodeEditor,
+gepinnte Engines unter `engines/`, Modellablage und die Messregeln aus `llm-bench/`.
+
+Kurz: Standard ist `engines/llama.cpp-vulkan/build/bin/llama-server` mit
+`models/Qwen3-4B-Instruct-2507-Q4_K_M.gguf` (`src/ai/paths.zig`), Fallback Ollama.
+`LLAMA_SERVER_PATH` und `LLAMA_MODEL_PATH` überschreiben. RPC `chat_state`,
+E2E `python3 scripts/e2e_ai_chat.py`.
 
 ## Engines und Modelle (`engines/`, `models/`, `llm-bench/`)
 
-Seit 06.09.2026 liegt alles im Repo; `~/projects/ki` und das separate Bench-Repo gibt es nicht mehr.
-
-- **Layout:** `engines/BitNet` (Submodul, gepinnt `01eb415`, Submodul `3rdparty/llama.cpp`
-  `1f86f05` = b3962, `.gitmodules` mit `ignore = dirty`, weil `src/ggml-bitnet-mad.cpp` den
-  lokalen Patch `llm-bench/patches/bitnet-mad-const-y_col.patch` trägt) und
-  `engines/llama.cpp-vulkan` (Submodul, `9ee9fc0` = b10524, Build mit `GGML_VULKAN=ON`). Die Builds
-  liegen unbeobachtet in `engines/*/build/`. `models/` hält alle GGUFs flach (per `*.gguf`
-  ignoriert, nie committen), das BitNet-Referenzmodell unter
-  `models/bitnet-b1.58-2B-4T/ggml-model-i2_s.gguf`. In `engines/BitNet/models/` zeigen zwei
-  Symlinks (`_compare`, `BitNet-b1.58-2B-4T`) auf `models/`, damit BitNets eigene Skripte laufen.
-- **cmake brennt absolute Pfade ein:** nach dem Umzug fanden `llama-server` und `llama-bench`
-  ihre `libllama.so` nicht (RUNPATH zeigte auf `~/projects/ki/...`). `llm-bench/setup/fix-rpath.sh`
-  schreibt die RUNPATHs aller Programme und Bibliotheken beider Builds per patchelf auf
-  `$ORIGIN`-relative Pfade um (Kopie patchen und darüberschieben, weil ein laufender llama-server
-  die Datei gemappt hält: „Text file busy“). Nach jedem Neubau bzw. Verschieben erneut ausführen;
-  die Build-Verzeichnisse selbst kann cmake nach einem Umzug nicht mehr neu konfigurieren
-  (`CMAKE_HOME_DIRECTORY`), ein Neubau muss von vorn beginnen.
-- **`llm-bench/`** ist das frühere Repo `bitnet-colibri-bench` als `git subtree` (Historie
-  erhalten, Rohlogs unter `results/logs/`). `results/*.md` sind historische Protokolle und werden
-  nicht angefasst; `bench/olmoe_*.py` bleiben als Messprotokoll (colibri ist gelöscht).
-  `llm-bench/setup/serve-coding-agent.sh` und `setup/linux.sh` rechnen mit den Repo-Pfaden.
-- **Die Engine ist gepinnt, und das ist keine Vorsicht.** Der aktuelle Stand von
-  microsoft/BitNet zeigt mit seinem Submodul auf einen Fork-Branch, mit dem BitNet-b1.58-2B-4T
-  unbrauchbar ist (Endlosschleife, Perplexity ×3,7, Werkzeugwahl 0/10) — bei unauffälligem
-  Durchsatz. Vor jeder Messung `./engines/BitNet/build/bin/llama-bench -m <i2_s.gguf> -p 8 -n 8
-  -r 1`: `I2_S - 2 bpw ternary` in der Modellspalte heißt brauchbar, `Q1_0` heißt nicht messen.
-- **BitNet braucht `--override-kv tokenizer.ggml.pre=str:llama-bpe`** (dem GGUF fehlt das
-  Feld; ohne Override zerfallen Werkzeugnamen, 8–9/10 → 4/10). Nur für BitNet.
-- **Feste Engine-Zuordnung:** BitNet i2_s nur auf der gepinnten BitNet-Engine (auf b10524 ist
-  i2_s kaputt); Qwen3/Phi-4/Gemma-3 nur auf b10524 (b3962 kennt die Architekturen nicht und hat
-  kein taugliches Vulkan); Llama-3.2-3B läuft auf beiden und ist die Brücke (tg64 13,64 gegen
-  12,22, pp128 36,73 gegen 49,30) — Zahlen nie ohne diese Verschiebung über die Engine-Grenze
-  vergleichen.
-- **Jede Zahl braucht drei Kennungen:** Engine-Commit, Submodul-Commit, Modell-sha256
-  (Referenz BitNet `4221b252…`, 1 187 801 280 Bytes; Perplexity nur mit `llm-bench/bench/ppl-corpus.txt`
-  bei `-c 512`). Entscheidungen des Projektinhabers (keine Fehlerberichte an fremde Projekte, keine
-  weiteren Läufe) und die Liste „nicht erneut aufrollen“ stehen in `llm-bench/CLAUDE.md`.
-- **Nachweis nach dem Umzug (06.09.2026):** `scripts/e2e_ai_chat.py` grün (llama-server aus
-  `engines/`), BitNet `llama-bench` zeigt `I2_S - 2 bpw ternary` (pp8 97,6, tg8 21,9 tok/s, 6 Threads),
-  `serve-coding-agent.sh llama gpu 8081` + `agent_eval.py` 9/10 wie in `results/`. Das GitHub-Repo
-  `gstrainovic/bitnet-colibri-bench` ist archiviert.
-- **Standardmodell des Chats** ist Qwen3-4B-Instruct-2507 (Pflicht); Llama-3.2-3B und das
-  BitNet-Referenzmodell sind sinnvoll; die fünf reinen Bench-Modelle (Qwen3.5-4B/2B, xLAM,
-  Gemma-3, Phi-4-mini, ~10 GB) bleiben, bis der Projektinhaber entscheidet.
+Alles liegt im Repo. Layout, gepinnte Submodule, `fix-rpath.sh` und die Messregeln stehen in
+`.claude/skills/llm-local/SKILL.md`. Kurz: `engines/BitNet` und `engines/llama.cpp-vulkan` sind
+gepinnt, `models/` hält GGUFs flach und ignoriert (nie committen), `llm-bench/` ist ein
+`git subtree` mit historischen Protokollen, die nicht angefasst werden.
 
 ## Agent-Werkzeuge: der Agent kann, was der Editor kann
 
 - **Natives Tool-Calling** (OpenAI `tools`-Feld, `tool_calls` in der Antwort, `role: tool` zurück).
-  Geprüft 05.09.2026 mit llama-server b10524 + Qwen3-4B + `--jinja`: funktioniert nicht-streamend
+  Geprüft mit llama-server b10524 + Qwen3-4B + `--jinja`: funktioniert nicht-streamend
   und streamend (`delta.tool_calls` je Index zusammensetzen), das Modell nutzt Tool-Ergebnisse.
   Das alte JSON-im-Text-Verfahren (`tryExecuteToolCall`) ist entfernt. Kein MCP, kein RPC:
   Agent und Editor sind derselbe Prozess; MCP wäre nur für externe Agenten interessant.
@@ -272,7 +215,7 @@ Seit 06.09.2026 liegt alles im Repo; `~/projects/ki` und das separate Bench-Repo
 - Kein `run_shell` (bewusst, erst mit Sandbox). Kein Diff-Review vor dem Schreiben (Zed zeigt
   Agent-Änderungen erst als Vorschlag); wäre der nächste Schritt nach dem Dock.
 - **Kontextgrenze:** llama-server (`-c 8192`) kürzt nicht still, sondern antwortet HTTP 400
-  `exceed_context_size_error` (gemessen 06.09.2026: 24 017 Tokens abgelehnt; ein 8014-Token-Prompt
+  `exceed_context_size_error` (gemessen: 24 017 Tokens abgelehnt; ein 8014-Token-Prompt
   brauchte auf der P1000 123 s). `agent.zig` macht daraus `error.ContextTooLong`, der Chat zeigt
   einen verständlichen Hinweis. Vorbeugend schickt `submitCompletion` nur das jüngste Stück der
   Historie, das in `history_budget_chars` (12 000 Zeichen ≈ 3–4 k Tokens; Tools-Schema 6 501 Zeichen
@@ -285,9 +228,9 @@ Seit 06.09.2026 liegt alles im Repo; `~/projects/ki` und das separate Bench-Repo
   einen Import hinweg scheitern (Qwen3 bricht gefahrlos ab, Llama-3.2-3B schrieb destruktiv). Der
   Agent soll nur in Git-Repos ändern: nur die Bestätigungsdialoge sichern, eine Warnung außerhalb
   eines Repos ist eine offene Produktentscheidung. Prompt-Verarbeitung auf der P1000 ~96 tok/s.
-- **Temperatur bleibt 0.7, auch mit Tools** (negatives Ergebnis 06.09.2026): `bench/agent_eval.py`
+- **Temperatur bleibt 0.7, auch mit Tools** (negatives Ergebnis): `bench/agent_eval.py`
   Werkzeugwahl bei 0.7 dreimal 10/10, bei 0.0 ebenfalls 10/10 — kein Unterschied, keine Sonderregel.
-- **CPU ohne `-tb`** (negatives Ergebnis 06.09.2026, `-dev none -ngl 0`, Prompt 6×-Absatz):
+- **CPU ohne `-tb`** (negatives Ergebnis, `-dev none -ngl 0`, Prompt 6×-Absatz):
   `-t 8` prompt 52,9 tok/s / gen 10,8 tok/s; `-t 8 -tb 12` prompt 50,6 / gen 11,5 — im Rauschen,
   `agent.zig` bleibt bei `-t min(Kerne, 8)`.
 - Nach jeder Änderung an `agent.zig` muss `python3 scripts/e2e_ai_tools.py` grün bleiben; Messzahlen
@@ -428,7 +371,7 @@ Seit 06.09.2026 liegt alles im Repo; `~/projects/ki` und das separate Bench-Repo
 - **Theme:** `toggle_theme` (View, Palette) schaltet `UI.theme` zwischen `Theme.light()`/`dark()`;
   Editor-Farben kommen aus `CodeEditor.applyTheme` (bg, gutter, Zeilennummern, Cursor, Auswahl,
   `text_color`). `--theme light|dark` gilt einmalig beim Start; vorher setzte main.zig das Theme in
-  **jedem Frame** auf Dark, deshalb griff kein Umschalter (Ursache, Datum 06.09.2026).
+  **jedem Frame** auf Dark, deshalb griff kein Umschalter.
 - **Zoom:** Ctrl+=/Ctrl+-/Ctrl+0 (`zoom_in/out/reset`, 10–48, `setFontSizeAll` für alle Panes).
 - **Autosave:** File → Toggle Autosave (`UI.autosave`), speichert 1 s nach der letzten Änderung
   (`CodeEditor.last_edit_ms`) nur Text-Tabs mit Pfad. Jedes Speichern legt vorher eine Sicherung
@@ -464,7 +407,19 @@ Seit 06.09.2026 liegt alles im Repo; `~/projects/ki` und das separate Bench-Repo
   kürzt standardmäßig in der Mitte. `ROW_CHARS` rechnet das Zeichenbudget aus `BOX_WIDTH` — zulässig,
   weil die einzige Schrift eine Monospace ist. `commonPrefix` liegt bereit für Zeds Ansatz
   (gemeinsame Segmente aller Treffer wegkürzen), ist aber noch nicht verdrahtet.
+- **Clay: Text ohne Umbruch ist eine Mindestbreite.** `wrap_mode = .none` meldet die volle
+  Textbreite als Mindestmaß, und Clay zieht Zeile und Liste darauf auf — gemessen 1236 px in einem
+  720 px breiten Kasten, worauf der rechtsbündige Ordner ins Leere geschoben wurde. Abhilfe ist
+  `SizingAxis.growMinMax(.{ .min = 0, .max = … })` auf der Zeile, das Gegenstück zu `max-width`;
+  in CSS entspricht das `min-width: 0` an einem Flex-Element. **Kein verschachteltes `.clip`** als
+  Ersatz: der innere Clip ersetzt im Renderer den äußeren statt sich mit ihm zu schneiden, dann
+  läuft die Liste unten aus dem Kasten.
+- Breiten werden gemessen, nicht aus Zeichen geschätzt: Name (18 px) und Ordner (14 px) stehen in
+  verschiedenen Größen, ein gemeinsames Zeichenbudget lag daneben. `truncateToWidth` sucht die
+  Zeichenzahl binär über `ui.measureTextWidth`.
 - `Picker.dirShown` ist die eine Quelle für Render und RPC, damit der E2E prüft, was gezeichnet wird.
+  `e2e_picker.py` prüft zusätzlich die Geometrie (Zeile ⊆ Kasten) — die reinen Textprüfungen waren
+  grün, während die Zeile 1236 px breit war.
 - RPC `picker_state` (open, scanning, mode, query, matches, items, selected, selected_label,
   selected_dir_shown); `python3 scripts/e2e_picker.py`.
 
@@ -472,8 +427,8 @@ Seit 06.09.2026 liegt alles im Repo; `~/projects/ki` und das separate Bench-Repo
 
 - **„+“ (Neu-Menü) sitzt ganz links** vor dem scrollenden Tab-Streifen. Der Streifen hat `.w = .grow`
   mit Clip; stand der Knopf dahinter, wanderte er an den Fensterrand und sein Dropdown wurde
-  abgeschnitten (aufgefallen 06.09.2026).
-- **Keine Vorschau-Tabs** (entfernt 06.09.2026 auf Wunsch des Projektinhabers; VS Code und Zed haben
+  abgeschnitten.
+- **Keine Vorschau-Tabs** (auf Wunsch des Projektinhabers; VS Code und Zed haben
   sie standardmäßig an): Einfachklick, Space und Enter im Explorer öffnen jede Datei in einem
   eigenen Tab, ein Klick auf eine schon offene Datei wechselt nur dorthin (`TabBarState.openFile`).
 - **Ctrl+Tab = zuletzt benutzt** (`recent_tab_next`/`recent_tab_prev`, wie VS Code/Zed): Tabs
@@ -508,56 +463,11 @@ Seit 06.09.2026 liegt alles im Repo; `~/projects/ki` und das separate Bench-Repo
 
 ## Marp: Folien aus Markdown, Export nach PDF
 
-- **Parser** `src/ui/marp.zig` (Modul `marp`, rein, 15 Tests): Front-Matter mit `marp: true`,
-  Folientrennung an `---` (nicht im Code-Zaun, nicht bei Setext-Überschriften), `headingDivider`,
-  globale Direktiven (`theme`, `style`, `size`, `headingDivider`) und lokale mit Vererbung
-  (`_`-Präfix = nur diese Folie). Kommentare ohne Direktiven werden Notizen. Das `Deck` hält eine
-  eigene Arena, die Quelle darf danach weg.
-- **HTML** `src/ui/marp_html.zig` (Modul `marp_html`): Folie → HTML-Fragment über zigdowns
-  `HtmlRenderer` (`body_only`) plus CSS. Bewusst CSS 2.1, MuPDFs Story-Engine kennt weder
-  Flexbox noch Grid noch Custom Properties.
-- **PDF** `src/rendering/marp_pdf.zig`: eine Seite je Folie in Foliengröße über `fz_story` und
-  `fz_new_document_writer`. Hintergrund, Kopf-/Fußzeile und Seitenzahl zeichnet das Modul selbst,
-  weil MuPDFs CSS kein `position` kennt. Die Wrapper dafür stehen in `mupdf_wrapper/fitz-z.c`
-  (setjmp-Kapselung wie beim Lesen).
-- **Folienvorschau:** `MarkdownView` parst ihren Text beim Anlegen als Deck (`deck`-Feld).
-  Gelingt das, zeigt sie statt des Fließtexts eine Folie im Seitenverhältnis des Decks
-  (`md_slide`) plus Blätterleiste (`md_slide_prev`, `md_slide_counter`, `md_slide_next`).
-  Geblättert wird per Pfeil links/rechts, Bild auf/ab, Pos1/Ende, Mausrad und den beiden
-  Schaltflächen. Es ist immer nur eine Folie geparst (`slide_arena`/`slide_parsed`), der
-  Folienwechsel wirft sie weg. `UI.activeSlideDeckView` liefert die Vorschau des aktiven Tabs,
-  wenn sie ein Deck zeigt; darüber laufen Tasten und der RPC `slide_state`
-  (`deck`, `slides`, `current`, `scale`, `font_size`, `overflow`).
-- **Rahmengröße von Hand:** `renderDeck` rechnet Breite und Höhe der Folie selbst aus der Fläche
-  des Wurzelelements (`markdown_view_root`, letzter Frame) und setzt sie als `.fixed`. Mit Clays
-  `.aspect_ratio` plus `.w = .grow` blieb der Rahmen auf Inhaltsgröße stehen und war im Fenster
-  winzig; im Headless-Test fiel das nicht auf, weil dort nur Verhältnisse geprüft wurden. Der
-  E2E prüft deshalb jetzt auch, dass der Rahmen die Breite ausfüllt.
-- **Maßstab:** Der Rahmen wird im Verhältnis `Rahmenbreite / Deckbreite` gezeichnet, Ränder und
-  Grundschrift stammen aus denselben Konstanten wie der Export (`pdf_margin_x`, `pdf_margin_y`,
-  `pdf_content_em`, gespiegelt aus `marp_pdf.zig`); die Überschriftenfaktoren in `renderBlock`
-  (2.0 / 1.5 / 1.2) entsprechen dem Export-CSS. Untergrenze 6 px, sonst wird die Vorschau in
-  kleinen Panes unleserlich.
-- **Überlauf:** `marp_pdf.slideFits` legt die Folie mit `fz_place_story` aus und zeichnet nichts;
-  bleibt Inhalt übrig, meldet die Vorschau „Inhalt passt nicht auf die Folie" (`md_slide_overflow`).
-  Clay kann das nicht beantworten: der Rahmen clippt, die gemessene Höhe geht darum nie über die
-  Innenhöhe hinaus.
-- **Bedienung:** Command `md_export_pdf` („Export to PDF") in `shortcuts.zig`, sichtbar im
-  Tab-Kontextmenü, im Editor-Kontextmenü, im Kontextmenü der Vorschau und im View-Menü; wie
-  `md_preview` bei Nicht-`.md`-Tabs ausgeblendet. Das Ergebnis landet neben der Quelle
-  (`deck.md` → `deck.pdf`) und wird sofort als PDF-Tab geöffnet, die Vorschau ist damit das,
-  was rauskommt. Fehlt `marp: true`, kommt ein Fehlerdialog statt einer Datei.
-- **E2E:** `python3 scripts/e2e_marp_pdf.py` (headless) deckt Sichtbarkeit des Menüeintrags,
-  Export, Seitenzahl, PDF-Tab, den Nicht-Deck-Fall und die Folienvorschau samt Blättern ab. Fixture: `test_data/marp_test.md`.
-  Einzelne Seiten prüfen: `mutool draw -F txt -o - DATEI.pdf SEITE`.
-- **Grenzen:** Der Streifen für Kopf-/Fußzeile muss eine Zeile samt Abstand fassen, sonst
-  platziert `fz_place_story` gar nichts (deshalb `chrome_h = 40` und `p { margin: 0 }`).
-  Inhalt, der nicht auf die Folie passt, wird abgeschnitten statt verkleinert. zigdown maskiert
-  nur Textstücke mit spitzer Klammer, ein alleinstehendes `&` bleibt roh. Mehrzeiliges YAML im
-  Front-Matter (`style: |`) wird nicht zusammengefasst. `![bg]`-Hintergrundbilder bleiben im
-  Markdown stehen. Die Vorschau bildet den Umbruch nach, ist aber keine Pixelkopie: sie zeichnet
-  mit der Editor-Schrift (JetBrainsMono), das PDF mit MuPDFs Serifenlosen. Die Grenze meldet
-  deshalb `slideFits`, nicht das Auge.
+Details in der Skill `.claude/skills/marp/SKILL.md`. Kurz: Parser `src/ui/marp.zig`
+(Modul `marp`), HTML `src/ui/marp_html.zig`, PDF `src/rendering/marp_pdf.zig` über
+MuPDFs Story-Engine. Folienvorschau in `MarkdownView` (`deck`-Feld), Command
+`md_export_pdf`. E2E: `python3 scripts/e2e_marp_pdf.py`, Fixture
+`test_data/marp_test.md`.
 
 ## LSP (zls): Sprung zur Definition
 
@@ -636,7 +546,7 @@ Seit 06.09.2026 liegt alles im Repo; `~/projects/ki` und das separate Bench-Repo
   `scroll_horizontal` scrollt Spalten (`scrollColumns`). RPC `editor_state` liefert `view_col`/`view_cols`.
 - `python3 scripts/e2e_odd_files.py` legt unter `tmp/` eine 3-KB-Binärdatei ohne Zeilenumbruch,
   eine 5000-Zeichen-Zeile und eine 5-MB-Datei an, öffnet sie headless, tippt und misst die Latenz
-  bis das Zeichen in `editor_state` steht (Messung 06.09.2026: 0,06 s bei der langen Zeile,
+  bis das Zeichen in `editor_state` steht (gemessen 0,06 s bei der langen Zeile,
   1,2–2,4 s bei der 5-MB-Datei); die Binärdatei muss als Tab-Art `binary` ohne Buffer erscheinen. Logs mit Binärinhalt nur mit `grep -a` lesen, sonst schweigt grep.
 - Verwaiste Headless-Prozesse: `pkill -f '[v]ulkan-ed --headless'` — ohne die Klammer trifft das
   Muster die eigene Shell, die den Befehl enthält.
@@ -654,7 +564,7 @@ Seit 06.09.2026 liegt alles im Repo; `~/projects/ki` und das separate Bench-Repo
   `pending_split`, `pending_tab_closes`, leere Panes. Vorher lief das direkt nach `endLayout`:
   die Dialog-Nachricht wurde freigegeben, `performMove` → `refresh` → `loadDirectory` gab alle
   Knotennamen frei, `closeTab`/`TabBarState.deinit` die Tab-Namen, während der Frame noch
-  gezeichnet wurde → `Segmentation fault` in `text_system.hashText` (Symptom vom 06.09.2026:
+  gezeichnet wurde → `Segmentation fault` in `text_system.hashText` (Symptom:
   Bilder per Drag & Drop in einen Ordner verschoben, Absturz beim nächsten Zeichnen).
 - Kein `clay.text(&.{byte}, …)`: Zeiger auf ein Stack-Temporary, beim Zeichnen längst
   überschrieben. Statische Literale nehmen (Git-Status-Buchstaben in `renderTreeEntry`).

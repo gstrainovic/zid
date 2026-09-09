@@ -37,7 +37,6 @@ const agent_actions = @import("agent_actions.zig");
 const ai_chat_mod = @import("ai_chat.zig");
 const agent_mod = @import("agent");
 
-
 const log = std.log.scoped(.ui);
 
 /// Globaler Measure-Context (thread-local) — wird von CodeEditor.colFromX genutzt
@@ -200,20 +199,39 @@ pub const UI = struct {
     const Self = @This();
 
     /// UI initialisieren
+    /// Obergrenze für Clay-Layout-Elemente pro Frame. Großzügig, weil die
+    /// Markdown-Vorschau nicht virtualisiert: sie legt das ganze Dokument an,
+    /// nicht nur den sichtbaren Ausschnitt.
+    const MAX_CLAY_ELEMENTS: i32 = 16384;
+
+    /// Clay meldet Layout-Fehler hierher statt sie nur auf den Bildschirm zu
+    /// malen. Ohne diesen Handler stand die Meldung rot im Fenster und tauchte
+    /// in keinem Log auf.
+    fn clayError(data: clay.ErrorData) callconv(.c) void {
+        log.err("Clay: {s} ({s})", .{ data.error_text.chars[0..@intCast(data.error_text.length)], @tagName(data.error_type) });
+    }
+
     pub fn init(allocator: std.mem.Allocator, config: UIConfig, default_file_path: ?[]const u8) !Self {
         log.debug("Initializing UI system", .{});
 
-        // Clay Memory allozieren
+        // Clay Memory allozieren. Die Obergrenze für Layout-Elemente muss vor
+        // minMemorySize stehen, weil die Größe daran hängt. Clays Standard sind
+        // 8192; die Markdown-Vorschau baut ein ganzes Dokument auf einmal auf
+        // (ein Element je Zeile und je Textstück), was bei großen Dateien wie
+        // AGENTS.md darüber hinausgeht — Clay meldet dann
+        // „Layout elements exceeded Clay__maxElementCount" und bricht ab.
+        clay.setMaxElementCount(MAX_CLAY_ELEMENTS);
         const min_memory = clay.minMemorySize();
         const generous_memory = @max(min_memory, 10 * 1024 * 1024);
         const clay_memory = try allocator.alloc(u8, generous_memory);
+        log.info("Clay: max {d} Elemente, {d} KiB Arena", .{ MAX_CLAY_ELEMENTS, generous_memory / 1024 });
 
         // File Explorer initialisieren
         const file_explorer = file_explorer_mod.FileExplorerState.init(allocator);
 
         var open_buffers = std.StringHashMap(*@import("flow_core").Buffer).init(allocator);
         const initial_buf = try @import("flow_core").Buffer.create(allocator);
-        
+
         // Content laden
         if (default_file_path) |path| {
             if (std.fs.cwd().readFileAlloc(allocator, path, 64 * 1024 * 1024)) |file_content| {
@@ -368,7 +386,7 @@ pub const UI = struct {
             self.allocator.free(entry.key_ptr.*); // Key freigeben
         }
         self.open_images.deinit();
-        
+
         // PDFs aufräumen
         var pdf_iter = self.open_pdfs.iterator();
         while (pdf_iter.next()) |entry| {
@@ -458,7 +476,11 @@ pub const UI = struct {
 
         const arena = clay.createArenaWithCapacityAndMemory(self.clay_memory);
 
-        _ = clay.initialize(arena, .{ .w = @floatFromInt(width), .h = @floatFromInt(height) }, .{});
+        _ = clay.initialize(
+            arena,
+            .{ .w = @floatFromInt(width), .h = @floatFromInt(height) },
+            .{ .error_handler_function = clayError },
+        );
 
         // Measure Text Function setzen
         clay.setMeasureTextFunction(*Self, self, clayMeasureText);
@@ -477,13 +499,13 @@ pub const UI = struct {
         // Kleiner Puffer gegen Rundung/Clipping. Vorher 1 px: jedes Highlight-Segment einer Zeile
         // wurde so 1 px breiter als gerendert, die Zeile driftete gegenüber Cursor und Overlays.
         const width = (renderer.ts_ptr.measureTextAtSize(text_str, @floatFromInt(config.font_size)) catch 0) + 0.25;
-        
+
         var height: f32 = @floatFromInt(config.font_size);
         if (renderer.ts_ptr.getMetrics()) |metrics| {
             const scale = @as(f32, @floatFromInt(config.font_size)) / metrics.point_size;
             height = metrics.line_height * scale;
         }
-        
+
         return .{
             .w = width,
             .h = height,
@@ -879,7 +901,7 @@ pub const UI = struct {
 
         const tab_bar = self.getActiveTabBar();
         const editor = self.getActiveEditor();
-        
+
         if (tab_bar.getActiveTab()) |tab| {
             if (tab.kind == .terminal) {
                 if (tab_bar.terminal_instances.get(tab.path)) |term| {
@@ -1235,16 +1257,57 @@ pub const UI = struct {
     /// wio-Taste auf die Kürzel-Tabelle abbilden; null = Taste hat dort keine Rolle.
     fn keyFromButton(btn: wio.Button) ?shortcuts.Key {
         return switch (btn) {
-            .a => .a, .b => .b, .c => .c, .d => .d, .e => .e, .f => .f, .g => .g, .h => .h, .j => .j,
-            .k => .k, .n => .n, .o => .o, .p => .p, .r => .r, .s => .s, .t => .t, .v => .v, .w => .w,
-            .x => .x, .y => .y, .z => .z,
-            .@"0" => .n0, .equals => .equals, .minus => .minus,
-            .@"1" => .n1, .@"2" => .n2, .@"3" => .n3, .@"4" => .n4, .@"5" => .n5,
-            .@"6" => .n6, .@"7" => .n7, .@"8" => .n8, .@"9" => .n9,
-            .tab => .tab, .grave => .grave, .backslash => .backslash, .slash => .slash, .dot => .dot, .f1 => .f1, .f2 => .f2, .f5 => .f5, .f12 => .f12,
-            .delete => .delete, .escape => .escape, .enter, .kp_enter => .enter,
-            .page_up => .page_up, .page_down => .page_down,
-            .left => .left, .right => .right, .up => .up, .down => .down,
+            .a => .a,
+            .b => .b,
+            .c => .c,
+            .d => .d,
+            .e => .e,
+            .f => .f,
+            .g => .g,
+            .h => .h,
+            .j => .j,
+            .k => .k,
+            .n => .n,
+            .o => .o,
+            .p => .p,
+            .r => .r,
+            .s => .s,
+            .t => .t,
+            .v => .v,
+            .w => .w,
+            .x => .x,
+            .y => .y,
+            .z => .z,
+            .@"0" => .n0,
+            .equals => .equals,
+            .minus => .minus,
+            .@"1" => .n1,
+            .@"2" => .n2,
+            .@"3" => .n3,
+            .@"4" => .n4,
+            .@"5" => .n5,
+            .@"6" => .n6,
+            .@"7" => .n7,
+            .@"8" => .n8,
+            .@"9" => .n9,
+            .tab => .tab,
+            .grave => .grave,
+            .backslash => .backslash,
+            .slash => .slash,
+            .dot => .dot,
+            .f1 => .f1,
+            .f2 => .f2,
+            .f5 => .f5,
+            .f12 => .f12,
+            .delete => .delete,
+            .escape => .escape,
+            .enter, .kp_enter => .enter,
+            .page_up => .page_up,
+            .page_down => .page_down,
+            .left => .left,
+            .right => .right,
+            .up => .up,
+            .down => .down,
             else => null,
         };
     }
@@ -2278,8 +2341,12 @@ pub const UI = struct {
                 clay.UI()(.{
                     .id = item_id,
                     .layout = .{
-                        .sizing = .{ .w = .fixed(380), .h = .fit },
+                        // Der Rahmen ist `.fit`, die Einträge `.grow`: Clay misst den
+                        // breitesten Eintrag und zieht alle anderen darauf. Damit
+                        // stehen die Kürzel rechtsbündig, ohne selbst zu messen.
+                        .sizing = .{ .w = .grow, .h = .fit },
                         .padding = .{ .left = 12, .right = 12, .top = 6, .bottom = 6 },
+                        .child_gap = 32,
                         .direction = .left_to_right,
                         .child_alignment = .{ .y = .center },
                     },
@@ -2417,7 +2484,6 @@ pub const UI = struct {
 
                 // Recursive Pane Rendering
                 self.renderPane(self.root_pane, t);
-
             });
         });
 
@@ -2459,7 +2525,7 @@ pub const UI = struct {
                         const other_data = other_child.data;
                         const other_allocator = other_child.allocator;
 
-                        // Focus redirection: If either the closed pane or the parent was active, 
+                        // Focus redirection: If either the closed pane or the parent was active,
                         // redirection focus to the parent (which now becomes the sibling).
                         if (self.active_pane == pane or self.active_pane == p or self.active_pane == other_child) {
                             self.active_pane = p;
@@ -2548,15 +2614,15 @@ pub const UI = struct {
                                 image_view_mod.ImageViewState.render(allocator, tab.path, t, &self.open_images);
                                 special_active = true;
                             } else if (tab.kind == .pdf) {
-                                 const maybe_handler = self.open_pdfs.get(tab.path);
-                                 const maybe_texture = self.open_images.get(tab.path);
-                                 if (maybe_handler) |handler_ptr| {
-                                     const handler: *PdfHandler = @ptrCast(@alignCast(handler_ptr));
-                                     if (PdfViewState.render(handler, maybe_texture, t, self.mouse_pressed_this_frame)) |delta| {
-                                         self.pending_pdf_page_change = .{ .path = tab.path, .delta = delta };
-                                     }
-                                 }
-                                 special_active = true;
+                                const maybe_handler = self.open_pdfs.get(tab.path);
+                                const maybe_texture = self.open_images.get(tab.path);
+                                if (maybe_handler) |handler_ptr| {
+                                    const handler: *PdfHandler = @ptrCast(@alignCast(handler_ptr));
+                                    if (PdfViewState.render(handler, maybe_texture, t, self.mouse_pressed_this_frame)) |delta| {
+                                        self.pending_pdf_page_change = .{ .path = tab.path, .delta = delta };
+                                    }
+                                }
+                                special_active = true;
                             } else if (tab.kind == .binary) {
                                 binary_view_mod.render(allocator, tab.path, t);
                                 special_active = true;
@@ -2666,7 +2732,8 @@ pub const UI = struct {
                         .layout = .{
                             .sizing = if (split.direction == .horizontal)
                                 .{ .w = .percent(split.ratio), .h = .grow }
-                                else .{ .w = .grow, .h = .percent(split.ratio) },
+                            else
+                                .{ .w = .grow, .h = .percent(split.ratio) },
                         },
                     })({
                         self.renderPane(split.children[0], t);
@@ -2678,7 +2745,8 @@ pub const UI = struct {
                         .layout = .{
                             .sizing = if (split.direction == .horizontal)
                                 .{ .w = .fixed(4), .h = .grow }
-                                else .{ .w = .grow, .h = .fixed(4) },
+                            else
+                                .{ .w = .grow, .h = .fixed(4) },
                         },
                         .background_color = if (split.is_resizing) t.primary else if (clay.pointerOver(splitter_id)) t.secondary else t.border,
                     })({});
@@ -2745,7 +2813,8 @@ pub const UI = struct {
                     const bw = leaf.code_editor.editor_bounds_width;
                     const bh = leaf.code_editor.editor_bounds_height;
                     if (self.mouse_x >= bx and self.mouse_x < bx + bw and
-                        self.mouse_y >= by and self.mouse_y < by + bh) {
+                        self.mouse_y >= by and self.mouse_y < by + bh)
+                    {
                         // Über Editor, aber Scrollbalken ausschließen
                         if (leaf.code_editor.isMouseOverScrollbar(self.mouse_x, self.mouse_y)) {
                             return false;
@@ -2835,11 +2904,7 @@ pub const UI = struct {
         var old_tab_bar = current_leaf.tab_bar;
 
         // 5. Transform original pane into a split node
-        pane.data = .{ .split = .{ 
-            .direction = direction, 
-            .ratio = 0.5, 
-            .children = .{ old_content_leaf, new_split_leaf } 
-        } };
+        pane.data = .{ .split = .{ .direction = direction, .ratio = 0.5, .children = .{ old_content_leaf, new_split_leaf } } };
 
         // 6. Now it's safe to deinit old resources
         old_editor.deinit();
@@ -2848,7 +2913,7 @@ pub const UI = struct {
 
         // 7. Update focus
         self.active_pane = new_split_leaf;
-        
+
         wio.cancelWait();
     }
 
@@ -2998,7 +3063,7 @@ pub const UI = struct {
         const tab = &pane.data.leaf.tab_bar.tabs.items[tab_index];
         var msg_buf: [256]u8 = undefined;
         const msg = std.fmt.bufPrint(&msg_buf, "Do you want to save changes to '{s}'?", .{tab.display_name}) catch "Save?";
-        
+
         const duped_msg = self.allocator.dupe(u8, msg) catch msg;
         const needs_free = (duped_msg.ptr != msg.ptr);
 
@@ -3082,7 +3147,7 @@ pub const UI = struct {
         const arena_alloc = self.frame_arena.allocator();
         const cursor = term_instance.getCursor();
         const total_rows = term_instance.*.totalRows();
-        const line_height: f32 = 24.0; 
+        const line_height: f32 = 24.0;
         const clip_id = clay.ElementId.IDI("terminal_content_clip", @truncate(@intFromPtr(pane)));
         const term_data = clay.getElementData(clip_id);
         if (term_data.found) {
@@ -3124,7 +3189,13 @@ pub const UI = struct {
                                 if (line_text[pos] == '\x1B' and pos + 1 < line_text.len and line_text[pos + 1] == '[') {
                                     if (pos > text_start) {
                                         const seg = line_text[text_start..pos];
-                                        if (current_bg) |bg| { clay.UI()(.{ .background_color = bg })({ clay.text(arena_alloc.dupe(u8, seg) catch " ", .{ .font_size = 16, .color = current_fg }); }); } else { clay.text(arena_alloc.dupe(u8, seg) catch " ", .{ .font_size = 16, .color = current_fg }); }
+                                        if (current_bg) |bg| {
+                                            clay.UI()(.{ .background_color = bg })({
+                                                clay.text(arena_alloc.dupe(u8, seg) catch " ", .{ .font_size = 16, .color = current_fg });
+                                            });
+                                        } else {
+                                            clay.text(arena_alloc.dupe(u8, seg) catch " ", .{ .font_size = 16, .color = current_fg });
+                                        }
                                     }
                                     pos += 2;
                                     var args: [16]u8 = undefined;
@@ -3133,22 +3204,100 @@ pub const UI = struct {
                                     var has_num = false;
                                     while (pos < line_text.len) {
                                         const c = line_text[pos];
-                                        if (c >= '0' and c <= '9') { num = num * 10 + (c - '0'); has_num = true; pos += 1; } else if (c == ';') { if (arg_count < args.len) { args[arg_count] = num; arg_count += 1; } num = 0; has_num = false; pos += 1; } else if (c == 'm') { if (has_num and arg_count < args.len) { args[arg_count] = num; arg_count += 1; } pos += 1; break; } else { pos += 1; break; }
+                                        if (c >= '0' and c <= '9') {
+                                            num = num * 10 + (c - '0');
+                                            has_num = true;
+                                            pos += 1;
+                                        } else if (c == ';') {
+                                            if (arg_count < args.len) {
+                                                args[arg_count] = num;
+                                                arg_count += 1;
+                                            }
+                                            num = 0;
+                                            has_num = false;
+                                            pos += 1;
+                                        } else if (c == 'm') {
+                                            if (has_num and arg_count < args.len) {
+                                                args[arg_count] = num;
+                                                arg_count += 1;
+                                            }
+                                            pos += 1;
+                                            break;
+                                        } else {
+                                            pos += 1;
+                                            break;
+                                        }
                                     }
                                     var arg_idx: usize = 0;
-                                    if (arg_count == 0) { current_fg = default_fg; current_bg = null; }
+                                    if (arg_count == 0) {
+                                        current_fg = default_fg;
+                                        current_bg = null;
+                                    }
                                     while (arg_idx < arg_count) {
                                         const code = args[arg_idx];
                                         arg_idx += 1;
                                         switch (code) {
-                                            0 => { current_fg = default_fg; current_bg = null; },
-                                            30...37 => { current_fg = switch (code - 30) { 0 => .{ 0, 0, 0, 255 }, 1 => .{ 205, 49, 49, 255 }, 2 => .{ 13, 188, 121, 255 }, 3 => .{ 229, 229, 16, 255 }, 4 => .{ 36, 114, 200, 255 }, 5 => .{ 188, 63, 188, 255 }, 6 => .{ 17, 168, 205, 255 }, 7 => .{ 229, 229, 229, 255 }, else => default_fg }; },
-                                            38 => { if (arg_idx + 1 < arg_count and args[arg_idx] == 5) { arg_idx += 2; } else if (arg_idx + 3 < arg_count and args[arg_idx] == 2) { current_fg = .{ @floatFromInt(args[arg_idx + 1]), @floatFromInt(args[arg_idx + 2]), @floatFromInt(args[arg_idx + 3]), 255 }; arg_idx += 4; } },
+                                            0 => {
+                                                current_fg = default_fg;
+                                                current_bg = null;
+                                            },
+                                            30...37 => {
+                                                current_fg = switch (code - 30) {
+                                                    0 => .{ 0, 0, 0, 255 },
+                                                    1 => .{ 205, 49, 49, 255 },
+                                                    2 => .{ 13, 188, 121, 255 },
+                                                    3 => .{ 229, 229, 16, 255 },
+                                                    4 => .{ 36, 114, 200, 255 },
+                                                    5 => .{ 188, 63, 188, 255 },
+                                                    6 => .{ 17, 168, 205, 255 },
+                                                    7 => .{ 229, 229, 229, 255 },
+                                                    else => default_fg,
+                                                };
+                                            },
+                                            38 => {
+                                                if (arg_idx + 1 < arg_count and args[arg_idx] == 5) {
+                                                    arg_idx += 2;
+                                                } else if (arg_idx + 3 < arg_count and args[arg_idx] == 2) {
+                                                    current_fg = .{ @floatFromInt(args[arg_idx + 1]), @floatFromInt(args[arg_idx + 2]), @floatFromInt(args[arg_idx + 3]), 255 };
+                                                    arg_idx += 4;
+                                                }
+                                            },
                                             39 => current_fg = default_fg,
-                                            40...47 => { current_bg = switch (code - 40) { 0 => .{ 0, 0, 0, 255 }, 1 => .{ 205, 49, 49, 255 }, 2 => .{ 13, 188, 121, 255 }, 3 => .{ 229, 229, 16, 255 }, 4 => .{ 36, 114, 200, 255 }, 5 => .{ 188, 63, 188, 255 }, 6 => .{ 17, 168, 205, 255 }, 7 => .{ 229, 229, 229, 255 }, else => null }; },
-                                            48 => { if (arg_idx + 1 < arg_count and args[arg_idx] == 5) { arg_idx += 2; } else if (arg_idx + 3 < arg_count and args[arg_idx] == 2) { current_bg = .{ @floatFromInt(args[arg_idx + 1]), @floatFromInt(args[arg_idx + 2]), @floatFromInt(args[arg_idx + 3]), 255 }; arg_idx += 4; } },
+                                            40...47 => {
+                                                current_bg = switch (code - 40) {
+                                                    0 => .{ 0, 0, 0, 255 },
+                                                    1 => .{ 205, 49, 49, 255 },
+                                                    2 => .{ 13, 188, 121, 255 },
+                                                    3 => .{ 229, 229, 16, 255 },
+                                                    4 => .{ 36, 114, 200, 255 },
+                                                    5 => .{ 188, 63, 188, 255 },
+                                                    6 => .{ 17, 168, 205, 255 },
+                                                    7 => .{ 229, 229, 229, 255 },
+                                                    else => null,
+                                                };
+                                            },
+                                            48 => {
+                                                if (arg_idx + 1 < arg_count and args[arg_idx] == 5) {
+                                                    arg_idx += 2;
+                                                } else if (arg_idx + 3 < arg_count and args[arg_idx] == 2) {
+                                                    current_bg = .{ @floatFromInt(args[arg_idx + 1]), @floatFromInt(args[arg_idx + 2]), @floatFromInt(args[arg_idx + 3]), 255 };
+                                                    arg_idx += 4;
+                                                }
+                                            },
                                             49 => current_bg = null,
-                                            90...97 => { current_fg = switch (code - 90) { 0 => .{ 102, 102, 102, 255 }, 1 => .{ 241, 76, 76, 255 }, 2 => .{ 35, 209, 139, 255 }, 3 => .{ 245, 245, 67, 255 }, 4 => .{ 59, 142, 234, 255 }, 5 => .{ 214, 112, 214, 255 }, 6 => .{ 41, 184, 219, 255 }, 7 => .{ 255, 255, 255, 255 }, else => default_fg }; },
+                                            90...97 => {
+                                                current_fg = switch (code - 90) {
+                                                    0 => .{ 102, 102, 102, 255 },
+                                                    1 => .{ 241, 76, 76, 255 },
+                                                    2 => .{ 35, 209, 139, 255 },
+                                                    3 => .{ 245, 245, 67, 255 },
+                                                    4 => .{ 59, 142, 234, 255 },
+                                                    5 => .{ 214, 112, 214, 255 },
+                                                    6 => .{ 41, 184, 219, 255 },
+                                                    7 => .{ 255, 255, 255, 255 },
+                                                    else => default_fg,
+                                                };
+                                            },
                                             else => {},
                                         }
                                     }
@@ -3157,7 +3306,13 @@ pub const UI = struct {
                             }
                             if (pos > text_start) {
                                 const seg = line_text[text_start..pos];
-                                if (current_bg) |bg| { clay.UI()(.{ .background_color = bg })({ clay.text(arena_alloc.dupe(u8, seg) catch " ", .{ .font_size = 16, .color = current_fg }); }); } else { clay.text(arena_alloc.dupe(u8, seg) catch " ", .{ .font_size = 16, .color = current_fg }); }
+                                if (current_bg) |bg| {
+                                    clay.UI()(.{ .background_color = bg })({
+                                        clay.text(arena_alloc.dupe(u8, seg) catch " ", .{ .font_size = 16, .color = current_fg });
+                                    });
+                                } else {
+                                    clay.text(arena_alloc.dupe(u8, seg) catch " ", .{ .font_size = 16, .color = current_fg });
+                                }
                             }
                             if (i == cursor_abs_row) {
                                 const char_w = measureTextWidth("W", 16.0);
@@ -3169,7 +3324,9 @@ pub const UI = struct {
                                 var selection_start_col: ?u16 = null;
                                 const char_w = measureTextWidth("W", 16.0);
                                 while (col < term_instance.cols) {
-                                    if (term_instance.isSelected(col, i)) { if (selection_start_col == null) selection_start_col = col; } else {
+                                    if (term_instance.isSelected(col, i)) {
+                                        if (selection_start_col == null) selection_start_col = col;
+                                    } else {
                                         if (selection_start_col) |start| {
                                             const width = @as(f32, @floatFromInt(col - start)) * char_w;
                                             clay.UI()(.{ .id = clay.ElementId.IDI("term_sel", @truncate(i * 1000 + start ^ @intFromPtr(pane))), .floating = .{ .attach_to = .to_parent, .attach_points = .{ .element = .left_top, .parent = .left_top }, .offset = .{ .x = @as(f32, @floatFromInt(start)) * char_w, .y = 0 } }, .layout = .{ .sizing = .{ .w = .fixed(width), .h = .fixed(line_height) } }, .background_color = .{ 100, 100, 255, 60 } })({});
@@ -3190,7 +3347,10 @@ pub const UI = struct {
             if (total_rows > visible_rows) {
                 const track_id = clay.ElementId.IDI("terminal_scrollbar_track", @truncate(@intFromPtr(pane)));
                 const track_data = clay.getElementData(track_id);
-                if (track_data.found) { term_instance.scrollbar_track_x = track_data.bounding_box.x; term_instance.scrollbar_track_y = track_data.bounding_box.y; }
+                if (track_data.found) {
+                    term_instance.scrollbar_track_x = track_data.bounding_box.x;
+                    term_instance.scrollbar_track_y = track_data.bounding_box.y;
+                }
                 const track_height = term_instance.height;
                 const thumb_ratio: f32 = @as(f32, @floatFromInt(visible_rows)) / @as(f32, @floatFromInt(total_rows));
                 const thumb_height = @max(20.0, track_height * thumb_ratio);

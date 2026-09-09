@@ -221,11 +221,23 @@ fn runGitCwd(alloc: std.mem.Allocator, cwd: []const u8, args: []const []const u8
     switch (result.term) {
         .Exited => |code| if (code != 0) {
             alloc.free(result.stdout);
-            log.err("git exited {d}", .{code});
+            // stderr mitloggen: „git exited 128" allein sagt nicht, ob der Ordner
+            // kein Repo ist, die Datei fehlt oder git etwas anderes bemängelt.
+            log.err("git {s} in '{s}': exit {d}: {s}", .{
+                args[0],
+                cwd,
+                code,
+                std.mem.trim(u8, result.stderr, " \t\r\n"),
+            });
             return error.GitFailed;
         },
         else => {
             alloc.free(result.stdout);
+            log.err("git {s} in '{s}' abgebrochen: {s}", .{
+                args[0],
+                cwd,
+                std.mem.trim(u8, result.stderr, " \t\r\n"),
+            });
             return error.GitFailed;
         },
     }
@@ -233,7 +245,48 @@ fn runGitCwd(alloc: std.mem.Allocator, cwd: []const u8, args: []const []const u8
     return result.stdout;
 }
 
+/// Liegt `path` in einem Git-Repository? Sucht `.git` aufwärts bis zur Wurzel.
+/// `.git` kann Ordner (normales Repo) oder Datei (Worktree, Submodul) sein.
+///
+/// Ohne diese Prüfung reihte jeder Ordnerwechsel git-Tasks ein, die in Ordnern
+/// wie `~/projects` nur mit Exit 128 zurückkamen.
+pub fn isInsideRepo(path: []const u8) bool {
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir: []const u8 = std.fs.cwd().realpath(path, &buf) catch return false;
+
+    while (true) {
+        var candidate_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const candidate = std.fmt.bufPrint(&candidate_buf, "{s}/.git", .{dir}) catch return false;
+        if (std.fs.cwd().statFile(candidate)) |_| {
+            return true;
+        } else |_| {}
+
+        const parent = std.fs.path.dirname(dir) orelse return false;
+        if (parent.len == dir.len) return false;
+        dir = parent;
+    }
+}
+
 // ─── Tests ────────────────────────────────────────────────────────────────────
+
+test "isInsideRepo erkennt das eigene Repo und Unterordner" {
+    const alloc = std.testing.allocator;
+    const cwd = try std.process.getCwdAlloc(alloc);
+    defer alloc.free(cwd);
+    try std.testing.expect(isInsideRepo(cwd));
+
+    const sub = try std.fs.path.join(alloc, &.{ cwd, "src", "git" });
+    defer alloc.free(sub);
+    try std.testing.expect(isInsideRepo(sub));
+}
+
+test "isInsideRepo lehnt Ordner ohne Repo ab" {
+    // Nicht `std.testing.tmpDir` nehmen: der legt unter `.zig-cache/tmp` an und
+    // liegt damit selbst im Repo.
+    try std.testing.expect(!isInsideRepo("/tmp"));
+    try std.testing.expect(!isInsideRepo("/"));
+    try std.testing.expect(!isInsideRepo("/gibt/es/nicht"));
+}
 
 test "git branch returns non-empty string" {
     const alloc = std.testing.allocator;

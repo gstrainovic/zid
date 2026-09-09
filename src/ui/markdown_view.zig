@@ -27,6 +27,12 @@ pub const MarkdownView = struct {
     /// Viewports, wo Clay dem Container die volle Inhaltsbreite meldet.
     wrap_width_hint: ?f32 = null,
 
+    /// Gemessene Höhe je Block auf oberster Ebene, für die Virtualisierung.
+    block_heights: std.ArrayListUnmanaged(f32) = .empty,
+    /// Blockbereich, der im letzten Frame gezeichnet wurde (nur der ist messbar).
+    measured_from: usize = 0,
+    measured_to: usize = 0,
+
     /// Marp-Deck, falls `text` eines ist (`marp: true` im Front-Matter). Dann
     /// zeigt die Vorschau Folien statt eines durchgehenden Dokuments.
     deck: ?marp.Deck = null,
@@ -107,6 +113,7 @@ pub const MarkdownView = struct {
     }
 
     pub fn deinit(self: *Self) void {
+        self.block_heights.deinit(self.allocator);
         self.dropSlideDocument();
         if (self.deck) |*d| {
             d.deinit();
@@ -359,6 +366,173 @@ pub const MarkdownView = struct {
         self.renderBlock(doc, arena, effective_theme, ui_ptr);
     }
 
+    /// Abstand zwischen zwei Blöcken auf oberster Ebene (`child_gap` im Dokument).
+    const block_gap: f32 = 16;
+
+    /// Geschätzte Höhe eines Blocks, der noch nie gezeichnet wurde. Aus Blockart
+    /// und Textlänge, damit Bildlaufleiste und Scrollweg schon vor dem ersten
+    /// Besuch ungefähr stimmen. Eine feste Zahl lag bei Tabellen und Codeblöcken
+    /// weit daneben.
+    fn estimateBlockHeight(self: *const Self, block: *const Block) f32 {
+        const line_h = @as(f32, @floatFromInt(self.font_size)) * 1.5;
+        const width = self.wrap_width_hint orelse 800;
+        const char_w = @as(f32, @floatFromInt(self.font_size)) * 0.6;
+        const per_line: f32 = @max(20, width / @max(1, char_w));
+
+        const chars: f32 = @floatFromInt(countText(block));
+        const lines: f32 = @max(1, @ceil(chars / per_line));
+
+        return switch (block.*) {
+            .Leaf => |*leaf| switch (leaf.content) {
+                // Überschriften sind größer, aber selten umgebrochen.
+                .Heading => |h| line_h * (switch (h.level) {
+                    1 => @as(f32, 2.0),
+                    2 => 1.5,
+                    3 => 1.2,
+                    else => 1.1,
+                }),
+                // Codeblöcke brechen nicht um: eine Zeile je Zeilenumbruch.
+                .Code => |c| line_h * @as(f32, @floatFromInt(1 + std.mem.count(u8, c.text orelse "", "\n"))),
+                .Break => line_h * 0.5,
+                else => line_h * lines,
+            },
+            // Container: Kinder aufsummieren, plus Abstand dazwischen.
+            .Container => |*c| blk: {
+                var sum: f32 = 0;
+                for (c.children.items) |*child| sum += self.estimateBlockHeight(child) + block_gap * 0.5;
+                break :blk @max(line_h, sum);
+            },
+        };
+    }
+
+    /// Ungefähre Zeichenzahl eines Blocks, für die Höhenschätzung.
+    fn countText(block: *const Block) usize {
+        return switch (block.*) {
+            .Leaf => |*leaf| blk: {
+                var n: usize = 0;
+                for (leaf.inlines.items) |*item| n += switch (item.content) {
+                    .autolink => |a| a.url.len,
+                    .codespan => |c| c.text.len,
+                    .image => |i| blk_img: {
+                        var m: usize = 0;
+                        for (i.alt.items) |t| m += t.text.len;
+                        break :blk_img m;
+                    },
+                    .linebreak => 0,
+                    .link => |l| blk_link: {
+                        var m: usize = 0;
+                        for (l.text.items) |t| m += t.text.len;
+                        break :blk_link m;
+                    },
+                    .text => |t| t.text.len,
+                };
+                break :blk n;
+            },
+            .Container => |*c| blk: {
+                var n: usize = 0;
+                for (c.children.items) |*child| n += countText(child);
+                break :blk n;
+            },
+        };
+    }
+
+
+    /// Wie `renderDocument`, legt aber nur die sichtbaren Blöcke als
+    /// Clay-Elemente an. Ohne das baut die Vorschau ein ganzes Dokument pro
+    /// Frame auf und sprengt bei großen Dateien Clays Elementgrenze.
+    ///
+    /// Höhen kommen aus dem letzten Frame (`block_heights`); was noch nie
+    /// sichtbar war, zählt mit einer Schätzung. Ober- und unterhalb steht je
+    /// ein Abstandhalter, damit Gesamthöhe und Bildlauf stimmen.
+    fn renderDocumentVirtualized(self: *Self, arena: std.mem.Allocator, theme: Theme, ui_ptr: *ui_mod.UI) void {
+        const doc = self.cachedDocument() orelse return;
+        const children = switch (doc.*) {
+            .Container => |*c| c.children.items,
+            else => {
+                self.renderDocument(arena, theme, ui_ptr);
+                return;
+            },
+        };
+        if (children.len == 0) return;
+
+        self.syncBlockHeights(children);
+
+        var effective_theme = theme;
+        if (self.text_color) |c| effective_theme.text = c;
+        self.run_counter = 0;
+
+        // Sichtbaren Bereich bestimmen. Ein Bildschirm Vorlauf nach oben und
+        // unten, damit beim Scrollen nichts nachklappt.
+        const margin = @max(self.viewport_height, 200);
+        const top = self.scroll_offset_y - margin;
+        const bottom = self.scroll_offset_y + self.viewport_height + margin;
+
+        var first: usize = children.len;
+        var last: usize = 0;
+        var before: f32 = 0;
+        var after: f32 = 0;
+        var y: f32 = 0;
+        for (self.block_heights.items, 0..) |h, i| {
+            const block_bottom = y + h;
+            if (block_bottom >= top and y <= bottom) {
+                first = @min(first, i);
+                last = @max(last, i);
+            } else if (block_bottom < top) {
+                before += h + block_gap;
+            } else {
+                after += h + block_gap;
+            }
+            y = block_bottom + block_gap;
+        }
+        if (first > last) { // nichts im Sichtbereich: alles als Abstand
+            self.spacer("md_v_top", before + after);
+            return;
+        }
+
+        self.spacer("md_v_top", before);
+        for (children[first .. last + 1], first..) |*child, i| {
+            clay.UI()(.{
+                .id = clay.ElementId.IDI("md_block", @intCast(i)),
+                .layout = .{ .sizing = .{ .w = .grow, .h = .fit } },
+            })({
+                self.renderBlock(child, arena, effective_theme, ui_ptr);
+            });
+        }
+        self.spacer("md_v_bottom", after);
+
+        self.measured_from = first;
+        self.measured_to = last;
+    }
+
+    fn spacer(self: *Self, id: []const u8, height: f32) void {
+        _ = self;
+        if (height <= 0) return;
+        clay.UI()(.{
+            .id = clay.ElementId.ID(id),
+            .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(height) } },
+        })({});
+    }
+
+    /// Höhenliste auf die Blockzahl bringen und die im letzten Frame
+    /// gezeichneten Blöcke nachmessen.
+    fn syncBlockHeights(self: *Self, children: []Block) void {
+        const count = children.len;
+        while (self.block_heights.items.len < count) {
+            const i = self.block_heights.items.len;
+            self.block_heights.append(self.allocator, self.estimateBlockHeight(&children[i])) catch return;
+        }
+        if (self.block_heights.items.len > count) {
+            self.block_heights.shrinkRetainingCapacity(count);
+        }
+        var i = self.measured_from;
+        while (i <= self.measured_to and i < count) : (i += 1) {
+            const data = clay.getElementData(clay.ElementId.IDI("md_block", @intCast(i)));
+            if (data.found and data.bounding_box.height > 0) {
+                self.block_heights.items[i] = data.bounding_box.height;
+            }
+        }
+    }
+
     /// Folienvorschau: eine Folie im 16:9-Rahmen plus Blätterleiste. Der Rahmen
     /// hat die Seitenverhältnisse des Decks, damit man sieht, was ins PDF passt.
     fn renderDeck(self: *Self, arena: std.mem.Allocator, theme: Theme, ui_ptr: *ui_mod.UI) void {
@@ -567,7 +741,9 @@ pub const MarkdownView = struct {
                         .child_gap = 16,
                     },
                 })({
-                    self.renderDocument(arena, theme, ui_ptr);
+                    // Nur hier virtualisiert: der Chat rendert dasselbe Dokument
+                    // ohne eigenen Viewport und braucht alle Blöcke.
+                    self.renderDocumentVirtualized(arena, theme, ui_ptr);
                 });
             });
 

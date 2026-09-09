@@ -128,13 +128,21 @@ def item3_tabs():
     st = ui_state()
     n = st["tab_count"]
     check(n == n0 + 2, f"Zweite Datei geöffnet, {n} Tabs")
+    # Ctrl+Tab geht nach "zuletzt benutzt", nicht zyklisch durch die Leiste:
+    # ein einzelner Druck springt zwischen den zwei jüngsten Tabs hin und her.
     active = st["active_tab"]
     key("tab", ctrl=True)
-    st = ui_state()
-    check(st["active_tab"] == (active + 1) % n, f"Ctrl+Tab wechselt zyklisch ({active} → {st['active_tab']})")
+    previous = ui_state()["active_tab"]
+    check(previous != active, f"Ctrl+Tab verlässt den aktiven Tab ({active} → {previous})")
+    key("tab", ctrl=True)
+    check(ui_state()["active_tab"] == active,
+          f"noch ein Ctrl+Tab springt zurück ({previous} → {active})")
+    # Ctrl+Shift+Tab läuft die MRU-Liste andersherum. Vom jüngsten Eintrag aus
+    # landet man deshalb beim ältesten, nicht beim zweitjüngsten.
     key("tab", ctrl=True, shift=True)
     st = ui_state()
-    check(st["active_tab"] == active, "Ctrl+Shift+Tab wechselt zurück")
+    check(st["active_tab"] not in (active, previous),
+          f"Ctrl+Shift+Tab springt zum ältesten Tab ({active} → {st['active_tab']})")
 
     key("w", ctrl=True)
     settle(5)
@@ -197,6 +205,17 @@ def item5_menus():
     check(ui_state()["open_menu"] == "View", "Hover über View wechselt bei offenem Menü")
     key("escape")
     check(ui_state()["open_menu"] is None, "Escape schließt das Menü")
+
+    # Breite kommt vom breitesten Eintrag. Mit der früheren festen Breite (380)
+    # stieß "Toggle Line Comment" an sein Kürzel "Ctrl+/".
+    widths = {}
+    for name, title in (("File", "menu_file"), ("Edit", "menu_edit"), ("View", "menu_view")):
+        click_center(title); settle(5)
+        widths[name] = bounds("menu_dropdown")["w"]
+        key("escape"); settle(3)
+    for name, w in widths.items():
+        check(w > 380, f"{name}-Menü ist breiter als das alte feste Maß ({w:.0f} > 380)")
+    check(widths["Edit"] > widths["View"], "Edit braucht mehr Platz als View und bekommt ihn auch")
 
     # "New File.txt" ist aus Punkt 3 offen und geändert: New File wechselt dorthin,
     # Close Tab fragt nach, "Don't Save" schließt.
