@@ -63,7 +63,24 @@ pub fn hits(box: Box, px: f32, py: f32) bool {
         py >= box.y and py < box.y + box.h;
 }
 
+/// Aufhellung für die überfahrene Schaltfläche. Clay-Farben sind Fließkomma
+/// von 0 bis 255: Alpha bleibt, die Kanäle sättigen bei 255.
+pub fn brighten(color: [4]f32, amount: f32) [4]f32 {
+    return .{
+        @min(255, color[0] + amount),
+        @min(255, color[1] + amount),
+        @min(255, color[2] + amount),
+        color[3],
+    };
+}
+
 const testing = std.testing;
+
+test "Hover hellt auf, sättigt und lässt Alpha in Ruhe" {
+    try testing.expectEqual([4]f32{ 40, 60, 80, 200 }, brighten(.{ 10, 30, 50, 200 }, 30));
+    try testing.expectEqual([4]f32{ 255, 255, 255, 255 }, brighten(.{ 250, 240, 255, 255 }, 30));
+    try testing.expectEqual([4]f32{ 10, 30, 50, 200 }, brighten(.{ 10, 30, 50, 200 }, 0));
+}
 
 test "Trefferprüfung der Schaltflächen" {
     const box: Box = .{ .x = 100, .y = 200, .w = 60, .h = 40 };

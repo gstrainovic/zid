@@ -476,8 +476,9 @@ MuPDFs Story-Engine. Folienvorschau in `MarkdownView` (`deck`-Feld), Command
   angewendet wird es in der Hauptschleife, die auch die Textur neu rendert.
 - Bild ab/auf und Pfeil links/rechts blättern; hoch und runter bleiben der Navigation
   zwischen Panes und im Explorer. Mausrad: negative Zeilen heißen nach unten, also vorwärts.
-- `clay.pointerOver` meldet in dieser Ansicht nichts, deshalb prüfen die Schaltflächen den
-  Klick selbst gegen die Bounding-Box aus dem letzten Layout (`pdf_nav.hits`).
+- `clay.pointerOver` meldet in dieser Ansicht nichts, deshalb hat die Leiste eine eigene
+  Schaltfläche statt `components.Button`: Hover und Klick rechnen gegen die Bounding-Box aus
+  dem letzten Layout (`pdf_nav.hits`, Aufhellung über `pdf_nav.brighten`).
 - Die Beschriftung liegt in einem Puffer der UI (`pdf_label_buf`), nicht in der Frame-Arena:
   `beginLayout` setzt die Arena zurück, Clay liest den Text erst beim Zeichnen.
 - Zustand für E2E: `pdf_state` liest Felder im `E2EContext`, die der Main-Thread pro Frame
