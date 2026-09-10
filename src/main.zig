@@ -5,6 +5,7 @@ const builtin = @import("builtin");
 const file_types = @import("ui/file_types.zig");
 const wio = @import("wio");
 const platform = @import("platform/mod.zig");
+const display_check = @import("platform/display_check.zig");
 const rendering = @import("rendering/mod.zig");
 const text = @import("text/mod.zig");
 const ui = @import("ui/mod.zig");
@@ -59,6 +60,21 @@ fn logFn(
 }
 
 const log = std.log.scoped(.main);
+
+/// Fensterstart fehlgeschlagen: Ursache aus der Umgebung ableiten und in einem
+/// verständlichen Satz nach stderr schreiben.
+fn reportDisplayFailure(err: anyerror) void {
+    const reason = display_check.classify(.{
+        .session_type = std.posix.getenv("XDG_SESSION_TYPE"),
+        .wayland_display = std.posix.getenv("WAYLAND_DISPLAY"),
+        .display = std.posix.getenv("DISPLAY"),
+    });
+    var buf: [256]u8 = undefined;
+    var stderr = std.fs.File.stderr().writer(&buf);
+    const w = &stderr.interface;
+    w.print("{s}\n(details: {s})\n", .{ display_check.message(reason), @errorName(err) }) catch {};
+    w.flush() catch {};
+}
 
 var debug_log_state: enum { unknown, off, on } = .unknown;
 
@@ -201,11 +217,16 @@ pub fn main() !void {
 
     // 2. Platform initialisieren (wio - NACH wgpu, vermeidet EGL-Konflikt)
     // Headless: kein Platform/Window/Surface nötig
-    var plat: platform.Platform = if (headless_mode) undefined else try platform.Platform.init(allocator, .{
+    var plat: platform.Platform = if (headless_mode) undefined else platform.Platform.init(allocator, .{
         .title = "zid",
         .width = 1200,
         .height = 800,
-    });
+    }) catch |err| {
+        // Ohne Compositor hilft ein Zig-Stacktrace niemandem: erklären, warum
+        // kein Fenster entsteht, und still beenden.
+        reportDisplayFailure(err);
+        std.process.exit(1);
+    };
 
     // Headless: use default viewport dimensions
     const viewport_width: u32 = if (headless_mode) 1200 else plat.getSize().width;
