@@ -10,6 +10,7 @@ const std = @import("std");
 pub const Key = enum {
     a, b, c, d, e, f, g, h, j, k, n, o, p, r, s, t, v, w, x, y, z,
     n0, n1, n2, n3, n4, n5, n6, n7, n8, n9, equals, minus,
+    kp_0, kp_plus, kp_minus,
     tab, grave, backslash, slash, dot, f1, f2, f5, f12, delete, escape, enter, page_up, page_down, left, right, up, down,
 };
 
@@ -202,6 +203,11 @@ pub const bindings = [_]Binding{
     .{ .command = .zoom_in, .key = .equals, .mods = .{ .ctrl = true } },
     .{ .command = .zoom_out, .key = .minus, .mods = .{ .ctrl = true } },
     .{ .command = .zoom_reset, .key = .n0, .mods = .{ .ctrl = true } },
+    // Zweitbelegungen: Ziffernblock und Ctrl+Shift+= (auf US-Layout liegt "+" auf Shift+=).
+    .{ .command = .zoom_in, .key = .equals, .mods = .{ .ctrl = true, .shift = true } },
+    .{ .command = .zoom_in, .key = .kp_plus, .mods = .{ .ctrl = true } },
+    .{ .command = .zoom_out, .key = .kp_minus, .mods = .{ .ctrl = true } },
+    .{ .command = .zoom_reset, .key = .kp_0, .mods = .{ .ctrl = true } },
     .{ .command = .show_shortcuts, .key = .f1 },
 };
 
@@ -361,6 +367,7 @@ fn keyName(key: Key) []const u8 {
         .k => "K", .n => "N", .o => "O", .p => "P", .r => "R", .s => "S", .t => "T", .v => "V", .w => "W",
         .x => "X", .y => "Y", .z => "Z",
         .n0 => "0", .equals => "=", .minus => "-", .n1 => "1", .n2 => "2", .n3 => "3", .n4 => "4", .n5 => "5", .n6 => "6", .n7 => "7", .n8 => "8", .n9 => "9",
+        .kp_0 => "Num0", .kp_plus => "Num+", .kp_minus => "Num-",
         .tab => "Tab", .grave => "`", .backslash => "\\", .slash => "/", .dot => ".", .f1 => "F1", .f2 => "F2", .f5 => "F5", .f12 => "F12", .delete => "Del",
         .escape => "Esc", .enter => "Enter", .page_up => "PgUp", .page_down => "PgDn",
         .left => "←", .right => "→", .up => "↑", .down => "↓",
@@ -370,6 +377,18 @@ fn keyName(key: Key) []const u8 {
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 const testing = std.testing;
+
+test "lookup: Zoom auch über Ziffernblock und Shift+= (US-Layout)" {
+    try testing.expectEqual(Command.zoom_in, lookup(.kp_plus, .{ .ctrl = true }, .global).?);
+    try testing.expectEqual(Command.zoom_out, lookup(.kp_minus, .{ .ctrl = true }, .global).?);
+    try testing.expectEqual(Command.zoom_reset, lookup(.kp_0, .{ .ctrl = true }, .global).?);
+    try testing.expectEqual(Command.zoom_in, lookup(.equals, .{ .ctrl = true, .shift = true }, .global).?);
+}
+
+test "shortcutText: Zoom zeigt weiterhin die Haupttastatur-Variante" {
+    try testing.expectEqualStrings("Ctrl+=", shortcutText(.zoom_in));
+    try testing.expectEqualStrings("Ctrl+-", shortcutText(.zoom_out));
+}
 
 test "lookup: Ctrl+O global ist open_folder, ohne Ctrl nichts" {
     try testing.expectEqual(Command.open_folder, lookup(.o, .{ .ctrl = true }, .global).?);
