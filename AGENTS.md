@@ -469,6 +469,21 @@ MuPDFs Story-Engine. Folienvorschau in `MarkdownView` (`deck`-Feld), Command
 `md_export_pdf`. E2E: `python3 scripts/e2e_marp_pdf.py`, Fixture
 `test_data/marp_test.md`.
 
+## PDF-Vorschau: Blättern
+
+- Blätter-Logik als reines Modul `src/ui/pdf_nav.zig` (Tasten, Mausrad, Sättigung an den
+  Rändern, Beschriftung). Die Ansicht `src/ui/pdf_view.zig` liefert nur ein Seiten-Delta,
+  angewendet wird es in der Hauptschleife, die auch die Textur neu rendert.
+- Bild ab/auf und Pfeil links/rechts blättern; hoch und runter bleiben der Navigation
+  zwischen Panes und im Explorer. Mausrad: negative Zeilen heißen nach unten, also vorwärts.
+- `clay.pointerOver` meldet in dieser Ansicht nichts, deshalb prüfen die Schaltflächen den
+  Klick selbst gegen die Bounding-Box aus dem letzten Layout (`pdf_nav.hits`).
+- Die Beschriftung liegt in einem Puffer der UI (`pdf_label_buf`), nicht in der Frame-Arena:
+  `beginLayout` setzt die Arena zurück, Clay liest den Text erst beim Zeichnen.
+- Zustand für E2E: `pdf_state` liest Felder im `E2EContext`, die der Main-Thread pro Frame
+  setzt. Über Tabs und `open_pdfs` im Server-Thread zu laufen lieferte springende Werte.
+- E2E: `python3 scripts/e2e_pdf_pager.py`, Fixture `test_data/marp_test.pdf`.
+
 ## LSP (zls): Sprung zur Definition
 
 - **Aufbau:** `src/lsp/lsp_proto.zig` (reine Logik, unit-getestet: `Content-Length`-Rahmen,

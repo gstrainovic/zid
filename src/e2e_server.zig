@@ -60,6 +60,10 @@ pub const E2EContext = struct {
     screenshot_requested: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
     screenshot_done: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
     screenshot_failed: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+    /// Zustand der PDF-Vorschau, vom Main-Thread pro Frame gesetzt: der
+    /// Server-Thread darf weder Tabs noch die Handler-Map anfassen.
+    pdf_page: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
+    pdf_pages: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
 
     const Self = @This();
 
@@ -839,14 +843,14 @@ fn slideState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     return buf.written();
 }
 
-/// pdf_state: Seite und Seitenzahl des aktiven PDF-Tabs. Liest nur die vom
-/// Main-Thread beim Rendern gespiegelten Felder, nie Tabs oder Handler-Map.
+/// pdf_state: Seite und Seitenzahl der PDF-Vorschau, aus den vom Main-Thread
+/// gesetzten Feldern.
 fn pdfState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     var buf = std.Io.Writer.Allocating.init(dc.arena());
-    const pages = ctx.ui_system.pdf_view_pages;
+    const pages = ctx.pdf_pages.load(.seq_cst);
     try buf.writer.print(
         \\{{"pdf": {}, "page": {d}, "pages": {d}}}
-    , .{ pages > 0, ctx.ui_system.pdf_view_page, pages });
+    , .{ pages > 0, ctx.pdf_page.load(.seq_cst), pages });
     return buf.written();
 }
 

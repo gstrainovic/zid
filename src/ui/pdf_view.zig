@@ -15,6 +15,8 @@ pub const PdfViewState = struct {
         maybe_texture: ?*anyopaque,
         theme: Theme,
         mouse_pressed: bool,
+        mouse_x: f32,
+        mouse_y: f32,
     ) ?i16 {
         var delta: ?i16 = null;
 
@@ -63,22 +65,30 @@ pub const PdfViewState = struct {
                 const back = pdf_nav.canGoBack(handler.current_page);
                 const forward = pdf_nav.canGoForward(handler.current_page, handler.total_pages);
 
-                if (components.Button("pdf_prev_page", "‹", pagerTheme(theme, back), mouse_pressed) and back) {
-                    delta = -1;
-                }
+                _ = components.Button("pdf_prev_page", "‹", pagerTheme(theme, back), false);
+                if (back and clicked("pdf_prev_page", mouse_pressed, mouse_x, mouse_y)) delta = -1;
 
                 clay.text(pdf_nav.pageLabel(label_buf, handler.current_page, handler.total_pages), .{
                     .font_size = 18,
                     .color = theme.text,
                 });
 
-                if (components.Button("pdf_next_page", "›", pagerTheme(theme, forward), mouse_pressed) and forward) {
-                    delta = 1;
-                }
+                _ = components.Button("pdf_next_page", "›", pagerTheme(theme, forward), false);
+                if (forward and clicked("pdf_next_page", mouse_pressed, mouse_x, mouse_y)) delta = 1;
             });
         });
 
         return delta;
+    }
+
+    /// Klick auf eine Schaltfläche: Clays `pointerOver` meldet in dieser Ansicht
+    /// nichts, deshalb selbst gegen die Bounding-Box des letzten Layouts prüfen.
+    fn clicked(id: []const u8, mouse_pressed: bool, mouse_x: f32, mouse_y: f32) bool {
+        if (!mouse_pressed) return false;
+        const data = clay.getElementData(clay.ElementId.ID(id));
+        if (!data.found) return false;
+        const bb = data.bounding_box;
+        return pdf_nav.hits(.{ .x = bb.x, .y = bb.y, .w = bb.width, .h = bb.height }, mouse_x, mouse_y);
     }
 
     /// Gesperrte Richtung: gedämpfte Farben statt eigener Button-Variante.
