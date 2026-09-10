@@ -12,6 +12,7 @@ const AnimationManager = animation.AnimationManager;
 const PdfHandler = @import("../rendering/pdf_handler.zig").PdfHandler;
 const marp_pdf = @import("../rendering/marp_pdf.zig");
 const PdfViewState = @import("pdf_view.zig").PdfViewState;
+const pdf_nav = @import("pdf_nav.zig");
 const editor_mod = @import("../editor/mod.zig");
 const lsp_client = @import("lsp_client");
 const tab_mru = @import("tab_mru.zig");
@@ -111,6 +112,13 @@ pub const UI = struct {
     current_directory: ?[]const u8,
     pending_tab_switch: ?[]const u8,
     pending_pdf_page_change: ?PdfPageChange,
+    /// Vom Main-Thread beim Rendern gesetzt, damit E2E den Zustand lesen kann,
+    /// ohne im Server-Thread über Tabs und Handler-Map zu laufen.
+    /// Beschriftung der Blätter-Leiste: gehört der UI, weil Clay den Text erst
+    /// beim Zeichnen liest und die Frame-Arena bis dahin zurückgesetzt ist.
+    pdf_label_buf: [32]u8 = undefined,
+    pdf_view_page: u16 = 0,
+    pdf_view_pages: u16 = 0,
     pending_split: ?pane_mod.PaneDirection,
 
     active_dialog: ?ActiveDialog,
@@ -312,6 +320,9 @@ pub const UI = struct {
             .current_directory = null,
             .pending_tab_switch = null,
             .pending_pdf_page_change = null,
+            .pdf_label_buf = undefined,
+            .pdf_view_page = 0,
+            .pdf_view_pages = 0,
             .pending_split = null,
             .active_dialog = null,
             .folder_picker = folder_picker_mod.FolderPicker.init(allocator),
@@ -598,6 +609,15 @@ pub const UI = struct {
                 .home => return v.showSlide(0),
                 .end => return v.showSlide(v.slideCount() - 1),
                 else => {},
+            }
+        }
+        // PDF-Vorschau: Pfeile und Bild auf/ab blättern durch die Seiten.
+        if (self.activePdfTabPath()) |pdf_path| {
+            if (keyFromButton(key)) |k| {
+                if (pdf_nav.deltaForKey(k, self.currentMods())) |delta| {
+                    self.pending_pdf_page_change = .{ .path = pdf_path, .delta = delta };
+                    return;
+                }
             }
         }
         // Kürzel aus der zentralen Tabelle (shortcuts.zig): global überall,
@@ -1030,6 +1050,8 @@ pub const UI = struct {
 
     pub fn handleScroll(self: *Self, delta: i32) void {
         if (self.shortcuts_dialog_open) return self.scrollShortcuts(delta);
+        // PDF-Vorschau blättert seitenweise statt zu scrollen.
+        if (self.handlePdfScroll(@floatFromInt(delta))) return;
         if (self.is_shift_down) return self.handleScrollHorizontal(delta);
         if (self.folder_picker.visible) {
             self.folder_picker.handleScroll(delta);
@@ -2070,6 +2092,23 @@ pub const UI = struct {
         return v;
     }
 
+    /// Pfad des aktiven PDF-Tabs, sonst null.
+    pub fn activePdfTabPath(self: *Self) ?[]const u8 {
+        const tb = self.getActiveTabBar();
+        const tab = tb.getActiveTab() orelse return null;
+        if (tab.kind != .pdf) return null;
+        if (!self.open_pdfs.contains(tab.path)) return null;
+        return tab.path;
+    }
+
+    /// Mausrad im PDF-Tab blättert seitenweise.
+    pub fn handlePdfScroll(self: *Self, delta_y: f32) bool {
+        const path = self.activePdfTabPath() orelse return false;
+        const delta = pdf_nav.deltaForScroll(delta_y) orelse return false;
+        self.pending_pdf_page_change = .{ .path = path, .delta = delta };
+        return true;
+    }
+
     /// Exportiert `path` als Marp-Deck nach PDF und öffnet das Ergebnis als Tab.
     /// Nicht-Decks (kein `marp: true` im Front-Matter) melden das als Dialog.
     fn exportMarpPdf(self: *Self, path: []const u8) void {
@@ -2621,7 +2660,9 @@ pub const UI = struct {
                                 const maybe_texture = self.open_images.get(tab.path);
                                 if (maybe_handler) |handler_ptr| {
                                     const handler: *PdfHandler = @ptrCast(@alignCast(handler_ptr));
-                                    if (PdfViewState.render(handler, maybe_texture, t, self.mouse_pressed_this_frame)) |delta| {
+                                    self.pdf_view_page = handler.current_page;
+                                    self.pdf_view_pages = handler.total_pages;
+                                    if (PdfViewState.render(&self.pdf_label_buf, handler, maybe_texture, t, self.mouse_pressed_this_frame)) |delta| {
                                         self.pending_pdf_page_change = .{ .path = tab.path, .delta = delta };
                                     }
                                 }

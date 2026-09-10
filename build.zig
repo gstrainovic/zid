@@ -393,6 +393,17 @@ pub fn build(b: *std.Build) void {
     const run_wio_keysym_tests = b.addRunArtifact(wio_keysym_tests);
     run_wio_keysym_tests.has_side_effects = true;
 
+    // Blätter-Logik der PDF-Vorschau.
+    const pdf_nav_mod = b.createModule(.{
+        .root_source_file = b.path("src/ui/pdf_nav.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    pdf_nav_mod.addImport("shortcuts", shortcuts_mod);
+    const pdf_nav_tests = b.addTest(.{ .root_module = pdf_nav_mod });
+    const run_pdf_nav_tests = b.addRunArtifact(pdf_nav_tests);
+    run_pdf_nav_tests.has_side_effects = true;
+
     // Erklärtext, wenn kein Wayland-Compositor erreichbar ist.
     const display_check_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("src/platform/display_check.zig"),
@@ -584,6 +595,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_shortcuts_tests.step);
     test_step.dependOn(&run_wio_keysym_tests.step);
     test_step.dependOn(&run_display_check_tests.step);
+    test_step.dependOn(&run_pdf_nav_tests.step);
     test_step.dependOn(&run_context_menu_tests.step);
     test_step.dependOn(&run_find_ops_tests.step);
     test_step.dependOn(&run_wrap_ops_tests.step);

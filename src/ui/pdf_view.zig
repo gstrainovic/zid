@@ -3,24 +3,28 @@ const clay = @import("clay");
 const ui = @import("mod.zig");
 const Theme = ui.Theme;
 const components = @import("components/mod.zig");
+const pdf_nav = @import("pdf_nav.zig");
 const PdfHandler = @import("../rendering/pdf_handler.zig").PdfHandler;
 const ImageTexture = @import("../clay_renderer/image_renderer.zig").ImageTexture;
 
 pub const PdfViewState = struct {
+    /// Rückgabe: Seiten-Delta, das die Hauptschleife anwendet.
     pub fn render(
+        label_buf: []u8,
         handler: *PdfHandler,
         maybe_texture: ?*anyopaque,
         theme: Theme,
         mouse_pressed: bool,
     ) ?i16 {
-        _ = mouse_pressed;
-        _ = handler;
+        var delta: ?i16 = null;
 
         clay.UI()(.{
             .id = clay.ElementId.ID("pdf_view_container"),
             .layout = .{
                 .sizing = .grow,
+                .direction = .top_to_bottom,
                 .child_alignment = .{ .x = .center, .y = .center },
+                .child_gap = 8,
                 .padding = .all(16),
             },
             .background_color = theme.bg,
@@ -44,8 +48,46 @@ pub const PdfViewState = struct {
             } else {
                 clay.text("Lade Seite ...", .{ .font_size = 24, .color = theme.text });
             }
+
+            // Leiste: Zurück, Seitenzahl, Weiter. Gesperrte Ränder bleiben
+            // sichtbar, damit die Leiste ihre Breite nicht ändert.
+            clay.UI()(.{
+                .id = clay.ElementId.ID("pdf_pager"),
+                .layout = .{
+                    .sizing = .{ .w = .fit, .h = .fit },
+                    .child_alignment = .{ .x = .center, .y = .center },
+                    .child_gap = 12,
+                    .padding = .all(4),
+                },
+            })({
+                const back = pdf_nav.canGoBack(handler.current_page);
+                const forward = pdf_nav.canGoForward(handler.current_page, handler.total_pages);
+
+                if (components.Button("pdf_prev_page", "‹", pagerTheme(theme, back), mouse_pressed) and back) {
+                    delta = -1;
+                }
+
+                clay.text(pdf_nav.pageLabel(label_buf, handler.current_page, handler.total_pages), .{
+                    .font_size = 18,
+                    .color = theme.text,
+                });
+
+                if (components.Button("pdf_next_page", "›", pagerTheme(theme, forward), mouse_pressed) and forward) {
+                    delta = 1;
+                }
+            });
         });
 
-        return null;
+        return delta;
+    }
+
+    /// Gesperrte Richtung: gedämpfte Farben statt eigener Button-Variante.
+    fn pagerTheme(theme: Theme, enabled: bool) Theme {
+        if (enabled) return theme;
+        var dimmed = theme;
+        dimmed.primary = theme.surface;
+        dimmed.text_on_primary = theme.muted;
+        dimmed.accent = theme.border;
+        return dimmed;
     }
 };
