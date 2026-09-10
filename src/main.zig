@@ -410,7 +410,28 @@ pub fn main() !void {
         var e2e_ctx: ?e2e_server.E2EContext = null;
         if (e2e_mode) {
             const e2e_listen_addr = try std.net.Address.parseIp("127.0.0.1", 9999);
-            const e2e_server_sock = try e2e_listen_addr.listen(.{ .reuse_address = true });
+            // Socket von Hand: `Address.listen(.{ .reuse_address = true })` setzt
+            // zusätzlich SO_REUSEPORT. Dann lauscht eine verwaiste Instanz still
+            // weiter, der Kernel verteilt die Verbindungen, und die Hälfte aller
+            // RPC-Antworten kommt aus dem alten Prozess. Nur SO_REUSEADDR: der
+            // Neustart nach TIME_WAIT klappt, ein zweiter Start scheitert.
+            const e2e_server_sock = blk: {
+                const sock = try std.posix.socket(
+                    e2e_listen_addr.any.family,
+                    std.posix.SOCK.STREAM | std.posix.SOCK.CLOEXEC,
+                    std.posix.IPPROTO.TCP,
+                );
+                errdefer std.posix.close(sock);
+                try std.posix.setsockopt(sock, std.posix.SOL.SOCKET, std.posix.SO.REUSEADDR, &std.mem.toBytes(@as(c_int, 1)));
+                std.posix.bind(sock, &e2e_listen_addr.any, e2e_listen_addr.getOsSockLen()) catch |err| {
+                    if (err == error.AddressInUse) {
+                        log.err("Port 9999 ist belegt — läuft noch eine zid-Instanz? (pkill -f 'bin/zid')", .{});
+                    }
+                    return err;
+                };
+                try std.posix.listen(sock, 128);
+                break :blk std.net.Server{ .listen_address = e2e_listen_addr, .stream = .{ .handle = sock } };
+            };
             e2e_ctx = e2e_server.E2EContext.init(allocator, &ui_system, e2e_server_sock);
             // Fenstermodus: RPC-Eingaben puffern, der Main-Loop wendet sie pro Frame an.
             e2e_ctx.?.defer_input = !interactive_mode;

@@ -95,7 +95,8 @@ pub const PdfViewState = struct {
         const hovered = enabled and over(element_id, mouse_x, mouse_y);
 
         const base_bg = if (enabled) theme.primary else theme.surface;
-        const bg = if (hovered) pdf_nav.brighten(base_bg, 30) else base_bg;
+        // Deutlich sichtbar: heller Hintergrund und der Fokusrahmen.
+        const bg = if (hovered) pdf_nav.brighten(base_bg, 45) else base_bg;
 
         clay.UI()(.{
             .id = element_id,
@@ -108,7 +109,7 @@ pub const PdfViewState = struct {
             .corner_radius = .all(4),
             .border = .{
                 .width = .all(2),
-                .color = if (enabled) theme.accent else theme.border,
+                .color = if (hovered) theme.border_focus else if (enabled) theme.accent else theme.border,
             },
         })({
             clay.text(label, .{
@@ -118,6 +119,12 @@ pub const PdfViewState = struct {
         });
 
         return hovered and mouse_pressed;
+    }
+
+    /// Zeiger über einer der beiden Schaltflächen? Für den Hand-Cursor.
+    pub fn overPagerButton(mouse_x: f32, mouse_y: f32) bool {
+        return over(clay.ElementId.ID("pdf_prev_page"), mouse_x, mouse_y) or
+            over(clay.ElementId.ID("pdf_next_page"), mouse_x, mouse_y);
     }
 
     /// Zeiger über dem Element? Bounding-Box aus dem letzten Layout.

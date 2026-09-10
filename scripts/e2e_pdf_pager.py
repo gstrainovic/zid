@@ -7,6 +7,8 @@ der Leiste und die Sperren an erster und letzter Seite.
 Aufruf: python3 scripts/e2e_pdf_pager.py
 """
 import os
+import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -37,6 +39,28 @@ def key(name):
     settle(10)
 
 
+def pixel(name, x, y):
+    """Farbe eines Pixels aus einem PPM (P6, 8 Bit) ohne Fremdbibliothek."""
+    with open(os.path.join(ROOT, "tmp", name), "rb") as f:
+        data = f.read()
+    fields, pos = [], 2
+    while len(fields) < 3:
+        while data[pos:pos + 1].isspace():
+            pos += 1
+        if data[pos:pos + 1] == b"#":
+            while data[pos:pos + 1] not in (b"\n", b""):
+                pos += 1
+            continue
+        start = pos
+        while not data[pos:pos + 1].isspace():
+            pos += 1
+        fields.append(int(data[start:pos]))
+    w, _h, _max = fields
+    pos += 1
+    off = pos + (int(y) * w + int(x)) * 3
+    return tuple(data[off:off + 3])
+
+
 def expect_page(n, msg, timeout=5):
     """Der Seitenwechsel wird erst im nächsten Frame gerendert: kurz nachfassen."""
     t0 = time.time()
@@ -48,22 +72,47 @@ def expect_page(n, msg, timeout=5):
 
 
 def to_first_page():
-    """Die Sitzung merkt sich die zuletzt gezeigte Seite: erst nach vorn zurück."""
-    for _ in range(page()["pages"] + 1):
+    """Auf Seite 1 zurück, eine Taste nach der anderen. Blind viele Tasten zu
+    schicken hinterlässt Nachzügler in der Warteschlange, die später blättern."""
+    while page()["page"] > 0:
+        before = page()["page"]
         key("page_up")
+        expect_page(before - 1, "zurück zum Anfang")
+
+
+def wait_port_free(timeout=15):
+    """Der Vorgänger gibt Port 9999 erst beim Beenden frei; sonst scheitert der
+    Start mit AddressInUse."""
+    import socket as _s
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        try:
+            with _s.create_connection(("127.0.0.1", 9999), timeout=0.5):
+                pass
+        except OSError:
+            return
+        time.sleep(0.5)
+    raise RuntimeError("Port 9999 bleibt belegt — läuft noch eine zid-Instanz?")
 
 
 def main():
     log = open(os.path.join(ROOT, "tmp", "e2e_pdf_pager.log"), "w")
+    # Eigener, frischer Sitzungszustand pro Lauf: sonst stellt der Start die Tabs
+    # des Benutzers oder des letzten Laufs wieder her, der aktive Tab wechselt
+    # und der Test misst Fremdzustand.
+    cfg = os.path.join(ROOT, "tmp", "e2e_pdf_cfg")
+    shutil.rmtree(cfg, ignore_errors=True)
+    env = dict(os.environ, XDG_CONFIG_HOME=cfg)
+    wait_port_free()
     proc = subprocess.Popen(
-        ["zig", "build", "run", "--", "--headless", "--ai=off"],
-        cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
+        ["zig", "build", "run", "--", "--headless", "--ai=off", PDF],
+        cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, env=env,
+        start_new_session=True,  # eigene Prozessgruppe, siehe finally
     )
     try:
         wait_port(proc)
         settle(20)
 
-        rpc("open_file", [PDF])
         t0 = time.time()
         st = page()
         while not st["pdf"] and time.time() - t0 < 30:
@@ -99,8 +148,9 @@ def main():
         # Mausrad über der Seite: Mitte zwischen den Schaltflächen, weiter oben
         nb = wait_bounds("pdf_next_page")
         pb = wait_bounds("pdf_prev_page")
-        cx = (pb["x"] + nb["x"] + nb["w"]) / 2
-        cy = pb["y"] - 150
+        # Zwischen den Schaltflächen, auf ihrer Höhe: sicher im PDF-Bereich.
+        cx = (pb["x"] + pb["w"] + nb["x"]) / 2
+        cy = pb["y"] + pb["h"] / 2
         rpc("scroll", [cx, cy, -1])
         settle(10)
         expect_page(1, "Mausrad nach unten blättert vorwärts")
@@ -121,6 +171,22 @@ def main():
         for _ in range(total + 2):
             key("page_down")
         check(page()["page"] == total - 1, f"Nach dem Ende bleibt Seite {total} stehen")
+
+        # Hover: die überfahrene Schaltfläche hellt auf. Vorher zurück auf Seite 1,
+        # sonst ist Weiter gesperrt und darf gar nicht aufhellen.
+        to_first_page()
+        nb = wait_bounds("pdf_next_page")
+        top_x, top_y = nb["x"] + nb["w"] * 0.25, nb["y"] + nb["h"] * 0.25
+        rpc("move_mouse", [10, 400])
+        settle(15)
+        shot("e2e_pdf_hover_off.ppm")
+        rpc("move_mouse", [nb["x"] + nb["w"] / 2, nb["y"] + nb["h"] / 2])
+        settle(15)
+        shot("e2e_pdf_hover_on.ppm")
+        off = pixel("e2e_pdf_hover_off.ppm", top_x, top_y)
+        on = pixel("e2e_pdf_hover_on.ppm", top_x, top_y)
+        check(on != off and all(a >= b for a, b in zip(on, off)),
+              f"Schaltfläche hellt beim Überfahren auf ({off} -> {on})")
 
         # Screenshots am Ende: der Screenshot-RPC rendert selbst und stört sonst
         # die Frames, in denen ein Seitenwechsel verarbeitet wird.
@@ -143,8 +209,12 @@ def main():
         code = proc.wait(timeout=30)
         check(code == 0, f"Prozess beendet sauber (Code {code})")
     finally:
-        if proc.poll() is None:
-            proc.kill()
+        # `zig build run` startet zid als Kind: proc.kill() träfe nur zig, das
+        # verwaiste zid bliebe auf Port 9999 und beantwortete später fremde RPCs.
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
         log.close()
     print("OK")
 
