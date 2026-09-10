@@ -384,6 +384,15 @@ pub fn build(b: *std.Build) void {
     const run_folder_ops_tests = b.addRunArtifact(folder_ops_tests);
     run_folder_ops_tests.has_side_effects = true;
 
+    // Keysym-Tabelle des wio-Forks: layout-unabhängige Tastenzuordnung.
+    const wio_keysym_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("libs/wio/src/keysym.zig"),
+        .target = target,
+        .optimize = optimize,
+    }) });
+    const run_wio_keysym_tests = b.addRunArtifact(wio_keysym_tests);
+    run_wio_keysym_tests.has_side_effects = true;
+
     const shortcuts_tests = b.addTest(.{ .root_module = shortcuts_mod });
     const run_shortcuts_tests = b.addRunArtifact(shortcuts_tests);
     run_shortcuts_tests.has_side_effects = true;
@@ -564,6 +573,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_explorer_ops_tests.step);
     test_step.dependOn(&run_folder_ops_tests.step);
     test_step.dependOn(&run_shortcuts_tests.step);
+    test_step.dependOn(&run_wio_keysym_tests.step);
     test_step.dependOn(&run_context_menu_tests.step);
     test_step.dependOn(&run_find_ops_tests.step);
     test_step.dependOn(&run_wrap_ops_tests.step);
