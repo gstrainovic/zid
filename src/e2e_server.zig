@@ -215,6 +215,7 @@ pub fn createDispatcher(alloc: std.mem.Allocator, ctx: *E2EContext) !*zigjr.RpcD
     try rpc_dispatcher.addWithCtx("element_bounds_i", ctx, elementBoundsIndexed);
     try rpc_dispatcher.addWithCtx("folder_picker_state", ctx, folderPickerState);
     try rpc_dispatcher.addWithCtx("slide_state", ctx, slideState);
+    try rpc_dispatcher.addWithCtx("pdf_state", ctx, pdfState);
     try rpc_dispatcher.addWithCtx("ui_state", ctx, uiState);
     try rpc_dispatcher.addWithCtx("editor_lines", ctx, editorLines);
     try rpc_dispatcher.addWithCtx("editor_state", ctx, editorState);
@@ -835,6 +836,17 @@ fn slideState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     } else {
         try buf.writer.writeAll("{\"deck\": false, \"slides\": 0, \"current\": 0}");
     }
+    return buf.written();
+}
+
+/// pdf_state: Seite und Seitenzahl des aktiven PDF-Tabs. Liest nur die vom
+/// Main-Thread beim Rendern gespiegelten Felder, nie Tabs oder Handler-Map.
+fn pdfState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
+    var buf = std.Io.Writer.Allocating.init(dc.arena());
+    const pages = ctx.ui_system.pdf_view_pages;
+    try buf.writer.print(
+        \\{{"pdf": {}, "page": {d}, "pages": {d}}}
+    , .{ pages > 0, ctx.ui_system.pdf_view_page, pages });
     return buf.written();
 }
 

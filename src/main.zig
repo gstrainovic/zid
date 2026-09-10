@@ -6,6 +6,7 @@ const file_types = @import("ui/file_types.zig");
 const wio = @import("wio");
 const platform = @import("platform/mod.zig");
 const display_check = @import("platform/display_check.zig");
+const pdf_nav = @import("ui/pdf_nav.zig");
 const rendering = @import("rendering/mod.zig");
 const text = @import("text/mod.zig");
 const ui = @import("ui/mod.zig");
@@ -585,27 +586,23 @@ pub fn main() !void {
                     const handler: *PdfHandler = @ptrCast(@alignCast(handler_ptr));
 
                     const old_page = handler.current_page;
-                    const new_page = @as(i32, @intCast(handler.current_page)) + change.delta;
+                    handler.current_page = pdf_nav.clampPage(handler.current_page, handler.total_pages, change.delta);
 
-                    if (new_page >= 0 and new_page < handler.total_pages) {
-                        handler.current_page = @intCast(new_page);
+                    if (handler.current_page != old_page) {
+                        log.info("PDF Page Change: {d} -> {d}", .{ old_page, handler.current_page });
+                        if (handler.renderPage(handler.current_page, 2.0)) |info| {
+                            defer allocator.free(info.pixels);
 
-                        if (handler.current_page != old_page) {
-                            log.info("PDF Page Change: {d} -> {d}", .{ old_page, handler.current_page });
-                            if (handler.renderPage(handler.current_page, 2.0)) |info| {
-                                defer allocator.free(info.pixels);
-
-                                // Alte Textur ersetzen
-                                if (ui_system.open_images.get(change.path)) |tex_ptr| {
-                                    const ImageTexture = @import("clay_renderer/image_renderer.zig").ImageTexture;
-                                    const tex_cast: *ImageTexture = @ptrCast(@alignCast(tex_ptr));
-                                    tex_cast.deinit();
-                                    tex_cast.* = image_rdr.createTextureFromPixels(info.pixels, info.width, info.height) catch unreachable;
-                                }
-                                wio.cancelWait();
-                            } else |err| {
-                                log.err("Failed to render PDF page {d}: {}", .{ handler.current_page, err });
+                            // Alte Textur ersetzen
+                            if (ui_system.open_images.get(change.path)) |tex_ptr| {
+                                const ImageTexture = @import("clay_renderer/image_renderer.zig").ImageTexture;
+                                const tex_cast: *ImageTexture = @ptrCast(@alignCast(tex_ptr));
+                                tex_cast.deinit();
+                                tex_cast.* = image_rdr.createTextureFromPixels(info.pixels, info.width, info.height) catch unreachable;
                             }
+                            wio.cancelWait();
+                        } else |err| {
+                            log.err("Failed to render PDF page {d}: {}", .{ handler.current_page, err });
                         }
                     }
                 }
