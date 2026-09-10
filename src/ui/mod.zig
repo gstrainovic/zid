@@ -321,8 +321,6 @@ pub const UI = struct {
             .pending_tab_switch = null,
             .pending_pdf_page_change = null,
             .pdf_label_buf = undefined,
-            .pdf_view_page = 0,
-            .pdf_view_pages = 0,
             .pending_split = null,
             .active_dialog = null,
             .folder_picker = folder_picker_mod.FolderPicker.init(allocator),
@@ -2660,9 +2658,7 @@ pub const UI = struct {
                                 const maybe_texture = self.open_images.get(tab.path);
                                 if (maybe_handler) |handler_ptr| {
                                     const handler: *PdfHandler = @ptrCast(@alignCast(handler_ptr));
-                                    self.pdf_view_page = handler.current_page;
-                                    self.pdf_view_pages = handler.total_pages;
-                                    if (PdfViewState.render(&self.pdf_label_buf, handler, maybe_texture, t, self.mouse_pressed_this_frame)) |delta| {
+                                    if (PdfViewState.render(&self.pdf_label_buf, handler, maybe_texture, t, self.mouse_pressed_this_frame, self.mouse_x, self.mouse_y)) |delta| {
                                         self.pending_pdf_page_change = .{ .path = tab.path, .delta = delta };
                                     }
                                 }

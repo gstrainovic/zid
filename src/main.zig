@@ -609,6 +609,22 @@ pub fn main() !void {
                 ui_system.pending_pdf_page_change = null;
             }
 
+            // Zustand der PDF-Vorschau für E2E spiegeln (nur hier im Main-Thread).
+            if (e2e_ctx) |*c| {
+                var page: u32 = 0;
+                var pages: u32 = 0;
+                if (ui_system.activePdfTabPath()) |pdf_path| {
+                    if (ui_system.open_pdfs.get(pdf_path)) |handler_ptr| {
+                        const PdfHandler = @import("rendering/pdf_handler.zig").PdfHandler;
+                        const handler: *PdfHandler = @ptrCast(@alignCast(handler_ptr));
+                        page = handler.current_page;
+                        pages = handler.total_pages;
+                    }
+                }
+                c.pdf_page.store(page, .seq_cst);
+                c.pdf_pages.store(pages, .seq_cst);
+            }
+
             var state_dirty: bool = false;
 
             // Phase 9: Datei öffnen verarbeiten
