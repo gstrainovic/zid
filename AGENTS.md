@@ -483,7 +483,10 @@ MuPDFs Story-Engine. Folienvorschau in `MarkdownView` (`deck`-Feld), Command
   `beginLayout` setzt die Arena zurück, Clay liest den Text erst beim Zeichnen.
 - Zustand für E2E: `pdf_state` liest Felder im `E2EContext`, die der Main-Thread pro Frame
   setzt. Über Tabs und `open_pdfs` im Server-Thread zu laufen lieferte springende Werte.
-- E2E: `python3 scripts/e2e_pdf_pager.py`, Fixture `test_data/marp_test.pdf`.
+- E2E: `python3 scripts/e2e_pdf_pager.py`, Fixture `test_data/marp_test.pdf`. Der Test startet
+  mit eigenem, frischem `XDG_CONFIG_HOME` und übergibt das PDF als Startdatei: über eine
+  wiederhergestellte Sitzung wechselt der aktive Tab und die Messung trifft Fremdzustand.
+  `open_file` öffnet keinen PDF-Tab, das Laden hängt am Explorer-Pfad.
 
 ## LSP (zls): Sprung zur Definition
 
@@ -564,6 +567,12 @@ MuPDFs Story-Engine. Folienvorschau in `MarkdownView` (`deck`-Feld), Command
   eine 5000-Zeichen-Zeile und eine 5-MB-Datei an, öffnet sie headless, tippt und misst die Latenz
   bis das Zeichen in `editor_state` steht (gemessen 0,06 s bei der langen Zeile,
   1,2–2,4 s bei der 5-MB-Datei); die Binärdatei muss als Tab-Art `binary` ohne Buffer erscheinen. Logs mit Binärinhalt nur mit `grep -a` lesen, sonst schweigt grep.
+- Der RPC-Socket bindet nur mit SO_REUSEADDR, nie mit SO_REUSEPORT (`Address.listen` mit
+  `reuse_address` setzt beides). Sonst lauscht eine verwaiste Instanz weiter, der Kernel
+  verteilt die Verbindungen, und ein Teil der RPC-Antworten kommt aus dem alten Prozess mit
+  altem Zustand. Ein zweiter Start meldet jetzt `Port 9999 ist belegt`.
+- E2E-Skripte starten mit `start_new_session=True` und beenden die Prozessgruppe: `zig build
+  run` startet zid als Kind, ein `kill` auf den Vater lässt zid auf dem Port zurück.
 - Verwaiste Headless-Prozesse: `pkill -f '[v]ulkan-ed --headless'` — ohne die Klammer trifft das
   Muster die eigene Shell, die den Befehl enthält.
 

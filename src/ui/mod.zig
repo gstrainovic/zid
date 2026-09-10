@@ -2818,6 +2818,12 @@ pub const UI = struct {
 
     /// Berechnet den gewünschten Cursor für diesen Frame
     pub fn getDesiredCursor(self: *Self) wio.Cursor {
+        // PDF-Leiste: Hand über den Schaltflächen (Bounds-Check, clay.pointerOver
+        // meldet in dieser Ansicht nichts).
+        if (self.activePdfTabPath() != null and PdfViewState.overPagerButton(self.mouse_x, self.mouse_y)) {
+            return .hand;
+        }
+
         if (self.file_explorer.is_resizing or clay.pointerOver(clay.ElementId.ID("ExplorerSplitter"))) {
             return .size_ew;
         }
