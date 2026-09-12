@@ -1,4 +1,4 @@
-# zid3
+# zid
 
 Editor mit Vulkan/WGPU-Rendering, wio-Platform-Layer und Clay-UI. Unterstützt
 Code-Editing, eingebettete Terminals (ghostty-vt + PTY/ConPTY), Bild- und
@@ -44,12 +44,14 @@ sudo apt install libmupdf-dev \
 
 ### KI-Setup
 
-Der Editor benötigt ein GGUF-Modell (empfohlen: **Gemma 4 E2B Instruct**).
-Setze vor dem Start folgende Umgebungsvariablen:
+Der Editor benötigt ein GGUF-Modell. Standard ist **Qwen3-4B-Instruct-2507**
+(`models/Qwen3-4B-Instruct-2507-Q4_K_M.gguf`, siehe `src/ai/paths.zig`); die
+Begründung steht in `.claude/skills/llm-local/SKILL.md`. Abweichende Pfade über
+Umgebungsvariablen:
 
 ```bash
 export LLAMA_SERVER_PATH=/pfad/zu/llama-server
-export LLAMA_MODEL_PATH=/pfad/zu/gemma-4-E2B-it-Q4_K_M.gguf
+export LLAMA_MODEL_PATH=/pfad/zu/Qwen3-4B-Instruct-2507-Q4_K_M.gguf
 # Optional: NVIDIA GPU erzwingen (Index 1)
 export GGML_VULKAN_DEVICE=1
 ```
