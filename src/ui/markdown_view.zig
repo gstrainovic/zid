@@ -23,6 +23,9 @@ pub const MarkdownView = struct {
     text_color: ?clay.Color = null,
     /// Laufende Nummer der Fließtext-Container im aktuellen Frame (für Element-IDs).
     run_counter: u32 = 0,
+    /// Salz der Pane, die diese Ansicht gerade zeichnet (`UI.renderPane`): dieselbe Ansicht in
+    /// zwei Panes bekommt so verschiedene Clay-IDs.
+    pane_salt: u32 = 0,
     /// Obergrenze für die Umbruchbreite. Nötig in horizontal scrollbaren
     /// Viewports, wo Clay dem Container die volle Inhaltsbreite meldet.
     wrap_width_hint: ?f32 = null,
@@ -177,11 +180,11 @@ pub const MarkdownView = struct {
         }
 
         if (self.deck != null) {
-            if (hitElement("md_slide_prev", x, y)) {
+            if (self.hitElement("md_slide_prev", x, y)) {
                 self.prevSlide();
                 return true;
             }
-            if (hitElement("md_slide_next", x, y)) {
+            if (self.hitElement("md_slide_next", x, y)) {
                 self.nextSlide();
                 return true;
             }
@@ -189,7 +192,6 @@ pub const MarkdownView = struct {
         }
 
         if (self.content_height <= self.viewport_height) return false;
-
 
         if (x < self.scrollbar_track_x) return false;
         if (x > self.scrollbar_track_x + self.scrollbar_width) return false;
@@ -218,9 +220,16 @@ pub const MarkdownView = struct {
         return true;
     }
 
+    /// Clay-ID mit Instanz-Salz: zwei Vorschauen in zwei Panes (oder Deck und Dokument) haben
+    /// sonst dieselben md_*-IDs, Clay meldet duplicate_id, und `getElementData` liefert die Box
+    /// der anderen Ansicht. E2E: `element_bounds(_i)` löst Namen auch über die aktive Vorschau auf.
+    pub fn idi(self: *const Self, name: []const u8, index: u32) clay.ElementId {
+        return clay.ElementId.IDI(name, index +% @as(u32, @truncate(@intFromPtr(self))) +% self.pane_salt);
+    }
+
     /// Liegt (x, y) in der Bounding-Box des Elements aus dem letzten Frame?
-    fn hitElement(id: []const u8, x: f32, y: f32) bool {
-        const data = clay.getElementData(clay.ElementId.ID(id));
+    fn hitElement(self: *const Self, id: []const u8, x: f32, y: f32) bool {
+        const data = clay.getElementData(self.idi(id, 0));
         if (!data.found) return false;
         const b = data.bounding_box;
         return x >= b.x and x <= b.x + b.width and y >= b.y and y <= b.y + b.height;
@@ -436,7 +445,6 @@ pub const MarkdownView = struct {
         };
     }
 
-
     /// Wie `renderDocument`, legt aber nur die sichtbaren Blöcke als
     /// Clay-Elemente an. Ohne das baut die Vorschau ein ganzes Dokument pro
     /// Frame auf und sprengt bei großen Dateien Clays Elementgrenze.
@@ -492,7 +500,7 @@ pub const MarkdownView = struct {
         self.spacer("md_v_top", before);
         for (children[first .. last + 1], first..) |*child, i| {
             clay.UI()(.{
-                .id = clay.ElementId.IDI("md_block", @intCast(i)),
+                .id = self.idi("md_block", @intCast(i)),
                 .layout = .{ .sizing = .{ .w = .grow, .h = .fit } },
             })({
                 self.renderBlock(child, arena, effective_theme, ui_ptr);
@@ -505,10 +513,9 @@ pub const MarkdownView = struct {
     }
 
     fn spacer(self: *Self, id: []const u8, height: f32) void {
-        _ = self;
         if (height <= 0) return;
         clay.UI()(.{
-            .id = clay.ElementId.ID(id),
+            .id = self.idi(id, 0),
             .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(height) } },
         })({});
     }
@@ -526,7 +533,7 @@ pub const MarkdownView = struct {
         }
         var i = self.measured_from;
         while (i <= self.measured_to and i < count) : (i += 1) {
-            const data = clay.getElementData(clay.ElementId.IDI("md_block", @intCast(i)));
+            const data = clay.getElementData(self.idi("md_block", @intCast(i)));
             if (data.found and data.bounding_box.height > 0) {
                 self.block_heights.items[i] = data.bounding_box.height;
             }
@@ -548,8 +555,8 @@ pub const MarkdownView = struct {
         // Grundlage ist die Fläche des Wurzelelements aus dem letzten Frame; das
         // Wurzelelement clippt, sonst wüchse es mit dem Rahmen mit und der
         // nächste Frame rechnete daraus einen noch größeren Rahmen.
-        const root = clay.getElementData(clay.ElementId.ID("markdown_view_root"));
-        const bar = clay.getElementData(clay.ElementId.ID("md_slide_bar"));
+        const root = clay.getElementData(self.idi("markdown_view_root", 0));
+        const bar = clay.getElementData(self.idi("md_slide_bar", 0));
         const reserve: f32 = if (bar.found) bar.bounding_box.height + 16 else chrome_reserve;
         const avail_w = if (root.found) @max(120.0, root.bounding_box.width - 2 * root_padding) else deck_w;
         const avail_h = if (root.found)
@@ -563,7 +570,7 @@ pub const MarkdownView = struct {
         self.slide_scale = scale;
 
         clay.UI()(.{
-            .id = clay.ElementId.ID("markdown_view_root"),
+            .id = self.idi("markdown_view_root", 0),
             .layout = .{
                 .sizing = .grow,
                 .direction = .top_to_bottom,
@@ -576,7 +583,7 @@ pub const MarkdownView = struct {
             .background_color = theme.bg,
         })({
             clay.UI()(.{
-                .id = clay.ElementId.ID("md_slide"),
+                .id = self.idi("md_slide", 0),
                 .layout = .{
                     .sizing = .{ .w = .fixed(frame_w), .h = .fixed(frame_h) },
                     .direction = .top_to_bottom,
@@ -595,33 +602,33 @@ pub const MarkdownView = struct {
                 .corner_radius = .all(theme.radius_sm),
             })({
                 clay.UI()(.{
-                    .id = clay.ElementId.ID("md_slide_content"),
+                    .id = self.idi("md_slide_content", 0),
                     .layout = .{
                         .sizing = .{ .w = .grow, .h = .fit },
                         .direction = .top_to_bottom,
                         .child_gap = scaled(10, scale),
                     },
                 })({
-                const doc = self.cachedSlideDocument();
-                if (doc) |block| {
-                    var effective_theme = theme;
-                    if (self.text_color) |cc| effective_theme.text = cc;
-                    self.run_counter = 0;
-                    // Grundschrift wie im Export, skaliert auf den Rahmen. Die
-                    // Überschriften-Faktoren in renderBlock (2.0 / 1.5 / 1.2)
-                    // sind dieselben wie im Export-CSS.
-                    const outer = self.font_size;
-                    self.font_size = @max(6, scaled(pdf_content_em, scale));
-                    self.wrap_width_hint = @max(0, frame_w - 2 * @as(f32, @floatFromInt(scaled(pdf_margin_x, scale))));
-                    self.renderBlock(block, arena, effective_theme, ui_ptr);
-                    self.font_size = outer;
-                }
+                    const doc = self.cachedSlideDocument();
+                    if (doc) |block| {
+                        var effective_theme = theme;
+                        if (self.text_color) |cc| effective_theme.text = cc;
+                        self.run_counter = 0;
+                        // Grundschrift wie im Export, skaliert auf den Rahmen. Die
+                        // Überschriften-Faktoren in renderBlock (2.0 / 1.5 / 1.2)
+                        // sind dieselben wie im Export-CSS.
+                        const outer = self.font_size;
+                        self.font_size = @max(6, scaled(pdf_content_em, scale));
+                        self.wrap_width_hint = @max(0, frame_w - 2 * @as(f32, @floatFromInt(scaled(pdf_margin_x, scale))));
+                        self.renderBlock(block, arena, effective_theme, ui_ptr);
+                        self.font_size = outer;
+                    }
                 });
             });
 
             // Blätterleiste: ‹ Folie / Gesamt ›
             clay.UI()(.{
-                .id = clay.ElementId.ID("md_slide_bar"),
+                .id = self.idi("md_slide_bar", 0),
                 .layout = .{
                     .sizing = .{ .w = .fit, .h = .fit },
                     .child_gap = 16,
@@ -632,7 +639,7 @@ pub const MarkdownView = struct {
                 var buf: [48]u8 = undefined;
                 const label = std.fmt.bufPrint(&buf, "{d} / {d}", .{ self.current_slide + 1, d.slides.len }) catch "";
                 clay.UI()(.{
-                    .id = clay.ElementId.ID("md_slide_counter"),
+                    .id = self.idi("md_slide_counter", 0),
                     .layout = .{ .sizing = .{ .w = .fit, .h = .fit } },
                 })({
                     clay.text(arena.dupe(u8, label) catch "", .{
@@ -645,7 +652,7 @@ pub const MarkdownView = struct {
 
             if (self.slide_overflow) {
                 clay.UI()(.{
-                    .id = clay.ElementId.ID("md_slide_overflow"),
+                    .id = self.idi("md_slide_overflow", 0),
                     .layout = .{ .sizing = .{ .w = .fit, .h = .fit } },
                 })({
                     clay.text("Inhalt passt nicht auf die Folie", .{
@@ -684,9 +691,8 @@ pub const MarkdownView = struct {
     }
 
     fn renderSlideButton(self: *Self, id: []const u8, label: []const u8, enabled: bool, theme: Theme) void {
-        _ = self;
         clay.UI()(.{
-            .id = clay.ElementId.ID(id),
+            .id = self.idi(id, 0),
             .layout = .{
                 .sizing = .{ .w = .fixed(36), .h = .fixed(28) },
                 .child_alignment = .{ .x = .center, .y = .center },
@@ -705,8 +711,8 @@ pub const MarkdownView = struct {
         if (self.deck != null) return self.renderDeck(arena, theme, ui_ptr);
 
         // Update layout info from previous frame
-        const clip_data = clay.getElementData(clay.ElementId.ID("md_viewport"));
-        const content_data = clay.getElementData(clay.ElementId.ID("md_content"));
+        const clip_data = clay.getElementData(self.idi("md_viewport", 0));
+        const content_data = clay.getElementData(self.idi("md_content", 0));
         if (clip_data.found) {
             self.viewport_height = clip_data.bounding_box.height;
             self.scrollbar_track_x = clip_data.bounding_box.x + clip_data.bounding_box.width;
@@ -719,7 +725,7 @@ pub const MarkdownView = struct {
         }
 
         clay.UI()(.{
-            .id = clay.ElementId.ID("markdown_view_root"),
+            .id = self.idi("markdown_view_root", 0),
             .layout = .{
                 .sizing = .{ .w = .grow, .h = .grow },
                 .direction = .left_to_right,
@@ -728,12 +734,12 @@ pub const MarkdownView = struct {
         })({
             // Content area
             clay.UI()(.{
-                .id = clay.ElementId.ID("md_viewport"),
+                .id = self.idi("md_viewport", 0),
                 .layout = .{ .sizing = .grow },
                 .clip = .{ .vertical = true, .horizontal = true, .child_offset = .{ .x = 0, .y = -self.scroll_offset_y } },
             })({
                 clay.UI()(.{
-                    .id = clay.ElementId.ID("md_content"),
+                    .id = self.idi("md_content", 0),
                     .layout = .{
                         .sizing = .{ .w = .grow, .h = .fit },
                         .direction = .top_to_bottom,
@@ -775,7 +781,7 @@ pub const MarkdownView = struct {
         const thumb_color: clay.Color = .{ 88, 88, 120, 200 };
 
         clay.UI()(.{
-            .id = clay.ElementId.ID("md_scrollbar_track"),
+            .id = self.idi("md_scrollbar_track", 0),
             .floating = .{
                 .attach_to = .to_parent,
                 .attach_points = .{ .element = .right_top, .parent = .right_top },
@@ -791,7 +797,7 @@ pub const MarkdownView = struct {
                 .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(thumb_y) } },
             })({});
             clay.UI()(.{
-                .id = clay.ElementId.ID("md_scrollbar_thumb"),
+                .id = self.idi("md_scrollbar_thumb", 0),
                 .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(thumb_height) } },
                 .background_color = thumb_color,
                 .corner_radius = .all(3),
@@ -832,8 +838,14 @@ pub const MarkdownView = struct {
             const Ctx = struct {
                 fn egc_length(_: flow_core.Buffer.Metrics, egcs: []const u8, colcount: *usize, _: usize) usize {
                     if (egcs.len == 0) return 0;
-                    if (egcs[0] == '\n') { colcount.* = 1; return 1; }
-                    if (egcs[0] == '\t') { colcount.* = 4; return 1; }
+                    if (egcs[0] == '\n') {
+                        colcount.* = 1;
+                        return 1;
+                    }
+                    if (egcs[0] == '\t') {
+                        colcount.* = 4;
+                        return 1;
+                    }
                     colcount.* = 1;
                     return 1;
                 }
@@ -953,7 +965,12 @@ pub const MarkdownView = struct {
             .Leaf => |*leaf| {
                 switch (leaf.content) {
                     .Heading => |h| {
-                        const multiplier: f32 = switch (h.level) { 1 => 2.0, 2 => 1.5, 3 => 1.2, else => 1.1 };
+                        const multiplier: f32 = switch (h.level) {
+                            1 => 2.0,
+                            2 => 1.5,
+                            3 => 1.2,
+                            else => 1.1,
+                        };
                         const size: u16 = @intFromFloat(@as(f32, @floatFromInt(self.font_size)) * multiplier);
                         self.renderInlineRun(leaf.inlines.items, size, theme, arena, ui_ptr);
                     },
@@ -1037,7 +1054,7 @@ pub const MarkdownView = struct {
         defer pieces.clearRetainingCapacity();
 
         self.run_counter += 1;
-        const id_str = std.fmt.allocPrint(arena, "md_run_{x}_{d}", .{ @intFromPtr(self), self.run_counter }) catch "md_run";
+        const id_str = std.fmt.allocPrint(arena, "md_run_{x}_{x}_{d}", .{ @intFromPtr(self), self.pane_salt, self.run_counter }) catch "md_run";
         const run_id = clay.ElementId.ID(id_str);
         const data = clay.getElementData(run_id);
         var avail: f32 = if (data.found) data.bounding_box.width else 0;

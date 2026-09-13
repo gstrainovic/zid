@@ -65,6 +65,24 @@ dem äußeren Bereich, es ersetzt ihn. Ein Clip auf der Zeile ließ die ganze Li
 aus ihrem Kasten laufen. Also kein Clip als Notnagel gegen Überlauf — die Größe
 begrenzen.
 
+## Kinder dürfen einen `.grow`-Container nie überragen
+
+Clay reicht die **Mindesthöhe** der Kinder durch alle Eltern bis zur Wurzel, sobald ein
+Container auf der Achse nicht clippt. Ein `.grow`-Container wird dann nicht kleiner als
+sein Inhalt, und die Wurzel wächst über das Fenster hinaus. Wer die Kinderzahl aus der
+eigenen Bounding-Box des Vorframes ableitet (`getElementData(...).height`), baut damit
+eine Rückkopplung: die Minimap zeichnete `height / 2` Balken à 2 px plus 2 px Innenabstand,
+war also 2 px höher als der Editor, die Wurzel wuchs jeden zweiten Frame um 2 px, und nach
+Minuten zeichnete der Editor hunderte Zeilen (extrem langsam, besonders klein gezoomt).
+
+Regel: Wer Inhalt aus der gemessenen Höhe ableitet, zieht Innenabstände ab
+(`CodeEditor.minimapWindow`, unit-getestet) **und** clippt den Container auf der Achse
+(`.clip = .{ .vertical = true }`), damit ein Rechenfehler nicht mehr nach oben durchschlägt.
+Die Zeilenschleife des Editors (`visible + 1` Reihen) ist nur deshalb harmlos, weil
+`editor_scroll` vertikal clippt. `python3 scripts/e2e_layout_stable.py` prüft, dass
+`editor_state.height` über Frames konstant bleibt; mit `ZID_DEBUG=1` listet jeder
+Headless-Screenshot alle Render-Commands mit Box, daran sieht man wachsende Elemente.
+
 ## Feste IDs gehören nie in eine Schleife
 
 ```zig
@@ -74,6 +92,23 @@ begrenzen.
 
 Ohne Index meldet Clay `duplicate_id` — im Projekt 45 mal pro Frame. Wird das Element
 nirgends abgefragt (Abstandhalter), einfach **keine ID** vergeben.
+
+Dasselbe gilt für Komponenten, die **mehrfach im Frame** stehen (Editor in zwei Panes):
+`IDI("code", zeile)` war in beiden Panes gleich, ~80 `duplicate_id` pro Frame, und
+`getElementData("scrollbar_track")` der zweiten Pane bekam die Box der ersten. Alle IDs eines
+Editors laufen deshalb über `CodeEditor.idi(name, index)`, das den Editor-Zeiger als Salz
+addiert (unit-getestet). E2E: `element_bounds(_i)` sucht erst global, dann über die aktive
+Vorschau und den aktiven Editor, Skripte dürfen weiter `element_bounds_i("code", zeile)` fragen.
+
+Die Markdown-Vorschau (`MarkdownView.idi`) salzt mit Instanz **und** Pane (`pane_salt`, setzt
+`UI.renderPane`): Views hängen am Pfad, ein Split kopiert die Tabs, dieselbe Ansicht steht dann
+in zwei Panes. Chat und Terminal kopiert `TabBarState.cloneFrom` gar nicht erst, ihr Zustand
+(Chat-Eingabe ist ein CodeEditor) kann nur einmal je Frame gezeichnet werden.
+
+`duplicate_id` nennt das Element nicht. `UI.clayError` loggt je Elternelement einmal dessen ID;
+`python3 scripts/clay_id_decode.py <id>` rechnet sie auf einen Namen zurück (nur ungesalzene IDs).
+Zuverlässiger: headless mit `ZID_DEBUG=1` einen Screenshot ziehen und im Command-Dump nach
+mehrfach vorkommenden `id=` suchen, Box und Text zeigen dann das Element.
 
 ## Elementgrenze
 

@@ -322,6 +322,23 @@ def step_word_wrap():
     st = ed()
     check(st["row"] == 0 and st["col"] >= 10, f"Klick in die zweite Reihe bleibt in Zeile 1, Spalte {st['col']}")
     shot("e2e_editor_wordwrap.ppm")
+    # Rad ans Ende: mit Umbruch passen weniger Buffer-Zeilen auf den Schirm. Zählt die
+    # Obergrenze Zeilen statt Reihen, bleibt das Dateiende verdeckt.
+    with open(SRC, "w") as f:
+        f.write("\n".join(long_line for _ in range(12)) + "\nende\n")
+    t0 = time.time()
+    while time.time() - t0 < 5 and "ende" not in text():
+        time.sleep(0.1)
+    check("ende" in text(), "Fixture mit zwölf langen Zeilen geladen")
+    ende = ed()["lines"] - 2  # letzte Zeile ist die leere nach dem Schluss-\n
+    check(not result_json("element_bounds_i", ["code", ende])["found"], "\"ende\" liegt vor dem Scrollen unter dem Schirm")
+    rpc("scroll", [EDITOR_X, EDITOR_Y, -200]); settle(10)
+    area = bounds("editor_scroll")
+    e = result_json("element_bounds_i", ["code", ende])
+    check(e["found"] and e["y"] + e["h"] <= area["y"] + area["h"] + 1, f"Rad ans Ende zeigt \"ende\" (y={e.get('y')}, Bereich bis {area['y'] + area['h']})")
+    check(ed()["view_row"] > 0, f"view_row ist vorgerückt ({ed()['view_row']})")
+    rpc("scroll", [EDITOR_X, EDITOR_Y, 200]); settle(10)
+    check(ed()["view_row"] == 0, "Rad nach oben kommt zum Anfang zurück")
     key_alt("z")
     check(not ed()["word_wrap"], "Alt+Z schaltet Word-Wrap wieder aus")
     # Clay behält getElementData für nicht mehr gerenderte IDs, deshalb über den Zustand prüfen

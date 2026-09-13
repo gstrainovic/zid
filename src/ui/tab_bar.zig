@@ -83,7 +83,6 @@ pub const TabBarState = struct {
         self.terminal_instances.deinit();
         log.debug("TabBarState.deinit: terminal_instances hashmap done", .{});
 
-
         for (self.tabs.items, 0..) |*tab, i| {
             log.debug("TabBarState.deinit: cleaning up tab {d}: {s}", .{ i, tab.path });
             // Buffer will be deinitialized by UI.open_buffers
@@ -239,14 +238,19 @@ pub const TabBarState = struct {
         }
         self.tabs.clearRetainingCapacity();
 
-        // Copy tabs from other
-        for (other.tabs.items) |tab| {
+        // Copy tabs from other. Chat und Terminal bleiben in der Quell-Pane: ihr Zustand
+        // (Chat-Eingabe ist ein CodeEditor, Terminal ein Emulator) würde sonst zweimal je Frame
+        // gezeichnet, Clay meldete ~25 duplicate_id pro Frame, und Klicks trafen die falsche Kopie.
+        var new_active: ?usize = null;
+        for (other.tabs.items, 0..) |tab, i| {
+            if (tab.kind == .chat or tab.kind == .terminal) continue;
+            if (other.active_index == i) new_active = self.tabs.items.len;
             try self.tabs.append(self.allocator, .{
                 .path = try self.allocator.dupe(u8, tab.path),
                 .display_name = try self.allocator.dupe(u8, tab.display_name),
                 .kind = tab.kind,
                 .modified = tab.modified,
-                .is_active = tab.is_active,
+                .is_active = false,
                 .buffer = tab.buffer,
                 .serial = tab.serial,
                 .pinned = tab.pinned,
@@ -254,8 +258,13 @@ pub const TabBarState = struct {
         }
         self.mru.deinit(self.allocator);
         self.mru = try other.mru.clone(self.allocator);
+        for (other.tabs.items) |tab| {
+            if (tab.kind == .chat or tab.kind == .terminal) self.mru.remove(tab.serial);
+        }
         self.next_serial = other.next_serial;
-        self.active_index = other.active_index;
+        if (new_active == null and self.tabs.items.len > 0) new_active = self.tabs.items.len - 1;
+        self.active_index = new_active;
+        if (new_active) |idx| self.tabs.items[idx].is_active = true;
     }
 
     /// Open a new terminal tab
@@ -398,18 +407,23 @@ pub fn tabId(state: *const TabBarState, index: usize) clay.ElementId {
     return clay.ElementId.IDI("tab", @as(u32, @truncate(@intFromPtr(state))) ^ @as(u32, @intCast(index)));
 }
 
-/// Anzeigename: bei gleichem Dateinamen in zwei Tabs kommt der Elternordner davor (a/mod.zig).
+/// Anzeigename: Vorschau-Tabs heißen „Preview: name“. Gleicher Dateiname in zwei Tabs derselben
+/// Art bekommt den Elternordner davor (a/mod.zig). Vorher zählte die Vorschau als Duplikat ihrer
+/// Quelle, und beide Tabs hießen gleich „vulkan-ed/README.md“.
 pub fn tabLabel(arena: std.mem.Allocator, state: *const TabBarState, index: usize) []const u8 {
     const tab = state.tabs.items[index];
     var duplicate = false;
     for (state.tabs.items, 0..) |other, i| {
-        if (i != index and std.mem.eql(u8, other.display_name, tab.display_name)) duplicate = true;
+        if (i != index and other.kind == tab.kind and std.mem.eql(u8, other.display_name, tab.display_name)) duplicate = true;
     }
-    if (!duplicate) return tab.display_name;
-    const dir = std.fs.path.dirname(tab.path) orelse return tab.display_name;
-    const parent = std.fs.path.basename(dir);
-    if (parent.len == 0) return tab.display_name;
-    return std.fmt.allocPrint(arena, "{s}/{s}", .{ parent, tab.display_name }) catch tab.display_name;
+    const name = if (!duplicate) tab.display_name else blk: {
+        const dir = std.fs.path.dirname(tab.path) orelse break :blk tab.display_name;
+        const parent = std.fs.path.basename(dir);
+        if (parent.len == 0) break :blk tab.display_name;
+        break :blk std.fmt.allocPrint(arena, "{s}/{s}", .{ parent, tab.display_name }) catch tab.display_name;
+    };
+    if (tab.kind != .markdown_preview) return name;
+    return std.fmt.allocPrint(arena, "Preview: {s}", .{name}) catch name;
 }
 
 /// Breite eines Tabs wie in renderTab (für das Scrollen zum aktiven Tab)
@@ -522,7 +536,6 @@ pub fn renderTabBar(
                 }
             }
         });
-
     });
 
     // Bounding-Box Check für add_btn (nach clay.UI())
@@ -607,7 +620,6 @@ pub fn renderTabBar(
             })({
                 clay.text("New Chat", .{ .font_size = 18, .color = theme.text, .wrap_mode = .none });
             });
-
         });
 
         const dropdown_hover = clay.pointerOver(dropdown_id);

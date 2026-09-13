@@ -316,8 +316,8 @@ fn saveFile(ctx: *E2EContext, dc: *zigjr.DispatchCtx, params: []const u8) ![]con
     _ = params;
     log.info("RPC: save_file()", .{});
     ctx.ui_system.getActiveEditor().save() catch |err| {
-         const msg = try std.fmt.allocPrint(dc.arena(), "error: {}", .{err});
-         return msg;
+        const msg = try std.fmt.allocPrint(dc.arena(), "error: {}", .{err});
+        return msg;
     };
     return "ok";
 }
@@ -437,16 +437,16 @@ pub fn modsRelease(ctx: *E2EContext, _: *zigjr.DispatchCtx) ![]const u8 {
 fn buttonFromName(name: []const u8) ?@import("wio").Button {
     const Button = @import("wio").Button;
     const named = [_]struct { []const u8, Button }{
-        .{ "enter", .enter },       .{ "backspace", .backspace }, .{ "escape", .escape },
-        .{ "delete", .delete },     .{ "tab", .tab },             .{ "grave", .grave },
-        .{ "up", .up },             .{ "down", .down },           .{ "left", .left },
-        .{ "right", .right },       .{ "home", .home },           .{ "end", .end },
-        .{ "page_up", .page_up },   .{ "page_down", .page_down }, .{ "f1", .f1 },
-        .{ "f2", .f2 },             .{ "f5", .f5 },               .{ "space", .space },
-        .{ "1", .@"1" },            .{ "2", .@"2" },              .{ "3", .@"3" },
-        .{ "4", .@"4" },            .{ "5", .@"5" },              .{ "9", .@"9" },
-        .{ "backslash", .backslash },   .{ "slash", .slash },         .{ "f12", .f12 },
-        .{ "dot", .dot },               .{ "equals", .equals },       .{ "minus", .minus },
+        .{ "enter", .enter },         .{ "backspace", .backspace }, .{ "escape", .escape },
+        .{ "delete", .delete },       .{ "tab", .tab },             .{ "grave", .grave },
+        .{ "up", .up },               .{ "down", .down },           .{ "left", .left },
+        .{ "right", .right },         .{ "home", .home },           .{ "end", .end },
+        .{ "page_up", .page_up },     .{ "page_down", .page_down }, .{ "f1", .f1 },
+        .{ "f2", .f2 },               .{ "f5", .f5 },               .{ "space", .space },
+        .{ "1", .@"1" },              .{ "2", .@"2" },              .{ "3", .@"3" },
+        .{ "4", .@"4" },              .{ "5", .@"5" },              .{ "9", .@"9" },
+        .{ "backslash", .backslash }, .{ "slash", .slash },         .{ "f12", .f12 },
+        .{ "dot", .dot },             .{ "equals", .equals },       .{ "minus", .minus },
         .{ "0", .@"0" },
     };
     for (named) |entry| {
@@ -573,14 +573,14 @@ fn explorerEntries(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     try buf.writer.print(
         \\{{"viewport": {{"x": {d:.1}, "y": {d:.1}, "w": {d:.1}, "h": {d:.1}}}, "row_height": {d:.1}, "scroll": {d:.1}, "renaming": {}, "creating": {}, "show_hidden": {}, "filter_active": {}, "filter": "{s}", "width": {d:.1}, "menu_open": {}, "menu_x": {d:.1}, "menu_y": {d:.1}, "entries": [
     , .{
-        fx.viewport_x,                                     fx.viewport_y,
-        fx.viewport_width,                                 fx.viewport_height,
-        @import("ui/file_explorer.zig").ROW_HEIGHT,        fx.scroll_offset_y,
-        fx.isRenaming(),                                   fx.isCreating(),
-        fx.show_hidden,                                    fx.filter_active,
-        fx.filter.text(),                                  fx.width,
-        fx.context_menu != null,
-        if (fx.context_menu) |m| m.x else @as(f32, 0),     if (fx.context_menu) |m| m.y else @as(f32, 0),
+        fx.viewport_x,                                 fx.viewport_y,
+        fx.viewport_width,                             fx.viewport_height,
+        @import("ui/file_explorer.zig").ROW_HEIGHT,    fx.scroll_offset_y,
+        fx.isRenaming(),                               fx.isCreating(),
+        fx.show_hidden,                                fx.filter_active,
+        fx.filter.text(),                              fx.width,
+        fx.context_menu != null,                       if (fx.context_menu) |m| m.x else @as(f32, 0),
+        if (fx.context_menu) |m| m.y else @as(f32, 0),
     });
     for (fx.visible_entries.items, 0..) |e, i| {
         const node = fx.nodes.items[e.node_index];
@@ -638,14 +638,25 @@ fn mouseUp(ctx: *E2EContext, _: *zigjr.DispatchCtx, x: f64, y: f64) ![]const u8 
     return "ok";
 }
 
-/// Bounding-Box eines Clay-Elements aus dem letzten Layout (String-ID).
-fn elementBounds(_: *E2EContext, dc: *zigjr.DispatchCtx, id: []const u8) ![]const u8 {
-    return boundsJson(dc, clay.getElementData(clay.ElementId.ID(id)));
+/// Bounding-Box eines Clay-Elements aus dem letzten Layout (String-ID). Nicht global gefunden →
+/// gesalzene ID des aktiven Editors (`CodeEditor.idi`: editor_scroll, scrollbar_track, …).
+fn elementBounds(ctx: *E2EContext, dc: *zigjr.DispatchCtx, id: []const u8) ![]const u8 {
+    return boundsJson(dc, lookupElement(ctx, id, 0));
 }
 
-/// Bounding-Box eines indexierten Clay-Elements (IDI, z.B. fp_entry + 3).
-fn elementBoundsIndexed(_: *E2EContext, dc: *zigjr.DispatchCtx, id: []const u8, index: i64) ![]const u8 {
-    return boundsJson(dc, clay.getElementData(clay.ElementId.IDI(id, @intCast(index))));
+/// Bounding-Box eines indexierten Clay-Elements (IDI, z.B. fp_entry + 3, code + zeile).
+fn elementBoundsIndexed(ctx: *E2EContext, dc: *zigjr.DispatchCtx, id: []const u8, index: i64) ![]const u8 {
+    return boundsJson(dc, lookupElement(ctx, id, @intCast(index)));
+}
+
+fn lookupElement(ctx: *E2EContext, id: []const u8, index: u32) clay.ElementData {
+    const global = clay.getElementData(clay.ElementId.IDI(id, index));
+    if (global.found) return global;
+    if (ctx.ui_system.activeMarkdownView()) |v| {
+        const md = clay.getElementData(v.idi(id, index));
+        if (md.found) return md;
+    }
+    return clay.getElementData(ctx.ui_system.getActiveEditor().idi(id, index));
 }
 
 fn boundsJson(dc: *zigjr.DispatchCtx, data: clay.ElementData) ![]const u8 {
@@ -674,6 +685,8 @@ fn editorState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     try std.json.Stringify.value(ed.find.text(), .{}, &buf.writer);
     try buf.writer.print(", \"extra_cursors\": {d}", .{ed.extra_cursors.items.len});
     try buf.writer.print(", \"visual_rows\": {d}", .{ed.visualRowsOf(ed.cursor.row)});
+    // Bounding-Box-Höhe des Editors (Clay, Vorframe): muss über Frames konstant bleiben.
+    try buf.writer.print(", \"height\": {d:.1}, \"visible_rows\": {d}", .{ ed.height, ed.visibleLineCount() });
     try buf.writer.print(", \"minimap\": {}, \"word_wrap\": {}, \"whitespace\": {}, \"indent_guides\": {}, \"find_case\": {}, \"find_word\": {}, \"find_regex\": {}, \"bracket_pair\": ", .{ ed.show_minimap, ed.word_wrap, ed.show_whitespace, ed.show_indent_guides, ed.find.case_sensitive, ed.find.whole_word, ed.find.use_regex });
     if (ed.bracket_pair) |bp| {
         try buf.writer.print("[[{d}, {d}], [{d}, {d}]]", .{ bp[0].row, bp[0].col, bp[1].row, bp[1].col });
@@ -809,6 +822,11 @@ fn uiState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
         ui.last_clipboard_text orelse "", ui.file_explorer.selectionCount(), if (ui.active_dialog) |ad| ad.focused else 0,
     });
     try buf.writer.print(", \"last_frame_ms\": {d:.2}, \"max_frame_ms\": {d:.2}, \"lsp\": \"{s}\", \"tab_switcher\": {d}", .{ ui.last_frame_ms, ui.takeMaxFrameMs(), ui.lspStatus(), if (ui.tab_switcher) |p| @as(i64, @intCast(p)) else @as(i64, -1) });
+    // Glyph-Cache-Diagnose: gerasterte Glyphen und komplette Leerungen seit Start.
+    const glyph_stats = if (@import("rendering/mod.zig").Renderer.g_text_renderer) |tr| tr.ts_ptr.cache.getStats() else null;
+    try buf.writer.print(", \"glyph_rasterized\": {d}, \"glyph_cache_clears\": {d}, \"glyph_cache_entries\": {d}", .{
+        if (glyph_stats) |s| s.rasterized else 0, if (glyph_stats) |s| s.clears else 0, if (glyph_stats) |s| s.entries else 0,
+    });
     try buf.writer.print(", \"active_pane_index\": {d}, \"light_theme\": {}, \"font_size\": {d}, \"autosave\": {}, \"menu_highlight\": {d}, \"shortcuts_scroll\": {d:.0}, \"toast\": ", .{
         activePaneIndex(ui), ui.isLightTheme(), ui.getActiveEditor().font_size, ui.autosave, ui.menu_highlight orelse 999, ui.shortcuts_scroll_y,
     });
@@ -911,11 +929,11 @@ pub fn splitPane(ctx: *E2EContext, _: *zigjr.DispatchCtx, direction: []const u8)
     } else {
         ctx.ui_system.pending_split = .vertical;
     }
-    
+
     // Event Loop aufwecken
     const wio = @import("wio");
     wio.cancelWait();
-    
+
     return "ok";
 }
 
@@ -998,6 +1016,18 @@ fn writeScreenshot(ctx: *E2EContext, commands: []clay.RenderCommand) ![]const u8
         }
     }
     log.debug("screenshot: rects={d} texts={d} images={d}", .{ rect_count, text_count, image_count });
+    // ZID_DEBUG=1: jeden Command mit Typ, Box und Textanfang ausgeben (Diagnose wachsender Layouts).
+    for (commands, 0..) |cmd, ci| {
+        const bb = cmd.bounding_box;
+        if (cmd.command_type == .text) {
+            const sc = cmd.render_data.text.string_contents;
+            const len: usize = @intCast(@max(sc.length, 0));
+            const shown = sc.chars[0..@min(len, 40)];
+            log.debug("cmd[{d}] text id={d} box=({d:.0},{d:.0} {d:.0}x{d:.0}) len={d} \"{s}\"", .{ ci, cmd.id, bb.x, bb.y, bb.width, bb.height, len, shown });
+        } else {
+            log.debug("cmd[{d}] {s} id={d} box=({d:.0},{d:.0} {d:.0}x{d:.0})", .{ ci, @tagName(cmd.command_type), cmd.id, bb.x, bb.y, bb.width, bb.height });
+        }
+    }
     const w = if (renderer.width == 0) mod.g_viewport_width else renderer.width;
     const h = if (renderer.height == 0) mod.g_viewport_height else renderer.height;
     log.info("screenshot: rendering {d}x{d}", .{ w, h });
