@@ -6,6 +6,7 @@ const file_types = @import("ui/file_types.zig");
 const wio = @import("wio");
 const platform = @import("platform/mod.zig");
 const display_check = @import("platform/display_check.zig");
+const wheel = @import("platform/wheel.zig");
 const pdf_nav = @import("ui/pdf_nav.zig");
 const rendering = @import("rendering/mod.zig");
 const text = @import("text/mod.zig");
@@ -576,10 +577,7 @@ pub fn main() !void {
                         },
                         .scroll_vertical => |delta| {
                             scroll_delta_y = @floatCast(delta);
-                            var lines_delta: i32 = @intFromFloat(@round(scroll_delta_y));
-                            if (builtin.os.tag == .windows) {
-                                lines_delta = -lines_delta;
-                            }
+                            const lines_delta = wheel.wheelLines(scroll_delta_y);
                             if (lines_delta != 0) ui_system.handleScroll(lines_delta);
                         },
                         .scroll_horizontal => |delta| {

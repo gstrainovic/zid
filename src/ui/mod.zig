@@ -217,6 +217,25 @@ pub const UI = struct {
     /// in keinem Log auf.
     fn clayError(data: clay.ErrorData) callconv(.c) void {
         log.err("Clay: {s} ({s})", .{ data.error_text.chars[0..@intCast(data.error_text.length)], @tagName(data.error_type) });
+        if (data.error_type == .duplicate_id) logDuplicateParent();
+    }
+
+    /// duplicate_id nennt das Element nicht. Zur Eingrenzung einmal je Elternelement dessen
+    /// Clay-ID loggen (das doppelte Element ist beim Aufruf noch offen, sein Elternteil steht
+    /// darunter im Stapel). Die Zahl lässt sich mit den bekannten ID-Namen zurückrechnen
+    /// (`scripts/clay_id_decode.py`).
+    fn logDuplicateParent() void {
+        const Seen = struct {
+            var ids: [16]u32 = undefined;
+            var count: usize = 0;
+        };
+        const parent = clay.cdefs.Clay__GetParentElementId();
+        for (Seen.ids[0..Seen.count]) |id| if (id == parent) return;
+        if (Seen.count < Seen.ids.len) {
+            Seen.ids[Seen.count] = parent;
+            Seen.count += 1;
+        }
+        log.err("Clay: duplicate_id unter Elternelement id={d}", .{parent});
     }
 
     pub fn init(allocator: std.mem.Allocator, config: UIConfig, default_file_path: ?[]const u8) !Self {
@@ -1113,7 +1132,10 @@ pub const UI = struct {
         }
         {
             const ed = self.getActiveEditor();
-            if (ed.takeSaved()) self.showToast("Saved {s}", .{std.fs.path.basename(ed.buffer.get_file_path())});
+            if (ed.takeSaved()) {
+                self.showToast("Saved {s}", .{std.fs.path.basename(ed.buffer.get_file_path())});
+                self.reloadMarkdownPreview(ed.buffer.get_file_path());
+            }
             // Autosave: 1 s nach der letzten Änderung, nur für Dateien mit Pfad
             if (self.autosave and ed.is_modified and ed.buffer.get_file_path().len > 0 and (ed.time_ms - ed.last_edit_ms) > 1000) {
                 if (self.getActiveTabBar().getActiveTab()) |tab| {
@@ -2080,12 +2102,40 @@ pub const UI = struct {
         self.pending_tab_switch = preview_path;
     }
 
-    /// Die Markdown-Vorschau des aktiven Tabs, falls sie ein Marp-Deck zeigt.
-    pub fn activeSlideDeckView(self: *Self) ?*markdown_view_mod.MarkdownView {
+    /// Nach dem Speichern von `source_path` (Ctrl+S oder Autosave) die offene Vorschau derselben
+    /// Datei neu aufbauen, damit ein Split „Editor links, Vorschau rechts“ ohne Neuöffnen
+    /// nachzieht. Scroll-Position, Folie und Schriftgröße bleiben erhalten.
+    pub fn reloadMarkdownPreview(self: *Self, source_path: []const u8) void {
+        var key_buf: [std.fs.max_path_bytes + 16]u8 = undefined;
+        const key = std.fmt.bufPrint(&key_buf, "preview://{s}", .{source_path}) catch return;
+        const entry = self.open_markdown_views.getEntry(key) orelse return;
+        const old = entry.value_ptr.*;
+        const content = std.fs.cwd().readFileAlloc(self.allocator, source_path, 1024 * 1024) catch |err| {
+            log.warn("preview reload: {s}: {s}", .{ source_path, @errorName(err) });
+            return;
+        };
+        defer self.allocator.free(content);
+        const new_v = self.allocator.create(markdown_view_mod.MarkdownView) catch return;
+        new_v.* = markdown_view_mod.MarkdownView.init(self.allocator, content, source_path);
+        new_v.scroll_offset_y = old.scroll_offset_y;
+        if (new_v.slideCount() > 0) new_v.current_slide = @min(old.current_slide, new_v.slideCount() - 1);
+        new_v.font_size = old.font_size;
+        old.deinit();
+        self.allocator.destroy(old);
+        entry.value_ptr.* = new_v;
+    }
+
+    /// Die Markdown-Vorschau des aktiven Tabs, sonst null.
+    pub fn activeMarkdownView(self: *Self) ?*markdown_view_mod.MarkdownView {
         const tb = self.getActiveTabBar();
         const tab = tb.getActiveTab() orelse return null;
         if (tab.kind != .markdown_preview) return null;
-        const v = self.open_markdown_views.get(tab.path) orelse return null;
+        return self.open_markdown_views.get(tab.path);
+    }
+
+    /// Die Markdown-Vorschau des aktiven Tabs, falls sie ein Marp-Deck zeigt.
+    pub fn activeSlideDeckView(self: *Self) ?*markdown_view_mod.MarkdownView {
+        const v = self.activeMarkdownView() orelse return null;
         if (v.slideCount() == 0) return null;
         return v;
     }
@@ -2694,6 +2744,9 @@ pub const UI = struct {
                                     md_view = new_v;
                                 }
                                 if (md_view) |v| {
+                                    // Dieselbe Vorschau kann in zwei Panes stehen (Split kopiert die
+                                    // Tabs, Views hängen am Pfad): IDs zusätzlich je Pane salzen.
+                                    v.pane_salt = @truncate(@intFromPtr(pane));
                                     v.render(allocator, t, self);
                                     if (v.pending_split_v) {
                                         v.pending_split_v = false;

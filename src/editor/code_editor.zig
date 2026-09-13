@@ -374,10 +374,16 @@ pub const CodeEditor = struct {
         const Ctx = struct {
             fn egc_length(_: flow_core.Buffer.Metrics, egcs: []const u8, colcount: *usize, _: usize) usize {
                 if (egcs.len == 0) return 0;
-                if (egcs[0] == '\n') { colcount.* = 1; return 1; }
-                if (egcs[0] == '\t') { colcount.* = 4; return 1; }
+                if (egcs[0] == '\n') {
+                    colcount.* = 1;
+                    return 1;
+                }
+                if (egcs[0] == '\t') {
+                    colcount.* = 4;
+                    return 1;
+                }
                 colcount.* = 1;
-                return 1;  // ASCII: jedes Zeichen ist 1 Byte und Breite 1
+                return 1; // ASCII: jedes Zeichen ist 1 Byte und Breite 1
             }
             /// Breite eines ganzen Chunks: insert_chars addiert sie zur Cursor-Spalte. Vorher
             /// war das pauschal 1, der Cursor stand nach Einfügen/Autoclose eine Spalte zu weit links.
@@ -463,7 +469,7 @@ pub const CodeEditor = struct {
         self.destroyHighlighter();
         self.buffer.set_file_path(file_path);
         const content = self.buffer.store_to_string_cached(self.buffer.root, self.buffer.file_eol_mode);
-        
+
         // Create primary highlighter
         self.highlighter = flow_core.highlight.SyntaxHighlighter.createByPath(
             self.allocator,
@@ -482,7 +488,7 @@ pub const CodeEditor = struct {
         ) catch null; // If first succeeded, this usually succeeds too
 
         self.last_parsed_root = null;
-        
+
         // Dirty-Flag setzen statt sofort zu parsen.
         // highlightChunked wird im Main-Loop aufgerufen.
         self.edits_fully_tracked = false;
@@ -531,7 +537,7 @@ pub const CodeEditor = struct {
             return;
         };
         const end = std.time.nanoTimestamp();
-        std.log.scoped(.highlight).debug("synchronous reparse took {d:.3} ms", .{ @as(f64, @floatFromInt(end - start)) / 1_000_000.0 });
+        std.log.scoped(.highlight).debug("synchronous reparse took {d:.3} ms", .{@as(f64, @floatFromInt(end - start)) / 1_000_000.0});
         self.last_parsed_root = self.buffer.root;
 
         // Cache invalidieren: komplett bei Full-Reparse, sonst nur Dirty-Range.
@@ -557,7 +563,7 @@ pub const CodeEditor = struct {
             self.bg_mutex.unlock();
         };
         const end = std.time.nanoTimestamp();
-        std.log.scoped(.highlight).debug("background reparse took {d:.3} ms", .{ @as(f64, @floatFromInt(end - start)) / 1_000_000.0 });
+        std.log.scoped(.highlight).debug("background reparse took {d:.3} ms", .{@as(f64, @floatFromInt(end - start)) / 1_000_000.0});
 
         self.bg_mutex.lock();
         self.bg_parsing = false;
@@ -568,12 +574,12 @@ pub const CodeEditor = struct {
     /// Gibt `true` zurück wenn noch Arbeit (Parsing) läuft.
     pub fn highlightChunked(self: *Self, max_ms: u64, time_ms: f32) bool {
         _ = max_ms; // Budget wird im Background-Thread ignoriert (da kein UI-Block)
-        
+
         // 1. Prüfen ob Background-Parse fertig ist
         self.bg_mutex.lock();
         if (self.bg_parse_thread != null and !self.bg_parsing) {
             self.bg_mutex.unlock();
-            
+
             const swap_start = std.time.nanoTimestamp();
             if (self.bg_parse_thread) |thread| {
                 thread.join();
@@ -587,7 +593,7 @@ pub const CodeEditor = struct {
                 self.highlighter = self.bg_highlighter.?;
                 self.bg_highlighter = old_hl;
 
-                // Neuer primary hat frischen Tree vom Snapshot-Zeitpunkt, 
+                // Neuer primary hat frischen Tree vom Snapshot-Zeitpunkt,
                 // aber ihm fehlen die Edits, die WÄHREND des Parsens passiert sind.
                 // -> Catch up!
                 self.bg_mutex.lock();
@@ -607,7 +613,7 @@ pub const CodeEditor = struct {
                 self.bg_mutex.unlock();
 
                 const swap_end = std.time.nanoTimestamp();
-                std.log.scoped(.highlight).debug("background reparse swapped in {d:.3} ms", .{ @as(f64, @floatFromInt(swap_end - swap_start)) / 1_000_000.0 });
+                std.log.scoped(.highlight).debug("background reparse swapped in {d:.3} ms", .{@as(f64, @floatFromInt(swap_end - swap_start)) / 1_000_000.0});
             } else {
                 self.bg_mutex.lock();
                 self.bg_queued_edits.clearRetainingCapacity();
@@ -641,7 +647,7 @@ pub const CodeEditor = struct {
         // 4. Background-Parse starten
         const hl = self.highlighter orelse return false;
         std.log.scoped(.highlight).debug("starting background parse: has_dirty={any} tracked={any} root={*} last={*}", .{ self.has_dirty_lines, self.edits_fully_tracked, self.buffer.root, self.last_parsed_root });
-        
+
         // Wenn Edits fehlen: resetTree() nötig
         if (!self.edits_fully_tracked) {
             hl.resetTree();
@@ -922,7 +928,7 @@ pub const CodeEditor = struct {
             // pushEdit für Delete der Selection
             const sel_text = self.getTextInRange(range) catch "";
             defer if (sel_text.len > 0 and sel_text.ptr != "".ptr) self.allocator.free(sel_text);
-            
+
             self.pushEditForChange(range.begin.row, range.begin.col, sel_text, "");
             const new_root = self.buffer.root.delete_range(range, self.buffer.allocator, null, m) catch return error.Stop;
             self.buffer.root = new_root;
@@ -959,9 +965,7 @@ pub const CodeEditor = struct {
     /// keine Zeilenoperationen: die würden die Positionen der anderen Cursor verschieben).
     fn multiSafe(action: actions.Action) bool {
         return switch (action) {
-            .MoveLeft, .MoveRight, .MoveUp, .MoveDown, .MoveWordLeft, .MoveWordRight, .MoveLineStart, .MoveLineEnd,
-            .SelectLeft, .SelectRight, .SelectUp, .SelectDown, .SelectWordLeft, .SelectWordRight, .SelectLineStart, .SelectLineEnd,
-            .DeleteBack, .DeleteForward, .DeleteWordBack, .DeleteWordForward, .InsertTab => true,
+            .MoveLeft, .MoveRight, .MoveUp, .MoveDown, .MoveWordLeft, .MoveWordRight, .MoveLineStart, .MoveLineEnd, .SelectLeft, .SelectRight, .SelectUp, .SelectDown, .SelectWordLeft, .SelectWordRight, .SelectLineStart, .SelectLineEnd, .DeleteBack, .DeleteForward, .DeleteWordBack, .DeleteWordForward, .InsertTab => true,
             else => false,
         };
     }
@@ -1113,9 +1117,7 @@ pub const CodeEditor = struct {
 
     fn dispatchSingle(self: *Self, action: actions.Action) void {
         if (!self.in_multi) switch (action) {
-            .InsertNewline, .InsertTab,
-            .DeleteBack, .DeleteForward, .DeleteWordBack, .DeleteWordForward, .DeleteLine,
-            .Cut, .Paste, .IndentLines, .OutdentLines, .ToggleComment, .MoveLineUp, .MoveLineDown, .DuplicateLine => {
+            .InsertNewline, .InsertTab, .DeleteBack, .DeleteForward, .DeleteWordBack, .DeleteWordForward, .DeleteLine, .Cut, .Paste, .IndentLines, .OutdentLines, .ToggleComment, .MoveLineUp, .MoveLineDown, .DuplicateLine => {
                 self.typing_in_progress = false;
                 self.snapshotForUndo();
             },
@@ -1478,7 +1480,11 @@ pub const CodeEditor = struct {
                 const ins_col = self.cursor.col;
                 self.pushEditForChange(ins_row, ins_col, "", "    ");
                 const result = self.buffer.root.insert_chars(
-                    self.cursor.row, self.cursor.col, "    ", self.buffer.allocator, m,
+                    self.cursor.row,
+                    self.cursor.col,
+                    "    ",
+                    self.buffer.allocator,
+                    m,
                 ) catch return;
                 self.buffer.root = result[2];
                 self.cursor.col += 4;
@@ -1589,7 +1595,7 @@ pub const CodeEditor = struct {
         const range = self.selectionRange() orelse return false;
         const del_text = self.getTextInRange(range) catch return false;
         defer self.allocator.free(del_text);
-        
+
         self.pushEditForChange(range.begin.row, range.begin.col, del_text, "");
         const m = self.metrics();
         const new_root = self.buffer.root.delete_range(range, self.buffer.allocator, null, m) catch return false;
@@ -2364,16 +2370,44 @@ pub const CodeEditor = struct {
 
     /// Minimap rechts: je Zeile ein Balken (Länge ∝ Zeilenlänge), Fenster um den Viewport,
     /// sichtbarer Bereich hinterlegt. Klick springt dorthin.
+    /// Clay-ID mit Editor-Salz: Zeilen-, Gutter-, Scroll-Elemente sind je Pane eindeutig.
+    /// Ohne Salz meldete Clay bei zwei Panes ~80 `duplicate_id` pro Frame, und `getElementData`
+    /// der zweiten Pane bekam die Boxen der ersten. E2E: `element_bounds(_i)` löst den Namen
+    /// zuerst global, dann über den aktiven Editor auf (`E2E: elementBounds*`).
+    pub fn idi(self: *const Self, name: []const u8, index: u32) clay.ElementId {
+        return clay.ElementId.IDI(name, index +% self.idSalt());
+    }
+
+    pub fn idSalt(self: *const Self) u32 {
+        return @truncate(@intFromPtr(self));
+    }
+
+    /// Höhe eines Minimap-Balkens und Innenabstand oben des Minimap-Elements.
+    pub const minimap_line_px: f32 = 2;
+    pub const minimap_pad_top: u16 = 2;
+
+    pub const MinimapWindow = struct { rows: usize, start: usize, end: usize };
+
+    /// Zeilenfenster der Minimap: `rows` Balken passen samt Innenabstand in die Editor-Höhe,
+    /// der Viewport liegt möglichst mittig, `start..end` sind die gezeichneten Buffer-Zeilen.
+    pub fn minimapWindow(self: *Self) MinimapWindow {
+        const total = self.lineCount();
+        const visible = self.visibleLineCount();
+        const usable = @max(0, self.height - @as(f32, @floatFromInt(minimap_pad_top)));
+        const rows: usize = @max(1, @as(usize, @intFromFloat(usable / minimap_line_px)));
+        const half = rows / 2;
+        var start: usize = if (self.view.row + visible / 2 > half) self.view.row + visible / 2 - half else 0;
+        if (start + rows > total) start = if (total > rows) total - rows else 0;
+        return .{ .rows = rows, .start = start, .end = @min(start + rows, total) };
+    }
+
     fn renderMinimap(self: *Self, mouse_pressed: bool) void {
         const total = self.lineCount();
         const visible = self.visibleLineCount();
-        const line_px: f32 = 2;
-        const rows_fit: usize = @max(1, @as(usize, @intFromFloat(@max(0, self.height) / line_px)));
-        // Fenster: Viewport möglichst mittig
-        const half = rows_fit / 2;
-        var start: usize = if (self.view.row + visible / 2 > half) self.view.row + visible / 2 - half else 0;
-        if (start + rows_fit > total) start = if (total > rows_fit) total - rows_fit else 0;
-        const end = @min(start + rows_fit, total);
+        const line_px = minimap_line_px;
+        const window = self.minimapWindow();
+        const start = window.start;
+        const end = window.end;
         const mm_id = clay.ElementId.IDI("minimap", @truncate(@intFromPtr(self)));
         const data = clay.getElementData(mm_id);
         if (data.found and mouse_pressed and clay.pointerOver(mm_id)) {
@@ -2384,7 +2418,11 @@ pub const CodeEditor = struct {
         }
         clay.UI()(.{
             .id = mm_id,
-            .layout = .{ .sizing = .{ .w = .fixed(self.minimap_width), .h = .grow }, .direction = .top_to_bottom, .padding = .{ .left = 4, .top = 2 } },
+            .layout = .{ .sizing = .{ .w = .fixed(self.minimap_width), .h = .grow }, .direction = .top_to_bottom, .padding = .{ .left = 4, .top = minimap_pad_top } },
+            // Clip: Kinder dürfen die Mindesthöhe nicht nach oben durchreichen. Ohne Clip war die
+            // Minimap 2 px höher als der Editor, die Wurzel wuchs jeden zweiten Frame um 2 px und
+            // der Editor zeichnete nach Minuten hunderte Zeilen (extrem langsam, besonders klein gezoomt).
+            .clip = .{ .vertical = true },
             .background_color = self.gutter_color,
             .border = .{ .width = .{ .left = 1 }, .color = .{ self.line_number_color[0], self.line_number_color[1], self.line_number_color[2], 60 } },
         })({
@@ -2819,19 +2857,42 @@ pub const CodeEditor = struct {
             self.view.row = if (amount > self.view.row) 0 else self.view.row - amount;
         } else if (delta < 0) {
             const amount = @as(usize, @intCast(-delta));
-            const total = self.lineCount();
-            const visible = self.visibleLineCount();
-            const max_offset = if (total > visible) total - visible else 0;
-            self.view.row = @min(self.view.row + amount, max_offset);
+            self.view.row = @min(self.view.row + amount, self.maxViewRow());
         }
     }
 
-    fn visibleLineCount(self: *const Self) usize {
+    pub fn visibleLineCount(self: *const Self) usize {
         const line_height: f32 = @floatFromInt(self.font_size + 16);
         if (line_height <= 0) return 10;
         const available = self.height;
         if (available <= 0) return 10;
         return @max(1, @as(usize, @intFromFloat(@floor(available / line_height))));
+    }
+
+    /// Höchste Buffer-Zeile, die oben stehen darf, damit der Schirm bis zum Dateiende
+    /// gefüllt ist. Mit Word-Wrap zählen die sichtbaren Reihen, nicht die Zeilen: von
+    /// hinten aufsummieren, bis der Schirm voll ist.
+    pub fn maxViewRow(self: *Self) usize {
+        const total = self.lineCount();
+        const visible = self.visibleLineCount();
+        if (total == 0) return 0;
+        if (!self.word_wrap) return if (total > visible) total - visible else 0;
+        var rows: usize = 0;
+        var line = total;
+        while (line > 0) {
+            const next = rows + self.visualRowsOf(line - 1);
+            if (next > visible) break;
+            rows = next;
+            line -= 1;
+        }
+        return line;
+    }
+
+    /// Sichtbare Reihen des ganzen Buffers (Zeilen ohne Word-Wrap).
+    pub fn totalVisualRows(self: *Self) usize {
+        const total = self.lineCount();
+        if (!self.word_wrap or total == 0) return total;
+        return self.visualRowsBetween(0, total - 1);
     }
 
     pub fn ensureCursorVisible(self: *Self) void {
@@ -2937,7 +2998,11 @@ pub const CodeEditor = struct {
         const m = self.metrics();
         std.log.debug("INSERT: row={} col={} char=U+{X}", .{ self.cursor.row, self.cursor.col, char_code });
         const result = self.buffer.root.insert_chars(
-            self.cursor.row, self.cursor.col, buf[0..len], self.buffer.allocator, m,
+            self.cursor.row,
+            self.cursor.col,
+            buf[0..len],
+            self.buffer.allocator,
+            m,
         ) catch |err| {
             std.log.err("INSERT FAILED: {} row={} col={} err={}", .{ char_code, self.cursor.row, self.cursor.col, err });
             return;
@@ -2955,7 +3020,7 @@ pub const CodeEditor = struct {
 
     pub fn render(self: *Self, arena: std.mem.Allocator, mouse_pressed: bool) void {
         self.desired_cursor = .arrow;
-        self.last_frame_hovered = false;  // Reset each frame
+        self.last_frame_hovered = false; // Reset each frame
 
         const editor_id = clay.ElementId.IDI("code_editor", @truncate(@intFromPtr(self)));
 
@@ -2980,7 +3045,7 @@ pub const CodeEditor = struct {
             // Phase 5: Progress Indicator
             if (self.bg_parsing) {
                 clay.UI()(.{
-                    .id = clay.ElementId.ID("parsing_indicator"),
+                    .id = self.idi("parsing_indicator", 0),
                     .layout = .{
                         .sizing = .fit,
                         .padding = .axes(6, 12),
@@ -3003,20 +3068,20 @@ pub const CodeEditor = struct {
             }
 
             clay.UI()(.{
-                .id = clay.ElementId.ID("editor_scroll"),
+                .id = self.idi("editor_scroll", 0),
                 .layout = .{ .sizing = .grow },
                 .background_color = self.bg_color,
                 .clip = .{ .vertical = true, .horizontal = true },
             })({
                 clay.UI()(.{
-                    .id = clay.ElementId.ID("editor_content"),
+                    .id = self.idi("editor_content", 0),
                     .layout = .{
                         .sizing = .{ .w = .grow, .h = .fit },
                         .direction = .top_to_bottom,
                     },
                 })({
                     const total = self.lineCount();
-                    
+
                     // Dynamische Gutter-Breite basierend auf maximaler Zeilennummer
                     if (!self.show_gutter) {
                         self.gutter_width = 0;
@@ -3051,53 +3116,53 @@ pub const CodeEditor = struct {
                         };
                         const segs: []const wrap_ops.Segment = if (self.word_wrap) (wrap_ops.segments(arena, line_text, wrap_cols) catch &one) else &one;
                         for (segs, 0..) |seg, k| {
-                        const vrow = rows_used;
-                        rows_used += 1;
-                        const is_last_seg = k + 1 == segs.len;
-
-                        clay.UI()(.{
-                            // Erstes Segment behält die ID je Buffer-Zeile (E2E: element_bounds_i("code", zeile)),
-                            // Fortsetzungsreihen bekommen eigene IDs je sichtbarer Reihe
-                            .id = if (k == 0) clay.ElementId.IDI("row", @intCast(i)) else clay.ElementId.IDI("roww", @intCast(vrow)),
-                            .layout = .{
-                                .sizing = .{ .w = .grow, .h = .fixed(@floatFromInt(self.font_size + 16)) },
-                                .direction = .left_to_right,
-                                .child_alignment = .{ .x = .left, .y = .center },
-                            },
-                        })({
-                            if (self.show_gutter) clay.UI()(.{
-                                .id = if (k == 0) clay.ElementId.IDI("gutter", @intCast(i)) else clay.ElementId.IDI("gutterw", @intCast(vrow)),
-                                .layout = .{
-                                    .sizing = .{ .w = .fixed(self.gutter_width), .h = .fixed(@floatFromInt(self.font_size + 16)) },
-                                    .padding = .{ .left = 8, .right = 16 },
-                                    .child_alignment = .{ .x = .right, .y = .center },
-                                },
-                                .background_color = if (is_selected) self.selection_color else if (is_current) self.current_line_highlight else self.gutter_color,
-                            })({
-                                const color = if (is_current)
-                                    self.current_line_number_color
-                                else
-                                    self.line_number_color;
-
-                                var buf: [16]u8 = undefined;
-                                // Fortsetzungsreihen einer umgebrochenen Zeile bleiben ohne Nummer
-                                const line_num_str = if (k == 0) (std.fmt.bufPrint(&buf, "{d}", .{i + 1}) catch "?") else "";
-                                const persistent_str = arena.dupe(u8, line_num_str) catch "";
-                                clay.text(persistent_str, .{ .font_size = self.font_size, .color = color });
-                            });
+                            const vrow = rows_used;
+                            rows_used += 1;
+                            const is_last_seg = k + 1 == segs.len;
 
                             clay.UI()(.{
-                                .id = if (k == 0) clay.ElementId.IDI("code", @intCast(i)) else clay.ElementId.IDI("codew", @intCast(vrow)),
+                                // Erstes Segment behält die ID je Buffer-Zeile (E2E: element_bounds_i("code", zeile)),
+                                // Fortsetzungsreihen bekommen eigene IDs je sichtbarer Reihe
+                                .id = if (k == 0) self.idi("row", @intCast(i)) else self.idi("roww", @intCast(vrow)),
                                 .layout = .{
                                     .sizing = .{ .w = .grow, .h = .fixed(@floatFromInt(self.font_size + 16)) },
-                                    .padding = .{ .left = 12 },
+                                    .direction = .left_to_right,
                                     .child_alignment = .{ .x = .left, .y = .center },
                                 },
-                                .background_color = if (is_current) self.current_line_highlight else .{ 0, 0, 0, 0 },
                             })({
-                                self.renderLine(arena, i, line_text[seg.start..seg.end], seg.start, line_text.len, seg.col, is_last_seg);
+                                if (self.show_gutter) clay.UI()(.{
+                                    .id = if (k == 0) self.idi("gutter", @intCast(i)) else self.idi("gutterw", @intCast(vrow)),
+                                    .layout = .{
+                                        .sizing = .{ .w = .fixed(self.gutter_width), .h = .fixed(@floatFromInt(self.font_size + 16)) },
+                                        .padding = .{ .left = 8, .right = 16 },
+                                        .child_alignment = .{ .x = .right, .y = .center },
+                                    },
+                                    .background_color = if (is_selected) self.selection_color else if (is_current) self.current_line_highlight else self.gutter_color,
+                                })({
+                                    const color = if (is_current)
+                                        self.current_line_number_color
+                                    else
+                                        self.line_number_color;
+
+                                    var buf: [16]u8 = undefined;
+                                    // Fortsetzungsreihen einer umgebrochenen Zeile bleiben ohne Nummer
+                                    const line_num_str = if (k == 0) (std.fmt.bufPrint(&buf, "{d}", .{i + 1}) catch "?") else "";
+                                    const persistent_str = arena.dupe(u8, line_num_str) catch "";
+                                    clay.text(persistent_str, .{ .font_size = self.font_size, .color = color });
+                                });
+
+                                clay.UI()(.{
+                                    .id = if (k == 0) self.idi("code", @intCast(i)) else self.idi("codew", @intCast(vrow)),
+                                    .layout = .{
+                                        .sizing = .{ .w = .grow, .h = .fixed(@floatFromInt(self.font_size + 16)) },
+                                        .padding = .{ .left = 12 },
+                                        .child_alignment = .{ .x = .left, .y = .center },
+                                    },
+                                    .background_color = if (is_current) self.current_line_highlight else .{ 0, 0, 0, 0 },
+                                })({
+                                    self.renderLine(arena, i, line_text[seg.start..seg.end], seg.start, line_text.len, seg.col, is_last_seg);
+                                });
                             });
-                        });
                         }
                     }
                 });
@@ -3118,11 +3183,7 @@ pub const CodeEditor = struct {
     fn renderLine(self: *Self, arena: std.mem.Allocator, line_idx: usize, line: []const u8, offset: usize, full_len: usize, first_col: usize, is_last: bool) void {
         const seg: VisibleSlice = .{ .text = line, .start_byte = offset };
         clay.UI()(.{
-            .layout = .{ 
-                .sizing = .{ .w = .grow, .h = .grow },
-                .direction = .left_to_right, 
-                .child_alignment = .{ .x = .left, .y = .center } 
-            },
+            .layout = .{ .sizing = .{ .w = .grow, .h = .grow }, .direction = .left_to_right, .child_alignment = .{ .x = .left, .y = .center } },
         })({
             if (self.hasSelection()) {
                 self.renderSelection(arena, line_idx, seg, is_last);
@@ -3279,20 +3340,20 @@ pub const CodeEditor = struct {
     }
 
     fn renderScrollbar(self: *Self) void {
-        const total = self.lineCount();
+        const total = self.totalVisualRows();
         const visible = self.visibleLineCount();
-        if (total <= visible) return;
+        const max_offset = self.maxViewRow();
+        if (max_offset == 0) return;
 
-        const track_data = clay.getElementData(clay.ElementId.ID("scrollbar_track"));
+        const track_data = clay.getElementData(self.idi("scrollbar_track", 0));
         if (track_data.found) {
             self.scrollbar_track_x = track_data.bounding_box.x;
             self.scrollbar_track_y = track_data.bounding_box.y;
         }
 
         const track_height = self.height;
-        const thumb_ratio: f32 = @as(f32, @floatFromInt(visible)) / @as(f32, @floatFromInt(total));
+        const thumb_ratio: f32 = @as(f32, @floatFromInt(visible)) / @as(f32, @floatFromInt(@max(total, 1)));
         const thumb_height = @max(20.0, track_height * thumb_ratio);
-        const max_offset: usize = total - visible;
         const scroll_frac: f32 = if (max_offset > 0)
             @as(f32, @floatFromInt(self.view.row)) / @as(f32, @floatFromInt(max_offset))
         else
@@ -3306,7 +3367,7 @@ pub const CodeEditor = struct {
         const thumb_color: clay.Color = .{ 88, 88, 120, 200 };
 
         clay.UI()(.{
-            .id = clay.ElementId.ID("scrollbar_track"),
+            .id = self.idi("scrollbar_track", 0),
             .floating = .{
                 .attach_to = .to_parent,
                 .attach_points = .{ .element = .right_top, .parent = .right_top },
@@ -3323,7 +3384,7 @@ pub const CodeEditor = struct {
                 .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(thumb_y) } },
             })({});
             clay.UI()(.{
-                .id = clay.ElementId.ID("scrollbar_thumb"),
+                .id = self.idi("scrollbar_thumb", 0),
                 .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(thumb_height) } },
                 .background_color = thumb_color,
                 .corner_radius = .all(3),
@@ -3334,9 +3395,7 @@ pub const CodeEditor = struct {
     }
 
     pub fn isMouseOverScrollbar(self: *Self, x: f32, y: f32) bool {
-        const total = self.lineCount();
-        const visible = self.visibleLineCount();
-        if (total <= visible) return false;
+        if (self.maxViewRow() == 0) return false;
 
         if (x < self.scrollbar_track_x) return false;
         if (x > self.scrollbar_track_x + self.scrollbar_width) return false;
@@ -3346,9 +3405,8 @@ pub const CodeEditor = struct {
     }
 
     fn handleScrollbarMouseDown(self: *Self, x: f32, y: f32) bool {
-        const total = self.lineCount();
         const visible = self.visibleLineCount();
-        if (total <= visible) return false;
+        if (self.maxViewRow() == 0) return false;
 
         if (x < self.scrollbar_track_x) return false;
         if (x > self.scrollbar_track_x + self.scrollbar_width) return false;
@@ -3371,14 +3429,14 @@ pub const CodeEditor = struct {
     }
 
     fn handleScrollbarMouseMove(self: *Self, _: f32, y: f32) void {
-        const total = self.lineCount();
+        const total = self.totalVisualRows();
         const visible = self.visibleLineCount();
-        if (total <= visible) return;
+        const max_offset = self.maxViewRow();
+        if (max_offset == 0) return;
 
         const track_height = self.height;
-        const thumb_ratio: f32 = @as(f32, @floatFromInt(visible)) / @as(f32, @floatFromInt(total));
+        const thumb_ratio: f32 = @as(f32, @floatFromInt(visible)) / @as(f32, @floatFromInt(@max(total, 1)));
         const thumb_height = @max(20.0, track_height * thumb_ratio);
-        const max_offset: usize = total - visible;
         const scrollable_height = track_height - thumb_height;
 
         if (scrollable_height <= 0) return;
@@ -3535,19 +3593,19 @@ test "Navigation: Right bewegt Cursor um EINE Position weiter" {
     ed.cursor.row = 0;
     ed.cursor.col = 0;
     const m = ed.metrics();
-    
+
     // Erster Right: col=0 → col=1
     ed.cursor.move_right(ed.buffer.root, m) catch {};
     try std.testing.expectEqual(@as(usize, 1), ed.cursor.col);
-    
+
     // Zweiter Right: col=1 → col=2
     ed.cursor.move_right(ed.buffer.root, m) catch {};
     try std.testing.expectEqual(@as(usize, 2), ed.cursor.col);
-    
+
     // Dritter Right: col=2 → col=3
     ed.cursor.move_right(ed.buffer.root, m) catch {};
     try std.testing.expectEqual(@as(usize, 3), ed.cursor.col);
-    
+
     // Am Zeilenende (col=6): Right springt zur nächsten Zeile
     ed.cursor.col = 6;
     ed.cursor.row = 0;
@@ -3923,6 +3981,39 @@ test "setText nach Tippen: Undo bleibt sicher (alte Undo-Bäume zeigen auf freig
     try std.testing.expectEqualStrings("neu\nzwei\ndrei", text2);
 }
 
+test "Clay-IDs je Editor: zwei Panes bekommen verschiedene Zeilen-IDs, dieselbe Pane stabile" {
+    // Vorher IDI("code", zeile) in jeder Pane gleich → bei Split ~80 duplicate_id-Fehler pro Frame.
+    var a = try testEditor(std.testing.allocator, "x");
+    defer a.buffer.deinit();
+    defer a.ed.deinit();
+    var b = try testEditor(std.testing.allocator, "y");
+    defer b.buffer.deinit();
+    defer b.ed.deinit();
+    try std.testing.expect(a.ed.idi("code", 3).id != b.ed.idi("code", 3).id);
+    try std.testing.expect(a.ed.idi("code", 3).id == a.ed.idi("code", 3).id);
+    try std.testing.expect(a.ed.idi("code", 3).id != a.ed.idi("code", 4).id);
+    try std.testing.expect(a.ed.idi("code", 3).id != a.ed.idi("row", 3).id);
+}
+
+test "Minimap: Balken plus Innenabstand passen in die Editor-Höhe (kein Wachstum pro Frame)" {
+    // Vorher: rows_fit = height / 2 Balken à 2 px + padding.top 2 → Minimap 2 px höher als der
+    // Editor; Clay reichte die Mindesthöhe bis zur Wurzel durch, die Bounding-Box wuchs jeden
+    // zweiten Frame um 2 px und der Editor zeichnete minutenlang immer mehr Zeilen.
+    var t = try testEditor(std.testing.allocator, "");
+    defer t.buffer.deinit();
+    defer t.ed.deinit();
+    var text: [4000]u8 = undefined;
+    @memset(&text, '\n');
+    t.ed.setText(&text);
+    for ([_]f32{ 672, 673, 800, 26, 3 }) |h| {
+        t.ed.height = h;
+        const w = t.ed.minimapWindow();
+        const px = @as(f32, @floatFromInt(w.rows)) * CodeEditor.minimap_line_px + @as(f32, @floatFromInt(CodeEditor.minimap_pad_top));
+        try std.testing.expect(px <= h or w.rows == 1);
+        try std.testing.expect(w.end - w.start <= w.rows);
+    }
+}
+
 test "Word-Wrap: sichtbare Reihen, Treffer je Reihe und Cursor bleibt sichtbar" {
     var t = try testEditor(std.testing.allocator, "aaa bbb ccc ddd eee\nkurz\nfff ggg hhh");
     defer t.buffer.deinit();
@@ -3956,6 +4047,40 @@ test "Word-Wrap: sichtbare Reihen, Treffer je Reihe und Cursor bleibt sichtbar" 
     t.ed.handleMouseDown(50 + 12 + 1, 40 + 5, .mouse_left);
     try std.testing.expectEqual(@as(usize, 0), t.ed.cursor.row);
     try std.testing.expectEqual(@as(usize, 8), t.ed.cursor.col);
+}
+
+test "Word-Wrap: Mausrad und Leiste kommen bis zur letzten Reihe" {
+    var t = try testEditor(std.testing.allocator, "aaa bbb ccc ddd eee\nkurz\nfff ggg hhh");
+    defer t.buffer.deinit();
+    defer t.ed.deinit();
+    t.ed.width = 50 + 12 + t.ed.scrollbar_width + 145; // 10 Umbruchspalten, wie im Test davor
+    t.ed.height = 3 * (24 + 16); // drei Reihen
+    t.ed.show_minimap = false;
+
+    // Ohne Umbruch passen alle drei Zeilen: nichts zu scrollen.
+    try std.testing.expectEqual(@as(usize, 0), t.ed.maxViewRow());
+    t.ed.scrollLines(-10);
+    try std.testing.expectEqual(@as(usize, 0), t.ed.view.row);
+
+    // Mit Umbruch: 3 + 1 + 2 = 6 Reihen. Ab Zeile 1 passen die restlichen drei Reihen,
+    // ab Zeile 0 nicht → das Rad muss bis Zeile 1 kommen.
+    t.ed.word_wrap = true;
+    try std.testing.expectEqual(@as(usize, 1), t.ed.maxViewRow());
+    t.ed.scrollLines(-10);
+    try std.testing.expectEqual(@as(usize, 1), t.ed.view.row);
+    // Die letzte Reihe ist jetzt sichtbar: Zeile 1 und beide Reihen von Zeile 2 füllen den Schirm.
+    try std.testing.expectEqual(@as(usize, 3), t.ed.visualRowsBetween(t.ed.view.row, 2));
+
+    // Bildlaufleiste: trotz nur drei Buffer-Zeilen ist sie da, ganz unten steht Zeile 1.
+    t.ed.scrollbar_track_x = 0;
+    t.ed.scrollbar_track_y = 0;
+    try std.testing.expect(t.ed.isMouseOverScrollbar(1, 1));
+    t.ed.view.row = 0;
+    t.ed.scrollbar_dragging = true;
+    t.ed.scrollbar_drag_start_y = 0;
+    t.ed.scrollbar_scroll_offset_at_drag_start = 0;
+    t.ed.handleScrollbarMouseMove(0, t.ed.height);
+    try std.testing.expectEqual(@as(usize, 1), t.ed.view.row);
 }
 
 test "Eingabefeld-Modus: ohne Gutter zählt die ganze Breite als Text" {

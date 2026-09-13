@@ -16,6 +16,7 @@ zig build run              # Run zid
 zig build run -- --headless  # Headless mode (screenshots via RPC port 9999)
 zig build run -- --interactive  # Interactive mode (stdin/stdout command interface)
 zig build -Doptimize=ReleaseSafe  # Release build
+zig build test-text        # nur Textsystem (Glyph-Cache, Atlas; Root src/text_tests.zig)
 ```
 
 ## Headless / Interactive Mode
@@ -68,14 +69,21 @@ echo -e "open ./README.md\nget-state\nshutdown" | zig build run -- --interactive
 - Explorer testen: `explorer_entries` liefert Viewport-Bounds, `row_height`, `scroll` und die
   sichtbaren Zeilen mit Index; Zeilenmitte = `viewport.y + index*row_height + row_height/2 - scroll`.
   Zeilen außerhalb des Viewports vorher mit `scroll x y lines` (negativ = runter) hereinholen.
+  Das ist die UI-Konvention aller `scrollLines` (positiv = hoch). Im Fenster spiegelt
+  `platform/wheel.zig` das wio-Delta (positiv = Rad nach unten, auf jeder Plattform gleich)
+  ohne OS-Sonderfall; der RPC umgeht diese Stelle, das Vorzeichen deckt nur der Unit-Test ab.
+  Achtung beim Prüfen von Hand: das Touchpad hat unter GNOME Natural Scrolling, die Maus nicht.
   Rechtsklick auf Zeile öffnet das Menü (Rename/Delete); F2/Entf wirken auf den markierten
   Eintrag, aber nur wenn der letzte Klick im Explorer war (`ui_state.explorer_focused`).
 - `key_press(name, ctrl)` kennt alle Buchstaben a–z sowie enter, backspace, escape, delete, tab,
   grave, up/down/left/right, home/end, page_up/page_down, f1, f2; `key_press_mods(name, ctrl, shift)`
   zusätzlich Shift (Ctrl+Shift+Tab). Modifier werden nach der Taste wieder gelöscht.
 - `ui_state` liefert Dialog-Titel, offenes Menü, Explorer-Fokus, Explorer sichtbar, Picker/Shortcut-
-  Dialog offen, Tabs (Pfad, Art, geändert) und aktiven Tab. `editor_state` liefert Zeilen, Cursor,
-  Suchleiste (offen, Begriff, kein Treffer) und den Text. `element_bounds(id)` /
+  Dialog offen, Tabs (Pfad, Art, geändert) und aktiven Tab, dazu `last_frame_ms`/`max_frame_ms`
+  (Layout-Zeit; headless rendert nur beim Screenshot) und die Glyph-Cache-Diagnose
+  `glyph_rasterized`, `glyph_cache_clears`, `glyph_cache_entries`. `editor_state` liefert Zeilen,
+  Cursor, Suchleiste (offen, Begriff, kein Treffer), den Text sowie `height`/`visible_rows`
+  (Bounding-Box des Editors aus dem Vorframe, muss über Frames konstant bleiben). `element_bounds(id)` /
   `element_bounds_i(id, index)` geben Clay-Bounding-Boxen für Klicks; für "existiert das Element
   gerade?" sind sie unzuverlässig (Clay behält Daten verschwundener Elemente), dafür `ui_state`.
   Fixtures unter `tmp/` anlegen (gitignored, im Explorer sichtbar).
@@ -133,7 +141,10 @@ liegen in `src/ui/mod.zig`, das Virtualisierungsmuster in
   Split. Der Editor hält die Farben in `menu_colors` (gesetzt in `applyTheme`). Terminal-Copy/Paste
   sind eigene Commands `terminal_copy`/`terminal_paste` ohne Kürzel (Ctrl+C/V gehen an die Shell).
   `md_preview` aus dem Tab-Menü öffnet die Vorschau des angeklickten Tabs
-  (`requestMarkdownPreview`), aus dem Editor die des aktiven Buffers.
+  (`requestMarkdownPreview`), aus dem Editor die des aktiven Buffers. Speichern (Ctrl+S oder
+  Autosave) baut eine offene Vorschau derselben Datei neu auf (`UI.reloadMarkdownPreview`, liest
+  die Datei, behält Scroll-Position, Folie und Schriftgröße); Split „Editor links, Vorschau
+  rechts“ zieht damit nach. E2E: `python3 scripts/e2e_md_preview_reload.py`.
 - **Breite der Aufklappmenüs ist dynamisch:** der Rahmen `menu_dropdown` ist `.w = .fit`, die
   Einträge sind `.w = .grow` mit `child_gap = 32`. Clay misst den breitesten Eintrag und zieht alle
   anderen darauf; die Kürzel stehen dadurch rechtsbündig, ohne dass jemand selbst misst. Vorher war
@@ -348,7 +359,10 @@ gepinnt, `models/` hält GGUFs flach und ignoriert (nie committen), `llm-bench/`
   Maus: `hitRow` findet Zeile + Segmentanfang, `colFromX` misst ab dort. `ensureCursorVisible`
   setzt `view.col = 0`, `view.cols` riesig und rückt `view.row` vor, bis die Reihen bis zum Cursor
   passen. Bewusst einfach: Cursor ↑/↓ und Scrollen arbeiten in Buffer-Zeilen, nicht in Reihen
-  (VS Code bewegt sich reihenweise); horizontale Scrollbar und Shift+Mausrad sind aus.
+  (VS Code bewegt sich reihenweise); horizontale Scrollbar und Shift+Mausrad sind aus. Die
+  Obergrenze fürs Scrollen ist `maxViewRow`: sie summiert bei Wrap die Reihen von hinten, bis der
+  Schirm voll ist; Zeilen minus sichtbare Zeilen ließe das Dateiende unerreichbar. Rad, Leiste
+  (Daumen über `totalVisualRows`) und Ziehen benutzen sie.
   RPC `editor_state.word_wrap`, `editor_state.visual_rows` (Reihen der Cursor-Zeile).
 - **Neue Editoren erben Optionen:** `splitActivePane` kopiert Minimap/Whitespace/Guides/Wrap,
   Schriftgröße und Theme vom Ausgangs-Editor (`copyEditorOptions`); vorher hatte der zweite Pane
@@ -373,6 +387,10 @@ gepinnt, `models/` hält GGUFs flach und ignoriert (nie committen), `llm-bench/`
   `text_color`). `--theme light|dark` gilt einmalig beim Start; vorher setzte main.zig das Theme in
   **jedem Frame** auf Dark, deshalb griff kein Umschalter.
 - **Zoom:** Ctrl+=/Ctrl+-/Ctrl+0 (`zoom_in/out/reset`, 10–48, `setFontSizeAll` für alle Panes).
+  Klein gezoomt zeichnet der Editor mehr Reihen; das Layout selbst darf dabei nie wachsen
+  (Minimap-Rückkopplung, siehe Skill `clay-layout`; `python3 scripts/e2e_layout_stable.py`).
+  Der Glyph-Cache (4096 Einträge, je Größe × 4 Subpixel-Varianten) leert sich komplett, wenn er
+  voll ist (`GlyphCache.ensureFreeSlot`), statt neue Glyphen jeden Frame neu zu rastern.
 - **Autosave:** File → Toggle Autosave (`UI.autosave`), speichert 1 s nach der letzten Änderung
   (`CodeEditor.last_edit_ms`) nur Text-Tabs mit Pfad. Jedes Speichern legt vorher eine Sicherung
   unter `$XDG_DATA_HOME/zid/backup/<name>.<hash>.bak` ab (`src/editor/backup.zig`, eine je
@@ -428,6 +446,10 @@ gepinnt, `models/` hält GGUFs flach und ignoriert (nie committen), `llm-bench/`
 - **„+“ (Neu-Menü) sitzt ganz links** vor dem scrollenden Tab-Streifen. Der Streifen hat `.w = .grow`
   mit Clip; stand der Knopf dahinter, wanderte er an den Fensterrand und sein Dropdown wurde
   abgeschnitten.
+- **Beschriftung** (`tabLabel`): Markdown-Vorschauen heißen „Preview: name“; gleicher Dateiname in
+  zwei Tabs derselben Art bekommt den Elternordner davor. Split (`cloneFrom`) kopiert Text-,
+  Bild- und Vorschau-Tabs, aber nicht Chat und Terminal (ein Zustand, eine Zeichnung je Frame,
+  siehe Skill `clay-layout`).
 - **Keine Vorschau-Tabs** (auf Wunsch des Projektinhabers; VS Code und Zed haben
   sie standardmäßig an): Einfachklick, Space und Enter im Explorer öffnen jede Datei in einem
   eigenen Tab, ein Klick auf eine schon offene Datei wechselt nur dorthin (`TabBarState.openFile`).

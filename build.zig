@@ -246,7 +246,6 @@ pub fn build(b: *std.Build) void {
     code_editor_mod.addImport("shortcuts", shortcuts_mod);
     code_editor_mod.addImport("context_menu", context_menu_mod);
 
-
     // Tests IN code_editor.zig laufen nur, wenn die Datei selbst Test-Root ist:
     // Tests aus importierten Modulen (test/test_editor.zig → "code_editor")
     // führt der Test-Runner nicht aus.
@@ -413,6 +412,15 @@ pub fn build(b: *std.Build) void {
     const run_display_check_tests = b.addRunArtifact(display_check_tests);
     run_display_check_tests.has_side_effects = true;
 
+    // Mausrad → Zeilen-Delta: reine Funktion, damit das Vorzeichen testbar ist.
+    const wheel_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("src/platform/wheel.zig"),
+        .target = target,
+        .optimize = optimize,
+    }) });
+    const run_wheel_tests = b.addRunArtifact(wheel_tests);
+    run_wheel_tests.has_side_effects = true;
+
     const shortcuts_tests = b.addTest(.{ .root_module = shortcuts_mod });
     const run_shortcuts_tests = b.addRunArtifact(shortcuts_tests);
     run_shortcuts_tests.has_side_effects = true;
@@ -533,6 +541,18 @@ pub fn build(b: *std.Build) void {
     const run_glyph_layout_tests = b.addRunArtifact(glyph_layout_tests);
     run_glyph_layout_tests.has_side_effects = true;
 
+    // Glyph-Cache (src/text_tests.zig als Root, weil text/types.zig ../platform importiert).
+    const text_tests_mod = b.createModule(.{
+        .root_source_file = b.path("src/text_tests.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    text_tests_mod.addImport("wio", wio_dep.module("wio"));
+    const text_tests = b.addTest(.{ .root_module = text_tests_mod });
+    const run_text_tests = b.addRunArtifact(text_tests);
+    run_text_tests.has_side_effects = true;
+    b.step("test-text", "Run text system tests").dependOn(&run_text_tests.step);
+
     const word_wrap_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("src/ui/word_wrap.zig"),
         .target = target,
@@ -595,6 +615,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_shortcuts_tests.step);
     test_step.dependOn(&run_wio_keysym_tests.step);
     test_step.dependOn(&run_display_check_tests.step);
+    test_step.dependOn(&run_wheel_tests.step);
     test_step.dependOn(&run_pdf_nav_tests.step);
     test_step.dependOn(&run_context_menu_tests.step);
     test_step.dependOn(&run_find_ops_tests.step);
@@ -610,6 +631,7 @@ pub fn build(b: *std.Build) void {
     run_word_wrap_tests.has_side_effects = true;
     test_step.dependOn(&run_word_wrap_tests.step);
     test_step.dependOn(&run_glyph_layout_tests.step);
+    test_step.dependOn(&run_text_tests.step);
     test_step.dependOn(&run_path_display_tests.step);
     test_step.dependOn(&run_marp_tests.step);
     test_step.dependOn(&run_marp_html_tests.step);

@@ -137,6 +137,9 @@ pub const GlyphCache = struct {
     hash_table: [HASH_TABLE_SIZE]u16,
     /// Number of valid entries
     entry_count: u32,
+    /// Diagnose: Glyphen seit Start gerastert bzw. Cache komplett geleert (RPC ui_state).
+    rasterized_total: u64 = 0,
+    clears_total: u32 = 0,
 
     /// Intrusive free list threaded through entries array.
     /// Each element stores the index of the next free slot, or EMPTY_SLOT for end-of-list.
@@ -223,6 +226,8 @@ pub const GlyphCache = struct {
 
         self.allocator = allocator;
         self.entry_count = 0;
+        self.rasterized_total = 0;
+        self.clears_total = 0;
         self.render_buffer = render_buffer;
         self.render_buffer_size = buffer_bytes;
         self.scale_factor = scale;
@@ -311,7 +316,9 @@ pub const GlyphCache = struct {
 
         // Pop the head of the free list — O(1) instead of O(N) linear scan.
         if (self.next_free == EMPTY_SLOT) {
-            return; // Cache full (atlas eviction handles this case).
+            // Kommt nicht vor: getOrRender* leert den Cache vorher (ensureFreeSlot).
+            std.debug.assert(false);
+            return;
         }
 
         const idx = self.next_free;
@@ -438,6 +445,7 @@ pub const GlyphCache = struct {
             return cached;
         }
 
+        self.ensureFreeSlot();
         const glyph = try self.renderGlyphSubpixel(face, glyph_id, font_size, subpixel_x, subpixel_y);
         self.putInCache(key, glyph);
         return glyph;
@@ -454,6 +462,7 @@ pub const GlyphCache = struct {
         std.debug.assert(subpixel_x < SUBPIXEL_VARIANTS_X);
         std.debug.assert(subpixel_y < SUBPIXEL_VARIANTS_Y);
 
+        self.rasterized_total += 1;
         @memset(self.render_buffer, 0);
 
         // Calculate subpixel shift (0.0, 0.25, 0.5, or 0.75)
@@ -524,9 +533,20 @@ pub const GlyphCache = struct {
             return cached;
         }
 
+        self.ensureFreeSlot();
         const glyph = try self.renderFallbackGlyph(font_ptr, glyph_id, font_size, subpixel_x, subpixel_y);
         self.putInCache(key, glyph);
         return glyph;
+    }
+
+    /// Sind alle Einträge belegt, wird der Cache komplett geleert, bevor ein neuer Glyph
+    /// gerastert wird. Sonst landet er nie im Cache und wird in jedem Frame neu gerastert;
+    /// der Atlas läuft dabei voll und wird bei jedem Treffer komplett auf die GPU geladen
+    /// (Zoom über mehrere Stufen: jede Größe × 4 Subpixel-Varianten füllt die Einträge).
+    fn ensureFreeSlot(self: *Self) void {
+        if (self.next_free != EMPTY_SLOT) return;
+        std.debug.assert(self.entry_count == MAX_CACHED_GLYPHS);
+        self.clear();
     }
 
     fn renderFallbackGlyph(
@@ -547,6 +567,7 @@ pub const GlyphCache = struct {
         std.debug.assert(subpixel_x < SUBPIXEL_VARIANTS_X);
         std.debug.assert(subpixel_y < SUBPIXEL_VARIANTS_Y);
 
+        self.rasterized_total += 1;
         @memset(self.render_buffer, 0);
 
         const subpixel_shift_x = @as(f32, @floatFromInt(subpixel_x)) / @as(f32, @floatFromInt(SUBPIXEL_VARIANTS_X));
@@ -614,6 +635,7 @@ pub const GlyphCache = struct {
 
     /// Clear the cache (call when changing fonts).
     pub fn clear(self: *Self) void {
+        self.clears_total += 1;
         // Clear all entries.
         for (&self.entries) |*entry| {
             entry.valid = false;
@@ -643,10 +665,12 @@ pub const GlyphCache = struct {
     }
 
     /// Get cache statistics for debugging
-    pub fn getStats(self: *const Self) struct { entries: u32, capacity: u32 } {
+    pub fn getStats(self: *const Self) struct { entries: u32, capacity: u32, rasterized: u64, clears: u32 } {
         return .{
             .entries = self.entry_count,
             .capacity = MAX_CACHED_GLYPHS,
+            .rasterized = self.rasterized_total,
+            .clears = self.clears_total,
         };
     }
 };
@@ -742,4 +766,64 @@ test "GlyphKey wyhash distribution — printable ASCII × subpixel variants" {
 
     // Sanity: we generated the expected number of keys.
     try testing.expectEqual(@as(u32, 95) * @as(u32, SUBPIXEL_VARIANTS_X), total_keys);
+}
+
+/// Mock-Schrift für Cache-Tests: jeder Glyph ist 8×8 Pixel, Aufrufe werden gezählt.
+const MockFace = struct {
+    metrics: types.Metrics = .{
+        .units_per_em = 1000,
+        .ascender = 12,
+        .descender = 4,
+        .line_gap = 0,
+        .cap_height = 10,
+        .x_height = 7,
+        .underline_position = -1,
+        .underline_thickness = 1,
+        .line_height = 16,
+        .point_size = 16,
+        .is_monospace = true,
+        .cell_width = 8,
+    },
+    renders: u32 = 0,
+
+    pub fn glyphIndex(_: *MockFace, codepoint: u21) u16 {
+        return @intCast(codepoint);
+    }
+
+    pub fn glyphMetrics(_: *MockFace, glyph_id: u16) types.GlyphMetrics {
+        return .{ .glyph_id = glyph_id, .advance_x = 8, .advance_y = 0, .bearing_x = 0, .bearing_y = 8, .width = 8, .height = 8 };
+    }
+
+    pub fn renderGlyphSubpixel(self: *MockFace, _: u16, _: f32, _: f32, _: f32, _: f32, buffer: []u8, _: u32) !types.RasterizedGlyph {
+        self.renders += 1;
+        @memset(buffer[0..64], 0xFF);
+        return .{ .width = 8, .height = 8, .offset_x = 0, .offset_y = 8, .advance_x = 8, .is_color = false };
+    }
+
+    pub fn deinit(_: *MockFace) void {}
+};
+
+test "GlyphCache: voller Eintrags-Cache verdrängt statt neue Glyphen stumm zu verwerfen" {
+    // Zoom in mehreren Stufen (jede Schriftgröße × 4 Subpixel-Varianten) füllt die 4096
+    // Einträge. Danach darf ein neuer Glyph nicht in jedem Frame neu gerastert werden.
+    const testing = std.testing;
+    var mock = MockFace{};
+    const face = font_face_mod.createFontFace(MockFace, &mock);
+
+    const cache = try testing.allocator.create(GlyphCache);
+    defer testing.allocator.destroy(cache);
+    try cache.initInPlace(testing.allocator, 1.0);
+    defer cache.deinit();
+
+    var id: u16 = 1;
+    while (id <= GlyphCache.MAX_CACHED_GLYPHS) : (id += 1) {
+        _ = try cache.getOrRenderSubpixel(face, id, 16.0, 0, 0);
+    }
+    try testing.expectEqual(GlyphCache.MAX_CACHED_GLYPHS, @as(usize, cache.entry_count));
+
+    _ = try cache.getOrRenderSubpixel(face, 5000, 16.0, 0, 0);
+    const renders_after_first = mock.renders;
+    _ = try cache.getOrRenderSubpixel(face, 5000, 16.0, 0, 0);
+    try testing.expectEqual(renders_after_first, mock.renders);
+    try testing.expect(cache.entry_count >= 1);
 }
