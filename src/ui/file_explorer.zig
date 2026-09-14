@@ -318,7 +318,10 @@ pub const FileExplorerState = struct {
 
             const child_path = try std.fs.path.join(self.allocator, &.{ dir_path, entry.name });
             const child_name = try self.allocator.dupe(u8, entry.name);
-            const is_dir = entry.kind == .directory;
+            // Symlink auf einen Ordner zählt als Ordner, sonst landet er als "Datei"
+            // in einem Tab und scheitert dort mit IsDir.
+            const is_dir = entry.kind == .directory or
+                (entry.kind == .sym_link and explorer_ops.isDirectory(child_path));
 
             const child_index: u32 = @intCast(self.nodes.items.len);
             try self.nodes.append(self.allocator, .{

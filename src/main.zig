@@ -329,6 +329,9 @@ pub fn main() !void {
         // Scheduler für async Git/LSP/FileWatcher/AI Tasks
         var scheduler = try async_mod.Scheduler.init(allocator, 4);
         defer scheduler.deinit();
+        // Ergebnisse aus Worker- und Watcher-Threads wecken den Frame-Loop aus wio.wait(.{}).
+        // Ohne das liefen bei ruhigem Fenster 256 Results auf und die Queue blockte.
+        if (!headless_mode) scheduler.on_result = &wio.cancelWait;
 
         ui_system.setAIScheduler(scheduler);
 
@@ -793,6 +796,14 @@ pub fn main() !void {
                             } else {
                                 ui_system.reportError("Cannot open '{s}': {s}", .{ std.fs.path.basename(path), @errorName(err) });
                             }
+                            // Tab ohne Buffer schließen und den Wechsel abhaken, sonst
+                            // wiederholt sich der Fehler in jedem Frame.
+                            if (ui_system.getActiveTabBar().active_index) |idx| {
+                                ui_system.pending_tab_closes.append(ui_system.allocator, .{ .pane = switch_leaf, .index = idx }) catch {};
+                            }
+                            ui_system.allocator.free(path);
+                            ui_system.getActiveTabBar().pending_switch_path = null;
+                            state_dirty = true;
                             continue;
                         };
 

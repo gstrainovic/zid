@@ -105,6 +105,10 @@ echo -e "open ./README.md\nget-state\nshutdown" | zig build run -- --interactive
   und braucht keine Systemabhängigkeit.
 - File-Watcher registriert seinen Baum im eigenen Thread (`~/projects` hat tausende
   Ordner, das darf den Frame-Loop nicht blockieren).
+- **Jedes Async-Result weckt den Frame-Loop:** `Scheduler.on_result` ist im Fenster-Modus
+  `wio.cancelWait` (Worker und Watcher rufen es nach jedem `push`). Ohne Hook schläft der Loop
+  in `wio.wait(.{})`, die Result-Queue (256) läuft bei ruhigem Fenster voll und der Watcher
+  loggt pro Ereignis „result queue full". Headless braucht keinen Hook (Polling).
 - E2E: `python3 scripts/e2e_open_folder.py [ordner]` startet headless, fährt Menü → Dialog →
   Pfad tippen → Enter und prüft den neuen Root; Screenshots in `tmp/e2e_menu.ppm` und
   `tmp/e2e_dialog.ppm`. RPCs dafür: `element_bounds(id)`, `element_bounds_i(id, index)`
@@ -257,6 +261,13 @@ gepinnt, `models/` hält GGUFs flach und ignoriert (nie committen), `llm-bench/`
   `/etc/hostname` abgelehnt. Messung: erste Runde nach Warmup 13–14 s, danach 3–9 s je Frage.
 
 ## Explorer: Fokus, Tastatur, Auswahl, Papierkorb
+
+- **Symlink auf einen Ordner ist ein Ordner** (`explorer_ops.isDirectory` folgt dem Link, z. B.
+  `wartungsheft/business-plan -> ../business/auto-service`). `TabBar.appendFileTab` lehnt
+  Verzeichnisse mit `error.IsDir` ab, egal ob Explorer, Ctrl+P, Agent oder RPC `open_file`.
+  Scheitert der Buffer-Load beim Tab-Wechsel trotzdem (z. B. AccessDenied), meldet `main.zig`
+  den Fehler einmal, schließt den Tab und nullt `pending_switch_path`; sonst wiederholt sich
+  der Fehler in jedem Frame. E2E: `python3 scripts/e2e_symlink_dir.py`.
 
 - **Fokus** (`ui_state.explorer_focused`) setzt jeder Klick in die Sidebar, Escape gibt ihn ab; die
   Sidebar zeigt ihn als linken Rahmen in `border_focus`. Mit Fokus erreicht keine Taste den Editor:

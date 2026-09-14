@@ -82,6 +82,38 @@ pub fn deletePath(path: []const u8, is_folder: bool) !void {
     }
 }
 
+/// true wenn `path` ein Verzeichnis ist; Symlinks werden aufgelöst, damit ein
+/// Link auf einen Ordner wie der Ordner behandelt wird (Explorer, Tab-Öffnen).
+pub fn isDirectory(path: []const u8) bool {
+    const st = std.fs.cwd().statFile(path) catch return false;
+    return st.kind == .directory;
+}
+
+test "isDirectory: Ordner und Symlink auf Ordner ja, Datei, Symlink auf Datei und Fehlendes nein" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const base = try tmp.dir.realpathAlloc(std.testing.allocator, ".");
+    defer std.testing.allocator.free(base);
+
+    try tmp.dir.makeDir("real_dir");
+    _ = try tmp.dir.createFile("real_file", .{});
+    try tmp.dir.symLink("real_dir", "dir_link", .{ .is_directory = true });
+    try tmp.dir.symLink("real_file", "file_link", .{});
+
+    const names = [_]struct { name: []const u8, dir: bool }{
+        .{ .name = "real_dir", .dir = true },
+        .{ .name = "dir_link", .dir = true },
+        .{ .name = "real_file", .dir = false },
+        .{ .name = "file_link", .dir = false },
+        .{ .name = "missing", .dir = false },
+    };
+    for (names) |n| {
+        const p = try std.fs.path.join(std.testing.allocator, &.{ base, n.name });
+        defer std.testing.allocator.free(p);
+        try std.testing.expectEqual(n.dir, isDirectory(p));
+    }
+}
+
 /// true wenn `path` gleich `root` ist oder darunter liegt.
 pub fn isPathOrUnder(path: []const u8, root: []const u8) bool {
     if (std.mem.eql(u8, path, root)) return true;

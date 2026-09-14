@@ -207,9 +207,7 @@ pub const FileWatcher = struct {
             .allocator = self.allocator,
         };
 
-        if (!self.scheduler.pushResult(result)) {
-            self.allocator.free(owned_path);
-            log.warn("result queue full", .{});
-        }
+        // pushResult loggt selbst, wenn die Queue voll ist
+        if (!self.scheduler.pushResult(result)) self.allocator.free(owned_path);
     }
 };

@@ -15,6 +15,7 @@ const flow_core = @import("flow_core");
 const log = std.log.scoped(.tab_bar);
 
 const file_types = @import("file_types.zig");
+const explorer_ops = @import("explorer_ops.zig");
 const FileKind = file_types.FileKind;
 
 /// Ein geöffneter Tab (Datei)
@@ -204,6 +205,10 @@ pub const TabBarState = struct {
             self.setActive(self.tabs.items.len - 1);
             return;
         }
+
+        // Verzeichnisse (auch per Symlink) bekommen nie einen Tab: der Buffer-Load
+        // scheitert mit IsDir. Gilt für Explorer, Quick-Open, Agent und E2E gleichermaßen.
+        if (explorer_ops.isDirectory(path)) return error.IsDir;
 
         // Endung + Dateianfang: Binärdateien bekommen einen Hinweis-Tab statt eines Buffers
         var kind = file_types.detectFileKind(path);
