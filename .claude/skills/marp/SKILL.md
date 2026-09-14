@@ -65,10 +65,13 @@ gemessene Höhe deshalb nie über die Innenhöhe geht.
 ## Bedienung
 
 Command `md_export_pdf` („Export to PDF") in `shortcuts.zig`, sichtbar im
-Tab-Kontextmenü, im Editor-Kontextmenü, im Kontextmenü der Vorschau und im View-Menü;
-wie `md_preview` bei Nicht-`.md`-Tabs ausgeblendet. Das Ergebnis landet neben der
-Quelle (`deck.md` → `deck.pdf`) und öffnet sich als PDF-Tab. Fehlt `marp: true`, kommt
-ein Fehlerdialog statt einer Datei.
+Tab-Kontextmenü, im Editor-Kontextmenü, im Kontextmenü der Vorschau und im View-Menü.
+Die drei Kontextmenüs zeigen ihn nur bei Marp-Decks: Editor und Tab-Menü prüfen
+`marp.isMarpDeck` auf dem Buffer (ungespeichertes Front-Matter zählt), das Tab-Menü ohne
+geladenen Buffer per `marp.isMarpDeckFile` auf dem Dateikopf, die Vorschau über ihr
+`deck`-Feld. `md_preview` bleibt bei jeder `.md` sichtbar. Das Ergebnis landet neben der
+Quelle (`deck.md` → `deck.pdf`) und öffnet sich als PDF-Tab. Über das View-Menü geht der
+Export auch bei Nicht-Decks; fehlt `marp: true`, kommt ein Fehlerdialog statt einer Datei.
 
 ## Prüfen
 

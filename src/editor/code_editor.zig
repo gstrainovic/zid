@@ -10,6 +10,7 @@ const syntax = @import("syntax");
 const wio = @import("wio");
 const shortcuts = @import("shortcuts");
 const ctx_menu = @import("context_menu");
+const marp = @import("marp");
 const find_ops = @import("find_ops.zig");
 
 const actions = @import("actions.zig");
@@ -3452,13 +3453,16 @@ pub const CodeEditor = struct {
         self.view.row = @as(usize, @intCast(new_offset));
     }
 
-    /// Ausgeblendete Menüeinträge: Markdown Preview nur bei .md, im Eingabefeld
+    /// Ausgeblendete Menüeinträge: Markdown Preview nur bei .md, Export to PDF nur
+    /// bei Marp-Decks (`marp: true` im Front-Matter des Buffers), im Eingabefeld
     /// (compact_menu) weder Preview noch Split.
     fn menuHidden(self: *Self) ctx_menu.Hidden {
         var hidden = ctx_menu.none;
         const is_md = std.mem.endsWith(u8, self.buffer.get_file_path(), ".md");
         if (!is_md or self.compact_menu) {
             hidden.insert(.md_preview);
+            hidden.insert(.md_export_pdf);
+        } else if (!marp.isMarpDeck(self.buffer.store_to_string_cached(self.buffer.root, self.buffer.file_eol_mode))) {
             hidden.insert(.md_export_pdf);
         }
         if (self.compact_menu) {
@@ -3652,6 +3656,32 @@ fn testEditor(allocator: std.mem.Allocator, text: []const u8) !struct { buffer: 
     var ed = CodeEditor.init(allocator, buffer);
     ed.setText(text);
     return .{ .buffer = buffer, .ed = ed };
+}
+
+test "Kontextmenü: Export to PDF nur bei Marp-Decks, Preview bei jeder .md" {
+    var plain = try testEditor(std.testing.allocator, "# Notiz\n\nText\n");
+    defer plain.buffer.deinit();
+    defer plain.ed.deinit();
+    plain.buffer.set_file_path("/tmp/plain.md");
+    try std.testing.expect(!plain.ed.menuHidden().contains(.md_preview));
+    try std.testing.expect(plain.ed.menuHidden().contains(.md_export_pdf));
+
+    var deck = try testEditor(std.testing.allocator, "---\nmarp: true\n---\n\n# Eins\n");
+    defer deck.buffer.deinit();
+    defer deck.ed.deinit();
+    deck.buffer.set_file_path("/tmp/deck.md");
+    try std.testing.expect(!deck.ed.menuHidden().contains(.md_preview));
+    try std.testing.expect(!deck.ed.menuHidden().contains(.md_export_pdf));
+
+    // Front-Matter erst nach dem Tippen: Menü folgt dem Buffer, nicht der Platte.
+    deck.ed.setText("# Kein Deck mehr\n");
+    try std.testing.expect(deck.ed.menuHidden().contains(.md_export_pdf));
+
+    var zig_file = try testEditor(std.testing.allocator, "---\nmarp: true\n---\n");
+    defer zig_file.buffer.deinit();
+    defer zig_file.ed.deinit();
+    zig_file.buffer.set_file_path("/tmp/x.zig");
+    try std.testing.expect(zig_file.ed.menuHidden().contains(.md_export_pdf));
 }
 
 test "DeleteLine: mittlere Zeile verschwindet, Cursor bleibt auf der Zeile" {

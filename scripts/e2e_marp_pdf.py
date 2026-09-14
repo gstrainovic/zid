@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Headless-E2E: Marp-Folienvorschau und Export nach PDF.
 
-Deckt ab: Eintrag im Tab-Kontextmenü nur bei .md, Export schreibt ein PDF mit
-einer Seite je Folie, das Ergebnis landet als PDF-Tab, eine Markdown-Datei ohne
-`marp: true` meldet einen Fehlerdialog, und die Vorschau eines Decks zeigt
+Deckt ab: Export-Eintrag im Tab-Kontextmenü nur bei Marp-Decks (Preview bei jeder
+.md), Export schreibt ein PDF mit einer Seite je Folie, das Ergebnis landet als
+PDF-Tab, eine Markdown-Datei ohne `marp: true` meldet über das View-Menü einen
+Fehlerdialog, und die Vorschau eines Decks zeigt
 einzelne Folien mit Blättern per Taste und Schaltfläche.
 
 Aufruf: python3 scripts/e2e_marp_pdf.py
@@ -48,8 +49,20 @@ def open_tab_menu(name):
 
 
 def menu_entry_visible(command):
-    """Ausgeblendete Eintraege haben keine Bounding-Box im Layout."""
-    return result_json("element_bounds", ["tab_menu_" + command])["found"]
+    """Eintrag liegt im aktuell gezeichneten Menuerahmen.
+
+    Clay behaelt die Bounds jeder einmal gezeichneten ID ueber Frames hinweg, `found`
+    allein sagt also nichts ueber den aktuellen Frame. Der Rahmen `tab_menu_container`
+    wird bei jedem Oeffnen an der Klickposition neu gezeichnet; ein ausgeblendeter
+    Eintrag behaelt die Bounds vom letzten Menue an einer anderen Stelle.
+    """
+    frame = bounds("tab_menu_container")
+    entry = result_json("element_bounds", ["tab_menu_" + command])
+    if not (frame["found"] and entry["found"]):
+        return False
+    inside_x = frame["x"] <= entry["x"] and entry["x"] + entry["w"] <= frame["x"] + frame["w"] + 0.5
+    inside_y = frame["y"] <= entry["y"] and entry["y"] + entry["h"] <= frame["y"] + frame["h"] + 0.5
+    return inside_x and inside_y
 
 
 def pdf_pages(path):
@@ -110,8 +123,13 @@ def step_not_a_deck():
     rpc("open_file", [PLAIN])
     settle(20)
     open_tab_menu("plain.md")
-    check(menu_entry_visible("md_export_pdf"), "plain.md: Eintrag sichtbar (ist ja .md)")
-    click_center("tab_menu_md_export_pdf")
+    check(menu_entry_visible("md_preview"), "plain.md: Preview-Eintrag sichtbar (ist ja .md)")
+    check(not menu_entry_visible("md_export_pdf"), "plain.md: kein Export-Eintrag (kein marp: true)")
+    rpc("key_press", ["escape", False]); settle(4)
+    # Über das View-Menü geht der Export trotzdem, dann meldet er den Nicht-Deck als Dialog.
+    click_center("menu_view")
+    check(bounds("menu_item_md_export_pdf")["found"], "View-Menü zeigt Export to PDF")
+    click_center("menu_item_md_export_pdf")
     settle(30)
     check(not os.path.exists(os.path.join(FX, "plain.pdf")), "kein PDF fuer ein Nicht-Deck")
     title = ui_state()["dialog"]
