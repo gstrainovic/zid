@@ -37,6 +37,7 @@ const ai_tools = @import("ai_tools");
 const agent_actions = @import("agent_actions.zig");
 const ai_chat_mod = @import("ai_chat.zig");
 const agent_mod = @import("agent");
+const env = @import("env");
 
 const log = std.log.scoped(.ui);
 
@@ -1574,7 +1575,7 @@ pub const UI = struct {
     fn ensureLsp(self: *Self) ?*lsp_client.LspClient {
         if (self.lsp) |l| return l;
         if (self.lsp_failed) return null;
-        if (std.posix.getenv("ZID_LSP")) |v| {
+        if (env.get("ZID_LSP")) |v| {
             if (std.mem.eql(u8, v, "off")) {
                 self.lsp_failed = true;
                 return null;
@@ -1585,8 +1586,8 @@ pub const UI = struct {
             return null;
         };
         var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-        const zls: []const u8 = std.posix.getenv("ZLS_PATH") orelse blk: {
-            if (std.posix.getenv("HOME")) |home| {
+        const zls: []const u8 = env.get("ZLS_PATH") orelse blk: {
+            if (env.home()) |home| {
                 const candidate = std.fmt.bufPrint(&path_buf, "{s}/.local/bin/zls", .{home}) catch break :blk "zls";
                 std.fs.accessAbsolute(candidate, .{}) catch break :blk "zls";
                 break :blk candidate;

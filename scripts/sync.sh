@@ -17,8 +17,9 @@ OWN_SUBMODULES=("libs/gooey" "libs/wgpu_native_zig" "libs/wio" "libs/zigdown")
 
 # Referenz-Repos: Inspiration/Lesequelle, kein Build-Input.
 # Format: "<relativer Pfad>|<git-URL>"
+# libs/ghostty gehört NICHT hierher: es ist ein gepinntes Submodul (ghostty-vt
+# im Build); ein reset auf origin/main zieht einen Stand, der Zig 0.16 verlangt.
 REFERENCES=(
-    "libs/ghostty|https://github.com/ghostty-org/ghostty.git"
     "reference/lite-xl|https://github.com/lite-xl/lite-xl.git"
     "reference/sev|https://github.com/dylancobb/sev.git"
 )

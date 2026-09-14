@@ -94,6 +94,14 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     exe_mod.addImport("shortcuts", shortcuts_mod);
+    // Umgebungsvariablen plattformübergreifend (std.posix.getenv fehlt unter Windows):
+    // eigenes Modul, weil mehrere Test-Roots (explorer_ops, backup, user_state) es brauchen.
+    const env_mod = b.createModule(.{
+        .root_source_file = b.path("src/platform/env.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    exe_mod.addImport("env", env_mod);
     // Gemeinsames Kontextmenü (Tab, Editor, Markdown, Terminal, Explorer): eigenes Modul
     // aus demselben Grund wie die Kürzel-Tabelle.
     const context_menu_mod = b.createModule(.{
@@ -251,6 +259,7 @@ pub fn build(b: *std.Build) void {
     // führt der Test-Runner nicht aus.
     code_editor_mod.addImport("clay", clay_dep.module("zclay"));
     code_editor_mod.addImport("wio", wio_dep.module("wio"));
+    code_editor_mod.addImport("env", env_mod);
     const code_editor_tests = b.addTest(.{ .root_module = code_editor_mod });
     const run_code_editor_tests = b.addRunArtifact(code_editor_tests);
     run_code_editor_tests.has_side_effects = true;
@@ -367,19 +376,23 @@ pub fn build(b: *std.Build) void {
     exe_mod.addImport("chat_markdown", chat_markdown_mod);
     const chat_markdown_tests = b.addTest(.{ .root_module = chat_markdown_mod });
 
-    const explorer_ops_tests = b.addTest(.{ .root_module = b.createModule(.{
+    const explorer_ops_mod = b.createModule(.{
         .root_source_file = b.path("src/ui/explorer_ops.zig"),
         .target = target,
         .optimize = optimize,
-    }) });
+    });
+    explorer_ops_mod.addImport("env", env_mod);
+    const explorer_ops_tests = b.addTest(.{ .root_module = explorer_ops_mod });
     const run_explorer_ops_tests = b.addRunArtifact(explorer_ops_tests);
     run_explorer_ops_tests.has_side_effects = true;
 
-    const folder_ops_tests = b.addTest(.{ .root_module = b.createModule(.{
+    const folder_ops_mod = b.createModule(.{
         .root_source_file = b.path("src/ui/folder_ops.zig"),
         .target = target,
         .optimize = optimize,
-    }) });
+    });
+    folder_ops_mod.addImport("env", env_mod);
+    const folder_ops_tests = b.addTest(.{ .root_module = folder_ops_mod });
     const run_folder_ops_tests = b.addRunArtifact(folder_ops_tests);
     run_folder_ops_tests.has_side_effects = true;
 
@@ -465,19 +478,23 @@ pub fn build(b: *std.Build) void {
     const run_tiny_regex_tests = b.addRunArtifact(tiny_regex_tests);
     run_tiny_regex_tests.has_side_effects = true;
 
-    const backup_tests = b.addTest(.{ .root_module = b.createModule(.{
+    const backup_mod = b.createModule(.{
         .root_source_file = b.path("src/editor/backup.zig"),
         .target = target,
         .optimize = optimize,
-    }) });
+    });
+    backup_mod.addImport("env", env_mod);
+    const backup_tests = b.addTest(.{ .root_module = backup_mod });
     const run_backup_tests = b.addRunArtifact(backup_tests);
     run_backup_tests.has_side_effects = true;
 
-    const user_state_tests = b.addTest(.{ .root_module = b.createModule(.{
+    const user_state_mod = b.createModule(.{
         .root_source_file = b.path("src/ui/user_state.zig"),
         .target = target,
         .optimize = optimize,
-    }) });
+    });
+    user_state_mod.addImport("env", env_mod);
+    const user_state_tests = b.addTest(.{ .root_module = user_state_mod });
     const run_user_state_tests = b.addRunArtifact(user_state_tests);
     run_user_state_tests.has_side_effects = true;
 
