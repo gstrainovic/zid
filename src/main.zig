@@ -6,6 +6,7 @@ const file_types = @import("ui/file_types.zig");
 const wio = @import("wio");
 const platform = @import("platform/mod.zig");
 const display_check = @import("platform/display_check.zig");
+const env = @import("env");
 const wheel = @import("platform/wheel.zig");
 const pdf_nav = @import("ui/pdf_nav.zig");
 const rendering = @import("rendering/mod.zig");
@@ -67,9 +68,9 @@ const log = std.log.scoped(.main);
 /// verständlichen Satz nach stderr schreiben.
 fn reportDisplayFailure(err: anyerror) void {
     const reason = display_check.classify(.{
-        .session_type = std.posix.getenv("XDG_SESSION_TYPE"),
-        .wayland_display = std.posix.getenv("WAYLAND_DISPLAY"),
-        .display = std.posix.getenv("DISPLAY"),
+        .session_type = env.get("XDG_SESSION_TYPE"),
+        .wayland_display = env.get("WAYLAND_DISPLAY"),
+        .display = env.get("DISPLAY"),
     });
     var buf: [256]u8 = undefined;
     var stderr = std.fs.File.stderr().writer(&buf);
@@ -82,7 +83,7 @@ var debug_log_state: enum { unknown, off, on } = .unknown;
 
 fn debugLogEnabled() bool {
     if (debug_log_state == .unknown) {
-        debug_log_state = if (std.posix.getenv("ZID_DEBUG")) |v| (if (v.len > 0 and v[0] != '0') .on else .off) else .off;
+        debug_log_state = if (env.get("ZID_DEBUG")) |v| (if (v.len > 0 and v[0] != '0') .on else .off) else .off;
     }
     return debug_log_state == .on;
 }
@@ -93,7 +94,7 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     // --page-alloc: jede Allokation auf eigenen Seiten, Freigaben mit Stack-Trace protokolliert
     // (Use-after-free-Suche zusammen mit der Text-Probe im Headless-Loop).
-    var page_alloc_mode = std.posix.getenv("ZID_PAGE_ALLOC") != null;
+    var page_alloc_mode = env.get("ZID_PAGE_ALLOC") != null;
     for (std.os.argv) |a| {
         if (std.mem.eql(u8, std.mem.span(a), "--page-alloc")) page_alloc_mode = true;
     }

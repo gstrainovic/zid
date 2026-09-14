@@ -3,6 +3,7 @@
 //! Parsen/Formatieren ist rein und unit-getestet; Laden/Speichern nimmt einen expliziten Pfad.
 
 const std = @import("std");
+const env = @import("env");
 
 pub const State = struct {
     sidebar_width: f32 = 250,
@@ -64,10 +65,10 @@ pub fn format(alloc: std.mem.Allocator, st: State) ![]u8 {
 
 /// Pfad der State-Datei (owned): $XDG_CONFIG_HOME/zid/state oder ~/.config/zid/state.
 pub fn defaultPath(alloc: std.mem.Allocator) ![]u8 {
-    if (std.posix.getenv("XDG_CONFIG_HOME")) |x| {
+    if (env.get("XDG_CONFIG_HOME")) |x| {
         if (x.len > 0) return std.fs.path.join(alloc, &.{ x, "zid", "state" });
     }
-    const home = std.posix.getenv("HOME") orelse return error.NoHome;
+    const home = env.home() orelse return error.NoHome;
     return std.fs.path.join(alloc, &.{ home, ".config", "zid", "state" });
 }
 

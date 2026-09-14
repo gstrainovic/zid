@@ -8,6 +8,7 @@ const ai_tools = @import("ai_tools");
 const shortcuts = @import("shortcuts");
 const ui_mod = @import("mod.zig");
 const pane_mod = @import("pane.zig");
+const env = @import("env");
 const UI = ui_mod.UI;
 
 const log = std.log.scoped(.agent_actions);
@@ -226,7 +227,7 @@ fn strArg(args: std.json.ObjectMap, key: []const u8) ?[]const u8 {
 
 fn expandHome(alloc: std.mem.Allocator, path: []const u8) ![]u8 {
     if (std.mem.startsWith(u8, path, "~/") or std.mem.eql(u8, path, "~")) {
-        if (std.posix.getenv("HOME")) |home| {
+        if (env.home()) |home| {
             return std.fs.path.join(alloc, &.{ home, if (path.len > 1) path[2..] else "" });
         }
     }

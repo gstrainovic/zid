@@ -3,6 +3,7 @@
 //! alles mit tmpDir testbar bleibt.
 
 const std = @import("std");
+const env = @import("env");
 
 pub const max_name_len = 255;
 
@@ -254,10 +255,10 @@ pub fn trashPath(alloc: std.mem.Allocator, path: []const u8, trash_root: []const
 
 /// Standard-Papierkorb: $XDG_DATA_HOME/Trash oder ~/.local/share/Trash (owned).
 pub fn defaultTrashRoot(alloc: std.mem.Allocator) ![]u8 {
-    if (std.posix.getenv("XDG_DATA_HOME")) |x| {
+    if (env.get("XDG_DATA_HOME")) |x| {
         if (x.len > 0) return std.fs.path.join(alloc, &.{ x, "Trash" });
     }
-    const home = std.posix.getenv("HOME") orelse return error.InvalidName;
+    const home = env.home() orelse return error.InvalidName;
     return std.fs.path.join(alloc, &.{ home, ".local", "share", "Trash" });
 }
 

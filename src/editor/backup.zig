@@ -3,6 +3,7 @@
 //! Speichern ersetzt. Kein Verlauf, kein Müll neben der Datei. Reine Pfadlogik ist unit-getestet.
 
 const std = @import("std");
+const env = @import("env");
 
 /// Zielpfad der Sicherung für `file_path` unter `data_home` (owned).
 pub fn backupPathFor(alloc: std.mem.Allocator, data_home: []const u8, file_path: []const u8) ![]u8 {
@@ -13,10 +14,10 @@ pub fn backupPathFor(alloc: std.mem.Allocator, data_home: []const u8, file_path:
 
 /// $XDG_DATA_HOME oder ~/.local/share (owned).
 pub fn defaultDataHome(alloc: std.mem.Allocator) ![]u8 {
-    if (std.posix.getenv("XDG_DATA_HOME")) |x| {
+    if (env.get("XDG_DATA_HOME")) |x| {
         if (x.len > 0) return alloc.dupe(u8, x);
     }
-    const home = std.posix.getenv("HOME") orelse return error.NoHome;
+    const home = env.home() orelse return error.NoHome;
     return std.fs.path.join(alloc, &.{ home, ".local", "share" });
 }
 

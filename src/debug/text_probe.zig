@@ -4,6 +4,7 @@
 //! Puffer gar nicht. Zeigt ein Command auf unmapped Speicher, liefert der Kernel EFAULT
 //! statt SIGSEGV, und der Aufrufer kann melden, welches Command betroffen ist.
 const std = @import("std");
+const builtin = @import("builtin");
 const clay = @import("clay");
 
 pub const Fault = struct {
@@ -27,6 +28,8 @@ fn fd() std.posix.fd_t {
 }
 
 pub fn probe(commands: []const clay.RenderCommand) ?Fault {
+    // memfd und EFAULT-Erkennung gibt es nur auf Linux; anderswo bleibt die Probe stumm.
+    if (comptime builtin.os.tag != .linux) return null;
     const out = fd();
     var prev: []const u8 = "";
     for (commands, 0..) |cmd, i| {

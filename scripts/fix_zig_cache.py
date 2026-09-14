@@ -26,10 +26,16 @@ from pathlib import Path
 
 
 def cache_root() -> Path:
-    local = os.environ.get("LOCALAPPDATA")
-    if not local:
-        raise SystemExit("LOCALAPPDATA env var not set - are you on Windows?")
-    root = Path(local) / "zig" / "p"
+    # Zig >= 0.16 legt Pakete projektlokal unter zig-pkg/ ab (neben build.zig.zon).
+    # Aeltere Versionen nutzen den globalen Cache unter %LOCALAPPDATA%\zig\p.
+    project = Path.cwd()
+    if (project / "build.zig.zon").exists():
+        root = project / "zig-pkg"
+    else:
+        local = os.environ.get("LOCALAPPDATA")
+        if not local:
+            raise SystemExit("LOCALAPPDATA env var not set - are you on Windows?")
+        root = Path(local) / "zig" / "p"
     root.mkdir(parents=True, exist_ok=True)
     return root
 
@@ -206,10 +212,6 @@ def cmd_scan(zon_path: str) -> None:
 
 
 def main(argv: list[str]) -> int:
-    import subprocess
-    print("Building zid...")
-    subprocess.run(["zig", "build"])
-
     if len(argv) < 2:
         print(__doc__)
         return 1

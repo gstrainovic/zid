@@ -4,6 +4,7 @@
 
 const std = @import("std");
 const explorer_ops = @import("explorer_ops.zig");
+const env = @import("env");
 
 /// Editierpuffer für den Pfad im Dialog.
 pub const PathEdit = explorer_ops.EditBuffer(std.fs.max_path_bytes);
@@ -159,7 +160,7 @@ pub const Picker = struct {
 };
 
 fn homeDir() ?[]const u8 {
-    return std.posix.getenv("HOME");
+    return env.home();
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
