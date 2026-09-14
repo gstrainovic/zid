@@ -257,7 +257,9 @@ pub fn isInsideRepo(path: []const u8) bool {
     while (true) {
         var candidate_buf: [std.fs.max_path_bytes]u8 = undefined;
         const candidate = std.fmt.bufPrint(&candidate_buf, "{s}/.git", .{dir}) catch return false;
-        if (std.fs.cwd().statFile(candidate)) |_| {
+        // access statt statFile: `.git` ist ein Ordner (statFile scheitert daran
+        // unter Windows) oder bei Worktrees/Submodulen eine Datei — beides zählt.
+        if (std.fs.cwd().access(candidate, .{})) |_| {
             return true;
         } else |_| {}
 
