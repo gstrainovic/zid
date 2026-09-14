@@ -85,7 +85,7 @@ pub fn deletePath(path: []const u8, is_folder: bool) !void {
 /// true wenn `path` gleich `root` ist oder darunter liegt.
 pub fn isPathOrUnder(path: []const u8, root: []const u8) bool {
     if (std.mem.eql(u8, path, root)) return true;
-    return path.len > root.len and std.mem.startsWith(u8, path, root) and path[root.len] == '/';
+    return path.len > root.len and std.mem.startsWith(u8, path, root) and std.fs.path.isSep(path[root.len]);
 }
 
 /// Neuer Pfad für `path`, wenn `old_root` nach `new_root` umbenannt wurde:
@@ -109,8 +109,10 @@ fn exists(path: []const u8) bool {
 }
 
 fn isDir(path: []const u8) bool {
-    const st = std.fs.cwd().statFile(path) catch return false;
-    return st.kind == .directory;
+    // Kein statFile: das öffnet unter Windows als Datei und scheitert an Ordnern.
+    var d = std.fs.cwd().openDir(path, .{}) catch return false;
+    d.close();
+    return true;
 }
 
 /// Legt `name` als Datei oder Ordner in `parent_dir` an (exklusiv, nie überschreiben).
@@ -382,8 +384,9 @@ test "createEntry: Datei und Ordner anlegen, vorhandenes nie überschreiben" {
 
     const d = try createEntry(testing.allocator, root, "ordner", true);
     defer testing.allocator.free(d);
-    const st = try tmp.dir.statFile("ordner");
-    try testing.expectEqual(std.fs.File.Kind.directory, st.kind);
+    var ordner = try tmp.dir.openDir("ordner", .{});
+    ordner.close();
+    try testing.expectError(error.NotDir, tmp.dir.openDir("neu.txt", .{}));
 
     try testing.expectError(error.InvalidName, createEntry(testing.allocator, root, "", false));
     try testing.expectError(error.InvalidName, createEntry(testing.allocator, root, "a/b", false));

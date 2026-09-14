@@ -22,7 +22,7 @@ pub fn expandHome(alloc: std.mem.Allocator, input: []const u8, home: ?[]const u8
     return alloc.dupe(u8, input);
 }
 
-pub const ResolveError = error{ NotDir, FileNotFound } || std.mem.Allocator.Error || std.fs.Dir.RealPathError || std.fs.Dir.StatFileError;
+pub const ResolveError = error{ NotDir, FileNotFound } || std.mem.Allocator.Error || std.fs.Dir.RealPathError || std.fs.Dir.OpenError || std.fs.File.OpenError;
 
 /// Löst eine Benutzereingabe (relativ, mit ~, mit Slash am Ende …) zu einem
 /// kanonischen absoluten Ordnerpfad auf. Dateien und fehlende Pfade sind Fehler.
@@ -34,8 +34,10 @@ pub fn resolveFolder(alloc: std.mem.Allocator, input: []const u8, home: ?[]const
 
     const real = try std.fs.cwd().realpathAlloc(alloc, expanded);
     errdefer alloc.free(real);
-    const st = try std.fs.cwd().statFile(real);
-    if (st.kind != .directory) return error.NotDir;
+    // Als Ordner öffnen statt statFile: das öffnet unter Windows als Datei und
+    // scheitert an Verzeichnissen. openDir liefert NotDir für Dateien.
+    var d = try std.fs.openDirAbsolute(real, .{});
+    d.close();
     return real;
 }
 
@@ -173,9 +175,12 @@ test "expandHome: ~ und ~/x werden mit HOME ersetzt, sonst unverändert" {
     defer a.free(h);
     try testing.expectEqualStrings("/home/u", h);
 
+    // Erwartung über join, weil der Trenner plattformabhängig ist ('\' unter Windows).
     const p = try expandHome(a, "~/projects", "/home/u");
     defer a.free(p);
-    try testing.expectEqualStrings("/home/u/projects", p);
+    const expected_p = try std.fs.path.join(a, &.{ "/home/u", "projects" });
+    defer a.free(expected_p);
+    try testing.expectEqualStrings(expected_p, p);
 
     const abs = try expandHome(a, "/tmp/x", "/home/u");
     defer a.free(abs);
@@ -305,9 +310,11 @@ test "Picker: confirm löst die Eingabe auf, Fehler bleibt als Meldung stehen" {
 }
 
 test "Picker: up an der Wurzel bleibt stehen" {
+    // Wurzel je Plattform: realpath("/") wäre unter Windows "C:\".
+    const fs_root = if (@import("builtin").os.tag == .windows) "C:\\" else "/";
     var p = Picker.init(testing.allocator);
     defer p.deinit();
-    try p.start("/");
+    try p.start(fs_root);
     try p.up();
-    try testing.expectEqualStrings("/", p.dir.?);
+    try testing.expectEqualStrings(fs_root, p.dir.?);
 }

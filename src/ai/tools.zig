@@ -295,7 +295,7 @@ pub fn resolveInProject(alloc: std.mem.Allocator, root: []const u8, path: []cons
     const root_norm = try std.fs.path.resolve(alloc, &.{root});
     defer alloc.free(root_norm);
     if (std.mem.eql(u8, resolved, root_norm)) return resolved;
-    if (resolved.len > root_norm.len and std.mem.startsWith(u8, resolved, root_norm) and resolved[root_norm.len] == '/') return resolved;
+    if (resolved.len > root_norm.len and std.mem.startsWith(u8, resolved, root_norm) and std.fs.path.isSep(resolved[root_norm.len])) return resolved;
     alloc.free(resolved);
     return null;
 }
@@ -342,25 +342,32 @@ test "parseEnvelope: kaputte Hülle ist ein Fehler" {
 
 test "resolveInProject: relativ ok, .. und absolute Pfade außerhalb werden abgelehnt" {
     const a = testing.allocator;
-    const ok = (try resolveInProject(a, "/home/u/proj", "src/main.zig")).?;
+    // Absolute Wurzel je Plattform; Erwartungen über join, weil resolve unter
+    // Windows '\' setzt und Pfade ohne Laufwerk aufs aktuelle Laufwerk legt.
+    const win = @import("builtin").os.tag == .windows;
+    const R = if (win) "C:\\home\\u\\proj" else "/home/u/proj";
+    const sep = std.fs.path.sep_str;
+
+    const ok = (try resolveInProject(a, R, "src/main.zig")).?;
     defer a.free(ok);
-    try testing.expectEqualStrings("/home/u/proj/src/main.zig", ok);
+    try testing.expectEqualStrings(R ++ sep ++ "src" ++ sep ++ "main.zig", ok);
 
-    const dot = (try resolveInProject(a, "/home/u/proj", "./src/../README.md")).?;
+    const dot = (try resolveInProject(a, R, "./src/../README.md")).?;
     defer a.free(dot);
-    try testing.expectEqualStrings("/home/u/proj/README.md", dot);
+    try testing.expectEqualStrings(R ++ sep ++ "README.md", dot);
 
-    const root = (try resolveInProject(a, "/home/u/proj/", ".")).?;
+    const root = (try resolveInProject(a, R ++ sep, ".")).?;
     defer a.free(root);
-    try testing.expectEqualStrings("/home/u/proj", root);
+    try testing.expectEqualStrings(R, root);
 
-    try testing.expect((try resolveInProject(a, "/home/u/proj", "../secret")) == null);
-    try testing.expect((try resolveInProject(a, "/home/u/proj", "/etc/passwd")) == null);
+    try testing.expect((try resolveInProject(a, R, "../secret")) == null);
+    const outside = if (win) "C:\\Windows\\win.ini" else "/etc/passwd";
+    try testing.expect((try resolveInProject(a, R, outside)) == null);
     // Gleicher Präfix, anderer Ordner
-    try testing.expect((try resolveInProject(a, "/home/u/proj", "/home/u/proj2/x")) == null);
-    const abs_in = (try resolveInProject(a, "/home/u/proj", "/home/u/proj/a.txt")).?;
+    try testing.expect((try resolveInProject(a, R, R ++ "2" ++ sep ++ "x")) == null);
+    const abs_in = (try resolveInProject(a, R, R ++ sep ++ "a.txt")).?;
     defer a.free(abs_in);
-    try testing.expectEqualStrings("/home/u/proj/a.txt", abs_in);
+    try testing.expectEqualStrings(R ++ sep ++ "a.txt", abs_in);
 }
 
 test "replaceCountsAsRewrite: kleine Edits frei, halbe Datei oder mehr fragt nach" {

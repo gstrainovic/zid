@@ -4,17 +4,19 @@
 //! unter `~/projects/ki`. Die ausführbare Datei liegt in `<repo>/zig-out/bin`, daraus folgt die
 //! Repo-Wurzel; sonst gilt das Arbeitsverzeichnis.
 const std = @import("std");
+const builtin = @import("builtin");
 
 pub const engine_rel = "engines/llama.cpp-vulkan/build/bin/llama-server";
 pub const model_rel = "models/Qwen3-4B-Instruct-2507-Q4_K_M.gguf";
 
 /// `<repo>/zig-out/bin` → `<repo>`; null, wenn die Datei woanders liegt.
 pub fn repoRootFromExeDir(exe_dir: []const u8) ?[]const u8 {
-    const suffix = "/zig-out/bin";
-    const trimmed = std.mem.trimEnd(u8, exe_dir, "/");
-    if (!std.mem.endsWith(u8, trimmed, suffix)) return null;
-    const root = trimmed[0 .. trimmed.len - suffix.len];
-    return if (root.len == 0) "/" else root;
+    // Über basename/dirname statt String-Suffix: die kennen beide Trenner
+    // (unter Windows auch '/') und schlucken einen Trenner am Ende.
+    if (!std.mem.eql(u8, std.fs.path.basename(exe_dir), "bin")) return null;
+    const zig_out = std.fs.path.dirname(exe_dir) orelse return null;
+    if (!std.mem.eql(u8, std.fs.path.basename(zig_out), "zig-out")) return null;
+    return std.fs.path.dirname(zig_out);
 }
 
 pub fn defaultEngine(alloc: std.mem.Allocator, root: []const u8) ![]u8 {
@@ -31,15 +33,26 @@ test "repoRootFromExeDir: zig-out/bin → Repo-Wurzel, sonst null" {
     try testing.expectEqualStrings("/x/zid", repoRootFromExeDir("/x/zid/zig-out/bin").?);
     try testing.expectEqualStrings("/x/zid", repoRootFromExeDir("/x/zid/zig-out/bin/").?);
     try testing.expect(repoRootFromExeDir("/usr/local/bin") == null);
+    try testing.expect(repoRootFromExeDir("/x/zid/bin") == null);
+    try testing.expectEqualStrings("/", repoRootFromExeDir("/zig-out/bin").?);
+    if (builtin.os.tag == .windows) {
+        try testing.expectEqualStrings("C:\\x\\zid", repoRootFromExeDir("C:\\x\\zid\\zig-out\\bin").?);
+        try testing.expectEqualStrings("C:\\x\\zid", repoRootFromExeDir("C:\\x\\zid\\zig-out\\bin\\").?);
+        try testing.expectEqualStrings("C:/x/zid", repoRootFromExeDir("C:/x/zid/zig-out/bin").?);
+    }
 }
 
 test "Standardpfade liegen unter engines/ und models/ des Repos, nicht unter HOME" {
     const a = testing.allocator;
-    const e = try defaultEngine(a, "/x/zid");
+    const root = "/x/zid";
+    const e = try defaultEngine(a, root);
     defer a.free(e);
-    try testing.expectEqualStrings("/x/zid/engines/llama.cpp-vulkan/build/bin/llama-server", e);
-    const m = try defaultModel(a, "/x/zid");
+    // Trenner ist plattformabhängig, deshalb Anfang und Ende statt Volltext prüfen.
+    try testing.expect(std.mem.startsWith(u8, e, root ++ std.fs.path.sep_str ++ "engines"));
+    try testing.expect(std.mem.endsWith(u8, e, "llama-server"));
+    const m = try defaultModel(a, root);
     defer a.free(m);
-    try testing.expectEqualStrings("/x/zid/models/Qwen3-4B-Instruct-2507-Q4_K_M.gguf", m);
+    try testing.expect(std.mem.startsWith(u8, m, root ++ std.fs.path.sep_str ++ "models"));
+    try testing.expect(std.mem.endsWith(u8, m, "Qwen3-4B-Instruct-2507-Q4_K_M.gguf"));
     try testing.expect(std.mem.indexOf(u8, e, "projects/ki") == null);
 }
