@@ -72,6 +72,16 @@ pub fn isMarpDeck(source: []const u8) bool {
     return false;
 }
 
+/// Wie `isMarpDeck`, aber für eine Datei auf der Platte: liest nur den Kopf
+/// (Front-Matter steht vorn). Unlesbare oder fehlende Datei zählt als kein Deck.
+pub fn isMarpDeckFile(path: []const u8) bool {
+    var file = std.fs.cwd().openFile(path, .{}) catch return false;
+    defer file.close();
+    var head: [16 * 1024]u8 = undefined;
+    const n = file.readAll(&head) catch return false;
+    return isMarpDeck(head[0..n]);
+}
+
 /// Zerlegt eine Markdown-Quelle in Folien. Alle Slices im Ergebnis gehören der
 /// Arena des Decks, die Quelle darf danach freigegeben werden.
 pub fn parse(allocator: std.mem.Allocator, source: []const u8) ParseError!Deck {
@@ -447,6 +457,23 @@ test "isMarpDeck lehnt gewöhnliches Markdown ab" {
     try testing.expect(!isMarpDeck(""));
     // marp: true erst im Rumpf zählt nicht.
     try testing.expect(!isMarpDeck("# Titel\n\nmarp: true\n"));
+}
+
+test "isMarpDeckFile liest nur den Dateikopf und erkennt Decks auf der Platte" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(.{ .sub_path = "deck.md", .data = "---\nmarp: true\n---\n\n# Eins\n" });
+    try tmp.dir.writeFile(.{ .sub_path = "plain.md", .data = "# Notiz\n\nmarp: true\n" });
+    const deck_path = try tmp.dir.realpathAlloc(testing.allocator, "deck.md");
+    defer testing.allocator.free(deck_path);
+    const plain_path = try tmp.dir.realpathAlloc(testing.allocator, "plain.md");
+    defer testing.allocator.free(plain_path);
+    const missing_path = try std.fs.path.join(testing.allocator, &.{ std.fs.path.dirname(deck_path).?, "fehlt.md" });
+    defer testing.allocator.free(missing_path);
+
+    try testing.expect(isMarpDeckFile(deck_path));
+    try testing.expect(!isMarpDeckFile(plain_path));
+    try testing.expect(!isMarpDeckFile(missing_path));
 }
 
 test "parse verweigert Nicht-Decks" {

@@ -168,7 +168,7 @@ pub const MarkdownView = struct {
     pub fn handleMouseDown(self: *Self, x: f32, y: f32) bool {
         if (self.show_context_menu) {
             self.show_context_menu = false;
-            if (ctx_menu.hit("md_menu", &shortcuts.markdown_menu_items, ctx_menu.none)) |cmd| {
+            if (ctx_menu.hit("md_menu", &shortcuts.markdown_menu_items, self.menuHidden())) |cmd| {
                 switch (cmd) {
                     .split_vertical => self.pending_split_v = true,
                     .split_horizontal => self.pending_split_h = true,
@@ -268,10 +268,17 @@ pub const MarkdownView = struct {
         self.context_menu_y = y;
     }
 
+    /// Export to PDF nur, wenn die Vorschau ein Marp-Deck zeigt.
+    fn menuHidden(self: *const Self) ctx_menu.Hidden {
+        var hidden = ctx_menu.none;
+        if (self.deck == null) hidden.insert(.md_export_pdf);
+        return hidden;
+    }
+
     /// Kontextmenü (`shortcuts.markdown_menu_items`, IDs `md_menu_<command>`) im gemeinsamen Stil.
     fn renderContextMenu(self: *Self, theme: Theme) void {
         if (!self.show_context_menu) return;
-        _ = ctx_menu.render("md_menu", &shortcuts.markdown_menu_items, self.context_menu_x, self.context_menu_y, ctx_menu.none, ctx_menu.Colors.fromTheme(theme));
+        _ = ctx_menu.render("md_menu", &shortcuts.markdown_menu_items, self.context_menu_x, self.context_menu_y, self.menuHidden(), ctx_menu.Colors.fromTheme(theme));
     }
 
     /// Parst self.text und rendert die Blöcke ohne Root-, Scroll- oder

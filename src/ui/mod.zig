@@ -11,6 +11,7 @@ const AnimationType = animation.AnimationType;
 const AnimationManager = animation.AnimationManager;
 const PdfHandler = @import("../rendering/pdf_handler.zig").PdfHandler;
 const marp_pdf = @import("../rendering/marp_pdf.zig");
+const marp = @import("marp");
 const PdfViewState = @import("pdf_view.zig").PdfViewState;
 const pdf_nav = @import("pdf_nav.zig");
 const editor_mod = @import("../editor/mod.zig");
@@ -75,7 +76,8 @@ pub const UI = struct {
     pub const PdfPageChange = struct { path: []const u8, delta: i16 };
     pub const TabTarget = struct { pane: *pane_mod.Pane, index: usize };
     pub const Toast = struct { text: []u8, until_ms: f32 };
-    pub const TabMenu = struct { pane: *pane_mod.Pane, index: usize, x: f32, y: f32 };
+    /// `marp_deck` wird beim Öffnen einmal bestimmt (ggf. Dateikopf lesen), nicht pro Frame.
+    pub const TabMenu = struct { pane: *pane_mod.Pane, index: usize, x: f32, y: f32, marp_deck: bool = false };
 
     pub const ActiveDialog = struct {
         dialog: dialog_mod.Dialog,
@@ -911,7 +913,7 @@ pub const UI = struct {
                         if (button == .mouse_middle) {
                             self.requestCloseTab(pane, i);
                         } else {
-                            self.tab_menu = .{ .pane = pane, .index = i, .x = x, .y = y };
+                            self.tab_menu = .{ .pane = pane, .index = i, .x = x, .y = y, .marp_deck = self.tabIsMarpDeck(pane, i) };
                         }
                         return;
                     }
@@ -1994,16 +1996,27 @@ pub const UI = struct {
         return false;
     }
 
-    /// Markdown Preview nur für Text-Tabs mit .md-Pfad; die Vorschau selbst und
-    /// Terminal/Chat/Bild bekommen den Eintrag nicht.
+    /// Text-Tab mit .md-Pfad, dessen Inhalt `marp: true` im Front-Matter trägt.
+    /// Quelle ist der Buffer (aktiver Tab: Editor, sonst Tab-Cache), damit ungespeichertes
+    /// Front-Matter zählt; ohne Buffer entscheidet der Dateikopf auf der Platte.
+    fn tabIsMarpDeck(self: *UI, pane: *pane_mod.Pane, index: usize) bool {
+        _ = self;
+        const leaf = &pane.data.leaf;
+        const tabs = leaf.tab_bar.tabs.items;
+        if (index >= tabs.len or tabs[index].kind != .text or !std.mem.endsWith(u8, tabs[index].path, ".md")) return false;
+        const buf: ?*@import("flow_core").Buffer = if (leaf.tab_bar.active_index == index) leaf.code_editor.buffer else tabs[index].buffer;
+        if (buf) |b| return marp.isMarpDeck(b.store_to_string_cached(b.root, b.file_eol_mode));
+        return marp.isMarpDeckFile(tabs[index].path);
+    }
+
+    /// Markdown Preview nur für Text-Tabs mit .md-Pfad, Export to PDF nur für
+    /// Marp-Decks; die Vorschau selbst und Terminal/Chat/Bild bekommen beides nicht.
     fn tabMenuHidden(menu: TabMenu) ctx_menu.Hidden {
         var hidden = ctx_menu.none;
         const tabs = menu.pane.data.leaf.tab_bar.tabs.items;
         const is_md = menu.index < tabs.len and tabs[menu.index].kind == .text and std.mem.endsWith(u8, tabs[menu.index].path, ".md");
-        if (!is_md) {
-            hidden.insert(.md_preview);
-            hidden.insert(.md_export_pdf);
-        }
+        if (!is_md) hidden.insert(.md_preview);
+        if (!is_md or !menu.marp_deck) hidden.insert(.md_export_pdf);
         return hidden;
     }
 

@@ -253,6 +253,7 @@ pub fn build(b: *std.Build) void {
     code_editor_mod.addImport("syntax", syntax_mod);
     code_editor_mod.addImport("shortcuts", shortcuts_mod);
     code_editor_mod.addImport("context_menu", context_menu_mod);
+    code_editor_mod.addImport("marp", marp_mod);
 
     // Tests IN code_editor.zig laufen nur, wenn die Datei selbst Test-Root ist:
     // Tests aus importierten Modulen (test/test_editor.zig → "code_editor")
