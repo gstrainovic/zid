@@ -19,6 +19,10 @@ const edit_ops = @import("edit_ops.zig");
 const wrap_ops = @import("wrap_ops.zig");
 const backup = @import("backup.zig");
 
+/// Bis zu dieser Zeilenzahl zählt `totalVisualRows` exakt, darüber per Stichprobe.
+pub const visual_rows_sample_max: usize = 2048;
+const VisualRowsCache = struct { root: flow_core.Buffer.Root, cols: usize, total: usize };
+
 /// Measurement function type: returns width of text in pixels.
 pub const MeasureFn = *const fn (ptr: [*c]const u8, len: usize) f32;
 
@@ -155,6 +159,9 @@ pub const CodeEditor = struct {
     scrollbar_thumb_y: f32 = 0,
     scrollbar_thumb_height: f32 = 0,
     scrollbar_container_width: f32 = 0,
+    /// Sichtbare Reihen des ganzen Buffers mit Word-Wrap, gültig für genau diesen
+    /// Root und diese Spaltenzahl (siehe `totalVisualRows`).
+    visual_rows_cache: ?VisualRowsCache = null,
 
     pending_split_v: bool = false,
     pending_split_h: bool = false,
@@ -461,6 +468,7 @@ pub const CodeEditor = struct {
         }
         self.bg_queued_edits.clearRetainingCapacity();
         self.last_parsed_root = null;
+        self.visual_rows_cache = null;
     }
 
     /// Sprache anhand Dateipfad (Extension / Shebang) wählen.
@@ -489,6 +497,7 @@ pub const CodeEditor = struct {
         ) catch null; // If first succeeded, this usually succeeds too
 
         self.last_parsed_root = null;
+        self.visual_rows_cache = null;
 
         // Dirty-Flag setzen statt sofort zu parsen.
         // highlightChunked wird im Main-Loop aufgerufen.
@@ -2889,11 +2898,40 @@ pub const CodeEditor = struct {
         return line;
     }
 
-    /// Sichtbare Reihen des ganzen Buffers (Zeilen ohne Word-Wrap).
+    /// Sichtbare Reihen des ganzen Buffers (Zeilen ohne Word-Wrap). Mit Word-Wrap
+    /// je Root und Spaltenzahl gecacht, ab `visual_rows_sample_max` Zeilen aus einer
+    /// Stichprobe geschätzt: der Wert bestimmt nur die Thumb-Größe der Scrollbar, und
+    /// ein Durchlauf über 40k Zeilen kostet sonst 300 ms pro Frame.
     pub fn totalVisualRows(self: *Self) usize {
         const total = self.lineCount();
         if (!self.word_wrap or total == 0) return total;
-        return self.visualRowsBetween(0, total - 1);
+        const cols = self.wrapCols();
+        if (self.visual_rows_cache) |c| {
+            if (c.root == self.buffer.root and c.cols == cols) return c.total;
+        }
+        const rows = if (total <= visual_rows_sample_max) self.visualRowsBetween(0, total - 1) else self.estimateVisualRows(total);
+        self.visual_rows_cache = .{ .root = self.buffer.root, .cols = cols, .total = rows };
+        return rows;
+    }
+
+    /// Schätzung aus `visual_rows_sample_max` Zeilen: gleichmäßige Schritte, innerhalb
+    /// jedes Schritts ein deterministisch gestreuter Versatz, damit periodische Inhalte
+    /// (jede zweite Zeile lang) die Stichprobe nicht verzerren. Nie unter `total`.
+    fn estimateVisualRows(self: *Self, total: usize) usize {
+        const stride = (total + visual_rows_sample_max - 1) / visual_rows_sample_max;
+        var sum: usize = 0;
+        var count: usize = 0;
+        var start: usize = 0;
+        var seed: u64 = 0x9E3779B97F4A7C15;
+        while (start < total) : (start += stride) {
+            seed = seed *% 6364136223846793005 +% 1442695040888963407;
+            const offset: usize = @intCast((seed >> 33) % stride);
+            const line = @min(start + offset, total - 1);
+            sum += self.visualRowsOf(line);
+            count += 1;
+        }
+        if (count == 0) return total;
+        return @max(total, sum * total / count);
     }
 
     pub fn ensureCursorVisible(self: *Self) void {
@@ -3682,6 +3720,52 @@ test "Kontextmenü: Export to PDF nur bei Marp-Decks, Preview bei jeder .md" {
     defer zig_file.ed.deinit();
     zig_file.buffer.set_file_path("/tmp/x.zig");
     try std.testing.expect(zig_file.ed.menuHidden().contains(.md_export_pdf));
+}
+
+/// Editor mit 10 Wrap-Spalten (Untergrenze) und Word-Wrap an.
+fn wrapTestEditor(allocator: std.mem.Allocator, text: []const u8) !struct { buffer: *flow_core.Buffer, ed: CodeEditor } {
+    var t = try testEditor(allocator, text);
+    t.ed.width = 50 + 12 + t.ed.scrollbar_width + 145;
+    t.ed.height = 3 * (24 + 16);
+    t.ed.show_minimap = false;
+    t.ed.word_wrap = true;
+    return .{ .buffer = t.buffer, .ed = t.ed };
+}
+
+test "totalVisualRows: exakt bei kleinen Dateien, Cache folgt dem Buffer" {
+    var t = try wrapTestEditor(std.testing.allocator, "aaa bbb ccc ddd eee\nkurz\nfff ggg hhh");
+    defer t.buffer.deinit();
+    defer t.ed.deinit();
+    try std.testing.expectEqual(@as(usize, 6), t.ed.totalVisualRows());
+    // Zweiter Aufruf ohne Änderung: gleicher Wert (aus dem Cache)
+    try std.testing.expectEqual(@as(usize, 6), t.ed.totalVisualRows());
+    // Edit ändert den Root → Cache verfällt: "kurz" wird zu drei Reihen
+    t.ed.cursor = .{ .row = 1, .col = 4, .target = 4 };
+    try t.ed.insertString(" aaa bbb ccc ddd");
+    try std.testing.expectEqual(@as(usize, 8), t.ed.totalVisualRows());
+    // Ohne Word-Wrap zählt jede Zeile eine Reihe
+    t.ed.word_wrap = false;
+    try std.testing.expectEqual(@as(usize, 3), t.ed.totalVisualRows());
+}
+
+test "totalVisualRows: große Dateien werden gesampelt, Schätzung bleibt nah dran" {
+    const allocator = std.testing.allocator;
+    var text: std.ArrayListUnmanaged(u8) = .empty;
+    defer text.deinit(allocator);
+    // 20000 Zeilen, abwechselnd 3 Reihen und 1 Reihe → exakt 40000 Reihen. Eine
+    // Stichprobe mit festem Schritt liefe hier auf ein Muster; die Schätzung muss trotzdem passen.
+    var i: usize = 0;
+    while (i < 20000) : (i += 1) {
+        try text.appendSlice(allocator, if (i % 2 == 0) "aaa bbb ccc ddd eee\n" else "kurz\n");
+    }
+    var t = try wrapTestEditor(allocator, text.items);
+    defer t.buffer.deinit();
+    defer t.ed.deinit();
+    const total = t.ed.lineCount();
+    try std.testing.expect(total > visual_rows_sample_max);
+    const rows = t.ed.totalVisualRows();
+    try std.testing.expect(rows >= 36000 and rows <= 44000);
+    try std.testing.expect(rows >= total);
 }
 
 test "DeleteLine: mittlere Zeile verschwindet, Cursor bleibt auf der Zeile" {
