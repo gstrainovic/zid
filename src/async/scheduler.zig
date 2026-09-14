@@ -115,6 +115,10 @@ pub const Scheduler = struct {
     // statt joined. Dann dürfen workers und self NICHT freigegeben werden
     // (noch-laufender Worker hält Referenzen).
     detached: bool = false,
+    /// Wird nach jedem erfolgreich eingereihten Result gerufen, auch aus Worker- und
+    /// Watcher-Threads. main.zig hängt hier wio.cancelWait ein: der Frame-Loop schläft
+    /// sonst in wio.wait(.{}) und holt Results erst beim nächsten Fenster-Event ab.
+    on_result: ?*const fn () void = null,
 
     const Self = @This();
 
@@ -177,6 +181,7 @@ pub const Scheduler = struct {
             log.warn("result queue full — result dropped", .{});
             return false;
         }
+        if (self.on_result) |wake| wake();
         return true;
     }
 
@@ -233,7 +238,9 @@ pub const Scheduler = struct {
             if (!self.result_queue.push(result)) {
                 log.warn("result queue full — dropping result", .{});
                 result.deinit();
+                continue;
             }
+            if (self.on_result) |wake| wake();
         }
     }
 };
@@ -260,6 +267,39 @@ test "submit 10 tasks, poll all results" {
         }
     }
     try std.testing.expectEqual(@as(usize, 10), total);
+}
+
+var wake_count = std.atomic.Value(usize).init(0);
+fn countWake() void {
+    _ = wake_count.fetchAdd(1, .monotonic);
+}
+
+test "on_result weckt bei jedem eingereihten Result: pushResult und Worker" {
+    var scheduler = try Scheduler.init(std.testing.allocator, 1);
+    defer scheduler.deinit();
+    wake_count.store(0, .monotonic);
+    scheduler.on_result = &countWake;
+
+    try std.testing.expect(scheduler.pushResult(.{
+        .tag = .file_changed,
+        .payload = try std.testing.allocator.dupe(u8, "x"),
+        .allocator = std.testing.allocator,
+    }));
+    try std.testing.expectEqual(@as(usize, 1), wake_count.load(.monotonic));
+
+    try std.testing.expect(scheduler.submit(.{ .func = testTask, .data = @ptrFromInt(7) }));
+    var buf: [4]TaskResult = undefined;
+    var got: usize = 0;
+    var attempts: usize = 0;
+    while (got < 2 and attempts < 2000) : (attempts += 1) {
+        std.Thread.sleep(std.time.ns_per_ms);
+        for (scheduler.pollResults(&buf)) |r| {
+            r.deinit();
+            got += 1;
+        }
+    }
+    try std.testing.expectEqual(@as(usize, 2), got);
+    try std.testing.expectEqual(@as(usize, 2), wake_count.load(.monotonic));
 }
 
 fn testTask(allocator: std.mem.Allocator, data: ?*anyopaque) !TaskResult {
