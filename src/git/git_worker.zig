@@ -5,6 +5,7 @@
 const std = @import("std");
 const scheduler = @import("scheduler");
 const git_history = @import("git_history");
+const git_diff = @import("git_diff");
 
 const log = std.log.scoped(.git_worker);
 
@@ -213,6 +214,63 @@ pub fn taskGitShow(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.TaskR
     const key = try std.mem.concat(alloc, u8, &.{ params.tab_path, "\x1f", sh.hash });
     defer alloc.free(key);
     return historyResult(alloc, key, runGitCapture(alloc, params.cwd(), args), .git_show, .git_show_error);
+}
+
+/// Ein selbst-owned String als Task-Parameter (Tab-Pfad eines Diff-Tabs).
+pub const TextParam = struct {
+    alloc: std.mem.Allocator,
+    text: []u8,
+
+    pub fn init(alloc: std.mem.Allocator, text: []const u8) !*TextParam {
+        const self = try alloc.create(TextParam);
+        errdefer alloc.destroy(self);
+        self.* = .{ .alloc = alloc, .text = try alloc.dupe(u8, text) };
+        return self;
+    }
+
+    pub fn deinit(self: *TextParam) void {
+        self.alloc.free(self.text);
+        self.alloc.destroy(self);
+    }
+};
+
+/// Diff-Editor: Payload `<tab_path>\n` + `git_diff.encodeContents(alt, neu, hunks)`.
+/// Fehlt eine Seite (Datei neu angelegt, gelöscht, Wurzel-Commit), ist sie leer.
+/// Scheitern die Hunks, kommt Tag `git_file_diff_error` mit stderr.
+pub fn taskGitFileDiff(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.TaskResult {
+    const param: *TextParam = @ptrCast(@alignCast(data.?));
+    defer param.deinit();
+    const spec = git_diff.parseTabPath(param.text) orelse return error.InvalidDiffPath;
+
+    var args_buf: [16][]const u8 = undefined;
+    var spec_buf: [2 * std.fs.max_path_bytes + 64]u8 = undefined;
+
+    const old = contentOrEmpty(alloc, spec.repo, git_diff.contentArgs(&args_buf, &spec_buf, spec.parent, spec.previous_path));
+    defer alloc.free(old);
+    const new = contentOrEmpty(alloc, spec.repo, git_diff.contentArgs(&args_buf, &spec_buf, spec.hash, spec.path));
+    defer alloc.free(new);
+
+    switch (runGitCapture(alloc, spec.repo, git_diff.hunkArgs(&args_buf, &spec_buf, spec))) {
+        .ok => |hunks| {
+            defer alloc.free(hunks);
+            const body = try git_diff.encodeContents(alloc, old, new, hunks);
+            defer alloc.free(body);
+            return .{ .tag = .git_file_diff, .payload = try git_history.frame(alloc, param.text, body), .allocator = alloc };
+        },
+        .failed => |msg| return historyResult(alloc, param.text, .{ .failed = msg }, .git_file_diff, .git_file_diff_error),
+    }
+}
+
+/// Dateiinhalt über `git show <ref>:<pfad>`; nicht vorhanden → leer (owned).
+fn contentOrEmpty(alloc: std.mem.Allocator, cwd: []const u8, args: ?[]const []const u8) []u8 {
+    const a = args orelse return no_message;
+    return switch (runGitCapture(alloc, cwd, a)) {
+        .ok => |out| out,
+        .failed => |msg| blk: {
+            alloc.free(msg);
+            break :blk no_message;
+        },
+    };
 }
 
 fn historyResult(alloc: std.mem.Allocator, key: []const u8, run: GitRun, ok_tag: scheduler.ResultTag, err_tag: scheduler.ResultTag) !scheduler.TaskResult {
@@ -452,8 +510,50 @@ test "taskGitShow: Diff eines Commits, Schlüssel mit Hash, auf Datei begrenzt" 
     try std.testing.expectEqualStrings(c.hash, k.hash);
     try std.testing.expect(std.mem.startsWith(u8, u.body, "commit "));
     try std.testing.expect(std.mem.indexOf(u8, u.body, "diff --git a/src/git/git_worker.zig") != null);
-    // auf die Datei begrenzt: kein Diff anderer Dateien
-    try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, u.body, "diff --git"));
+    // auf die Datei begrenzt: kein Diff anderer Dateien. Zeilenanfänge zählen, nicht Teilstrings:
+    // der Diff dieser Datei enthält den Text "diff --git" selbst (in genau diesem Test).
+    try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, u.body, "\ndiff --git "));
+}
+
+test "taskGitFileDiff: alter und neuer Inhalt plus Hunks einer Datei in einem Commit" {
+    const alloc = std.testing.allocator;
+    const cwd = try std.process.getCwdAlloc(alloc);
+    defer alloc.free(cwd);
+    const file = try std.fs.path.join(alloc, &.{ cwd, "src", "git", "git_history.zig" });
+    defer alloc.free(file);
+    const htab = try git_history.tabPath(alloc, .{ .file = file });
+    defer alloc.free(htab);
+    const log_result = try taskGitLog(alloc, try HistoryParams.init(alloc, htab, null));
+    defer log_result.deinit();
+    var log_ = try git_history.parseLog(alloc, git_history.unframe(log_result.payload).?.body);
+    defer log_.deinit();
+
+    // jüngster Commit: beide Seiten vorhanden
+    const c = log_.commits[0];
+    const tab = try git_diff.tabPath(alloc, .{ .hash = c.hash, .parent = c.firstParent(), .repo = cwd, .path = c.path, .previous_path = log_.commits[@min(1, log_.commits.len - 1)].path });
+    defer alloc.free(tab);
+    const result = try taskGitFileDiff(alloc, try TextParam.init(alloc, tab));
+    defer result.deinit();
+    try std.testing.expect(result.tag == .git_file_diff);
+    const u = git_history.unframe(result.payload).?;
+    try std.testing.expectEqualStrings(tab, u.key);
+    const contents = git_diff.decodeContents(u.body).?;
+    try std.testing.expect(std.mem.indexOf(u8, contents.new, "pub const State") != null);
+    const hunks = try git_diff.parseHunks(alloc, contents.hunks);
+    defer alloc.free(hunks);
+    try std.testing.expect(hunks.len > 0);
+
+    // ältester Commit: Datei neu angelegt, alter Inhalt leer, ein Hunk ab Zeile 0
+    const first = log_.commits[log_.commits.len - 1];
+    const tab0 = try git_diff.tabPath(alloc, .{ .hash = first.hash, .parent = first.firstParent(), .repo = cwd, .path = first.path, .previous_path = first.path });
+    defer alloc.free(tab0);
+    const r0 = try taskGitFileDiff(alloc, try TextParam.init(alloc, tab0));
+    defer r0.deinit();
+    const c0 = git_diff.decodeContents(git_history.unframe(r0.payload).?.body).?;
+    try std.testing.expectEqual(@as(usize, 0), c0.old.len);
+    const h0 = try git_diff.parseHunks(alloc, c0.hunks);
+    defer alloc.free(h0);
+    try std.testing.expectEqual(@as(u32, 0), h0[0].old_start);
 }
 
 test "taskGitLog: Fehler von git kommt als Text im Ergebnis, nicht als Task-Fehler" {

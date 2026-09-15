@@ -568,6 +568,26 @@ MuPDFs Story-Engine. Folienvorschau in `MarkdownView` (`deck`-Feld), Command
 - E2E `python3 scripts/e2e_git_history.py` (eigenes Fixture-Repo unter `tmp/`), RPC `git_history_state`
   (JSON vom Main-Thread pro Frame gespiegelt, `snapshotGitHistory`).
 
+## Diff-Editor im VS-Code-Stil (Tab `git-diff://…`)
+
+- Vorbild ist VS Codes Diff-Editor, Standardwerte aus `src/vs/editor/common/config/diffEditor.ts`:
+  Automatic-Layout (nebeneinander ab 900 px, sonst untereinander), `+`/`−`-Markierung, unveränderte
+  Bereiche standardmäßig sichtbar, eingeklappt mit Kontext 3 / Minimum 3. Titel wie
+  `resolveTimelineOpenDiffCommand`: `name (eltern) ↔ name (commit)`, Wurzel-Commit gegen den leeren
+  Baum `4b825dc`. Kürzel wie VS Code: Alt+F5 / Shift+Alt+F5 (`diff_next_change`/`diff_prev_change`),
+  Umschalter „Toggle Collapse Unchanged Regions“ und „Toggle Inline View“ in der Werkzeugleiste.
+- Läuft parallel zur einfachen Git-History (`git_history_view.zig`), die bleibt bestehen.
+- Aufbau: `src/git/git_diff.zig` (Modul `git_diff`, unit-getestet: Tab-Pfad mit 0x1f-Feldern
+  Commit/Eltern/Repo/Pfad/alter Pfad, Hunks aus `git show -U0 -M`, Ausrichtung je Layout,
+  `collapse`, `innerChange`, `columnSlice`, `DiffState`), Worker `taskGitFileDiff` (alter Inhalt
+  `<eltern>:<alter pfad>`, neuer `<commit>:<pfad>`, fehlende Seite leer), Ansicht
+  `src/ui/git_diff_view.zig`. Die Zeilen-Ausrichtung übernimmt git (Hunks), zid berechnet keinen Diff.
+- Beide Seiten nutzen den Tree-sitter-Highlighter wie die Markdown-Codeblöcke; Hälften sind
+  `.percent(0.5)`: feste Breiten aus dem Vorframe zogen im neuen Pane den Container auf 1200 px.
+- Tab-Pfade enthalten 0x1f: RPC-JSON immer über `std.json.Stringify` schreiben (`ui_state.tabs`).
+- E2E `python3 scripts/e2e_git_diff.py` (öffnet den Tab per `open_file` mit gebautem Pfad), Zustand
+  über `git_history_state` mit `view: "diff"`.
+
 ## Explorer: .gitignore-Einträge
 
 - `taskGitStatus` ruft `git status --porcelain=v2 --branch --null --ignored` (im Projekt ~50 ms
