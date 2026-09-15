@@ -6,7 +6,8 @@
 	url = https://github.com/gstrainovic/gooey-vulkan
 [submodule "libs/clay-zig"]
 	path = libs/clay-zig
-	url = https://github.com/johan0A/clay-zig-bindings
+	url = https://github.com/gstrainovic/clay-zig-bindings
+	branch = zid
 [submodule "libs/zigimg"]
 	path = libs/zigimg
 	url = https://github.com/zigimg/zigimg
