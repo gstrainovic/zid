@@ -210,6 +210,9 @@ fn isContinuation(byte: u8) bool {
 
 pub const scheme = "git-diff://";
 
+/// Ref für den Index (gestagter Stand) wie VS Code `GitTimelineItem('~', 'HEAD', …)`.
+pub const index_ref = "~";
+
 /// Hash des leeren Baums: VS Code vergleicht einen Wurzel-Commit damit.
 pub const empty_tree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
@@ -246,13 +249,16 @@ fn short(hash: []const u8) []const u8 {
 }
 
 pub fn specTitle(alloc: std.mem.Allocator, s: Spec) ![]u8 {
+    // VS Code: '{0} (Index)' für den gestagten Stand
+    if (std.mem.eql(u8, s.hash, index_ref)) return std.fmt.allocPrint(alloc, "{s} (Index)", .{std.fs.path.basename(s.path)});
     return title(alloc, s.path, short(if (s.parent.len > 0) s.parent else empty_tree), short(s.hash));
 }
 
 /// `git show <ref>:<pfad>` für den Dateiinhalt; null ohne Ref (Wurzel-Commit hat keinen Vorgänger).
 pub fn contentArgs(buf: *[16][]const u8, spec_buf: []u8, ref: []const u8, path: []const u8) ?[]const []const u8 {
     if (ref.len == 0 or path.len == 0) return null;
-    const object = std.fmt.bufPrint(spec_buf, "{s}:{s}", .{ ref, path }) catch return null;
+    // Index: `git show :pfad`
+    const object = std.fmt.bufPrint(spec_buf, "{s}:{s}", .{ if (std.mem.eql(u8, ref, index_ref)) "" else ref, path }) catch return null;
     buf[0] = "show";
     buf[1] = "--no-color";
     buf[2] = object;
@@ -263,7 +269,9 @@ pub fn contentArgs(buf: *[16][]const u8, spec_buf: []u8, ref: []const u8, path: 
 /// `git diff <vorher> <commit>` (exakt die beiden gezeigten Stände), sonst `git show`.
 pub fn hunkArgs(buf: *[16][]const u8, spec_buf: []u8, s: Spec) []const []const u8 {
     var n: usize = 0;
-    const head: []const []const u8 = if (s.parent.len > 0)
+    const head: []const []const u8 = if (std.mem.eql(u8, s.hash, index_ref))
+        &.{ "diff", "--no-color", "--no-ext-diff", "--cached", "-U0", "-M", s.parent, "--" }
+    else if (s.parent.len > 0)
         &.{ "diff", "--no-color", "--no-ext-diff", "-U0", "-M", s.parent, s.hash, "--" }
     else
         &.{ "show", "--no-color", "--no-ext-diff", "--format=", "-U0", "-M", s.hash, "--" };
@@ -905,6 +913,25 @@ test "columnSlice: Byte-Bereich ab Spalte für n Spalten, Tabs zählen 4, UTF-8 
     try testing.expectEqual(ByteRange{ .start = 1, .end = 4 }, columnSlice("aäbc", 1, 2));
     // Tab = 4 Spalten: ab Spalte 4 beginnt "x"
     try testing.expectEqual(ByteRange{ .start = 1, .end = 2 }, columnSlice("\tx", 4, 10));
+}
+
+test "Index (Staged Changes) wie VS Code: Titel „name (Index)“, Inhalt :pfad, Hunks --cached" {
+    const spec = Spec{ .hash = index_ref, .parent = "HEAD", .repo = "/r", .path = "a.zig", .previous_path = "a.zig" };
+    const t = try specTitle(testing.allocator, spec);
+    defer testing.allocator.free(t);
+    try testing.expectEqualStrings("a.zig (Index)", t);
+
+    var buf: [16][]const u8 = undefined;
+    var spec_buf: [512]u8 = undefined;
+    const new = contentArgs(&buf, &spec_buf, spec.hash, spec.path).?;
+    try testing.expectEqualStrings(":a.zig", new[new.len - 1]);
+    const old = contentArgs(&buf, &spec_buf, spec.parent, spec.previous_path).?;
+    try testing.expectEqualStrings("HEAD:a.zig", old[old.len - 1]);
+    const h = hunkArgs(&buf, &spec_buf, spec);
+    try testing.expectEqualStrings("diff", h[0]);
+    try testing.expect(containsArg(h, "--cached"));
+    try testing.expect(containsArg(h, "HEAD"));
+    try testing.expect(!containsArg(h, index_ref));
 }
 
 test "splitLines: Zeilen ohne Umbruch, letzte leere Zeile nach \\n zählt nicht, CR weg" {

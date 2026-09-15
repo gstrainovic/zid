@@ -57,7 +57,13 @@ fn formatAge(buf: []u8, seconds: i64, long: bool) []const u8 {
 /// `git log --shortstat` einer Datei: Dateien, Einfügungen, Löschungen.
 pub const Stat = struct { files: u32 = 0, insertions: u32 = 0, deletions: u32 = 0 };
 
+/// `staged`: VS Code „Staged Changes“ (Index gegen HEAD), erscheint, sobald die Datei gestagt ist.
+pub const ItemKind = enum { commit, staged };
+
 pub const Item = struct {
+    kind: ItemKind = .commit,
+    /// Name im Hover, falls anders als die Beschreibung (VS Code: „You“ beim Index)
+    hover_author: []const u8 = "",
     hash: []const u8 = "",
     /// Commit-Datum in Sekunden (VS Code `git.timeline.date`: committed)
     timestamp: i64 = 0,
@@ -99,6 +105,28 @@ pub fn logArgs(buf: *[16][]const u8, abs_file: []const u8) []const []const u8 {
     const args = [_][]const u8{ "log", "--no-color", "--follow", "--numstat", log_format, date_format, "-n", max_items, "--", std.fs.path.basename(abs_file) };
     @memcpy(buf[0..args.len], &args);
     return buf[0..args.len];
+}
+
+/// `git diff --cached --name-status` für die Datei: steht sie im Index?
+pub fn stagedArgs(buf: *[16][]const u8, abs_file: []const u8) []const []const u8 {
+    const args = [_][]const u8{ "diff", "--no-color", "--cached", "--name-status", "--", std.fs.path.basename(abs_file) };
+    @memcpy(buf[0..args.len], &args);
+    return buf[0..args.len];
+}
+
+/// Statuszeile → Text wie VS Code `Resource.getStatusText` (INDEX_*), null ohne Eintrag.
+pub fn parseStagedStatus(out: []const u8) ?[]const u8 {
+    const line = std.mem.trim(u8, out, " \r\n");
+    if (line.len == 0) return null;
+    return switch (line[0]) {
+        'M' => "Index Modified",
+        'A' => "Index Added",
+        'D' => "Index Deleted",
+        'R' => "Index Renamed",
+        'C' => "Index Copied",
+        'T' => "Index Modified",
+        else => null,
+    };
 }
 
 pub fn parseLog(alloc: std.mem.Allocator, out: []const u8) !Log {
@@ -200,10 +228,17 @@ pub const Hover = struct { header: []u8, message: []const u8, stats: []u8 };
 /// Hover wie VS Code `getCommitHover`: „Autor, 2 hours ago (Datum)“, Nachricht, Statistik.
 pub fn hoverText(alloc: std.mem.Allocator, item: Item, now: i64) !Hover {
     var age_buf: [32]u8 = undefined;
-    const header = try std.fmt.allocPrint(alloc, "{s}, {s} ({s})", .{ item.author, fromNowLong(&age_buf, now, item.timestamp), item.date_text });
+    const who = if (item.hover_author.len > 0) item.hover_author else item.author;
+    const age = fromNowLong(&age_buf, now, item.timestamp);
+    const header = if (item.date_text.len > 0)
+        try std.fmt.allocPrint(alloc, "{s}, {s} ({s})", .{ who, age, item.date_text })
+    else
+        try std.fmt.allocPrint(alloc, "{s}, {s}", .{ who, age });
     errdefer alloc.free(header);
     var stats: std.ArrayListUnmanaged(u8) = .empty;
     errdefer stats.deinit(alloc);
+    // VS Code gibt dem Index-Eintrag keine Statistik mit
+    if (item.kind == .staged) return .{ .header = header, .message = item.message, .stats = try stats.toOwnedSlice(alloc) };
     const w = stats.writer(alloc);
     try w.print("{d} {s} changed", .{ item.stat.files, if (item.stat.files == 1) "file" else "files" });
     if (item.stat.insertions > 0) try w.print(", {d} {s}(+)", .{ item.stat.insertions, if (item.stat.insertions == 1) "insertion" else "insertions" });
@@ -304,12 +339,39 @@ pub const Timeline = struct {
             self.error_text = try self.alloc.dupe(u8, body);
             return;
         }
+        // `<repo>\n<git diff --cached --name-status>\x1c<git log>`; ohne 0x1c nur Log
         const nl = std.mem.indexOfScalar(u8, body, '\n') orelse body.len;
         self.repo = try self.alloc.dupe(u8, body[0..nl]);
-        self.log = try parseLog(self.alloc, body[@min(body.len, nl + 1)..]);
+        const rest = body[@min(body.len, nl + 1)..];
+        const sep = std.mem.indexOfScalar(u8, rest, 0x1c);
+        const staged = if (sep) |s| parseStagedStatus(rest[0..s]) else null;
+        self.log = try parseLog(self.alloc, if (sep) |s| rest[s + 1 ..] else rest);
+        if (staged) |status| try self.prependStaged(f, status);
         if (selected_hash) |h| for (self.items(), 0..) |it, i| {
             if (std.mem.eql(u8, it.hash, h)) self.selected = i;
         };
+    }
+
+    /// VS Code stellt „Staged Changes“ an den Anfang (`items.splice(0, 0, item)`).
+    fn prependStaged(self: *Timeline, file: []const u8, status: []const u8) !void {
+        const log = &self.log.?;
+        const a = log.arena.allocator();
+        const rel = try a.dupe(u8, if (std.mem.startsWith(u8, file, self.repo) and file.len > self.repo.len + 1) file[self.repo.len + 1 ..] else std.fs.path.basename(file));
+        std.mem.replaceScalar(u8, rel, '\\', '/');
+        const all = try a.alloc(Item, log.items.len + 1);
+        all[0] = .{
+            .kind = .staged,
+            .hash = git_diff.index_ref,
+            .label = "Staged Changes",
+            .hover_author = "You",
+            .message = status,
+            .timestamp = std.time.timestamp(),
+            .path = rel,
+            .previous_ref = "HEAD",
+            .previous_path = rel,
+        };
+        @memcpy(all[1..], log.items);
+        log.items = all;
     }
 
     /// Diff wie VS Code `resolveTimelineOpenDiffCommand`: Commit gegen den vorigen Commit der Datei.
@@ -490,6 +552,48 @@ test "Timeline: Meldungen wie VS Code" {
     try testing.expect(t.message(&buf) == null);
     t.follow(null); // kein Datei-Editor aktiv
     try testing.expectEqualStrings("The active editor cannot provide timeline information.", t.message(&buf).?);
+}
+
+test "stagedArgs und parseStagedStatus: Status der Datei im Index wie VS Code getStatusText" {
+    var buf: [16][]const u8 = undefined;
+    const args = stagedArgs(&buf, "/r/src/a.zig");
+    try testing.expect(contains(args, "--cached") and contains(args, "--name-status"));
+    try testing.expectEqualStrings("a.zig", args[args.len - 1]);
+    try testing.expectEqualStrings("Index Modified", parseStagedStatus("M\tsrc/a.zig\n").?);
+    try testing.expectEqualStrings("Index Added", parseStagedStatus("A\tsrc/a.zig\n").?);
+    try testing.expectEqualStrings("Index Deleted", parseStagedStatus("D\tsrc/a.zig\n").?);
+    try testing.expectEqualStrings("Index Renamed", parseStagedStatus("R100\told.zig\tsrc/a.zig\n").?);
+    try testing.expect(parseStagedStatus("") == null);
+}
+
+test "Timeline: gestagte Datei bekommt „Staged Changes“ oben, Diff Index gegen HEAD" {
+    var t = Timeline.init(testing.allocator);
+    defer t.deinit();
+    t.setExpanded(true);
+    t.follow("/r/b.txt");
+    _ = t.takeRequest();
+    try t.apply("/r/b.txt", true, "/r\nM\tb.txt\n\x1c" ++ sample_log);
+    try testing.expectEqual(@as(usize, 3), t.items().len);
+    const staged = t.items()[0];
+    try testing.expectEqual(ItemKind.staged, staged.kind);
+    try testing.expectEqualStrings("Staged Changes", staged.label);
+    try testing.expectEqualStrings("", staged.author); // Beschreibung leer
+    try testing.expectEqualStrings("You", staged.hover_author);
+    try testing.expectEqualStrings("Index Modified", staged.message);
+    try testing.expectEqualStrings("b.txt", staged.path);
+    // Der erste Commit behält seinen Vorgänger, der gestagte Eintrag vergleicht mit HEAD
+    try testing.expectEqualStrings("bbbb", t.items()[1].previous_ref);
+    const spec = t.diffSpec(0).?;
+    try testing.expectEqualStrings(git_diff.index_ref, spec.hash);
+    try testing.expectEqualStrings("HEAD", spec.parent);
+    try testing.expectEqualStrings("b.txt", spec.path);
+
+    // ohne Index-Änderung kein Eintrag
+    t.refresh();
+    _ = t.takeRequest();
+    try t.apply("/r/b.txt", true, "/r\n\x1c" ++ sample_log);
+    try testing.expectEqual(@as(usize, 2), t.items().len);
+    try testing.expectEqual(ItemKind.commit, t.items()[0].kind);
 }
 
 fn contains(args: []const []const u8, arg: []const u8) bool {

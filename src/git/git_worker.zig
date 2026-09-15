@@ -276,10 +276,16 @@ pub fn taskGitTimeline(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.T
     defer alloc.free(toplevel);
 
     var args_buf: [16][]const u8 = undefined;
+    // Index-Status für „Staged Changes“ (leer, wenn die Datei nicht gestagt ist)
+    const staged = switch (runGitCapture(alloc, dir, git_timeline.stagedArgs(&args_buf, param.text))) {
+        .ok => |out| out,
+        .failed => |msg| msg,
+    };
+    defer alloc.free(staged);
     switch (runGitCapture(alloc, dir, git_timeline.logArgs(&args_buf, param.text))) {
         .ok => |log_out| {
             defer alloc.free(log_out);
-            const body = try std.mem.concat(alloc, u8, &.{ std.mem.trimRight(u8, toplevel, "\r\n"), "\n", log_out });
+            const body = try std.mem.concat(alloc, u8, &.{ std.mem.trimRight(u8, toplevel, "\r\n"), "\n", staged, "\x1c", log_out });
             defer alloc.free(body);
             return .{ .tag = .git_timeline, .payload = try git_history.frame(alloc, param.text, body), .allocator = alloc };
         },
