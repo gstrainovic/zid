@@ -185,6 +185,32 @@ def step_follow_pin():
     shot("e2e_timeline_empty.ppm")
 
 
+def step_staged():
+    print("--- 6b. Staged Changes wie VS Code")
+    explorer_click("other.txt"); settle(6)
+    wait(lambda s: s["file"] == os.path.join(FX, "other.txt") and s["loaded"], "other.txt aktiv")
+    write("other.txt", "anders\ngestagt\n")
+    git("add", "other.txt")
+    rpc("move_mouse", list(center(tl()["header"]))); settle(6)
+    click_center("tl_btn_refresh")
+    s = wait(lambda s: len(s["items"]) == 2 and s["items"][0]["label"] == "Staged Changes", "gestagte Datei: „Staged Changes“ oben")
+    check(s["items"][0]["author"] == "" and s["items"][0]["time"] == "now", "ohne Beschreibung, Zeit „now“")
+    rpc("click", list(row_center(s, 0))); settle(6)
+    t0 = time.time()
+    d = {}
+    while time.time() - t0 < 10:
+        d = result_json("git_history_state")
+        if d.get("view") == "diff" and d.get("loaded") and d.get("title") == "other.txt (Index)":
+            break
+        time.sleep(0.05)
+    check(d.get("title") == "other.txt (Index)", f"Titel wie VS Code: {d.get('title')}")
+    check(d.get("changes") == 1 and d.get("added") == 1, f"Index gegen HEAD: eine hinzugefügte Zeile (+{d.get('added')})")
+    shot("e2e_timeline_staged.ppm")
+    # zurücksetzen, damit Refresh unten nur den Commit sieht
+    git("reset", "-q", "other.txt")
+    write("other.txt", "anders\n")
+
+
 def step_refresh():
     print("--- 7. Refresh")
     explorer_click("other.txt"); settle(6)
@@ -212,7 +238,7 @@ def main():
         settle(20)
         check(rpc("open_folder", [FX]) == "ok", "Fixture-Repo als Explorer-Root")
         settle(10)
-        for step in (step_expand, step_items, step_hover, step_open_changes, step_menu, step_follow_pin, step_refresh):
+        for step in (step_expand, step_items, step_hover, step_open_changes, step_menu, step_follow_pin, step_staged, step_refresh):
             step()
         print("ALL PASSED")
     finally:

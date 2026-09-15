@@ -267,18 +267,21 @@ pub const TimelineView = struct {
         })({
             clay.text(h.header, .{ .font_size = 16, .color = theme.text, .wrap_mode = .words });
             clay.text(h.message, .{ .font_size = 16, .color = theme.text, .wrap_mode = .words });
-            clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(1) } }, .background_color = theme.border })({});
-            clay.UI()(.{ .layout = .{ .direction = .left_to_right } })({
-                // Einfügungen grün, Löschungen rot wie scmGraph.historyItemHoverAdditions/Deletions
-                const files_end = std.mem.indexOf(u8, h.stats, " changed").? + " changed".len;
-                clay.text(h.stats[0..files_end], .{ .font_size = 15, .color = theme.subtext, .wrap_mode = .none });
-                const rest = h.stats[files_end..];
-                const del = std.mem.indexOf(u8, rest, "deletion");
-                const split = if (del) |d| (std.mem.lastIndexOf(u8, rest[0..d], ", ") orelse 0) else rest.len;
-                if (split > 0) clay.text(rest[0..split], .{ .font_size = 15, .color = theme.success, .wrap_mode = .none });
-                if (split < rest.len) clay.text(rest[split..], .{ .font_size = 15, .color = theme.danger, .wrap_mode = .none });
-            });
-            clay.text(it.hash[0..@min(it.hash.len, 7)], .{ .font_size = 14, .color = theme.muted, .wrap_mode = .none });
+            // Index-Eintrag: keine Statistik und kein Hash (VS Code)
+            if (h.stats.len > 0) {
+                clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(1) } }, .background_color = theme.border })({});
+                clay.UI()(.{ .layout = .{ .direction = .left_to_right } })({
+                    // Einfügungen grün, Löschungen rot wie scmGraph.historyItemHoverAdditions/Deletions
+                    const files_end = (std.mem.indexOf(u8, h.stats, " changed") orelse 0) + " changed".len;
+                    clay.text(h.stats[0..@min(files_end, h.stats.len)], .{ .font_size = 15, .color = theme.subtext, .wrap_mode = .none });
+                    const rest = h.stats[@min(files_end, h.stats.len)..];
+                    const del = std.mem.indexOf(u8, rest, "deletion");
+                    const split = if (del) |d| (std.mem.lastIndexOf(u8, rest[0..d], ", ") orelse 0) else rest.len;
+                    if (split > 0) clay.text(rest[0..split], .{ .font_size = 15, .color = theme.success, .wrap_mode = .none });
+                    if (split < rest.len) clay.text(rest[split..], .{ .font_size = 15, .color = theme.danger, .wrap_mode = .none });
+                });
+                clay.text(it.hash[0..@min(it.hash.len, 7)], .{ .font_size = 14, .color = theme.muted, .wrap_mode = .none });
+            }
         });
     }
 };
