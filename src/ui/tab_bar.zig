@@ -16,6 +16,7 @@ const log = std.log.scoped(.tab_bar);
 
 const file_types = @import("file_types.zig");
 const explorer_ops = @import("explorer_ops.zig");
+const git_history = @import("git_history");
 const FileKind = file_types.FileKind;
 
 /// Ein geöffneter Tab (Datei)
@@ -201,6 +202,21 @@ pub const TabBarState = struct {
                 .modified = false,
                 .is_active = false,
                 .kind = .terminal,
+            });
+            self.setActive(self.tabs.items.len - 1);
+            return;
+        }
+
+        // Git-History: kein Dateipfad, Beschriftung „Git History: repo“ / „History: datei“
+        if (git_history.parseTarget(path)) |target| {
+            const name = try git_history.displayName(self.allocator, target);
+            errdefer self.allocator.free(name);
+            const path_copy = try self.allocator.dupe(u8, path);
+            errdefer self.allocator.free(path_copy);
+            try self.tabs.append(self.allocator, .{
+                .path = path_copy,
+                .display_name = name,
+                .kind = .git_history,
             });
             self.setActive(self.tabs.items.len - 1);
             return;

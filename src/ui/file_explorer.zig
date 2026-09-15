@@ -26,13 +26,8 @@ pub const ROW_HEIGHT: f32 = 36;
 /// Rechtsklick-Menü auf einem Eintrag
 pub const ContextMenu = struct { x: f32, y: f32, node_index: u32 };
 
-/// Einträge des Kontextmenüs, in dieser Reihenfolge (Labels/Kürzel aus shortcuts.zig)
-pub const context_menu_items = [_]shortcuts.Command{
-    .new_file_entry, .new_folder_entry,    .rename_entry,           .delete_entry,
-    .cut_entry,      .copy_entry,          .paste_entry,            .duplicate_entry,
-    .copy_path,      .copy_relative_path,  .reveal_in_file_manager, .open_in_terminal,
-    .collapse_all,   .toggle_hidden_files, .filter_explorer,
-};
+/// Einträge des Kontextmenüs (Liste, Labels und Kürzel in shortcuts.zig)
+pub const context_menu_items = shortcuts.explorer_menu_items;
 const context_menu_height: f32 = ctx_menu.height(context_menu_items.len);
 
 /// Laufendes Inline-Umbenennen

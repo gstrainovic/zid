@@ -115,6 +115,11 @@ pub const Command = enum {
     toggle_whitespace,
     toggle_indent_guides,
     toggle_word_wrap,
+    /// Verlauf des Repos (Tab `git-history://repo:…`)
+    git_history,
+    /// Verlauf der Datei des Tabs bzw. Editors; `_entry` für den markierten Explorer-Eintrag
+    file_history,
+    file_history_entry,
     show_shortcuts,
     /// Terminal-Kontextmenü: Auswahl kopieren / Zwischenablage einfügen (ohne Kürzel)
     terminal_copy,
@@ -216,11 +221,19 @@ pub const bindings = [_]Binding{
 pub const tab_menu_items = [_]Command{
     .close_tab,      .close_other_tabs,  .close_tabs_right,  .close_all_tabs, .close_saved_tabs,
     .pin_tab,        .copy_tab_path,     .reveal_in_explorer, .md_preview,    .md_export_pdf,
-    .split_vertical, .split_horizontal,
+    .file_history,   .split_vertical,    .split_horizontal,
 };
 
 /// Kontextmenü im Editor-Text (`md_preview` nur bei .md, im Chat-Eingabefeld nur Cut/Copy/Paste)
-pub const editor_menu_items = [_]Command{ .cut, .copy, .paste, .md_preview, .md_export_pdf, .split_vertical, .split_horizontal };
+pub const editor_menu_items = [_]Command{ .cut, .copy, .paste, .md_preview, .md_export_pdf, .file_history, .split_vertical, .split_horizontal };
+
+/// Kontextmenü eines Explorer-Eintrags, in dieser Reihenfolge
+pub const explorer_menu_items = [_]Command{
+    .new_file_entry, .new_folder_entry,    .rename_entry,           .delete_entry,
+    .cut_entry,      .copy_entry,          .paste_entry,            .duplicate_entry,
+    .copy_path,      .copy_relative_path,  .reveal_in_file_manager, .open_in_terminal,
+    .file_history_entry, .collapse_all,    .toggle_hidden_files,    .filter_explorer,
+};
 
 /// Kontextmenü der Markdown-Vorschau
 pub const markdown_menu_items = [_]Command{ .md_export_pdf, .split_vertical, .split_horizontal };
@@ -234,7 +247,7 @@ pub const Menu = struct { title: []const u8, items: []const Command };
 pub const menus = [_]Menu{
     .{ .title = "File", .items = &.{ .new_file, .quick_open, .save, .toggle_autosave, .open_folder, .close_tab, .close_all_tabs, .reopen_closed_tab } },
     .{ .title = "Edit", .items = &.{ .undo, .redo, .cut, .copy, .paste, .select_all, .delete_line, .duplicate_line, .move_line_up, .move_line_down, .toggle_comment, .find, .replace, .goto_line, .goto_definition, .select_next_occurrence, .add_cursor_above, .add_cursor_below } },
-    .{ .title = "View", .items = &.{ .toggle_explorer, .focus_explorer, .split_vertical, .split_horizontal, .md_preview, .md_export_pdf, .new_terminal, .toggle_terminal, .toggle_theme, .zoom_in, .zoom_out, .zoom_reset, .toggle_minimap, .toggle_whitespace, .toggle_indent_guides, .toggle_word_wrap } },
+    .{ .title = "View", .items = &.{ .toggle_explorer, .focus_explorer, .split_vertical, .split_horizontal, .md_preview, .md_export_pdf, .new_terminal, .toggle_terminal, .toggle_theme, .zoom_in, .zoom_out, .zoom_reset, .toggle_minimap, .toggle_whitespace, .toggle_indent_guides, .toggle_word_wrap, .git_history } },
     .{ .title = "Help", .items = &.{ .command_palette, .show_shortcuts } },
 };
 
@@ -339,6 +352,8 @@ pub fn label(command: Command) []const u8 {
         .toggle_whitespace => "Toggle Render Whitespace",
         .toggle_word_wrap => "Toggle Word Wrap",
         .toggle_indent_guides => "Toggle Indent Guides",
+        .git_history => "Git History",
+        .file_history, .file_history_entry => "File History",
         .show_shortcuts => "Keyboard Shortcuts",
         .terminal_copy => "Terminal Copy",
         .terminal_paste => "Terminal Paste",
@@ -481,6 +496,19 @@ test "menus: jeder Menüeintrag hat ein Label" {
         try testing.expect(menu.title.len > 0);
         for (menu.items) |cmd| try testing.expect(label(cmd).len > 0);
     }
+}
+
+test "Git History: Repo im View-Menü, Datei-History in Tab-, Editor- und Explorer-Menü" {
+    const view = for (menus) |m| {
+        if (std.mem.eql(u8, m.title, "View")) break m;
+    } else unreachable;
+    try testing.expect(std.mem.indexOfScalar(Command, view.items, .git_history) != null);
+    try testing.expect(std.mem.indexOfScalar(Command, &tab_menu_items, .file_history) != null);
+    try testing.expect(std.mem.indexOfScalar(Command, &editor_menu_items, .file_history) != null);
+    try testing.expect(std.mem.indexOfScalar(Command, &explorer_menu_items, .file_history_entry) != null);
+    try testing.expectEqualStrings("Git History", label(.git_history));
+    try testing.expectEqualStrings("File History", label(.file_history));
+    try testing.expectEqualStrings("File History", label(.file_history_entry));
 }
 
 test "Kontextmenüs: Tab-Kopf hat Markdown Preview, jede Liste hat Labels, Terminal ohne Ctrl+C" {

@@ -4,6 +4,7 @@
 
 const std = @import("std");
 const scheduler = @import("scheduler");
+const git_history = @import("git_history");
 
 const log = std.log.scoped(.git_worker);
 
@@ -142,20 +143,90 @@ pub fn parseStatusOutput(alloc: std.mem.Allocator, out: []const u8, root: ?[]con
     return buf.toOwnedSlice(alloc);
 }
 
-/// Payload: "<short-hash> <subject>\n" pro Zeile
+/// Parameter der History-Tasks. `tab_path` ist der Schlüssel im Ergebnis und bestimmt
+/// über `git_history.parseTarget` Repo oder Datei. Selbst-owned.
+pub const HistoryParams = struct {
+    alloc: std.mem.Allocator,
+    /// Alle Strings liegen in diesem einen Puffer
+    owned: []u8,
+    tab_path: []const u8,
+    show: Show,
+
+    /// Nur `show`: Commit, Pfad der Datei darin und im nächstälteren Commit (leer = ganzer Commit)
+    pub const Show = struct { hash: []const u8 = "", path: []const u8 = "", previous_path: []const u8 = "" };
+
+    pub fn init(alloc: std.mem.Allocator, tab_path: []const u8, show: ?Show) !*HistoryParams {
+        const sh = show orelse Show{};
+        const self = try alloc.create(HistoryParams);
+        errdefer alloc.destroy(self);
+        const owned = try std.mem.concat(alloc, u8, &.{ tab_path, sh.hash, sh.path, sh.previous_path });
+        var rest: []const u8 = owned;
+        self.* = .{
+            .alloc = alloc,
+            .owned = owned,
+            .tab_path = take(&rest, tab_path.len),
+            .show = .{ .hash = take(&rest, sh.hash.len), .path = take(&rest, sh.path.len), .previous_path = take(&rest, sh.previous_path.len) },
+        };
+        return self;
+    }
+
+    fn take(rest: *[]const u8, n: usize) []const u8 {
+        defer rest.* = rest.*[n..];
+        return rest.*[0..n];
+    }
+
+    pub fn deinit(self: *HistoryParams) void {
+        self.alloc.free(self.owned);
+        self.alloc.destroy(self);
+    }
+
+    /// Arbeitsordner: der Repo-Ordner selbst, bei Dateien ihr Ordner.
+    fn cwd(self: *const HistoryParams) []const u8 {
+        const target = git_history.parseTarget(self.tab_path) orelse return ".";
+        return switch (target) {
+            .repo => |p| p,
+            .file => |p| std.fs.path.dirname(p) orelse ".",
+        };
+    }
+};
+
+/// Payload: `<tab_path>\n<git log>` im Format von `git_history.logArgs`.
+/// Fehler (kein Repo, Datei nie committet) → Tag `git_log_error` mit stderr als Text.
 pub fn taskGitLog(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.TaskResult {
-    const params: *Params = @ptrCast(@alignCast(data.?));
+    const params: *HistoryParams = @ptrCast(@alignCast(data.?));
+    defer params.deinit();
+    const target = git_history.parseTarget(params.tab_path) orelse return error.InvalidHistoryPath;
+
+    var args_buf: [16][]const u8 = undefined;
+    return historyResult(alloc, params.tab_path, runGitCapture(alloc, params.cwd(), git_history.logArgs(&args_buf, target)), .git_log, .git_log_error);
+}
+
+/// Payload: `<tab_path>\x1f<hash>\n<git show>`; Fehler → Tag `git_show_error`.
+pub fn taskGitShow(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.TaskResult {
+    const params: *HistoryParams = @ptrCast(@alignCast(data.?));
     defer params.deinit();
 
-    const out = try runGit(alloc, params.repo_path, &.{
-        "log", "--oneline", "-n", "50",
-    });
+    var args_buf: [16][]const u8 = undefined;
+    var spec_buf: [2 * std.fs.max_path_bytes + 16]u8 = undefined;
+    const sh = params.show;
+    const args = git_history.showArgs(&args_buf, &spec_buf, sh.hash, sh.path, sh.previous_path);
+    const key = try std.mem.concat(alloc, u8, &.{ params.tab_path, "\x1f", sh.hash });
+    defer alloc.free(key);
+    return historyResult(alloc, key, runGitCapture(alloc, params.cwd(), args), .git_show, .git_show_error);
+}
 
-    return .{
-        .tag = .git_log,
-        .payload = out,
-        .allocator = alloc,
+fn historyResult(alloc: std.mem.Allocator, key: []const u8, run: GitRun, ok_tag: scheduler.ResultTag, err_tag: scheduler.ResultTag) !scheduler.TaskResult {
+    const body, const tag = switch (run) {
+        .ok => |out| .{ out, ok_tag },
+        .failed => |msg| blk: {
+            // Warnung, kein Fehler: eine nie committete Datei ist ein normaler Fall, die
+            // Meldung zeigt die Ansicht selbst.
+            log.warn("git history '{s}': {s}", .{ key, msg });
+            break :blk .{ msg, err_tag };
+        },
     };
+    defer alloc.free(body);
+    return .{ .tag = tag, .payload = try git_history.frame(alloc, key, body), .allocator = alloc };
 }
 
 /// Payload: Roher unified diff-Text
@@ -205,44 +276,50 @@ fn runGit(alloc: std.mem.Allocator, cwd: []const u8, args: []const []const u8) !
 }
 
 fn runGitCwd(alloc: std.mem.Allocator, cwd: []const u8, args: []const []const u8) ![]u8 {
-    var argv_buf: [32][]const u8 = undefined;
-    argv_buf[0] = "git";
-    @memcpy(argv_buf[1..][0..args.len], args);
-    const argv = argv_buf[0 .. args.len + 1];
+    return switch (runGitCapture(alloc, cwd, args)) {
+        .ok => |out| out,
+        .failed => |msg| {
+            // stderr mitloggen: „git exited 128" allein sagt nicht, ob der Ordner
+            // kein Repo ist, die Datei fehlt oder git etwas anderes bemängelt.
+            log.err("git {s} in '{s}': {s}", .{ args[0], cwd, msg });
+            alloc.free(msg);
+            return error.GitFailed;
+        },
+    };
+}
 
-    const result = try std.process.Child.run(.{
+/// Ausgabe von git (owned) oder die Fehlermeldung (owned, stderr bzw. Fehlername).
+const GitRun = union(enum) { ok: []u8, failed: []u8 };
+/// Leere Meldung ohne Allokation (free auf Länge 0 ist erlaubt).
+const no_message: []u8 = &.{};
+
+fn runGitCapture(alloc: std.mem.Allocator, cwd: []const u8, args: []const []const u8) GitRun {
+    var argv_buf: [32][]const u8 = undefined;
+    // quotepath=off: Dateinamen mit Umlauten kommen roh statt als "\303\244" (log --name-only)
+    const prefix = [_][]const u8{ "git", "-c", "core.quotepath=off" };
+    @memcpy(argv_buf[0..prefix.len], &prefix);
+    @memcpy(argv_buf[prefix.len..][0..args.len], args);
+    const argv = argv_buf[0 .. args.len + prefix.len];
+
+    const result = std.process.Child.run(.{
         .allocator = alloc,
         .argv = argv,
         .cwd = cwd,
         .max_output_bytes = 10 * 1024 * 1024,
-    });
-    defer alloc.free(result.stderr);
+    }) catch |err| return .{ .failed = alloc.dupe(u8, @errorName(err)) catch no_message };
 
-    switch (result.term) {
-        .Exited => |code| if (code != 0) {
-            alloc.free(result.stdout);
-            // stderr mitloggen: „git exited 128" allein sagt nicht, ob der Ordner
-            // kein Repo ist, die Datei fehlt oder git etwas anderes bemängelt.
-            log.err("git {s} in '{s}': exit {d}: {s}", .{
-                args[0],
-                cwd,
-                code,
-                std.mem.trim(u8, result.stderr, " \t\r\n"),
-            });
-            return error.GitFailed;
-        },
-        else => {
-            alloc.free(result.stdout);
-            log.err("git {s} in '{s}' abgebrochen: {s}", .{
-                args[0],
-                cwd,
-                std.mem.trim(u8, result.stderr, " \t\r\n"),
-            });
-            return error.GitFailed;
-        },
+    const ok = switch (result.term) {
+        .Exited => |code| code == 0,
+        else => false,
+    };
+    if (ok) {
+        alloc.free(result.stderr);
+        return .{ .ok = result.stdout };
     }
-
-    return result.stdout;
+    alloc.free(result.stdout);
+    const owned = alloc.dupe(u8, std.mem.trim(u8, result.stderr, " \t\r\n")) catch no_message;
+    alloc.free(result.stderr);
+    return .{ .failed = owned };
 }
 
 /// Liegt `path` in einem Git-Repository? Sucht `.git` aufwärts bis zur Wurzel.
@@ -315,17 +392,78 @@ test "git status returns branch line" {
     try std.testing.expect(std.mem.indexOf(u8, result.payload, "branch:") != null);
 }
 
-test "git log returns oneline entries" {
+test "taskGitLog: Repo-Log mit Tab-Pfad als Schlüssel, Commits lesbar" {
     const alloc = std.testing.allocator;
     const cwd = try std.process.getCwdAlloc(alloc);
     defer alloc.free(cwd);
+    const tab = try git_history.tabPath(alloc, .{ .repo = cwd });
+    defer alloc.free(tab);
 
-    const params = try Params.init(alloc, cwd, "");
-    const result = try taskGitLog(alloc, params);
+    const result = try taskGitLog(alloc, try HistoryParams.init(alloc, tab, null));
     defer result.deinit();
-
-    try std.testing.expect(result.payload.len > 0);
     try std.testing.expect(result.tag == .git_log);
+    const u = git_history.unframe(result.payload).?;
+    try std.testing.expectEqualStrings(tab, u.key);
+    var log_ = try git_history.parseLog(alloc, u.body);
+    defer log_.deinit();
+    try std.testing.expect(log_.commits.len > 1);
+    try std.testing.expectEqual(@as(usize, 40), log_.commits[0].hash.len);
+    try std.testing.expectEqualStrings("", log_.commits[0].path);
+}
+
+test "taskGitLog: Datei-Log liefert Pfad relativ zur Repo-Wurzel" {
+    const alloc = std.testing.allocator;
+    const cwd = try std.process.getCwdAlloc(alloc);
+    defer alloc.free(cwd);
+    const file = try std.fs.path.join(alloc, &.{ cwd, "src", "git", "git_worker.zig" });
+    defer alloc.free(file);
+    const tab = try git_history.tabPath(alloc, .{ .file = file });
+    defer alloc.free(tab);
+
+    const result = try taskGitLog(alloc, try HistoryParams.init(alloc, tab, null));
+    defer result.deinit();
+    var log_ = try git_history.parseLog(alloc, git_history.unframe(result.payload).?.body);
+    defer log_.deinit();
+    try std.testing.expect(log_.commits.len > 0);
+    try std.testing.expectEqualStrings("src/git/git_worker.zig", log_.commits[0].path);
+}
+
+test "taskGitShow: Diff eines Commits, Schlüssel mit Hash, auf Datei begrenzt" {
+    const alloc = std.testing.allocator;
+    const cwd = try std.process.getCwdAlloc(alloc);
+    defer alloc.free(cwd);
+    const file = try std.fs.path.join(alloc, &.{ cwd, "src", "git", "git_worker.zig" });
+    defer alloc.free(file);
+    const tab = try git_history.tabPath(alloc, .{ .file = file });
+    defer alloc.free(tab);
+
+    const log_result = try taskGitLog(alloc, try HistoryParams.init(alloc, tab, null));
+    defer log_result.deinit();
+    var log_ = try git_history.parseLog(alloc, git_history.unframe(log_result.payload).?.body);
+    defer log_.deinit();
+    const c = log_.commits[0];
+
+    const result = try taskGitShow(alloc, try HistoryParams.init(alloc, tab, .{ .hash = c.hash, .path = c.path, .previous_path = c.path }));
+    defer result.deinit();
+    try std.testing.expect(result.tag == .git_show);
+    const u = git_history.unframe(result.payload).?;
+    const k = git_history.splitKey(u.key);
+    try std.testing.expectEqualStrings(tab, k.tab_path);
+    try std.testing.expectEqualStrings(c.hash, k.hash);
+    try std.testing.expect(std.mem.startsWith(u8, u.body, "commit "));
+    try std.testing.expect(std.mem.indexOf(u8, u.body, "diff --git a/src/git/git_worker.zig") != null);
+    // auf die Datei begrenzt: kein Diff anderer Dateien
+    try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, u.body, "diff --git"));
+}
+
+test "taskGitLog: Fehler von git kommt als Text im Ergebnis, nicht als Task-Fehler" {
+    const alloc = std.testing.allocator;
+    const tab = try git_history.tabPath(alloc, .{ .repo = "/" });
+    defer alloc.free(tab);
+    const result = try taskGitLog(alloc, try HistoryParams.init(alloc, tab, null));
+    defer result.deinit();
+    try std.testing.expect(result.tag == .git_log_error);
+    try std.testing.expectEqualStrings(tab, git_history.unframe(result.payload).?.key);
 }
 
 test "git diff HEAD runs without error" {

@@ -83,6 +83,20 @@ Die Zeilenschleife des Editors (`visible + 1` Reihen) ist nur deshalb harmlos, w
 `editor_state.height` über Frames konstant bleibt; mit `ZID_DEBUG=1` listet jeder
 Headless-Screenshot alle Render-Commands mit Box, daran sieht man wachsende Elemente.
 
+## Kein `return` im Kinderblock
+
+```zig
+clay.UI()(.{ .id = ... })({
+    if (leer) { message(); return; }   // FALSCH: Element wird nie geschlossen
+});
+```
+
+`clay.UI()(config)` öffnet das Element, der Block `({ ... })` ist nur das Argument des
+schließenden Aufrufs. Ein `return` darin verlässt die Funktion, bevor Clay schließt. Folge:
+`panic: load of null pointer` in `Clay__SizeContainersAlongAxis` beim nächsten `endLayout`.
+Stattdessen `if … else` oder den Inhalt in eine eigene Funktion auslagern
+(`GitHistoryView.renderRows`).
+
 ## Feste IDs gehören nie in eine Schleife
 
 ```zig
