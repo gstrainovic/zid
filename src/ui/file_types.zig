@@ -9,10 +9,14 @@ pub const FileKind = enum {
     chat,
     /// Inhalt sieht nicht nach Text aus: der Tab zeigt nur einen Hinweis, kein Buffer wird geladen.
     binary,
+    /// Git-Verlauf eines Repos oder einer Datei (`git-history://…`, siehe git_history.zig)
+    git_history,
 };
 
 /// Dateiart nach Endung (Bild, PDF, sonst Text). Kennt den Inhalt nicht.
 pub fn getFileKind(path: []const u8) FileKind {
+    // Präfix wie git_history.scheme; das Modul steht hier nicht zur Verfügung (eigenes Test-Root)
+    if (std.mem.startsWith(u8, path, "git-history://")) return .git_history;
     const ext = std.fs.path.extension(path);
     if (std.ascii.eqlIgnoreCase(ext, ".pdf")) return .pdf;
     const images = [_][]const u8{ ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".svg" };
@@ -95,6 +99,11 @@ pub fn formatFileSize(alloc: std.mem.Allocator, bytes: u64) ![]const u8 {
 // ---------------------------------------------------------------- Tests
 
 const testing = std.testing;
+
+test "git-history://-Pfade sind History-Tabs, ohne die Platte zu lesen" {
+    try std.testing.expectEqual(FileKind.git_history, getFileKind("git-history://repo:/home/u/p"));
+    try std.testing.expectEqual(FileKind.git_history, detectFileKind("git-history://file:/home/u/p/a.png"));
+}
 
 test "getFileKind: Endungen" {
     try testing.expectEqual(FileKind.pdf, getFileKind("/a/b.PDF"));

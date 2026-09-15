@@ -170,6 +170,8 @@ pub const CodeEditor = struct {
 
     pending_md_preview: bool = false,
     pending_md_export_pdf: bool = false,
+    /// Kontextmenü „File History“: UI öffnet den Verlauf der Datei dieses Buffers
+    pending_file_history: bool = false,
     /// Suchleiste (Ctrl+F)
     find: FindState = .{},
     /// Gehe zu Zeile (Ctrl+G)
@@ -1577,6 +1579,9 @@ pub const CodeEditor = struct {
             .MdExportPdf => {
                 self.pending_md_export_pdf = true;
             },
+            .FileHistory => {
+                self.pending_file_history = true;
+            },
             .Search => self.openFind(),
             .SplitVertical => {
                 self.pending_split_v = true;
@@ -2113,6 +2118,7 @@ pub const CodeEditor = struct {
                     .paste => self.dispatchAction(.Paste),
                     .md_preview => self.dispatchAction(.MdPreview),
                     .md_export_pdf => self.dispatchAction(.MdExportPdf),
+                    .file_history => self.dispatchAction(.FileHistory),
                     .split_vertical => self.dispatchAction(.SplitVertical),
                     .split_horizontal => self.dispatchAction(.SplitHorizontal),
                     else => {},
@@ -3507,6 +3513,7 @@ pub const CodeEditor = struct {
             hidden.insert(.split_vertical);
             hidden.insert(.split_horizontal);
         }
+        if (self.compact_menu or self.buffer.get_file_path().len == 0) hidden.insert(.file_history);
         return hidden;
     }
 
@@ -3720,6 +3727,20 @@ test "Kontextmenü: Export to PDF nur bei Marp-Decks, Preview bei jeder .md" {
     defer zig_file.ed.deinit();
     zig_file.buffer.set_file_path("/tmp/x.zig");
     try std.testing.expect(zig_file.ed.menuHidden().contains(.md_export_pdf));
+}
+
+test "Kontextmenü: File History bei Dateien mit Pfad, nicht im Eingabefeld; Klick setzt pending" {
+    var t = try testEditor(std.testing.allocator, "x\n");
+    defer t.buffer.deinit();
+    defer t.ed.deinit();
+    try std.testing.expect(t.ed.menuHidden().contains(.file_history)); // noch kein Pfad
+    t.buffer.set_file_path("/tmp/a.zig");
+    try std.testing.expect(!t.ed.menuHidden().contains(.file_history));
+    t.ed.compact_menu = true;
+    try std.testing.expect(t.ed.menuHidden().contains(.file_history));
+
+    t.ed.dispatchAction(.FileHistory);
+    try std.testing.expect(t.ed.pending_file_history);
 }
 
 /// Editor mit 10 Wrap-Spalten (Untergrenze) und Word-Wrap an.

@@ -77,6 +77,7 @@ pub const Action = enum {
     ShowContextMenu,
     MdPreview,
     MdExportPdf,
+    FileHistory,
     SplitVertical,
     SplitHorizontal,
     // Bearbeiten

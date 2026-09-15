@@ -296,12 +296,24 @@ pub fn build(b: *std.Build) void {
 
     const async_tests = b.addTest(.{ .root_module = scheduler_mod });
 
+    // Git-History: Tab-Pfade, Argumente, Log-/Diff-Parsing (ohne Prozesse, unit-getestet).
+    const git_history_mod = b.createModule(.{
+        .root_source_file = b.path("src/git/git_history.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    exe_mod.addImport("git_history", git_history_mod);
+    const git_history_tests = b.addTest(.{ .root_module = git_history_mod });
+    const run_git_history_tests = b.addRunArtifact(git_history_tests);
+    run_git_history_tests.has_side_effects = true;
+
     const git_worker_mod = b.createModule(.{
         .root_source_file = b.path("src/git/git_worker.zig"),
         .target = target,
         .optimize = optimize,
     });
     git_worker_mod.addImport("scheduler", scheduler_mod);
+    git_worker_mod.addImport("git_history", git_history_mod);
     exe_mod.addImport("git_worker", git_worker_mod);
     const git_tests = b.addTest(.{ .root_module = git_worker_mod });
 
@@ -623,6 +635,7 @@ pub fn build(b: *std.Build) void {
     const run_git_tests = b.addRunArtifact(git_tests);
     run_git_tests.has_side_effects = true;
     test_step.dependOn(&run_git_tests.step);
+    test_step.dependOn(&run_git_history_tests.step);
 
     const run_ai_worker_tests = b.addRunArtifact(ai_worker_tests);
     run_ai_worker_tests.has_side_effects = true;

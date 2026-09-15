@@ -548,6 +548,26 @@ MuPDFs Story-Engine. Folienvorschau in `MarkdownView` (`deck`-Feld), Command
   `helper`. Hinweis: der RPC `open_folder` lädt nur den Explorer neu, `current_directory` bleibt das
   Startverzeichnis; zls bekommt im E2E deshalb das Projekt als Root.
 
+## Git-History (Repo und Datei)
+
+- **Aufruf:** View → Git History bzw. Palette (Repo des Explorer-Roots), „File History“ im Tab-,
+  Editor- und Explorer-Kontextmenü (`file_history`, `file_history_entry`). Tab-Art `git_history`,
+  Pfad `git-history://repo:<ordner>` bzw. `git-history://file:<datei>`; ein offener Tab wird
+  aktiviert und neu geladen. Bewusst ein Tab, keine Sidebar-Timeline wie in VS Code.
+- **Aufbau:** `src/git/git_history.zig` (Modul `git_history`, unit-getestet: Tab-Pfade, git-Argumente,
+  Log-/Diff-Parsing, `State` mit Auswahl, Anfragen und verworfenen veralteten Diffs),
+  `git_worker.taskGitLog`/`taskGitShow` (Payload `<schlüssel>\n<ausgabe>`, Fehler als Tags
+  `git_log_error`/`git_show_error` mit stderr), Ansicht `src/ui/git_history_view.zig`.
+  `UI.driveGitHistories` reicht Anfragen pro Frame an den Scheduler, `handleGitLog`/`handleGitShow`
+  nehmen die Ergebnisse an. Schließen des letzten Tabs gibt die Ansicht frei.
+- **Datei-Verlauf:** `git log --follow --name-only` liefert den Pfad je Commit; `git show` bekommt
+  `:(top)<pfad>` und bei Umbenennung zusätzlich den Pfad des nächstälteren Commits, sonst zeigt git
+  die umbenannte Datei als komplett neu. Alle git-Aufrufe laufen mit `core.quotepath=off`.
+- Liste (zweizeilig) und Diff haben feste Zeilenhöhen und sind virtualisiert; IDs sind je Pane gesalzen.
+  Tasten ↑↓/PgUp/PgDn/Home/End/F5, keine Taste und kein Zeichen erreicht den Editor dahinter.
+- E2E `python3 scripts/e2e_git_history.py` (eigenes Fixture-Repo unter `tmp/`), RPC `git_history_state`
+  (JSON vom Main-Thread pro Frame gespiegelt, `snapshotGitHistory`).
+
 ## Explorer: .gitignore-Einträge
 
 - `taskGitStatus` ruft `git status --porcelain=v2 --branch --null --ignored` (im Projekt ~50 ms
