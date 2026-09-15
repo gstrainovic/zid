@@ -71,6 +71,8 @@ pub const Item = struct {
     email: []const u8 = "",
     /// Datum für den Hover, von git formatiert
     date_text: []const u8 = "",
+    /// Erster Elternteil (leer beim Wurzel-Commit), für „Open Commit“
+    parent: []const u8 = "",
     message: []const u8 = "",
     /// Erste Zeile der Nachricht
     label: []const u8 = "",
@@ -94,7 +96,7 @@ pub const Log = struct {
 /// Obergrenze der geladenen Einträge (VS Code lädt seitenweise mit „Load more“).
 pub const max_items = "500";
 
-const log_format = "--format=%x1e%H%x1f%ct%x1f%an%x1f%ae%x1f%cd%x1f%B%x1d";
+const log_format = "--format=%x1e%H%x1f%ct%x1f%an%x1f%ae%x1f%cd%x1f%P%x1f%B%x1d";
 /// Wie `toLocaleString(month: long, day, year, hour, minute)`: Monatsname in der Locale wie in
 /// VS Code, 24 Stunden (`%p` ist in manchen Locales leer), %d statt %-d (Windows-strftime).
 const date_format = "--date=format:%B %d, %Y at %H:%M";
@@ -141,18 +143,19 @@ pub fn parseLog(alloc: std.mem.Allocator, out: []const u8) !Log {
     while (records.next()) |record| {
         const end = std.mem.indexOfScalar(u8, record, 0x1d) orelse continue;
         var fields = std.mem.splitScalar(u8, record[0..end], 0x1f);
-        var f: [6][]const u8 = undefined;
+        var f: [7][]const u8 = undefined;
         var n: usize = 0;
-        while (n < 5) : (n += 1) f[n] = fields.next() orelse break;
-        if (n < 5) continue;
-        f[5] = fields.rest();
-        const message = std.mem.trimRight(u8, f[5], " \t\r\n");
+        while (n < 6) : (n += 1) f[n] = fields.next() orelse break;
+        if (n < 6) continue;
+        f[6] = fields.rest();
+        const message = std.mem.trimRight(u8, f[6], " \t\r\n");
         var item = Item{
             .hash = f[0],
             .timestamp = std.fmt.parseInt(i64, f[1], 10) catch 0,
             .author = f[2],
             .email = f[3],
             .date_text = f[4],
+            .parent = f[5][0 .. std.mem.indexOfScalar(u8, f[5], ' ') orelse f[5].len],
             .message = message,
             .label = message[0 .. std.mem.indexOfScalar(u8, message, '\n') orelse message.len],
         };
@@ -423,9 +426,9 @@ test "fromNowLong: volle Wörter mit ago für den Hover" {
 }
 
 // Format wie `git log --follow --numstat`: Umbenennung als „alt => neu“
-const sample_log = "\x1eaaaa\x1f2000\x1fAda\x1fada@x.org\x1fSeptember 15, 2026 at 22:47\x1fa nach b\n\nLänger erklärt.\n\x1d\n\n" ++
+const sample_log = "\x1eaaaa\x1f2000\x1fAda\x1fada@x.org\x1fSeptember 15, 2026 at 22:47\x1fpppp\x1fa nach b\n\nLänger erklärt.\n\x1d\n\n" ++
     "2\t1\ta.txt => b.txt\n" ++
-    "\x1ebbbb\x1f1000\x1fBob\x1fbob@x.org\x1fSeptember 14, 2026 at 09:00\x1fanlegen\n\x1d\n\n" ++
+    "\x1ebbbb\x1f1000\x1fBob\x1fbob@x.org\x1fSeptember 14, 2026 at 09:00\x1f\x1fanlegen\n\x1d\n\n" ++
     "3\t0\ta.txt\n";
 
 test "numstatPath: einfache, umbenannte und in Klammern umbenannte Pfade" {
@@ -449,6 +452,9 @@ test "parseLog: Felder, Nachricht mit Leerzeilen, Statistik, Pfad, Vorgänger wi
     try testing.expectEqualStrings("a nach b", a.label);
     try testing.expectEqual(Stat{ .files = 1, .insertions = 2, .deletions = 1 }, a.stat);
     try testing.expectEqualStrings("b.txt", a.path);
+    // Erster Elternteil für „Open Commit“ (VS Code: commit.parents[0], sonst leerer Baum)
+    try testing.expectEqualStrings("pppp", a.parent);
+    try testing.expectEqualStrings("", log.items[1].parent);
     // previousRef = nächstälterer Commit der Datei, beim ältesten der leere Baum
     try testing.expectEqualStrings("bbbb", a.previous_ref);
     try testing.expectEqualStrings("a.txt", a.previous_path);

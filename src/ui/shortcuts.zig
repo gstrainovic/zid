@@ -127,10 +127,17 @@ pub const Command = enum {
     diff_toggle_inline,
     /// Timeline im Explorer (Namen wie VS Code timelineProvider / timelinePane)
     timeline_open_changes,
+    timeline_open_commit,
     timeline_copy_commit_id,
     timeline_copy_commit_message,
     timeline_refresh,
     timeline_toggle_pin,
+    /// Sidebar zeigt Source Control mit dem Graphen (VS Code workbench.view.scm)
+    view_source_control,
+    graph_open_changes,
+    graph_copy_commit_hash,
+    graph_copy_commit_message,
+    graph_refresh,
     show_shortcuts,
     /// Terminal-Kontextmenü: Auswahl kopieren / Zwischenablage einfügen (ohne Kürzel)
     terminal_copy,
@@ -226,6 +233,7 @@ pub const bindings = [_]Binding{
     .{ .command = .zoom_reset, .key = .kp_0, .mods = .{ .ctrl = true } },
     .{ .command = .show_shortcuts, .key = .f1 },
     // Diff-Editor: VS Code workbench.action.compareEditor.nextChange / previousChange
+    .{ .command = .view_source_control, .key = .g, .mods = .{ .ctrl = true, .shift = true } },
     .{ .command = .diff_next_change, .key = .f5, .mods = .{ .alt = true } },
     .{ .command = .diff_prev_change, .key = .f5, .mods = .{ .alt = true, .shift = true } },
 };
@@ -241,9 +249,12 @@ pub const tab_menu_items = [_]Command{
 /// Kontextmenü im Editor-Text (`md_preview` nur bei .md, im Chat-Eingabefeld nur Cut/Copy/Paste)
 pub const editor_menu_items = [_]Command{ .cut, .copy, .paste, .md_preview, .md_export_pdf, .file_history, .split_vertical, .split_horizontal };
 
-/// Kontextmenü eines Timeline-Eintrags (VS Code: Open Changes, Copy Commit ID, Copy Commit Message;
-/// „View Commit“ kommt mit dem Multi-File-Diff)
-pub const timeline_menu_items = [_]Command{ .timeline_open_changes, .timeline_copy_commit_id, .timeline_copy_commit_message };
+/// Kontextmenü eines Timeline-Eintrags (VS Code package.json `timeline/item/context` ohne Vergleichen)
+pub const timeline_menu_items = [_]Command{ .timeline_open_changes, .timeline_open_commit, .timeline_copy_commit_id, .timeline_copy_commit_message };
+
+/// Kontextmenü eines Graph-Commits: Open Changes und die Kopier-Einträge aus `scm/historyItem/context`
+/// (Checkout, Branch, Tag, Cherry Pick verändern das Repo und sind hier bewusst nicht dabei)
+pub const graph_menu_items = [_]Command{ .graph_open_changes, .graph_copy_commit_hash, .graph_copy_commit_message };
 
 /// Kontextmenü eines Explorer-Eintrags, in dieser Reihenfolge
 pub const explorer_menu_items = [_]Command{
@@ -265,7 +276,7 @@ pub const Menu = struct { title: []const u8, items: []const Command };
 pub const menus = [_]Menu{
     .{ .title = "File", .items = &.{ .new_file, .quick_open, .save, .toggle_autosave, .open_folder, .close_tab, .close_all_tabs, .reopen_closed_tab } },
     .{ .title = "Edit", .items = &.{ .undo, .redo, .cut, .copy, .paste, .select_all, .delete_line, .duplicate_line, .move_line_up, .move_line_down, .toggle_comment, .find, .replace, .goto_line, .goto_definition, .select_next_occurrence, .add_cursor_above, .add_cursor_below } },
-    .{ .title = "View", .items = &.{ .toggle_explorer, .focus_explorer, .split_vertical, .split_horizontal, .md_preview, .md_export_pdf, .new_terminal, .toggle_terminal, .toggle_theme, .zoom_in, .zoom_out, .zoom_reset, .toggle_minimap, .toggle_whitespace, .toggle_indent_guides, .toggle_word_wrap, .git_history } },
+    .{ .title = "View", .items = &.{ .toggle_explorer, .focus_explorer, .split_vertical, .split_horizontal, .md_preview, .md_export_pdf, .new_terminal, .toggle_terminal, .toggle_theme, .zoom_in, .zoom_out, .zoom_reset, .toggle_minimap, .toggle_whitespace, .toggle_indent_guides, .toggle_word_wrap, .view_source_control, .git_history } },
     .{ .title = "Help", .items = &.{ .command_palette, .show_shortcuts } },
 };
 
@@ -377,10 +388,16 @@ pub fn label(command: Command) []const u8 {
         .diff_toggle_collapse => "Toggle Collapse Unchanged Regions",
         .diff_toggle_inline => "Toggle Inline View",
         .timeline_open_changes => "Open Changes",
-        .timeline_copy_commit_id => "Copy Commit ID",
+        .timeline_open_commit => "Open Commit",
+        .timeline_copy_commit_id => "Copy Commit Hash",
         .timeline_copy_commit_message => "Copy Commit Message",
         .timeline_refresh => "Refresh Timeline",
         .timeline_toggle_pin => "Pin the Current Timeline",
+        .view_source_control => "Source Control",
+        .graph_open_changes => "Open Changes",
+        .graph_copy_commit_hash => "Copy Commit Hash",
+        .graph_copy_commit_message => "Copy Commit Message",
+        .graph_refresh => "Refresh",
         .show_shortcuts => "Keyboard Shortcuts",
         .terminal_copy => "Terminal Copy",
         .terminal_paste => "Terminal Paste",
@@ -538,10 +555,20 @@ test "Git History: Repo im View-Menü, Datei-History in Tab-, Editor- und Explor
     try testing.expectEqualStrings("File History", label(.file_history_entry));
 }
 
+test "Source Control Graph wie VS Code: Ctrl+Shift+G, Kontextmenü, Explorer zurück mit Ctrl+Shift+E" {
+    try testing.expectEqual(Command.view_source_control, lookup(.g, .{ .ctrl = true, .shift = true }, .global).?);
+    try testing.expectEqualStrings("Source Control", label(.view_source_control));
+    try testing.expectEqualSlices(Command, &.{ .graph_open_changes, .graph_copy_commit_hash, .graph_copy_commit_message }, &graph_menu_items);
+    try testing.expectEqualStrings("Open Changes", label(.graph_open_changes));
+    try testing.expectEqualStrings("Copy Commit Hash", label(.graph_copy_commit_hash));
+    try testing.expectEqualStrings("Refresh", label(.graph_refresh));
+}
+
 test "Timeline wie VS Code: Kontextmenü und Titelaktionen" {
-    try testing.expectEqualSlices(Command, &.{ .timeline_open_changes, .timeline_copy_commit_id, .timeline_copy_commit_message }, &timeline_menu_items);
+    try testing.expectEqualSlices(Command, &.{ .timeline_open_changes, .timeline_open_commit, .timeline_copy_commit_id, .timeline_copy_commit_message }, &timeline_menu_items);
     try testing.expectEqualStrings("Open Changes", label(.timeline_open_changes));
-    try testing.expectEqualStrings("Copy Commit ID", label(.timeline_copy_commit_id));
+    try testing.expectEqualStrings("Open Commit", label(.timeline_open_commit));
+    try testing.expectEqualStrings("Copy Commit Hash", label(.timeline_copy_commit_id));
     try testing.expectEqualStrings("Copy Commit Message", label(.timeline_copy_commit_message));
     try testing.expectEqualStrings("Refresh Timeline", label(.timeline_refresh));
     try testing.expectEqualStrings("Pin the Current Timeline", label(.timeline_toggle_pin));

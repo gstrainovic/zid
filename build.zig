@@ -330,6 +330,29 @@ pub fn build(b: *std.Build) void {
     const run_git_timeline_tests = b.addRunArtifact(git_timeline_tests);
     run_git_timeline_tests.has_side_effects = true;
 
+    // Source Control Graph (VS-Code-Stil): Bahnen und Zeichenelemente je Zeile.
+    const git_graph_mod = b.createModule(.{
+        .root_source_file = b.path("src/git/git_graph.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    exe_mod.addImport("git_graph", git_graph_mod);
+    const git_graph_tests = b.addTest(.{ .root_module = git_graph_mod });
+    const run_git_graph_tests = b.addRunArtifact(git_graph_tests);
+    run_git_graph_tests.has_side_effects = true;
+
+    const git_scm_mod = b.createModule(.{
+        .root_source_file = b.path("src/git/git_scm.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    git_scm_mod.addImport("git_graph", git_graph_mod);
+    git_scm_mod.addImport("git_diff", git_diff_mod);
+    exe_mod.addImport("git_scm", git_scm_mod);
+    const git_scm_tests = b.addTest(.{ .root_module = git_scm_mod });
+    const run_git_scm_tests = b.addRunArtifact(git_scm_tests);
+    run_git_scm_tests.has_side_effects = true;
+
     const git_worker_mod = b.createModule(.{
         .root_source_file = b.path("src/git/git_worker.zig"),
         .target = target,
@@ -339,6 +362,7 @@ pub fn build(b: *std.Build) void {
     git_worker_mod.addImport("git_history", git_history_mod);
     git_worker_mod.addImport("git_diff", git_diff_mod);
     git_worker_mod.addImport("git_timeline", git_timeline_mod);
+    git_worker_mod.addImport("git_scm", git_scm_mod);
     exe_mod.addImport("git_worker", git_worker_mod);
     const git_tests = b.addTest(.{ .root_module = git_worker_mod });
 
@@ -663,6 +687,8 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_git_history_tests.step);
     test_step.dependOn(&run_git_diff_tests.step);
     test_step.dependOn(&run_git_timeline_tests.step);
+    test_step.dependOn(&run_git_graph_tests.step);
+    test_step.dependOn(&run_git_scm_tests.step);
 
     const run_ai_worker_tests = b.addRunArtifact(ai_worker_tests);
     run_ai_worker_tests.has_side_effects = true;

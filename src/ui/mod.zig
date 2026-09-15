@@ -31,6 +31,9 @@ const git_worker = @import("git_worker");
 const git_diff_view = @import("git_diff_view.zig");
 const git_diff = @import("git_diff");
 const timeline_view_mod = @import("timeline_view.zig");
+const scm_graph_view_mod = @import("scm_graph_view.zig");
+const git_commit_view_mod = @import("git_commit_view.zig");
+const git_scm = @import("git_scm");
 const pane_mod = @import("pane.zig");
 const dialog_mod = @import("dialog.zig");
 const dialog_ops = @import("dialog_ops.zig");
@@ -117,6 +120,13 @@ pub const UI = struct {
     timeline_view: timeline_view_mod.TimelineView,
     /// Zuletzt an die Timeline gemeldeter Tab-Pfad (nur bei Änderung neu auflösen)
     timeline_follow_key: ?[]u8 = null,
+    /// Sidebar zeigt Explorer oder Source Control (VS Code: Ansichten der Aktivitätsleiste)
+    sidebar_mode: enum { explorer, scm } = .explorer,
+    scm_graph: scm_graph_view_mod.ScmGraphView,
+    /// Commit, auf den sich das Graph-Kontextmenü bezieht
+    scm_cmd_commit: ?usize = null,
+    /// Multi-File-Diff-Tabs je Tab-Pfad (`git-commit://…`)
+    git_commits: std.StringHashMapUnmanaged(*git_commit_view_mod.GitCommitView) = .empty,
     show_file_explorer: bool,
 
     ai_chat: ai_chat_mod.AIChatState,
@@ -351,6 +361,7 @@ pub const UI = struct {
             .window = null,
             .file_explorer = file_explorer,
             .timeline_view = timeline_view_mod.TimelineView.init(allocator),
+            .scm_graph = scm_graph_view_mod.ScmGraphView.init(allocator),
             .show_file_explorer = true,
             .ai_chat = ai_chat,
             .show_ai_chat = false,
@@ -409,6 +420,10 @@ pub const UI = struct {
         log.debug("UI.deinit: file_explorer done", .{});
         self.timeline_view.deinit();
         if (self.timeline_follow_key) |k| self.allocator.free(k);
+        self.scm_graph.deinit();
+        var gc_iter = self.git_commits.valueIterator();
+        while (gc_iter.next()) |v| v.*.destroy();
+        self.git_commits.deinit(self.allocator);
 
         self.ai_chat.deinit();
         log.debug("UI.deinit: ai_chat done", .{});
@@ -855,7 +870,7 @@ pub const UI = struct {
         }
         if (self.show_file_explorer and self.explorer_focused) return; // Buchstaben sind Explorer-Kürzel
         // kein Text in den unsichtbaren Editor hinter History- und Diff-Tabs
-        if (self.activeTabKind() == .git_history or self.activeTabKind() == .git_diff) return;
+        if (self.activeTabKind() == .git_history or self.activeTabKind() == .git_diff or self.activeTabKind() == .git_commit) return;
 
         // Forward to chat tab if active
         if (self.isChatTabActive()) {
@@ -987,8 +1002,24 @@ pub const UI = struct {
             }
         }
 
+        // Source Control Graph in der Sidebar
+        if (self.show_file_explorer and self.sidebar_mode == .scm and (self.scm_graph.menu != null or self.inSidebarBox(x, y))) {
+            self.explorer_focused = false;
+            switch (self.scm_graph.handleMouseDown(x, y, button == .mouse_right)) {
+                .none, .consumed => {},
+                .open_diff => |row| if (self.scm_graph.view.diffSpec(row)) |spec| self.openGitDiff(spec),
+                .open_commit => |c| self.openCommitChanges(c),
+                .command => |c| {
+                    self.scm_cmd_commit = c.commit;
+                    self.executeCommand(c.cmd);
+                    self.scm_cmd_commit = null;
+                },
+            }
+            if (self.inSidebarBox(x, y)) return;
+        }
+
         // Timeline unter dem Explorer: offenes Menü, Kopf und Einträge vor dem Baum
-        if (self.show_file_explorer and (self.timeline_view.menu != null or self.timeline_view.contains(x, y))) {
+        if (self.show_file_explorer and self.sidebar_mode == .explorer and (self.timeline_view.menu != null or self.timeline_view.contains(x, y))) {
             self.explorer_focused = false;
             switch (self.timeline_view.handleMouseDown(x, y, button == .mouse_right)) {
                 .none => {},
@@ -1010,9 +1041,9 @@ pub const UI = struct {
         }
 
         // Tastatur-Fokus folgt dem Klick: Explorer-Kürzel (F2/Entf) nur nach Klick im Explorer
-        self.explorer_focused = self.show_file_explorer and self.file_explorer.inSidebar(x);
+        self.explorer_focused = self.show_file_explorer and self.sidebar_mode == .explorer and self.file_explorer.inSidebar(x);
 
-        if (self.show_file_explorer) {
+        if (self.show_file_explorer and self.sidebar_mode == .explorer) {
             if (self.file_explorer.handleMouseDown(x, y, button)) {
                 if (self.file_explorer.takePendingCommand()) |cmd| self.executeCommand(cmd);
                 return;
@@ -1064,6 +1095,11 @@ pub const UI = struct {
                     if (button == .mouse_left) _ = d.view.handleMouseDown(x, y, d.salt);
                 }
                 return;
+            } else if (tab.kind == .git_commit) {
+                if (self.activeGitCommit()) |c| {
+                    if (button == .mouse_left) _ = c.view.handleMouseDown(x, y, c.salt);
+                }
+                return;
             }
         }
 
@@ -1098,8 +1134,13 @@ pub const UI = struct {
         self.mouse_y = y;
 
         if (self.show_file_explorer) {
-            self.file_explorer.handleMouseMove(x, y);
-            self.timeline_view.handleMouseMove(x, y);
+            switch (self.sidebar_mode) {
+                .explorer => {
+                    self.file_explorer.handleMouseMove(x, y);
+                    self.timeline_view.handleMouseMove(x, y);
+                },
+                .scm => self.scm_graph.handleMouseMove(x, y),
+            }
         }
 
         if (self.getActiveTabBar().getActiveTab()) |tab| {
@@ -1184,6 +1225,10 @@ pub const UI = struct {
             self.picker.handleScroll(delta);
             return;
         }
+        if (self.show_file_explorer and self.sidebar_mode == .scm and self.inSidebarBox(self.mouse_x, self.mouse_y)) {
+            self.scm_graph.scrollLines(delta);
+            return;
+        }
         if (self.show_file_explorer and self.timeline_view.contains(self.mouse_x, self.mouse_y)) {
             self.timeline_view.scrollLines(delta);
             return;
@@ -1214,6 +1259,9 @@ pub const UI = struct {
             } else if (tab.kind == .git_diff) {
                 if (self.activeGitDiff()) |d| d.view.scrollLines(delta, false);
                 return;
+            } else if (tab.kind == .git_commit) {
+                if (self.activeGitCommit()) |c| c.view.scrollLines(delta);
+                return;
             }
         }
         self.getActiveEditor().scrollLines(delta);
@@ -1228,6 +1276,8 @@ pub const UI = struct {
         self.timeline_view.update(delta_ms);
         self.followActiveFileForTimeline();
         self.driveTimeline();
+        self.scm_graph.update(delta_ms);
+        self.driveScm();
         // Bestätigtes Löschen im Explorer: vor dem Layout, nie im Dialog-Callback
         self.file_explorer.processPending();
         while (self.file_explorer.takeFsChange()) |change| {
@@ -1601,6 +1651,7 @@ pub const UI = struct {
             .focus_pane_down => self.focusPane(.down),
             .focus_explorer => {
                 self.show_file_explorer = true;
+                self.sidebar_mode = .explorer; // wie VS Code Ctrl+Shift+E: zurück zum Explorer
                 self.explorer_focused = true;
                 if (self.file_explorer.selected_index == null and self.file_explorer.visible_entries.items.len > 0) self.file_explorer.selectEntry(0);
             },
@@ -1644,7 +1695,162 @@ pub const UI = struct {
             .timeline_copy_commit_message => if (self.selectedTimelineItem()) |it| self.setClipboard(it.message),
             .timeline_refresh => self.timeline_view.timeline.refresh(),
             .timeline_toggle_pin => self.timeline_view.timeline.togglePin(),
+            .timeline_open_commit => if (self.selectedTimelineItem()) |it| {
+                const t = &self.timeline_view.timeline;
+                if (it.kind == .commit) self.openCommitTab(.{ .hash = it.hash, .parent = it.parent, .repo = t.repo, .subject = it.label });
+            },
+            .view_source_control => {
+                self.show_file_explorer = true;
+                self.sidebar_mode = .scm;
+                self.explorer_focused = false;
+            },
+            .graph_open_changes => if (self.scm_cmd_commit) |c| self.openCommitChanges(c),
+            .graph_copy_commit_hash => if (self.graphCommit()) |c| self.setClipboard(c.hash),
+            .graph_copy_commit_message => if (self.graphCommit()) |c| self.setClipboard(c.message),
+            .graph_refresh => self.scm_graph.refresh(),
         }
+    }
+
+    // ───────────────────────── Source Control Graph ─────────────────────────
+
+    fn inSidebarBox(self: *Self, x: f32, y: f32) bool {
+        _ = self;
+        const d = clay.getElementData(clay.ElementId.ID("sidebar"));
+        if (!d.found) return false;
+        const b = d.bounding_box;
+        return x >= b.x and x < b.x + b.width and y >= b.y and y < b.y + b.height;
+    }
+
+    fn graphCommit(self: *Self) ?git_scm.Commit {
+        const i = self.scm_cmd_commit orelse (if (self.scm_graph.view.selected) |r| (if (r < self.scm_graph.view.rows.items.len) self.scm_graph.view.rows.items[r].commit else null) else null) orelse return null;
+        const all = self.scm_graph.view.commits();
+        return if (i < all.len) all[i] else null;
+    }
+
+    /// „Open Changes“ eines Graph-Commits: Multi-File-Diff wie VS Code git.viewCommit.
+    fn openCommitChanges(self: *Self, commit_index: usize) void {
+        const spec = self.scm_graph.view.commitSpec(commit_index) orelse return;
+        self.openCommitTab(spec);
+    }
+
+    fn openCommitTab(self: *Self, spec: git_scm.CommitSpec) void {
+        const tab_path = git_scm.commitTabPath(self.allocator, spec) catch return;
+        if (self.pending_tab_switch) |old| self.allocator.free(old);
+        self.pending_tab_switch = tab_path;
+    }
+
+    fn gitCommitFor(self: *Self, tab_path: []const u8) ?*git_commit_view_mod.GitCommitView {
+        if (self.git_commits.get(tab_path)) |v| return v;
+        const v = git_commit_view_mod.GitCommitView.create(self.allocator, tab_path) catch return null;
+        self.git_commits.put(self.allocator, v.tab_path, v) catch {
+            v.destroy();
+            return null;
+        };
+        return v;
+    }
+
+    pub const ActiveCommit = struct { view: *git_commit_view_mod.GitCommitView, salt: u32 };
+
+    pub fn activeGitCommit(self: *Self) ?ActiveCommit {
+        const tab = self.getActiveTabBar().getActiveTab() orelse return null;
+        if (tab.kind != .git_commit) return null;
+        const v = self.git_commits.get(tab.path) orelse return null;
+        return .{ .view = v, .salt = paneSalt(self.active_pane) };
+    }
+
+    const graph_key = "graph";
+
+    /// Graph-Seiten, aufgeklappte Commits, Multi-File-Diffs und deren sichtbare Dateien anfordern.
+    fn driveScm(self: *Self) void {
+        const sched = self.scheduler orelse return;
+        if (self.sidebar_mode == .scm and self.show_file_explorer) {
+            const v = &self.scm_graph.view;
+            if (v.want_log != null) blk: {
+                const root = if (self.file_explorer.nodes.items.len > 0) self.file_explorer.nodes.items[0].path else (self.current_directory orelse ".");
+                var key_buf: [32]u8 = undefined;
+                var skip_buf: [24]u8 = undefined;
+                var size_buf: [24]u8 = undefined;
+                const skip = v.want_log.?;
+                const key = std.fmt.bufPrint(&key_buf, graph_key ++ "{d}\x1f{d}", .{ self.scm_graph.generation, skip }) catch break :blk;
+                const params = git_worker.FieldsParam.init(self.allocator, &.{
+                    key,
+                    root,
+                    std.fmt.bufPrint(&skip_buf, "{d}", .{skip}) catch break :blk,
+                    std.fmt.bufPrint(&size_buf, "{d}", .{git_scm.page_size}) catch break :blk,
+                }) catch break :blk;
+                if (sched.submit(.{ .func = git_worker.taskGitGraphLog, .data = params })) {
+                    _ = v.takeLogRequest();
+                } else params.deinit();
+            }
+            while (v.takeChangesRequest()) |hash| {
+                const c = for (v.commits()) |c| {
+                    if (std.mem.eql(u8, c.hash, hash)) break c;
+                } else continue;
+                var key_buf: [96]u8 = undefined;
+                const key = std.fmt.bufPrint(&key_buf, graph_key ++ "{d}\x1f{s}", .{ self.scm_graph.generation, hash }) catch continue;
+                const params = git_worker.FieldsParam.init(self.allocator, &.{ key, v.repo, c.hash, c.firstParent() }) catch continue;
+                if (!sched.submit(.{ .func = git_worker.taskGitCommitChanges, .data = params })) params.deinit();
+            }
+        }
+        var it = self.git_commits.valueIterator();
+        while (it.next()) |vp| {
+            const cv = vp.*;
+            if (cv.takeChangesRequest()) {
+                const params = git_worker.FieldsParam.init(self.allocator, &.{ cv.tab_path, cv.spec.repo, cv.spec.hash, cv.spec.parent }) catch continue;
+                if (!sched.submit(.{ .func = git_worker.taskGitCommitChanges, .data = params })) {
+                    params.deinit();
+                    cv.want_changes = true;
+                    cv.loading = false;
+                }
+            }
+            for (cv.sections.items) |*s| {
+                if (!s.needed or s.view.state.loaded or s.view.state.loading or s.view.state.error_text != null) continue;
+                s.view.state.want_load = true;
+                if (!s.view.state.takeRequest()) continue;
+                const param = git_worker.TextParam.init(self.allocator, s.view.state.tab_path) catch continue;
+                if (!sched.submit(.{ .func = git_worker.taskGitFileDiff, .data = param })) {
+                    param.deinit();
+                    s.view.state.loading = false;
+                }
+            }
+        }
+    }
+
+    /// Ergebnis einer Graph-Seite; Schlüssel `graph<generation>\x1f<skip>`, veraltete verworfen.
+    pub fn handleGitGraphLog(self: *Self, ok: bool, payload: []const u8) void {
+        const u = git_history.unframe(payload) orelse return;
+        const k = git_history.splitKey(u.key);
+        var buf: [32]u8 = undefined;
+        const current = std.fmt.bufPrint(&buf, graph_key ++ "{d}", .{self.scm_graph.generation}) catch return;
+        if (!std.mem.eql(u8, k.tab_path, current)) return;
+        self.scm_graph.view.applyLog(ok, u.body, git_scm.page_size) catch |err| log.warn("graph: {}", .{err});
+    }
+
+    /// Dateien eines Commits: für den Graphen (`graph<gen>\x1f<hash>`) oder einen Multi-File-Diff-Tab.
+    pub fn handleGitCommitChanges(self: *Self, ok: bool, payload: []const u8) void {
+        const u = git_history.unframe(payload) orelse return;
+        if (self.git_commits.get(u.key)) |cv| {
+            cv.applyChanges(ok, u.body) catch |err| log.warn("commit changes: {}", .{err});
+            return;
+        }
+        const k = git_history.splitKey(u.key);
+        var buf: [32]u8 = undefined;
+        const current = std.fmt.bufPrint(&buf, graph_key ++ "{d}", .{self.scm_graph.generation}) catch return;
+        if (!std.mem.eql(u8, k.tab_path, current)) return;
+        self.scm_graph.view.applyChanges(k.hash, ok, u.body) catch |err| log.warn("graph changes: {}", .{err});
+    }
+
+    fn dropUnusedGitCommit(self: *Self, tab_path: []const u8) void {
+        var buf: [32]*pane_mod.Pane = undefined;
+        var n: usize = 0;
+        collectLeaves(self.root_pane, &buf, &n);
+        for (buf[0..n]) |p| {
+            for (p.data.leaf.tab_bar.tabs.items) |tab| {
+                if (std.mem.eql(u8, tab.path, tab_path)) return;
+            }
+        }
+        const kv = self.git_commits.fetchRemove(tab_path) orelse return;
+        kv.value.destroy();
     }
 
     // ───────────────────────── Timeline ─────────────────────────
@@ -1756,8 +1962,13 @@ pub const UI = struct {
     /// Ergebnis von `taskGitFileDiff` (ok = Tag `git_file_diff`).
     pub fn handleGitFileDiff(self: *Self, ok: bool, payload: []const u8) void {
         const u = git_history.unframe(payload) orelse return;
-        const v = self.git_diffs.get(u.key) orelse return;
-        v.apply(ok, u.body) catch |err| log.warn("git diff: {}", .{err});
+        if (self.git_diffs.get(u.key)) |v| {
+            v.apply(ok, u.body) catch |err| log.warn("git diff: {}", .{err});
+            return;
+        }
+        // Datei eines Multi-File-Diffs
+        var it = self.git_commits.valueIterator();
+        while (it.next()) |cv| if (cv.*.applyFileDiff(u.key, ok, u.body)) return;
     }
 
     fn dropUnusedGitDiff(self: *Self, tab_path: []const u8) void {
@@ -2697,13 +2908,14 @@ pub const UI = struct {
                             } else |_| {}
                         }
                         // Pfad vor closeTab kopieren (gibt ihn frei); die Ansicht erst danach prüfen
-                        const view_path: ?[]u8 = if (closing.kind == .git_history or closing.kind == .git_diff) self.allocator.dupe(u8, closing.path) catch null else null;
+                        const view_path: ?[]u8 = if (closing.kind == .git_history or closing.kind == .git_diff or closing.kind == .git_commit) self.allocator.dupe(u8, closing.path) catch null else null;
                         const closing_kind = closing.kind;
                         defer if (view_path) |p| self.allocator.free(p);
                         leaf.tab_bar.closeTab(req.index);
                         if (view_path) |p| switch (closing_kind) {
                             .git_history => self.dropUnusedGitHistory(p),
                             .git_diff => self.dropUnusedGitDiff(p),
+                            .git_commit => self.dropUnusedGitCommit(p),
                             else => {},
                         };
                         // Don't call cancelWait here - causes recursive render with destroyed pane!
@@ -2766,7 +2978,10 @@ pub const UI = struct {
         clay.setPointerState(.{ .x = x, .y = y }, is_down);
     }
 
-    /// Scroll-Events an Clay weiterleiten
+    /// Scroll-Events an Clay weiterleiten. Clays eigene Scroll-Positionen benutzt zid nicht
+    /// (jede Ansicht scrollt über `child_offset`), aber jedes Element mit `.clip` legt dort
+    /// einen Eintrag an, und nur dieser Aufruf räumt die Liste auf (sie fasst 10 Einträge).
+    /// Das Aufräumen selbst ist in `libs/clay-zig/vendor/clay.h` korrigiert („zid:“).
     pub fn updateScroll(self: *Self, delta_x: f32, delta_y: f32, delta_time_ms: f32) void {
         _ = self;
         // Clay erwartet Scroll-Delta als Vector2 und delta_time in Sekunden
@@ -2981,17 +3196,22 @@ pub const UI = struct {
                         .id = clay.ElementId.ID("sidebar"),
                         .layout = .{ .sizing = .{ .w = .fixed(self.file_explorer.width), .h = .grow }, .direction = .top_to_bottom },
                     })({
-                        file_explorer_mod.renderFileExplorer(
-                            self.frame_arena.allocator(),
-                            &self.file_explorer,
-                            t,
-                            // Klicks in der Timeline gehören nicht dem Baum
-                            self.mouse_pressed_this_frame and !self.timeline_view.contains(self.mouse_x, self.mouse_y),
-                            self.explorer_focused,
-                            .{ .ctrl = self.is_ctrl_down, .shift = self.is_shift_down },
-                            .{ .x = self.mouse_x, .y = self.mouse_y, .down = self.is_mouse_down },
-                        );
-                        self.timeline_view.render(self.frame_arena.allocator(), t, self.file_explorer.width, self.mouse_x, self.mouse_y);
+                        switch (self.sidebar_mode) {
+                            .explorer => {
+                                file_explorer_mod.renderFileExplorer(
+                                    self.frame_arena.allocator(),
+                                    &self.file_explorer,
+                                    t,
+                                    // Klicks in der Timeline gehören nicht dem Baum
+                                    self.mouse_pressed_this_frame and !self.timeline_view.contains(self.mouse_x, self.mouse_y),
+                                    self.explorer_focused,
+                                    .{ .ctrl = self.is_ctrl_down, .shift = self.is_shift_down },
+                                    .{ .x = self.mouse_x, .y = self.mouse_y, .down = self.is_mouse_down },
+                                );
+                                self.timeline_view.render(self.frame_arena.allocator(), t, self.file_explorer.width, self.mouse_x, self.mouse_y);
+                            },
+                            .scm => self.scm_graph.render(self.frame_arena.allocator(), t, self.file_explorer.width, self.mouse_x, self.mouse_y),
+                        }
                     });
                     // Deferred Toggle ausführen (nach Rendering, vor endLayout)
                     self.file_explorer.processPendingToggle();
@@ -3157,6 +3377,11 @@ pub const UI = struct {
                             } else if (tab.kind == .git_history) {
                                 if (self.gitHistoryFor(tab.path)) |v| {
                                     v.render(allocator, t, paneSalt(pane), self.mouse_x, self.mouse_y);
+                                }
+                                special_active = true;
+                            } else if (tab.kind == .git_commit) {
+                                if (self.gitCommitFor(tab.path)) |v| {
+                                    v.render(allocator, t, paneSalt(pane), @intCast(@min(leaf.code_editor.font_size, 48)), self.mouse_x, self.mouse_y);
                                 }
                                 special_active = true;
                             } else if (tab.kind == .git_diff) {

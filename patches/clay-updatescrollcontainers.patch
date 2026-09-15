@@ -1,0 +1,32 @@
+--- /home/g/.cache/zig/p/N-V-__8AALPgZwA7tLqRlkCCL7OrkEhj4xZ3y_0FxgR42t0W/clay.h	2026-04-03 23:41:47.456305093 +0200
++++ libs/clay-zig/vendor/clay.h	2026-09-16 01:16:19.964577293 +0200
+@@ -4052,13 +4052,18 @@
+         Clay__ScrollContainerDataInternal *scrollData = Clay__ScrollContainerDataInternalArray_Get(&context->scrollContainerDatas, i);
+         if (!scrollData->openThisFrame) {
+             Clay__ScrollContainerDataInternalArray_RemoveSwapback(&context->scrollContainerDatas, i);
++            i--; // zid: RemoveSwapback zieht den letzten Eintrag hierher, sonst wird er übersprungen
+             continue;
+         }
+         scrollData->openThisFrame = false;
+         Clay_LayoutElementHashMapItem *hashMapItem = Clay__GetHashMapItem(scrollData->elementId);
+         // Element isn't rendered this frame but scroll offset has been retained
+-        if (!hashMapItem) {
++        // zid: Clay__GetHashMapItem liefert &Clay_LayoutElementHashMapItem_DEFAULT statt NULL,
++        // deshalb greift `!hashMapItem` nie und der Eintrag behält einen Zeiger in das
++        // Element-Array des Vorframes (Absturz in clipConfig->vertical weiter unten).
++        if (!hashMapItem || hashMapItem == &Clay_LayoutElementHashMapItem_DEFAULT || hashMapItem->layoutElement != scrollData->layoutElement) {
+             Clay__ScrollContainerDataInternalArray_RemoveSwapback(&context->scrollContainerDatas, i);
++            i--;
+             continue;
+         }
+ 
+@@ -4106,6 +4111,9 @@
+     if (highestPriorityElementIndex > -1 && highestPriorityScrollData) {
+         Clay_LayoutElement *scrollElement = highestPriorityScrollData->layoutElement;
+         Clay_ClipElementConfig *clipConfig = Clay__FindElementConfigWithType(scrollElement, CLAY__ELEMENT_CONFIG_TYPE_CLIP).clipElementConfig;
++        // zid: Der Eintrag kann auf ein Element ohne Clip zeigen (veralteter Zeiger aus einem
++        // früheren Frame). Ohne diese Prüfung greift Clay hier über einen Nullzeiger.
++        if (!clipConfig) { return; }
+         bool canScrollVertically = clipConfig->vertical && highestPriorityScrollData->contentSize.height > scrollElement->dimensions.height;
+         bool canScrollHorizontally = clipConfig->horizontal && highestPriorityScrollData->contentSize.width > scrollElement->dimensions.width;
+         // Handle wheel scroll

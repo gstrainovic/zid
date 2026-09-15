@@ -70,6 +70,8 @@ pub const E2EContext = struct {
     git_history_json: std.ArrayListUnmanaged(u8) = .empty,
     /// JSON der Timeline im Explorer, ebenso vom Main-Thread gespiegelt (Schutz: git_history_mutex)
     timeline_json: std.ArrayListUnmanaged(u8) = .empty,
+    /// JSON von Source Control Graph und aktivem Multi-File-Diff (Schutz: git_history_mutex)
+    scm_json: std.ArrayListUnmanaged(u8) = .empty,
 
     const Self = @This();
 
@@ -86,6 +88,7 @@ pub const E2EContext = struct {
         self.pending_inputs.deinit(self.allocator);
         self.git_history_json.deinit(self.allocator);
         self.timeline_json.deinit(self.allocator);
+        self.scm_json.deinit(self.allocator);
     }
 };
 
@@ -97,7 +100,12 @@ pub fn snapshotGitHistory(ctx: *E2EContext) void {
     var tl = std.Io.Writer.Allocating.init(ctx.allocator);
     defer tl.deinit();
     writeTimelineJson(ctx.ui_system, &tl.writer) catch return;
+    var scm = std.Io.Writer.Allocating.init(ctx.allocator);
+    defer scm.deinit();
+    writeScmJson(ctx.ui_system, &scm.writer) catch return;
     ctx.git_history_mutex.lock();
+    ctx.scm_json.clearRetainingCapacity();
+    ctx.scm_json.appendSlice(ctx.allocator, scm.written()) catch {};
     defer ctx.git_history_mutex.unlock();
     ctx.git_history_json.clearRetainingCapacity();
     ctx.git_history_json.appendSlice(ctx.allocator, out.written()) catch {};
@@ -146,6 +154,80 @@ fn writeTimelineJson(ui: *ui_mod.UI, w: *std.Io.Writer) !void {
     try w.print(
         \\, "hover_visible": {}, "header": {{"x": {d:.1}, "y": {d:.1}, "w": {d:.1}, "h": {d:.1}}}, "body": {{"x": {d:.1}, "y": {d:.1}, "w": {d:.1}, "h": {d:.1}}}, "row_height": {d:.1}, "scroll": {d:.1}}}
     , .{ hover.found and v.hover_index != null and v.now_ms - v.hover_since_ms > 700, header.x, header.y, header.width, header.height, body.x, body.y, body.width, body.height, tv_mod.ROW_HEIGHT, t.scroll });
+}
+
+fn writeScmJson(ui: *ui_mod.UI, w: *std.Io.Writer) !void {
+    const sg = @import("ui/scm_graph_view.zig");
+    const git_graph = @import("git_graph");
+    const v = &ui.scm_graph.view;
+    try w.print("{{\"mode\": \"{s}\", \"loading\": {}, \"has_more\": {}, \"branch\": ", .{ @tagName(ui.sidebar_mode), v.loading, v.has_more });
+    try std.json.Stringify.value(v.branch, .{}, w);
+    try w.writeAll(", \"filter\": ");
+    try std.json.Stringify.value(.{ .current = v.filter.current, .upstream = v.filter.upstream, .base = v.filter.base }, .{}, w);
+    try w.writeAll(", \"error\": ");
+    try std.json.Stringify.value(v.error_text, .{}, w);
+    try w.writeAll(", \"commits\": [");
+    for (v.commits(), 0..) |c, i| {
+        if (i >= 150) break;
+        if (i > 0) try w.writeAll(", ");
+        try w.writeAll("{\"hash\": ");
+        try std.json.Stringify.value(c.hash, .{}, w);
+        try w.writeAll(", \"subject\": ");
+        try std.json.Stringify.value(c.subject, .{}, w);
+        try w.writeAll(", \"refs\": [");
+        for (c.refs, 0..) |r, k| {
+            if (k > 0) try w.writeAll(", ");
+            try std.json.Stringify.value(r.name, .{}, w);
+        }
+        try w.writeAll("]");
+        if (v.graph) |g| if (i < g.rows.len) {
+            const row = g.rows[i];
+            try w.print(", \"kind\": \"{s}\", \"inputs\": {d}, \"outputs\": {d}, \"circle\": {d}", .{
+                @tagName(row.kind), row.input.len, row.output.len, git_graph.circleIndex(.{ .id = c.hash, .parents = c.parents }, row),
+            });
+        };
+        try w.print(", \"expanded\": {}}}", .{v.isExpanded(i)});
+    }
+    try w.writeAll("], \"rows\": [");
+    for (v.rows.items, 0..) |r, i| {
+        if (i >= 300) break;
+        if (i > 0) try w.writeAll(", ");
+        try w.print("{{\"kind\": \"{s}\", \"commit\": {d}, \"path\": ", .{ @tagName(r.kind), r.commit });
+        try std.json.Stringify.value(if (v.changeOf(r)) |ch| ch.path else "", .{}, w);
+        try w.print(", \"status\": \"{s}\"}}", .{if (v.changeOf(r)) |ch| @as([]const u8, &.{ch.status.letter()}) else ""});
+    }
+    const header = clay.getElementData(sg.ScmGraphView.headerId()).bounding_box;
+    const body = clay.getElementData(sg.ScmGraphView.bodyId()).bounding_box;
+    try w.writeAll("], \"selected\": ");
+    try std.json.Stringify.value(v.selected, .{}, w);
+    try w.print(", \"menu_open\": {}, \"hover_visible\": {}, \"header\": {{\"x\": {d:.1}, \"y\": {d:.1}, \"w\": {d:.1}, \"h\": {d:.1}}}, \"body\": {{\"x\": {d:.1}, \"y\": {d:.1}, \"w\": {d:.1}, \"h\": {d:.1}}}, \"row_height\": {d:.1}, \"scroll\": {d:.1}", .{
+        ui.scm_graph.menu != null, clay.getElementData(clay.ElementId.ID("sg_hover")).found and ui.scm_graph.hover_row != null and ui.scm_graph.now_ms - ui.scm_graph.hover_since_ms > 700,
+        header.x, header.y, header.width, header.height, body.x, body.y, body.width, body.height, sg.ROW_HEIGHT, v.scroll,
+    });
+    try w.writeAll(", \"commit_tab\": ");
+    if (ui.activeGitCommit()) |ac| {
+        const cv = ac.view;
+        try w.writeAll("{\"title\": ");
+        try std.json.Stringify.value(cv.title_text, .{}, w);
+        try w.print(", \"loading\": {}, \"all_collapsed\": {}, \"scroll\": {d:.1}, \"rendered_rows\": {d}, \"sections\": [", .{ cv.loading, cv.allCollapsed(), cv.scroll_y, cv.rendered_rows });
+        for (cv.sections.items, 0..) |s, i| {
+            if (i > 0) try w.writeAll(", ");
+            try w.writeAll("{\"path\": ");
+            try std.json.Stringify.value(s.change.path, .{}, w);
+            try w.print(", \"status\": \"{c}\", \"collapsed\": {}, \"loaded\": {}, \"collapse_unchanged\": {}, \"changes\": {d}}}", .{
+                s.change.status.letter(), s.collapsed, s.view.state.loaded, s.view.state.collapse_unchanged, s.view.state.stats().changes,
+            });
+        }
+        try w.writeAll("]}");
+    } else try w.writeAll("null");
+    try w.writeAll("}");
+}
+
+fn scmState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
+    ctx.git_history_mutex.lock();
+    defer ctx.git_history_mutex.unlock();
+    if (ctx.scm_json.items.len == 0) return "{\"mode\": \"explorer\"}";
+    return dc.arena().dupe(u8, ctx.scm_json.items);
 }
 
 fn timelineState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
@@ -400,6 +482,7 @@ pub fn createDispatcher(alloc: std.mem.Allocator, ctx: *E2EContext) !*zigjr.RpcD
     try rpc_dispatcher.addWithCtx("pdf_state", ctx, pdfState);
     try rpc_dispatcher.addWithCtx("git_history_state", ctx, gitHistoryState);
     try rpc_dispatcher.addWithCtx("timeline_state", ctx, timelineState);
+    try rpc_dispatcher.addWithCtx("scm_state", ctx, scmState);
     try rpc_dispatcher.addWithCtx("ui_state", ctx, uiState);
     try rpc_dispatcher.addWithCtx("editor_lines", ctx, editorLines);
     try rpc_dispatcher.addWithCtx("editor_state", ctx, editorState);

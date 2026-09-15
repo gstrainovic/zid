@@ -605,6 +605,45 @@ MuPDFs Story-Engine. Folienvorschau in `MarkdownView` (`deck`-Feld), Command
   alte Datei). Geladen wird nur aufgeklappt; Dateiereignisse (git-status-Debounce) laden neu.
 - E2E `python3 scripts/e2e_timeline.py` (Fixture-Repo mit festen Commit-Zeiten), RPC `timeline_state`.
 
+## Source Control Graph und Multi-File-Diff (VS-Code-Stil)
+
+- Ctrl+Shift+G schaltet die Sidebar auf Source Control (`UI.sidebar_mode`), Ctrl+Shift+E zurück.
+  Kopf „SOURCE CONTROL GRAPH“ mit Filter „Auto“ und Refresh; Commit-Zeile = Graph, Betreff, Autor,
+  Badges der gefilterten Referenzen; Klick klappt die Dateien auf, Klick auf eine Datei öffnet den
+  Diff-Editor, Rechtsklick `graph_menu_items`, Inline-Aktion und Menü „Open Changes“ öffnen den
+  Multi-File-Diff (`git-commit://…`, Titel „kurz - betreff“ wie `git.viewCommit`). Am Listenende
+  lädt die nächste Seite automatisch (`scm.graph.pageOnScroll`, 50 je Seite).
+- Quellen: `scmHistory.ts` (Bahnen und Zeichnen, 1:1 portiert in `src/git/git_graph.zig`),
+  `scmHistoryViewPane.ts` (Zeilen, Badges `scm.graph.badges = filter`), `historyProvider.ts`
+  (Referenzen, Filter Auto = Branch + Upstream + Basis), `git.ts` (`--topo-order --decorate=full
+  --shortstat --diff-merges=first-parent`), `diffEditorItemTemplate.ts` (Multi-Diff: unveränderte
+  Bereiche eingeklappt, Status R/D/A, Klappknopf je Datei).
+- Daten in `src/git/git_scm.zig` (Modul `git_scm`, unit-getestet: Referenzen, Filter, Log, Dateien,
+  Zeilen, Load More), Worker `taskGitGraphLog`/`taskGitCommitChanges`, Ansichten
+  `src/ui/scm_graph_view.zig` und `src/ui/git_commit_view.zig` (jede Datei ein `GitDiffView`,
+  Inhalt lädt erst, wenn der Abschnitt sichtbar wird).
+- **Graph zeichnen ohne Rundungen im Renderer:** gerade Linien sind Rechtecke, Bögen und Kreise je
+  ein kleines SVG mit eigenem Pfad. Das ist Absicht: Der Rasterizer füllt nach Even-Odd (mehrere
+  Formen in einem Pfad schneiden Löcher) und der Atlas rastert höchstens vier neue Formen pro
+  Durchgang — als eigene Formen je Radius und Quadrant werden sie wiederverwendet.
+- `git_worker.FieldsParam` trennt Felder mit 0x1e, weil Schlüssel selbst 0x1f enthalten
+  (`graph<generation>\x1f<hash>`); `generation` verwirft Ergebnisse von vor einem Refresh.
+- E2E `python3 scripts/e2e_scm_graph.py` (Fixture mit Remote, Merge, Tag und 55 Commits Vorlauf),
+  RPC `scm_state`.
+
+## Clay: gepatchte clay.h unter libs/clay-zig/vendor
+
+Die Änderung liegt im Submodul `libs/clay-zig` (Commit dort) und zusätzlich als
+`patches/clay-updatescrollcontainers.patch`, damit sie sich gegen eine frische clay.h
+wieder anwenden lässt. `libs/clay-zig/build.zig` legt `vendor/clay.h` vor die Abhängigkeit. Gegenüber v0.14 (upstream
+unverändert) sind dort drei Stellen in `Clay_UpdateScrollContainers` korrigiert, alle mit „zid:“
+markiert: Swap-Remove ohne `i--` übersprang Einträge, `Clay__GetHashMapItem` liefert nie `NULL`
+(sondern `&Clay_LayoutElementHashMapItem_DEFAULT`), und der Zeiger auf das Clip-Element wird vor
+dem Zugriff geprüft. Ohne den letzten Punkt stürzte zid mit „member access within null pointer of
+type Clay_ClipElementConfig“ ab, sobald nach einem Diff-Tab ein Multi-File-Diff im selben Pane
+stand. Clays Scroll-Positionen benutzt zid nicht, aber jedes `.clip`-Element legt dort einen
+Eintrag an, und nur `UI.updateScroll` räumt die (10 Einträge große) Liste auf.
+
 ## Explorer: .gitignore-Einträge
 
 - `taskGitStatus` ruft `git status --porcelain=v2 --branch --null --ignored` (im Projekt ~50 ms
