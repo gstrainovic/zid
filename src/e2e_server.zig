@@ -68,6 +68,8 @@ pub const E2EContext = struct {
     /// die Ansicht tauscht Log und Diff aus, der Server-Thread darf sie nicht direkt lesen.
     git_history_mutex: std.Thread.Mutex = .{},
     git_history_json: std.ArrayListUnmanaged(u8) = .empty,
+    /// JSON der Timeline im Explorer, ebenso vom Main-Thread gespiegelt (Schutz: git_history_mutex)
+    timeline_json: std.ArrayListUnmanaged(u8) = .empty,
 
     const Self = @This();
 
@@ -83,6 +85,7 @@ pub const E2EContext = struct {
     pub fn deinit(self: *Self) void {
         self.pending_inputs.deinit(self.allocator);
         self.git_history_json.deinit(self.allocator);
+        self.timeline_json.deinit(self.allocator);
     }
 };
 
@@ -91,10 +94,65 @@ pub fn snapshotGitHistory(ctx: *E2EContext) void {
     var out = std.Io.Writer.Allocating.init(ctx.allocator);
     defer out.deinit();
     writeGitHistoryJson(ctx.ui_system, &out.writer) catch return;
+    var tl = std.Io.Writer.Allocating.init(ctx.allocator);
+    defer tl.deinit();
+    writeTimelineJson(ctx.ui_system, &tl.writer) catch return;
     ctx.git_history_mutex.lock();
     defer ctx.git_history_mutex.unlock();
     ctx.git_history_json.clearRetainingCapacity();
     ctx.git_history_json.appendSlice(ctx.allocator, out.written()) catch {};
+    ctx.timeline_json.clearRetainingCapacity();
+    ctx.timeline_json.appendSlice(ctx.allocator, tl.written()) catch {};
+}
+
+fn writeTimelineJson(ui: *ui_mod.UI, w: *std.Io.Writer) !void {
+    const tv_mod = @import("ui/timeline_view.zig");
+    const v = &ui.timeline_view;
+    const t = &v.timeline;
+    var msg_buf: [300]u8 = undefined;
+    try w.print("{{\"expanded\": {}, \"pinned\": {}, \"loading\": {}, \"loaded\": {}, \"file\": ", .{ t.expanded, t.pinned, t.loading, t.loaded });
+    try std.json.Stringify.value(t.file, .{}, w);
+    try w.writeAll(", \"repo\": ");
+    try std.json.Stringify.value(t.repo, .{}, w);
+    try w.writeAll(", \"message\": ");
+    try std.json.Stringify.value(t.message(&msg_buf), .{}, w);
+    try w.writeAll(", \"items\": [");
+    for (t.items(), 0..) |it, i| {
+        if (i >= 100) break;
+        if (i > 0) try w.writeAll(", ");
+        try w.writeAll("{\"hash\": ");
+        try std.json.Stringify.value(it.hash, .{}, w);
+        try w.writeAll(", \"label\": ");
+        try std.json.Stringify.value(it.label, .{}, w);
+        try w.writeAll(", \"author\": ");
+        try std.json.Stringify.value(it.author, .{}, w);
+        try w.writeAll(", \"path\": ");
+        try std.json.Stringify.value(it.path, .{}, w);
+        try w.writeAll(", \"previous_ref\": ");
+        try std.json.Stringify.value(it.previous_ref, .{}, w);
+        // Zeiten aus dem letzten Layout (Frame-Arena, gilt bis zum nächsten beginLayout)
+        const label = if (i < v.last_labels.len) v.last_labels[i] else null;
+        try w.writeAll(", \"time\": ");
+        try std.json.Stringify.value(if (label) |l| l.text else "", .{}, w);
+        try w.print(", \"time_hidden\": {}}}", .{if (label) |l| l.hidden else false});
+    }
+    try w.writeAll("], \"selected\": ");
+    try std.json.Stringify.value(t.selected, .{}, w);
+    const header = clay.getElementData(tv_mod.TimelineView.headerId()).bounding_box;
+    const body = clay.getElementData(tv_mod.TimelineView.bodyId()).bounding_box;
+    const hover = clay.getElementData(clay.ElementId.ID("tl_hover"));
+    try w.print(", \"menu_open\": {}, \"hover_index\": ", .{v.menu != null});
+    try std.json.Stringify.value(v.hover_index, .{}, w);
+    try w.print(
+        \\, "hover_visible": {}, "header": {{"x": {d:.1}, "y": {d:.1}, "w": {d:.1}, "h": {d:.1}}}, "body": {{"x": {d:.1}, "y": {d:.1}, "w": {d:.1}, "h": {d:.1}}}, "row_height": {d:.1}, "scroll": {d:.1}}}
+    , .{ hover.found and v.hover_index != null and v.now_ms - v.hover_since_ms > 700, header.x, header.y, header.width, header.height, body.x, body.y, body.width, body.height, tv_mod.ROW_HEIGHT, t.scroll });
+}
+
+fn timelineState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
+    ctx.git_history_mutex.lock();
+    defer ctx.git_history_mutex.unlock();
+    if (ctx.timeline_json.items.len == 0) return "{\"expanded\": false}";
+    return dc.arena().dupe(u8, ctx.timeline_json.items);
 }
 
 fn writeGitHistoryJson(ui: *ui_mod.UI, w: *std.Io.Writer) !void {
@@ -341,6 +399,7 @@ pub fn createDispatcher(alloc: std.mem.Allocator, ctx: *E2EContext) !*zigjr.RpcD
     try rpc_dispatcher.addWithCtx("slide_state", ctx, slideState);
     try rpc_dispatcher.addWithCtx("pdf_state", ctx, pdfState);
     try rpc_dispatcher.addWithCtx("git_history_state", ctx, gitHistoryState);
+    try rpc_dispatcher.addWithCtx("timeline_state", ctx, timelineState);
     try rpc_dispatcher.addWithCtx("ui_state", ctx, uiState);
     try rpc_dispatcher.addWithCtx("editor_lines", ctx, editorLines);
     try rpc_dispatcher.addWithCtx("editor_state", ctx, editorState);

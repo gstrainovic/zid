@@ -484,6 +484,7 @@ pub fn main() !void {
                         .git_log, .git_log_error => ui_system.handleGitLog(result.tag == .git_log, result.payload),
                         .git_show, .git_show_error => ui_system.handleGitShow(result.tag == .git_show, result.payload),
                         .git_file_diff, .git_file_diff_error => ui_system.handleGitFileDiff(result.tag == .git_file_diff, result.payload),
+                        .git_timeline, .git_timeline_error => ui_system.handleGitTimeline(result.tag == .git_timeline, result.payload),
                         .ai_chat_reply => ui_system.handleAIReply(result.payload),
                         .ai_chat_error => ui_system.handleAIError(result.payload),
                         .ai_chat_delta => ui_system.handleAIDelta(result.payload),
@@ -503,7 +504,8 @@ pub fn main() !void {
                     }
                 }
                 if (results.len > 0) wio.cancelWait();
-                submitGitStatusIfDue(&git_refresh, scheduler, allocator, git_repo_path);
+                // Dateiänderungen: git status und die Timeline der aktiven Datei neu laden
+                if (submitGitStatusIfDue(&git_refresh, scheduler, allocator, git_repo_path)) ui_system.timeline_view.timeline.refresh();
             }
 
             // UI updaten (Animationen)
@@ -1041,19 +1043,20 @@ fn openProjectFolder(
     log.info("project folder: {s}", .{path});
 }
 
-/// Reiht genau einen git-status-Task ein, wenn die Debounce fällig ist.
+/// Reiht genau einen git-status-Task ein, wenn die Debounce fällig ist. true = fällig gewesen.
 fn submitGitStatusIfDue(
     git_refresh: *async_mod.Debounce,
     scheduler: *async_mod.Scheduler,
     allocator: std.mem.Allocator,
     git_repo_path: ?[]const u8,
-) void {
-    if (!git_refresh.take(std.time.milliTimestamp())) return;
-    const path = git_repo_path orelse return;
-    const params = git_worker.Params.init(allocator, path, "") catch return;
+) bool {
+    if (!git_refresh.take(std.time.milliTimestamp())) return false;
+    const path = git_repo_path orelse return true;
+    const params = git_worker.Params.init(allocator, path, "") catch return true;
     log.debug("git status refresh submitted (debounced)", .{});
     // Task gibt params selbst frei; bei voller Queue müssen wir es tun.
     if (!scheduler.submit(.{ .func = git_worker.taskGitStatus, .data = params })) {
         params.deinit();
     }
+    return true;
 }

@@ -259,10 +259,15 @@ pub fn contentArgs(buf: *[16][]const u8, spec_buf: []u8, ref: []const u8, path: 
     return buf[0..3];
 }
 
-/// Nur die Hunk-Köpfe: `-U0`, Umbenennung über beide Pfade erkennbar.
+/// Nur die Hunk-Köpfe: `-U0`, Umbenennung über beide Pfade erkennbar. Mit Vorgänger
+/// `git diff <vorher> <commit>` (exakt die beiden gezeigten Stände), sonst `git show`.
 pub fn hunkArgs(buf: *[16][]const u8, spec_buf: []u8, s: Spec) []const []const u8 {
     var n: usize = 0;
-    for ([_][]const u8{ "show", "--no-color", "--no-ext-diff", "--format=", "-U0", "-M", s.hash, "--" }) |a| {
+    const head: []const []const u8 = if (s.parent.len > 0)
+        &.{ "diff", "--no-color", "--no-ext-diff", "-U0", "-M", s.parent, s.hash, "--" }
+    else
+        &.{ "show", "--no-color", "--no-ext-diff", "--format=", "-U0", "-M", s.hash, "--" };
+    for (head) |a| {
         buf[n] = a;
         n += 1;
     }
@@ -780,11 +785,23 @@ test "showArgs: alter und neuer Inhalt über <ref>:<pfad>, Hunks mit -U0 und bei
     try testing.expectEqualStrings("abc:b.txt", new[new.len - 1]);
     try testing.expect(contentArgs(&buf, &spec_buf, "", "a.txt") == null);
 
+    // Mit Vorgänger: git diff <vorher> <commit> — die Timeline vergleicht mit dem vorigen
+    // Commit der Datei, der nicht der Eltern-Commit sein muss
     const h = hunkArgs(&buf, &spec_buf, spec);
+    try testing.expectEqualStrings("diff", h[0]);
     try testing.expect(containsArg(h, "-U0"));
-    try testing.expect(containsArg(h, "abc"));
+    try testing.expect(containsArg(h, "-M"));
+    try testing.expectEqualStrings("def", h[h.len - 5]);
+    try testing.expectEqualStrings("abc", h[h.len - 4]);
     try testing.expectEqualStrings(":(top)b.txt", h[h.len - 2]);
     try testing.expectEqualStrings(":(top)a.txt", h[h.len - 1]);
+
+    // Ohne Vorgänger (Wurzel / erster Commit der Datei): git show gegen den leeren Stand
+    var root = spec;
+    root.parent = "";
+    const r = hunkArgs(&buf, &spec_buf, root);
+    try testing.expectEqualStrings("show", r[0]);
+    try testing.expect(containsArg(r, "abc"));
 }
 
 fn containsArg(args: []const []const u8, arg: []const u8) bool {

@@ -21,6 +21,9 @@ pub const ResultTag = enum {
     /// Payload `<tab_path>\n` + git_diff.encodeContents (git_worker.taskGitFileDiff)
     git_file_diff,
     git_file_diff_error,
+    /// Payload `<datei>\n<repo-wurzel>\n<git log>` (git_worker.taskGitTimeline)
+    git_timeline,
+    git_timeline_error,
     git_blame,
     lsp_completion,
     lsp_diagnostics,

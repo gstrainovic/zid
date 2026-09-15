@@ -125,6 +125,12 @@ pub const Command = enum {
     diff_prev_change,
     diff_toggle_collapse,
     diff_toggle_inline,
+    /// Timeline im Explorer (Namen wie VS Code timelineProvider / timelinePane)
+    timeline_open_changes,
+    timeline_copy_commit_id,
+    timeline_copy_commit_message,
+    timeline_refresh,
+    timeline_toggle_pin,
     show_shortcuts,
     /// Terminal-Kontextmenü: Auswahl kopieren / Zwischenablage einfügen (ohne Kürzel)
     terminal_copy,
@@ -234,6 +240,10 @@ pub const tab_menu_items = [_]Command{
 
 /// Kontextmenü im Editor-Text (`md_preview` nur bei .md, im Chat-Eingabefeld nur Cut/Copy/Paste)
 pub const editor_menu_items = [_]Command{ .cut, .copy, .paste, .md_preview, .md_export_pdf, .file_history, .split_vertical, .split_horizontal };
+
+/// Kontextmenü eines Timeline-Eintrags (VS Code: Open Changes, Copy Commit ID, Copy Commit Message;
+/// „View Commit“ kommt mit dem Multi-File-Diff)
+pub const timeline_menu_items = [_]Command{ .timeline_open_changes, .timeline_copy_commit_id, .timeline_copy_commit_message };
 
 /// Kontextmenü eines Explorer-Eintrags, in dieser Reihenfolge
 pub const explorer_menu_items = [_]Command{
@@ -366,6 +376,11 @@ pub fn label(command: Command) []const u8 {
         .diff_prev_change => "Previous Change",
         .diff_toggle_collapse => "Toggle Collapse Unchanged Regions",
         .diff_toggle_inline => "Toggle Inline View",
+        .timeline_open_changes => "Open Changes",
+        .timeline_copy_commit_id => "Copy Commit ID",
+        .timeline_copy_commit_message => "Copy Commit Message",
+        .timeline_refresh => "Refresh Timeline",
+        .timeline_toggle_pin => "Pin the Current Timeline",
         .show_shortcuts => "Keyboard Shortcuts",
         .terminal_copy => "Terminal Copy",
         .terminal_paste => "Terminal Paste",
@@ -521,6 +536,15 @@ test "Git History: Repo im View-Menü, Datei-History in Tab-, Editor- und Explor
     try testing.expectEqualStrings("Git History", label(.git_history));
     try testing.expectEqualStrings("File History", label(.file_history));
     try testing.expectEqualStrings("File History", label(.file_history_entry));
+}
+
+test "Timeline wie VS Code: Kontextmenü und Titelaktionen" {
+    try testing.expectEqualSlices(Command, &.{ .timeline_open_changes, .timeline_copy_commit_id, .timeline_copy_commit_message }, &timeline_menu_items);
+    try testing.expectEqualStrings("Open Changes", label(.timeline_open_changes));
+    try testing.expectEqualStrings("Copy Commit ID", label(.timeline_copy_commit_id));
+    try testing.expectEqualStrings("Copy Commit Message", label(.timeline_copy_commit_message));
+    try testing.expectEqualStrings("Refresh Timeline", label(.timeline_refresh));
+    try testing.expectEqualStrings("Pin the Current Timeline", label(.timeline_toggle_pin));
 }
 
 test "Diff-Editor wie VS Code: Alt+F5 nächste, Shift+Alt+F5 vorige Änderung, Umschalter ohne Kürzel" {

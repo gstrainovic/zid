@@ -588,6 +588,23 @@ MuPDFs Story-Engine. Folienvorschau in `MarkdownView` (`deck`-Feld), Command
 - E2E `python3 scripts/e2e_git_diff.py` (öffnet den Tab per `open_file` mit gebautem Pfad), Zustand
   über `git_history_state` mit `view: "diff"`.
 
+## Timeline im Explorer (VS-Code-Stil)
+
+- Abschnitt „TIMELINE“ unter dem Dateibaum (`sidebar` = Explorer + `timeline_view.zig`), anfangs
+  eingeklappt wie VS Code, Auf-Zustand in `user_state` (`timeline_expanded`). Quellen:
+  `timelinePane.ts` (Zeitspalte, ausgeblendete gleiche Zeit, Meldungen, Pin/Refresh nur beim
+  Überfahren), `timelineProvider.ts` (Label = erste Nachrichtenzeile, Autor als Beschreibung,
+  `previousRef` = nächstälterer Commit **der Datei**, beim ältesten der leere Baum), `hover.ts`,
+  `base/common/date.ts` (`fromNow`-Kurzformen), `git.timeline.date` = committed.
+- Logik in `src/git/git_timeline.zig` (Modul `git_timeline`, unit-getestet), Worker `taskGitTimeline`
+  (`git log --follow --numstat`; `--shortstat` mit `--name-only` liefert keine Zahlen, `%p` ist in
+  deutscher Locale leer → 24 h). Klick öffnet den Diff-Editor (`openGitDiff`), Rechtsklick
+  `timeline_menu_items`. Die Hunks kommen dafür aus `git diff <voriger Datei-Commit> <commit>`.
+- Folgt dem aktiven Tab (Text, Bild, PDF, Binär, Vorschau-Quelle); Diff-Tabs lassen die Timeline
+  stehen, weil ihr Pfad der historische Name ist (sonst sprang sie nach einer Umbenennung auf die
+  alte Datei). Geladen wird nur aufgeklappt; Dateiereignisse (git-status-Debounce) laden neu.
+- E2E `python3 scripts/e2e_timeline.py` (Fixture-Repo mit festen Commit-Zeiten), RPC `timeline_state`.
+
 ## Explorer: .gitignore-Einträge
 
 - `taskGitStatus` ruft `git status --porcelain=v2 --branch --null --ignored` (im Projekt ~50 ms

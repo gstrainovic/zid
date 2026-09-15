@@ -30,6 +30,7 @@ const git_history = @import("git_history");
 const git_worker = @import("git_worker");
 const git_diff_view = @import("git_diff_view.zig");
 const git_diff = @import("git_diff");
+const timeline_view_mod = @import("timeline_view.zig");
 const pane_mod = @import("pane.zig");
 const dialog_mod = @import("dialog.zig");
 const dialog_ops = @import("dialog_ops.zig");
@@ -112,6 +113,10 @@ pub const UI = struct {
     window: ?*wio.Window,
 
     file_explorer: file_explorer_mod.FileExplorerState,
+    /// Timeline-Abschnitt unter dem Explorer (VS-Code-Stil)
+    timeline_view: timeline_view_mod.TimelineView,
+    /// Zuletzt an die Timeline gemeldeter Tab-Pfad (nur bei Änderung neu auflösen)
+    timeline_follow_key: ?[]u8 = null,
     show_file_explorer: bool,
 
     ai_chat: ai_chat_mod.AIChatState,
@@ -345,6 +350,7 @@ pub const UI = struct {
             .text_renderer = null,
             .window = null,
             .file_explorer = file_explorer,
+            .timeline_view = timeline_view_mod.TimelineView.init(allocator),
             .show_file_explorer = true,
             .ai_chat = ai_chat,
             .show_ai_chat = false,
@@ -401,6 +407,8 @@ pub const UI = struct {
 
         self.file_explorer.deinit();
         log.debug("UI.deinit: file_explorer done", .{});
+        self.timeline_view.deinit();
+        if (self.timeline_follow_key) |k| self.allocator.free(k);
 
         self.ai_chat.deinit();
         log.debug("UI.deinit: ai_chat done", .{});
@@ -979,6 +987,28 @@ pub const UI = struct {
             }
         }
 
+        // Timeline unter dem Explorer: offenes Menü, Kopf und Einträge vor dem Baum
+        if (self.show_file_explorer and (self.timeline_view.menu != null or self.timeline_view.contains(x, y))) {
+            self.explorer_focused = false;
+            switch (self.timeline_view.handleMouseDown(x, y, button == .mouse_right)) {
+                .none => {},
+                .consumed => return,
+                .toggled => {
+                    self.saveUserState();
+                    return;
+                },
+                .open_changes => |i| {
+                    self.openTimelineChanges(i);
+                    return;
+                },
+                .command => |c| {
+                    self.timeline_view.timeline.selected = c.index;
+                    self.executeCommand(c.cmd);
+                    return;
+                },
+            }
+        }
+
         // Tastatur-Fokus folgt dem Klick: Explorer-Kürzel (F2/Entf) nur nach Klick im Explorer
         self.explorer_focused = self.show_file_explorer and self.file_explorer.inSidebar(x);
 
@@ -1069,6 +1099,7 @@ pub const UI = struct {
 
         if (self.show_file_explorer) {
             self.file_explorer.handleMouseMove(x, y);
+            self.timeline_view.handleMouseMove(x, y);
         }
 
         if (self.getActiveTabBar().getActiveTab()) |tab| {
@@ -1153,6 +1184,10 @@ pub const UI = struct {
             self.picker.handleScroll(delta);
             return;
         }
+        if (self.show_file_explorer and self.timeline_view.contains(self.mouse_x, self.mouse_y)) {
+            self.timeline_view.scrollLines(delta);
+            return;
+        }
         if (self.show_file_explorer and clay.pointerOver(clay.ElementId.ID("file_explorer"))) {
             self.file_explorer.scrollLines(delta);
             return;
@@ -1190,6 +1225,9 @@ pub const UI = struct {
         self.applyLspGoto();
         self.driveGitHistories();
         self.driveGitDiffs();
+        self.timeline_view.update(delta_ms);
+        self.followActiveFileForTimeline();
+        self.driveTimeline();
         // Bestätigtes Löschen im Explorer: vor dem Layout, nie im Dialog-Callback
         self.file_explorer.processPending();
         while (self.file_explorer.takeFsChange()) |change| {
@@ -1601,7 +1639,69 @@ pub const UI = struct {
             .diff_prev_change => if (self.activeGitDiff()) |d| d.view.prevChange(d.salt),
             .diff_toggle_collapse => if (self.activeGitDiff()) |d| d.view.state.toggleCollapse(),
             .diff_toggle_inline => if (self.activeGitDiff()) |d| d.view.toggleInline(),
+            .timeline_open_changes => if (self.timeline_view.timeline.selected) |i| self.openTimelineChanges(i),
+            .timeline_copy_commit_id => if (self.selectedTimelineItem()) |it| self.setClipboard(it.hash),
+            .timeline_copy_commit_message => if (self.selectedTimelineItem()) |it| self.setClipboard(it.message),
+            .timeline_refresh => self.timeline_view.timeline.refresh(),
+            .timeline_toggle_pin => self.timeline_view.timeline.togglePin(),
         }
+    }
+
+    // ───────────────────────── Timeline ─────────────────────────
+
+    fn selectedTimelineItem(self: *Self) ?@import("git_timeline").Item {
+        const t = &self.timeline_view.timeline;
+        const i = t.selected orelse return null;
+        return if (i < t.items().len) t.items()[i] else null;
+    }
+
+    /// Klick auf einen Timeline-Eintrag: Diff-Editor wie VS Code `Open Comparison`.
+    fn openTimelineChanges(self: *Self, index: usize) void {
+        const spec = self.timeline_view.timeline.diffSpec(index) orelse return;
+        self.openGitDiff(spec);
+    }
+
+    /// Timeline folgt der Datei des aktiven Tabs (Datei-Tabs, Vorschau-Quelle, Diff-Editor-Datei).
+    /// Nur bei geändertem Tab-Pfad wird neu aufgelöst (realpath).
+    fn followActiveFileForTimeline(self: *Self) void {
+        const tab = self.getActiveTabBar().getActiveTab();
+        const key: []const u8 = if (tab) |t| t.path else "";
+        if (self.timeline_follow_key) |k| if (std.mem.eql(u8, k, key)) return;
+        if (self.timeline_follow_key) |k| self.allocator.free(k);
+        self.timeline_follow_key = self.allocator.dupe(u8, key) catch null;
+
+        const t = tab orelse return self.timeline_view.timeline.follow(null);
+        switch (t.kind) {
+            .text, .image, .pdf, .binary, .markdown_preview => {
+                const src = if (t.kind == .markdown_preview and std.mem.startsWith(u8, t.path, "preview://")) t.path["preview://".len..] else t.path;
+                const abs = std.fs.cwd().realpathAlloc(self.allocator, src) catch return self.timeline_view.timeline.follow(null);
+                defer self.allocator.free(abs);
+                self.timeline_view.timeline.follow(abs);
+            },
+            // Diff-Editor: Timeline bleibt stehen. VS Code behält die Datei-URI (app.zig), auch wenn
+            // der Commit die Datei noch unter altem Namen (lib.zig) zeigt; der Pfad im Diff-Tab
+            // ist der historische und würde die Liste auf die alte Datei umschalten.
+            .git_diff => {},
+            else => self.timeline_view.timeline.follow(null),
+        }
+    }
+
+    fn driveTimeline(self: *Self) void {
+        const sched = self.scheduler orelse return;
+        const t = &self.timeline_view.timeline;
+        if (!t.takeRequest()) return;
+        const param = git_worker.TextParam.init(self.allocator, t.file.?) catch return;
+        if (!sched.submit(.{ .func = git_worker.taskGitTimeline, .data = param })) {
+            param.deinit();
+            t.loading = false;
+            t.want_load = true;
+        }
+    }
+
+    /// Ergebnis von `taskGitTimeline` (ok = Tag `git_timeline`).
+    pub fn handleGitTimeline(self: *Self, ok: bool, payload: []const u8) void {
+        const u = git_history.unframe(payload) orelse return;
+        self.timeline_view.timeline.apply(u.key, ok, u.body) catch |err| log.warn("timeline: {}", .{err});
     }
 
     fn activeTabKind(self: *Self) ?file_types.FileKind {
@@ -2354,6 +2454,7 @@ pub const UI = struct {
             .whitespace = self.getActiveEditor().show_whitespace,
             .indent_guides = self.getActiveEditor().show_indent_guides,
             .word_wrap = self.getActiveEditor().word_wrap,
+            .timeline_expanded = self.timeline_view.timeline.expanded,
         }) catch |err| log.warn("state save '{s}' failed: {}", .{ path, err });
     }
 
@@ -2364,6 +2465,7 @@ pub const UI = struct {
         const st = user_state.loadFrom(self.allocator, path);
         self.file_explorer.width = st.sidebar_width;
         self.file_explorer.show_hidden = st.show_hidden;
+        self.timeline_view.timeline.setExpanded(st.timeline_expanded);
         self.autosave = st.autosave;
         self.theme = if (st.light_theme) Theme.light() else Theme.dark();
         self.applyThemeToEditors();
@@ -2873,17 +2975,24 @@ pub const UI = struct {
                     }
                 }
 
-                // File Explorer Sidebar
+                // File Explorer Sidebar, darunter der Timeline-Abschnitt wie in VS Code
                 if (self.show_file_explorer) {
-                    file_explorer_mod.renderFileExplorer(
-                        self.frame_arena.allocator(),
-                        &self.file_explorer,
-                        t,
-                        self.mouse_pressed_this_frame,
-                        self.explorer_focused,
-                        .{ .ctrl = self.is_ctrl_down, .shift = self.is_shift_down },
-                        .{ .x = self.mouse_x, .y = self.mouse_y, .down = self.is_mouse_down },
-                    );
+                    clay.UI()(.{
+                        .id = clay.ElementId.ID("sidebar"),
+                        .layout = .{ .sizing = .{ .w = .fixed(self.file_explorer.width), .h = .grow }, .direction = .top_to_bottom },
+                    })({
+                        file_explorer_mod.renderFileExplorer(
+                            self.frame_arena.allocator(),
+                            &self.file_explorer,
+                            t,
+                            // Klicks in der Timeline gehören nicht dem Baum
+                            self.mouse_pressed_this_frame and !self.timeline_view.contains(self.mouse_x, self.mouse_y),
+                            self.explorer_focused,
+                            .{ .ctrl = self.is_ctrl_down, .shift = self.is_shift_down },
+                            .{ .x = self.mouse_x, .y = self.mouse_y, .down = self.is_mouse_down },
+                        );
+                        self.timeline_view.render(self.frame_arena.allocator(), t, self.file_explorer.width, self.mouse_x, self.mouse_y);
+                    });
                     // Deferred Toggle ausführen (nach Rendering, vor endLayout)
                     self.file_explorer.processPendingToggle();
 
