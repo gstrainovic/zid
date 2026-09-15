@@ -18,6 +18,9 @@ pub const ResultTag = enum {
     /// Payload `<tab_path>\x1f<hash>\n<git show>` (git_worker.taskGitShow)
     git_show,
     git_show_error,
+    /// Payload `<tab_path>\n` + git_diff.encodeContents (git_worker.taskGitFileDiff)
+    git_file_diff,
+    git_file_diff_error,
     git_blame,
     lsp_completion,
     lsp_diagnostics,

@@ -99,6 +99,7 @@ pub fn snapshotGitHistory(ctx: *E2EContext) void {
 
 fn writeGitHistoryJson(ui: *ui_mod.UI, w: *std.Io.Writer) !void {
     const gh_view = @import("ui/git_history_view.zig");
+    if (ui.activeGitDiff()) |d| return writeGitDiffJson(d, w);
     const h = ui.activeGitHistory() orelse return w.writeAll("{\"active\": false}");
     const s = &h.view.state;
     const target = s.target();
@@ -142,6 +143,55 @@ fn writeGitHistoryJson(ui: *ui_mod.UI, w: *std.Io.Writer) !void {
     try w.print(
         \\, "list": {{"x": {d:.1}, "y": {d:.1}, "w": {d:.1}, "h": {d:.1}}}, "diff": {{"x": {d:.1}, "y": {d:.1}, "w": {d:.1}, "h": {d:.1}}}, "row_height": {d:.1}, "list_scroll": {d:.1}, "diff_scroll": {d:.1}, "rendered_diff_rows": {d}}}
     , .{ list.x, list.y, list.width, list.height, diff.x, diff.y, diff.width, diff.height, gh_view.ROW_HEIGHT, s.list_scroll, s.diff_scroll, h.view.rendered_diff_rows });
+}
+
+/// Diff-Editor-Zustand (gleicher Kanal wie git_history_state, `view` unterscheidet).
+fn writeGitDiffJson(d: ui_mod.UI.ActiveDiff, w: *std.Io.Writer) !void {
+    const gd_view = @import("ui/git_diff_view.zig");
+    const s = &d.view.state;
+    const layout = d.view.last_layout;
+    const st = s.stats();
+    var folds: usize = 0;
+    const items = s.items(layout) catch &.{};
+    for (items) |it| if (it == .fold) {
+        folds += 1;
+    };
+    try w.writeAll("{\"active\": true, \"view\": \"diff\", \"title\": ");
+    try std.json.Stringify.value(s.title_text, .{}, w);
+    try w.print(", \"loaded\": {}, \"loading\": {}, \"error\": ", .{ s.loaded, s.loading });
+    try std.json.Stringify.value(s.error_text, .{}, w);
+    try w.print(", \"layout\": \"{s}\", \"mode\": \"{s}\", \"collapse\": {}, \"old_lines\": {d}, \"new_lines\": {d}, \"rows\": {d}, \"items\": {d}, \"folds\": {d}, \"changes\": {d}, \"added\": {d}, \"removed\": {d}, \"current_row\": ", .{
+        @tagName(layout), @tagName(s.mode), s.collapse_unchanged, s.old_lines.len, s.new_lines.len, s.rows(layout).len, items.len, folds, st.changes, st.added, st.removed,
+    });
+    try std.json.Stringify.value(s.current_row, .{}, w);
+    const kinds = s.rows(layout);
+    var modified: usize = 0;
+    for (kinds) |r| {
+        if (r.kind == .modified) modified += 1;
+    }
+    const body = clay.getElementData(gd_view.GitDiffView.bodyId(d.salt)).bounding_box;
+    try w.print(", \"modified_rows\": {d}, \"scroll_y\": {d:.1}, \"row_height\": {d:.1}, \"rendered_rows\": {d}, \"old_highlight\": {}, \"new_highlight\": {}, \"body\": {{\"x\": {d:.1}, \"y\": {d:.1}, \"w\": {d:.1}, \"h\": {d:.1}}}, \"buttons\": {{", .{
+        modified, s.scroll_y, d.view.row_height, d.view.rendered_rows, d.view.old_hl != null, d.view.new_hl != null, body.x, body.y, body.width, body.height,
+    });
+    const names = [_][]const u8{ "prev", "next", "collapse", "inline" };
+    for (names, 0..) |name, i| {
+        const b = clay.getElementData(clay.ElementId.IDI(switch (i) {
+            0 => "gd_btn_prev",
+            1 => "gd_btn_next",
+            2 => "gd_btn_collapse",
+            else => "gd_btn_inline",
+        }, d.salt)).bounding_box;
+        if (i > 0) try w.writeAll(", ");
+        try w.print("\"{s}\": {{\"x\": {d:.1}, \"y\": {d:.1}, \"w\": {d:.1}, \"h\": {d:.1}}}", .{ name, b.x, b.y, b.width, b.height });
+    }
+    // erster Faltbalken (für Klick-Tests)
+    var first_fold: ?usize = null;
+    for (items, 0..) |it, i| if (it == .fold and first_fold == null) {
+        first_fold = i;
+    };
+    try w.writeAll("}, \"first_fold_item\": ");
+    try std.json.Stringify.value(first_fold, .{}, w);
+    try w.writeAll("}");
 }
 
 fn gitHistoryState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
@@ -911,7 +961,10 @@ fn uiState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     try buf.writer.writeAll(", \"tabs\": [");
     for (tb.tabs.items, 0..) |tab, i| {
         if (i > 0) try buf.writer.writeAll(", ");
-        try buf.writer.print("{{\"path\": \"{s}\", \"kind\": \"{s}\", \"modified\": {}}}", .{ tab.path, @tagName(tab.kind), tab.modified });
+        // Pfad escapen: Diff-Tabs trennen ihre Felder mit 0x1f, das ist in JSON ungültig
+        try buf.writer.writeAll("{\"path\": ");
+        try std.json.Stringify.value(tab.path, .{}, &buf.writer);
+        try buf.writer.print(", \"kind\": \"{s}\", \"modified\": {}}}", .{ @tagName(tab.kind), tab.modified });
     }
     try buf.writer.writeAll("]}");
     return buf.written();

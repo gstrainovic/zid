@@ -120,6 +120,11 @@ pub const Command = enum {
     /// Verlauf der Datei des Tabs bzw. Editors; `_entry` für den markierten Explorer-Eintrag
     file_history,
     file_history_entry,
+    /// Diff-Editor (Tab `git-diff://…`), Namen und Kürzel wie VS Code
+    diff_next_change,
+    diff_prev_change,
+    diff_toggle_collapse,
+    diff_toggle_inline,
     show_shortcuts,
     /// Terminal-Kontextmenü: Auswahl kopieren / Zwischenablage einfügen (ohne Kürzel)
     terminal_copy,
@@ -214,6 +219,9 @@ pub const bindings = [_]Binding{
     .{ .command = .zoom_out, .key = .kp_minus, .mods = .{ .ctrl = true } },
     .{ .command = .zoom_reset, .key = .kp_0, .mods = .{ .ctrl = true } },
     .{ .command = .show_shortcuts, .key = .f1 },
+    // Diff-Editor: VS Code workbench.action.compareEditor.nextChange / previousChange
+    .{ .command = .diff_next_change, .key = .f5, .mods = .{ .alt = true } },
+    .{ .command = .diff_prev_change, .key = .f5, .mods = .{ .alt = true, .shift = true } },
 };
 
 /// Kontextmenü eines Tabs (Rechtsklick auf den Tab-Kopf), in dieser Reihenfolge.
@@ -354,6 +362,10 @@ pub fn label(command: Command) []const u8 {
         .toggle_indent_guides => "Toggle Indent Guides",
         .git_history => "Git History",
         .file_history, .file_history_entry => "File History",
+        .diff_next_change => "Next Change",
+        .diff_prev_change => "Previous Change",
+        .diff_toggle_collapse => "Toggle Collapse Unchanged Regions",
+        .diff_toggle_inline => "Toggle Inline View",
         .show_shortcuts => "Keyboard Shortcuts",
         .terminal_copy => "Terminal Copy",
         .terminal_paste => "Terminal Paste",
@@ -509,6 +521,17 @@ test "Git History: Repo im View-Menü, Datei-History in Tab-, Editor- und Explor
     try testing.expectEqualStrings("Git History", label(.git_history));
     try testing.expectEqualStrings("File History", label(.file_history));
     try testing.expectEqualStrings("File History", label(.file_history_entry));
+}
+
+test "Diff-Editor wie VS Code: Alt+F5 nächste, Shift+Alt+F5 vorige Änderung, Umschalter ohne Kürzel" {
+    try testing.expectEqual(Command.diff_next_change, lookup(.f5, .{ .alt = true }, .global).?);
+    try testing.expectEqual(Command.diff_prev_change, lookup(.f5, .{ .alt = true, .shift = true }, .global).?);
+    try testing.expectEqualStrings("Next Change", label(.diff_next_change));
+    try testing.expectEqualStrings("Previous Change", label(.diff_prev_change));
+    try testing.expectEqualStrings("Toggle Collapse Unchanged Regions", label(.diff_toggle_collapse));
+    try testing.expectEqualStrings("Toggle Inline View", label(.diff_toggle_inline));
+    try testing.expectEqualStrings("", shortcutText(.diff_toggle_collapse));
+    try testing.expectEqualStrings("Alt+F5", shortcutText(.diff_next_change));
 }
 
 test "Kontextmenüs: Tab-Kopf hat Markdown Preview, jede Liste hat Labels, Terminal ohne Ctrl+C" {

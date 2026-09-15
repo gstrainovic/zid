@@ -17,6 +17,7 @@ const log = std.log.scoped(.tab_bar);
 const file_types = @import("file_types.zig");
 const explorer_ops = @import("explorer_ops.zig");
 const git_history = @import("git_history");
+const git_diff = @import("git_diff");
 const FileKind = file_types.FileKind;
 
 /// Ein geöffneter Tab (Datei)
@@ -218,6 +219,17 @@ pub const TabBarState = struct {
                 .display_name = name,
                 .kind = .git_history,
             });
+            self.setActive(self.tabs.items.len - 1);
+            return;
+        }
+
+        // Diff-Editor: Titel wie VS Code „name (alt) ↔ name (neu)“
+        if (git_diff.parseTabPath(path)) |spec| {
+            const name = try git_diff.specTitle(self.allocator, spec);
+            errdefer self.allocator.free(name);
+            const path_copy = try self.allocator.dupe(u8, path);
+            errdefer self.allocator.free(path_copy);
+            try self.tabs.append(self.allocator, .{ .path = path_copy, .display_name = name, .kind = .git_diff });
             self.setActive(self.tabs.items.len - 1);
             return;
         }

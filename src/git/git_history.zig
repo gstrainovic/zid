@@ -51,7 +51,7 @@ pub const max_commits = "2000";
 
 /// Feldtrenner im Log: 0x1e vor jedem Commit, 0x1f zwischen den Feldern. Betreffzeilen
 /// dürfen damit jedes druckbare Zeichen enthalten.
-const log_format = "--format=%x1e%H%x1f%h%x1f%an%x1f%ad%x1f%s";
+const log_format = "--format=%x1e%H%x1f%h%x1f%an%x1f%ad%x1f%s%x1f%P";
 const date_format = "--date=format:%Y-%m-%d %H:%M";
 
 /// Argumente für `git log` (ohne "git"). Läuft im Repo-Ordner bzw. im Ordner der Datei.
@@ -108,6 +108,13 @@ pub const Commit = struct {
     subject: []const u8,
     /// Pfad der Datei in diesem Commit (relativ zur Repo-Wurzel), leer beim Repo-Log.
     path: []const u8 = "",
+    /// Volle Eltern-Hashes, durch Leerzeichen getrennt (leer beim Wurzel-Commit)
+    parents: []const u8 = "",
+
+    pub fn firstParent(self: Commit) []const u8 {
+        const end = std.mem.indexOfScalar(u8, self.parents, ' ') orelse self.parents.len;
+        return self.parents[0..end];
+    }
 };
 
 pub const Log = struct {
@@ -134,12 +141,12 @@ pub fn parseLog(alloc: std.mem.Allocator, out: []const u8) !Log {
         var lines = std.mem.splitScalar(u8, record, '\n');
         const head = trimCr(lines.next() orelse continue);
         var fields = std.mem.splitScalar(u8, head, 0x1f);
-        var f: [5][]const u8 = undefined;
+        var f: [6][]const u8 = .{ "", "", "", "", "", "" };
         var count: usize = 0;
         while (fields.next()) |field| : (count += 1) {
             if (count < f.len) f[count] = field;
         }
-        if (count < f.len) continue;
+        if (count < 5) continue; // Eltern (6. Feld) sind optional
         var path: []const u8 = "";
         while (lines.next()) |line| {
             const l = std.mem.trim(u8, line, " \t\r");
@@ -148,7 +155,7 @@ pub fn parseLog(alloc: std.mem.Allocator, out: []const u8) !Log {
                 break;
             }
         }
-        try commits.append(a, .{ .hash = f[0], .short = f[1], .author = f[2], .date = f[3], .subject = f[4], .path = path });
+        try commits.append(a, .{ .hash = f[0], .short = f[1], .author = f[2], .date = f[3], .subject = f[4], .path = path, .parents = f[5] });
     }
     return .{ .arena = arena, .commits = try commits.toOwnedSlice(a) };
 }
@@ -512,6 +519,20 @@ test "parseLog: Datei-Log mit --name-only liefert den Pfad je Commit (Umbenennun
     try std.testing.expectEqualStrings("src/new.zig", log.commits[0].path);
     try std.testing.expectEqualStrings("src/old.zig", log.commits[1].path);
     try std.testing.expectEqualStrings("rename", log.commits[0].subject);
+}
+
+test "parseLog: Eltern-Hashes als sechstes Feld, erster Elternteil für den Diff" {
+    const alloc = std.testing.allocator;
+    const out = "\x1em1\x1fm\x1fAda\x1f2026-09-14 10:00\x1fMerge\x1fp1 p2\n" ++
+        "\x1er0\x1fr\x1fAda\x1f2026-09-13 10:00\x1fWurzel\x1f\n";
+    var log = try parseLog(alloc, out);
+    defer log.deinit();
+    try std.testing.expectEqualStrings("p1 p2", log.commits[0].parents);
+    try std.testing.expectEqualStrings("p1", log.commits[0].firstParent());
+    try std.testing.expectEqualStrings("", log.commits[1].firstParent());
+    try std.testing.expectEqualStrings("Wurzel", log.commits[1].subject);
+    var buf: [16][]const u8 = undefined;
+    try std.testing.expect(std.mem.endsWith(u8, logArgs(&buf, .{ .repo = "/r" })[2], "%s%x1f%P"));
 }
 
 test "parseLog: leer und kaputte Datensätze" {

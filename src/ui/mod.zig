@@ -28,6 +28,8 @@ const markdown_view_mod = @import("markdown_view.zig");
 const git_history_view = @import("git_history_view.zig");
 const git_history = @import("git_history");
 const git_worker = @import("git_worker");
+const git_diff_view = @import("git_diff_view.zig");
+const git_diff = @import("git_diff");
 const pane_mod = @import("pane.zig");
 const dialog_mod = @import("dialog.zig");
 const dialog_ops = @import("dialog_ops.zig");
@@ -189,6 +191,8 @@ pub const UI = struct {
     open_markdown_views: std.StringHashMap(*markdown_view_mod.MarkdownView),
     /// Git-History-Tabs je Tab-Pfad (`git-history://…`); Schlüssel gehört der Ansicht
     git_histories: std.StringHashMapUnmanaged(*git_history_view.GitHistoryView) = .empty,
+    /// Diff-Editor-Tabs je Tab-Pfad (`git-diff://…`); Schlüssel gehört der Ansicht
+    git_diffs: std.StringHashMapUnmanaged(*git_diff_view.GitDiffView) = .empty,
     pending_md_preview: ?[]const u8,
 
     image_renderer: ?*@import("../clay_renderer/image_renderer.zig").ImageRenderer,
@@ -443,6 +447,9 @@ pub const UI = struct {
         var gh_iter = self.git_histories.valueIterator();
         while (gh_iter.next()) |v| v.*.destroy();
         self.git_histories.deinit(self.allocator);
+        var gd_iter = self.git_diffs.valueIterator();
+        while (gd_iter.next()) |v| v.*.destroy();
+        self.git_diffs.deinit(self.allocator);
 
         if (self.current_directory) |dir| self.allocator.free(dir);
         if (self.pending_open_folder) |p| self.allocator.free(p);
@@ -717,6 +724,26 @@ pub const UI = struct {
             return;
         }
 
+        // Diff-Editor: Pfeile/Bild/Pos1/Ende scrollen (Alt+F5 läuft über die Kürzel-Tabelle)
+        if (self.activeTabKind() == .git_diff) {
+            const d = self.activeGitDiff() orelse return;
+            if (!self.is_ctrl_down and !self.is_alt_down) {
+                const k: ?git_diff_view.GitDiffView.Key = switch (key) {
+                    .up => .up,
+                    .down => .down,
+                    .page_up => .page_up,
+                    .page_down => .page_down,
+                    .home => .home,
+                    .end => .end,
+                    .left => .left,
+                    .right => .right,
+                    else => null,
+                };
+                if (k) |kk| d.view.handleKey(kk, d.salt);
+            }
+            return;
+        }
+
         // If a chat tab is active, handle chat input
         if (self.isChatTabActive()) {
             if (self.ai_chat.handleKeyPress(key)) return;
@@ -819,7 +846,8 @@ pub const UI = struct {
             return;
         }
         if (self.show_file_explorer and self.explorer_focused) return; // Buchstaben sind Explorer-Kürzel
-        if (self.isGitHistoryTabActive()) return; // kein Text in den unsichtbaren Editor
+        // kein Text in den unsichtbaren Editor hinter History- und Diff-Tabs
+        if (self.activeTabKind() == .git_history or self.activeTabKind() == .git_diff) return;
 
         // Forward to chat tab if active
         if (self.isChatTabActive()) {
@@ -1001,6 +1029,11 @@ pub const UI = struct {
                     if (button == .mouse_left) _ = h.view.handleMouseDown(x, y, h.salt);
                 }
                 return;
+            } else if (tab.kind == .git_diff) {
+                if (self.activeGitDiff()) |d| {
+                    if (button == .mouse_left) _ = d.view.handleMouseDown(x, y, d.salt);
+                }
+                return;
             }
         }
 
@@ -1091,6 +1124,10 @@ pub const UI = struct {
     pub fn handleScrollHorizontal(self: *Self, delta: i32) void {
         if (self.active_dialog != null or self.folder_picker.visible) return;
         if (self.getActiveTabBar().getActiveTab()) |tab| {
+            if (tab.kind == .git_diff) {
+                if (self.activeGitDiff()) |d| d.view.scrollLines(delta, true);
+                return;
+            }
             if (tab.kind != .text) return;
         }
         self.getActiveEditor().scrollColumns(delta);
@@ -1139,6 +1176,9 @@ pub const UI = struct {
             } else if (tab.kind == .git_history) {
                 if (self.activeGitHistory()) |h| h.view.scrollLines(delta, self.mouse_x, self.mouse_y, h.salt);
                 return;
+            } else if (tab.kind == .git_diff) {
+                if (self.activeGitDiff()) |d| d.view.scrollLines(delta, false);
+                return;
             }
         }
         self.getActiveEditor().scrollLines(delta);
@@ -1149,6 +1189,7 @@ pub const UI = struct {
         self.ensureEditorHooks();
         self.applyLspGoto();
         self.driveGitHistories();
+        self.driveGitDiffs();
         // Bestätigtes Löschen im Explorer: vor dem Layout, nie im Dialog-Callback
         self.file_explorer.processPending();
         while (self.file_explorer.takeFsChange()) |change| {
@@ -1556,7 +1597,80 @@ pub const UI = struct {
             .file_history_entry => if (self.file_explorer.selectedNodeIndex()) |node| {
                 self.openFileHistory(self.file_explorer.nodes.items[node].path);
             },
+            .diff_next_change => if (self.activeGitDiff()) |d| d.view.nextChange(d.salt),
+            .diff_prev_change => if (self.activeGitDiff()) |d| d.view.prevChange(d.salt),
+            .diff_toggle_collapse => if (self.activeGitDiff()) |d| d.view.state.toggleCollapse(),
+            .diff_toggle_inline => if (self.activeGitDiff()) |d| d.view.toggleInline(),
         }
+    }
+
+    fn activeTabKind(self: *Self) ?file_types.FileKind {
+        const tab = self.getActiveTabBar().getActiveTab() orelse return null;
+        return tab.kind;
+    }
+
+    pub const ActiveDiff = struct { view: *git_diff_view.GitDiffView, salt: u32 };
+
+    /// Diff-Editor des aktiven Tabs im aktiven Pane.
+    pub fn activeGitDiff(self: *Self) ?ActiveDiff {
+        const tab = self.getActiveTabBar().getActiveTab() orelse return null;
+        if (tab.kind != .git_diff) return null;
+        const v = self.git_diffs.get(tab.path) orelse return null;
+        return .{ .view = v, .salt = paneSalt(self.active_pane) };
+    }
+
+    fn gitDiffFor(self: *Self, tab_path: []const u8) ?*git_diff_view.GitDiffView {
+        if (self.git_diffs.get(tab_path)) |v| return v;
+        const v = git_diff_view.GitDiffView.create(self.allocator, tab_path) catch return null;
+        self.git_diffs.put(self.allocator, v.state.tab_path, v) catch {
+            v.destroy();
+            return null;
+        };
+        return v;
+    }
+
+    /// Diff-Tab öffnen bzw. aktivieren (main.zig öffnet `pending_tab_switch` im nächsten Frame).
+    pub fn openGitDiff(self: *Self, spec: git_diff.Spec) void {
+        const tab_path = git_diff.tabPath(self.allocator, spec) catch return;
+        if (self.pending_tab_switch) |old| self.allocator.free(old);
+        self.pending_tab_switch = tab_path;
+        self.explorer_focused = false;
+    }
+
+    fn driveGitDiffs(self: *Self) void {
+        const sched = self.scheduler orelse return;
+        var it = self.git_diffs.valueIterator();
+        while (it.next()) |vp| {
+            const s = &vp.*.state;
+            if (!s.takeRequest()) continue;
+            const param = git_worker.TextParam.init(self.allocator, s.tab_path) catch return;
+            if (!sched.submit(.{ .func = git_worker.taskGitFileDiff, .data = param })) {
+                param.deinit();
+                s.want_load = true; // Queue voll: nächster Frame
+                s.loading = false;
+                return;
+            }
+        }
+    }
+
+    /// Ergebnis von `taskGitFileDiff` (ok = Tag `git_file_diff`).
+    pub fn handleGitFileDiff(self: *Self, ok: bool, payload: []const u8) void {
+        const u = git_history.unframe(payload) orelse return;
+        const v = self.git_diffs.get(u.key) orelse return;
+        v.apply(ok, u.body) catch |err| log.warn("git diff: {}", .{err});
+    }
+
+    fn dropUnusedGitDiff(self: *Self, tab_path: []const u8) void {
+        var buf: [32]*pane_mod.Pane = undefined;
+        var n: usize = 0;
+        collectLeaves(self.root_pane, &buf, &n);
+        for (buf[0..n]) |p| {
+            for (p.data.leaf.tab_bar.tabs.items) |tab| {
+                if (std.mem.eql(u8, tab.path, tab_path)) return;
+            }
+        }
+        const kv = self.git_diffs.fetchRemove(tab_path) orelse return;
+        kv.value.destroy();
     }
 
     // ───────────────────────── Git-History ─────────────────────────
@@ -2481,10 +2595,15 @@ pub const UI = struct {
                             } else |_| {}
                         }
                         // Pfad vor closeTab kopieren (gibt ihn frei); die Ansicht erst danach prüfen
-                        const history_path: ?[]u8 = if (closing.kind == .git_history) self.allocator.dupe(u8, closing.path) catch null else null;
-                        defer if (history_path) |p| self.allocator.free(p);
+                        const view_path: ?[]u8 = if (closing.kind == .git_history or closing.kind == .git_diff) self.allocator.dupe(u8, closing.path) catch null else null;
+                        const closing_kind = closing.kind;
+                        defer if (view_path) |p| self.allocator.free(p);
                         leaf.tab_bar.closeTab(req.index);
-                        if (history_path) |p| self.dropUnusedGitHistory(p);
+                        if (view_path) |p| switch (closing_kind) {
+                            .git_history => self.dropUnusedGitHistory(p),
+                            .git_diff => self.dropUnusedGitDiff(p),
+                            else => {},
+                        };
                         // Don't call cancelWait here - causes recursive render with destroyed pane!
                     } else {
                         log.warn("pending_tab_closes: index {d} out of range (len={d}), skipping", .{ req.index, leaf.tab_bar.tabs.items.len });
@@ -2929,6 +3048,12 @@ pub const UI = struct {
                             } else if (tab.kind == .git_history) {
                                 if (self.gitHistoryFor(tab.path)) |v| {
                                     v.render(allocator, t, paneSalt(pane), self.mouse_x, self.mouse_y);
+                                }
+                                special_active = true;
+                            } else if (tab.kind == .git_diff) {
+                                if (self.gitDiffFor(tab.path)) |v| {
+                                    // Schrift wie im Editor dieses Panes (Zoom gilt mit)
+                                    v.render(allocator, t, paneSalt(pane), @intCast(@min(leaf.code_editor.font_size, 48)), self.mouse_x, self.mouse_y);
                                 }
                                 special_active = true;
                             } else if (tab.kind == .terminal) {

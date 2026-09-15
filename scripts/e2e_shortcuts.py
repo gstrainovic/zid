@@ -42,7 +42,8 @@ def explorer():
 
 
 def explorer_row_center(name):
-    """Zeilenmitte des Explorer-Eintrags `name`; scrollt ihn bei Bedarf in den Viewport."""
+    """Zeilenmitte des Explorer-Eintrags `name`; scrollt ihn bei Bedarf in den Viewport.
+    Schrittweite nach Abstand: tmp/ hat hunderte Einträge, feste 3 Zeilen je Versuch reichten nicht."""
     for _ in range(40):
         ex = explorer()
         rows = [e for e in ex["entries"] if e["name"] == name]
@@ -52,8 +53,9 @@ def explorer_row_center(name):
         y = vp["y"] + rows[0]["index"] * rh + rh / 2 - ex["scroll"]
         if vp["y"] <= y < vp["y"] + vp["h"]:
             return vp["x"] + 60, y
-        lines = -3 if y >= vp["y"] + vp["h"] else 3
-        rpc("scroll", [vp["x"] + 60, vp["y"] + vp["h"] / 2, lines])
+        center = vp["y"] + vp["h"] / 2
+        lines = max(3, int(abs(y - center) / rh))
+        rpc("scroll", [vp["x"] + 60, center, -lines if y >= center else lines])
         settle()
     raise AssertionError(f"{name!r} nicht in den Viewport gescrollt")
 
