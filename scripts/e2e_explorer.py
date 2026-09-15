@@ -228,8 +228,10 @@ def step_hidden_and_filter():
 def step_drag_drop():
     print("--- Drag & Drop verschiebt mit Bestätigung")
     explorer_click("gamma copy.txt")
+    explorer_row_center("sub")  # scrollt bei Bedarf; danach beide Zeilen neu messen
     x0, y0 = explorer_row_center("gamma copy.txt")
     x1, y1 = explorer_row_center("sub")
+    check(explorer_row_center("gamma copy.txt") == (x0, y0), "Quelle und Ziel gleichzeitig sichtbar")
     rpc("mouse_down", [x0, y0]); settle()
     for i in range(1, 6):
         rpc("move_mouse", [x0, y0 + (y1 - y0) * i / 5]); settle(3)

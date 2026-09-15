@@ -6,6 +6,7 @@ const std = @import("std");
 const scheduler = @import("scheduler");
 const git_history = @import("git_history");
 const git_diff = @import("git_diff");
+const git_timeline = @import("git_timeline");
 
 const log = std.log.scoped(.git_worker);
 
@@ -258,6 +259,31 @@ pub fn taskGitFileDiff(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.T
             return .{ .tag = .git_file_diff, .payload = try git_history.frame(alloc, param.text, body), .allocator = alloc };
         },
         .failed => |msg| return historyResult(alloc, param.text, .{ .failed = msg }, .git_file_diff, .git_file_diff_error),
+    }
+}
+
+/// Timeline einer Datei: Payload `<datei>\n<repo-wurzel>\n<git log>` (git_timeline.logArgs).
+/// Fehler (kein Repo) → Tag `git_timeline_error` mit stderr.
+pub fn taskGitTimeline(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.TaskResult {
+    const param: *TextParam = @ptrCast(@alignCast(data.?));
+    defer param.deinit();
+    const dir = std.fs.path.dirname(param.text) orelse ".";
+
+    const toplevel = switch (runGitCapture(alloc, dir, &.{ "rev-parse", "--show-toplevel" })) {
+        .ok => |out| out,
+        .failed => |msg| return historyResult(alloc, param.text, .{ .failed = msg }, .git_timeline, .git_timeline_error),
+    };
+    defer alloc.free(toplevel);
+
+    var args_buf: [16][]const u8 = undefined;
+    switch (runGitCapture(alloc, dir, git_timeline.logArgs(&args_buf, param.text))) {
+        .ok => |log_out| {
+            defer alloc.free(log_out);
+            const body = try std.mem.concat(alloc, u8, &.{ std.mem.trimRight(u8, toplevel, "\r\n"), "\n", log_out });
+            defer alloc.free(body);
+            return .{ .tag = .git_timeline, .payload = try git_history.frame(alloc, param.text, body), .allocator = alloc };
+        },
+        .failed => |msg| return historyResult(alloc, param.text, .{ .failed = msg }, .git_timeline, .git_timeline_error),
     }
 }
 
@@ -554,6 +580,31 @@ test "taskGitFileDiff: alter und neuer Inhalt plus Hunks einer Datei in einem Co
     const h0 = try git_diff.parseHunks(alloc, c0.hunks);
     defer alloc.free(h0);
     try std.testing.expectEqual(@as(u32, 0), h0[0].old_start);
+}
+
+test "taskGitTimeline: Repo-Wurzel und Log der Datei, Schlüssel ist der Dateipfad" {
+    const alloc = std.testing.allocator;
+    const cwd = try std.process.getCwdAlloc(alloc);
+    defer alloc.free(cwd);
+    const file = try std.fs.path.join(alloc, &.{ cwd, "src", "git", "git_worker.zig" });
+    defer alloc.free(file);
+
+    const result = try taskGitTimeline(alloc, try TextParam.init(alloc, file));
+    defer result.deinit();
+    try std.testing.expect(result.tag == .git_timeline);
+    const u = git_history.unframe(result.payload).?;
+    try std.testing.expectEqualStrings(file, u.key);
+
+    var t = git_timeline.Timeline.init(alloc);
+    defer t.deinit();
+    t.setExpanded(true);
+    t.follow(file);
+    try t.apply(file, true, u.body);
+    try std.testing.expectEqualStrings(cwd, t.repo);
+    try std.testing.expect(t.items().len > 1);
+    try std.testing.expectEqualStrings("src/git/git_worker.zig", t.items()[0].path);
+    try std.testing.expect(t.items()[0].timestamp > 1_700_000_000);
+    try std.testing.expect(t.items()[0].stat.files == 1);
 }
 
 test "taskGitLog: Fehler von git kommt als Text im Ergebnis, nicht als Task-Fehler" {

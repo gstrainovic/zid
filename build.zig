@@ -318,6 +318,18 @@ pub fn build(b: *std.Build) void {
     const run_git_diff_tests = b.addRunArtifact(git_diff_tests);
     run_git_diff_tests.has_side_effects = true;
 
+    // Timeline der aktiven Datei (VS-Code-Stil): Log, relative Zeiten, Hover, Nachfolge.
+    const git_timeline_mod = b.createModule(.{
+        .root_source_file = b.path("src/git/git_timeline.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    git_timeline_mod.addImport("git_diff", git_diff_mod);
+    exe_mod.addImport("git_timeline", git_timeline_mod);
+    const git_timeline_tests = b.addTest(.{ .root_module = git_timeline_mod });
+    const run_git_timeline_tests = b.addRunArtifact(git_timeline_tests);
+    run_git_timeline_tests.has_side_effects = true;
+
     const git_worker_mod = b.createModule(.{
         .root_source_file = b.path("src/git/git_worker.zig"),
         .target = target,
@@ -326,6 +338,7 @@ pub fn build(b: *std.Build) void {
     git_worker_mod.addImport("scheduler", scheduler_mod);
     git_worker_mod.addImport("git_history", git_history_mod);
     git_worker_mod.addImport("git_diff", git_diff_mod);
+    git_worker_mod.addImport("git_timeline", git_timeline_mod);
     exe_mod.addImport("git_worker", git_worker_mod);
     const git_tests = b.addTest(.{ .root_module = git_worker_mod });
 
@@ -649,6 +662,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_git_tests.step);
     test_step.dependOn(&run_git_history_tests.step);
     test_step.dependOn(&run_git_diff_tests.step);
+    test_step.dependOn(&run_git_timeline_tests.step);
 
     const run_ai_worker_tests = b.addRunArtifact(ai_worker_tests);
     run_ai_worker_tests.has_side_effects = true;
