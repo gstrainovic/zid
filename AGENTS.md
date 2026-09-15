@@ -633,9 +633,9 @@ MuPDFs Story-Engine. Folienvorschau in `MarkdownView` (`deck`-Feld), Command
 
 ## Clay: gepatchte clay.h unter libs/clay-zig/vendor
 
-Die Änderung liegt im Submodul `libs/clay-zig` (Commit dort) und zusätzlich als
-`patches/clay-updatescrollcontainers.patch`, damit sie sich gegen eine frische clay.h
-wieder anwenden lässt. `libs/clay-zig/build.zig` legt `vendor/clay.h` vor die Abhängigkeit. Gegenüber v0.14 (upstream
+Das Submodul zeigt auf den eigenen Fork `gstrainovic/clay-zig-bindings`, Branch `zid`
+(Upstream johan0A als Remote `upstream`); dort liegt der Fix. Zusätzlich liegt er als
+`patches/clay-updatescrollcontainers.patch`, um ihn gegen eine neuere clay.h anzuwenden. `libs/clay-zig/build.zig` legt `vendor/clay.h` vor die Abhängigkeit. Gegenüber v0.14 (upstream
 unverändert) sind dort drei Stellen in `Clay_UpdateScrollContainers` korrigiert, alle mit „zid:“
 markiert: Swap-Remove ohne `i--` übersprang Einträge, `Clay__GetHashMapItem` liefert nie `NULL`
 (sondern `&Clay_LayoutElementHashMapItem_DEFAULT`), und der Zeiger auf das Clip-Element wird vor
