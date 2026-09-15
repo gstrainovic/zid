@@ -247,6 +247,24 @@ pub const GitDiffView = struct {
         const content_h = @as(f32, @floatFromInt(items.len)) * self.row_height;
         s.scroll_y = std.math.clamp(s.scroll_y, 0, @max(0, content_h - vp));
         const range = visibleRange(s.scroll_y, if (vp > 0) vp else 800, self.row_height, items.len);
+        spacer(@as(f32, @floatFromInt(range.first)) * self.row_height);
+        self.renderItems(arena, theme, salt, layout, width, fs, range.first, range.end);
+        spacer(@as(f32, @floatFromInt(items.len - range.end)) * self.row_height);
+    }
+
+    /// Anzahl der Anzeigeeinträge (Zeilen und Faltbalken) im Layout; 0 solange nicht geladen.
+    pub fn itemCount(self: *Self, layout: git_diff.Layout) usize {
+        if (!self.state.loaded) return 0;
+        return (self.state.items(layout) catch return 0).len;
+    }
+
+    /// Einträge [first, end) ohne Abstandhalter zeichnen (auch vom Multi-File-Diff benutzt).
+    pub fn renderItems(self: *Self, arena: std.mem.Allocator, theme: Theme, salt: u32, layout: git_diff.Layout, width: f32, fs: f32, first: usize, end: usize) void {
+        const s = &self.state;
+        self.row_height = @ceil(fs * 1.45);
+        self.last_layout = layout;
+        const items = s.items(layout) catch return;
+        const range = .{ .first = @min(first, items.len), .end = @min(end, items.len) };
 
         const char_w = @max(1, ui.measureTextWidth("W", fs));
         const digits = digitCount(@max(s.old_lines.len, s.new_lines.len));
@@ -263,7 +281,6 @@ pub const GitDiffView = struct {
         const cols: usize = @intFromFloat(@max(1, (half_w - gutter_w - 8) / char_w));
         const first_col: usize = @intFromFloat(@max(0, s.scroll_x));
 
-        spacer(@as(f32, @floatFromInt(range.first)) * self.row_height);
         for (range.first..range.end) |i| {
             switch (items[i]) {
                 .fold => |f| self.renderFold(arena, theme, salt, i, f.count),
@@ -287,7 +304,6 @@ pub const GitDiffView = struct {
                 },
             }
         }
-        spacer(@as(f32, @floatFromInt(items.len - range.end)) * self.row_height);
     }
 
     const RowCtx = struct {

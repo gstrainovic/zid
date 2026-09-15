@@ -24,6 +24,12 @@ pub const ResultTag = enum {
     /// Payload `<datei>\n<repo-wurzel>\n<git log>` (git_worker.taskGitTimeline)
     git_timeline,
     git_timeline_error,
+    /// Payload `<schlüssel>\n<kopf>\n<git log>` (git_worker.taskGitGraphLog)
+    git_graph_log,
+    git_graph_log_error,
+    /// Payload `<schlüssel>\n<git diff --name-status>` (git_worker.taskGitCommitChanges)
+    git_commit_changes,
+    git_commit_changes_error,
     git_blame,
     lsp_completion,
     lsp_diagnostics,

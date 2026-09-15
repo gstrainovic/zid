@@ -13,6 +13,8 @@ pub const FileKind = enum {
     git_history,
     /// Diff-Editor einer Datei in einem Commit (`git-diff://…`, siehe git_diff.zig)
     git_diff,
+    /// Multi-File-Diff eines Commits (`git-commit://…`, siehe git_scm.zig)
+    git_commit,
 };
 
 /// Dateiart nach Endung (Bild, PDF, sonst Text). Kennt den Inhalt nicht.
@@ -20,6 +22,7 @@ pub fn getFileKind(path: []const u8) FileKind {
     // Präfix wie git_history.scheme; das Modul steht hier nicht zur Verfügung (eigenes Test-Root)
     if (std.mem.startsWith(u8, path, "git-history://")) return .git_history;
     if (std.mem.startsWith(u8, path, "git-diff://")) return .git_diff;
+    if (std.mem.startsWith(u8, path, "git-commit://")) return .git_commit;
     const ext = std.fs.path.extension(path);
     if (std.ascii.eqlIgnoreCase(ext, ".pdf")) return .pdf;
     const images = [_][]const u8{ ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".svg" };
@@ -107,6 +110,7 @@ test "git-history://-Pfade sind History-Tabs, ohne die Platte zu lesen" {
     try std.testing.expectEqual(FileKind.git_history, getFileKind("git-history://repo:/home/u/p"));
     try std.testing.expectEqual(FileKind.git_history, detectFileKind("git-history://file:/home/u/p/a.png"));
     try std.testing.expectEqual(FileKind.git_diff, getFileKind("git-diff://abc\x1fdef\x1f/r\x1fa.png\x1fa.png"));
+    try std.testing.expectEqual(FileKind.git_commit, getFileKind("git-commit://abc\x1fdef\x1f/r\x1fBetreff.png"));
 }
 
 test "getFileKind: Endungen" {

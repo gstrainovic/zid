@@ -7,6 +7,7 @@ const scheduler = @import("scheduler");
 const git_history = @import("git_history");
 const git_diff = @import("git_diff");
 const git_timeline = @import("git_timeline");
+const git_scm = @import("git_scm");
 
 const log = std.log.scoped(.git_worker);
 
@@ -291,6 +292,107 @@ pub fn taskGitTimeline(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.T
         },
         .failed => |msg| return historyResult(alloc, param.text, .{ .failed = msg }, .git_timeline, .git_timeline_error),
     }
+}
+
+/// Mehrere Strings als Task-Parameter, intern mit 0x1e getrennt (selbst-owned). Nicht 0x1f:
+/// das trennt bereits Schlüssel wie `graph<gen>\x1f<hash>`.
+pub const FieldsParam = struct {
+    const sep: u8 = 0x1e;
+
+    alloc: std.mem.Allocator,
+    text: []u8,
+
+    pub fn init(alloc: std.mem.Allocator, fields: []const []const u8) !*FieldsParam {
+        const self = try alloc.create(FieldsParam);
+        errdefer alloc.destroy(self);
+        var list: std.ArrayListUnmanaged(u8) = .empty;
+        errdefer list.deinit(alloc);
+        for (fields, 0..) |f, i| {
+            if (i > 0) try list.append(alloc, sep);
+            try list.appendSlice(alloc, f);
+        }
+        self.* = .{ .alloc = alloc, .text = try list.toOwnedSlice(alloc) };
+        return self;
+    }
+
+    pub fn deinit(self: *FieldsParam) void {
+        self.alloc.free(self.text);
+        self.alloc.destroy(self);
+    }
+
+    fn field(self: *const FieldsParam, index: usize) []const u8 {
+        var it = std.mem.splitScalar(u8, self.text, sep);
+        var i: usize = 0;
+        while (it.next()) |f| : (i += 1) if (i == index) return f;
+        return "";
+    }
+};
+
+/// Erste Zeile einer git-Ausgabe oder leer (owned), Fehler zählen als leer.
+fn firstLineOrEmpty(alloc: std.mem.Allocator, cwd: []const u8, args: []const []const u8) []u8 {
+    return switch (runGitCapture(alloc, cwd, args)) {
+        .ok => |out| blk: {
+            const trimmed = std.mem.trim(u8, out, " \r\n");
+            std.mem.copyForwards(u8, out, trimmed);
+            break :blk alloc.realloc(out, trimmed.len) catch out[0..trimmed.len];
+        },
+        .failed => |msg| blk: {
+            alloc.free(msg);
+            break :blk no_message;
+        },
+    };
+}
+
+/// Source Control Graph, eine Seite. Felder: Schlüssel, Repo-Ordner, skip, Seitengröße.
+/// Payload: `<schlüssel>\n<branch>\x1f<ref>\x1f<upstream>\x1f<basis>\x1f<repo>\n<git log>`.
+/// Filter wie VS Code „Auto“: Branch, Upstream, Basis (Standard-Branch des Remotes).
+pub fn taskGitGraphLog(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.TaskResult {
+    const param: *FieldsParam = @ptrCast(@alignCast(data.?));
+    defer param.deinit();
+    const key = param.field(0);
+    const dir = param.field(1);
+    const skip = std.fmt.parseInt(usize, param.field(2), 10) catch 0;
+    const limit = std.fmt.parseInt(usize, param.field(3), 10) catch git_scm.page_size;
+
+    const toplevel = switch (runGitCapture(alloc, dir, &.{ "rev-parse", "--show-toplevel" })) {
+        .ok => |out| out,
+        .failed => |msg| return historyResult(alloc, key, .{ .failed = msg }, .git_graph_log, .git_graph_log_error),
+    };
+    defer alloc.free(toplevel);
+    const current = firstLineOrEmpty(alloc, dir, &.{ "symbolic-ref", "-q", "HEAD" });
+    defer alloc.free(current);
+    const upstream = firstLineOrEmpty(alloc, dir, &.{ "rev-parse", "--symbolic-full-name", "@{upstream}" });
+    defer alloc.free(upstream);
+    const base = firstLineOrEmpty(alloc, dir, &.{ "symbolic-ref", "-q", "refs/remotes/origin/HEAD" });
+    defer alloc.free(base);
+
+    const filter = git_scm.AutoFilter{ .current = current, .upstream = upstream, .base = base };
+    var refs_buf: [4][]const u8 = undefined;
+    var args_buf: [24][]const u8 = undefined;
+    var num_buf: [48]u8 = undefined;
+    const args = git_scm.logArgs(&args_buf, &num_buf, filter.refNames(&refs_buf), skip, limit);
+    switch (runGitCapture(alloc, dir, args)) {
+        .ok => |log_out| {
+            defer alloc.free(log_out);
+            const branch = if (std.mem.startsWith(u8, current, "refs/heads/")) current["refs/heads/".len..] else "HEAD";
+            const body = try std.mem.concat(alloc, u8, &.{
+                branch, "\x1f", current, "\x1f", upstream, "\x1f", base, "\x1f", std.mem.trimRight(u8, toplevel, "\r\n"), "\n", log_out,
+            });
+            defer alloc.free(body);
+            return .{ .tag = .git_graph_log, .payload = try git_history.frame(alloc, key, body), .allocator = alloc };
+        },
+        .failed => |msg| return historyResult(alloc, key, .{ .failed = msg }, .git_graph_log, .git_graph_log_error),
+    }
+}
+
+/// Geänderte Dateien eines Commits. Felder: Schlüssel, Repo, Commit, erster Elternteil.
+/// Payload `<schlüssel>\n<git diff --name-status>`.
+pub fn taskGitCommitChanges(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.TaskResult {
+    const param: *FieldsParam = @ptrCast(@alignCast(data.?));
+    defer param.deinit();
+    var args_buf: [16][]const u8 = undefined;
+    const args = git_scm.changesArgs(&args_buf, param.field(2), param.field(3));
+    return historyResult(alloc, param.field(0), runGitCapture(alloc, param.field(1), args), .git_commit_changes, .git_commit_changes_error);
 }
 
 /// Dateiinhalt über `git show <ref>:<pfad>`; nicht vorhanden → leer (owned).
@@ -611,6 +713,39 @@ test "taskGitTimeline: Repo-Wurzel und Log der Datei, Schlüssel ist der Dateipf
     try std.testing.expectEqualStrings("src/git/git_worker.zig", t.items()[0].path);
     try std.testing.expect(t.items()[0].timestamp > 1_700_000_000);
     try std.testing.expect(t.items()[0].stat.files == 1);
+}
+
+test "taskGitGraphLog und taskGitCommitChanges: eigenes Repo, Filter Auto, Dateien des jüngsten Commits" {
+    const alloc = std.testing.allocator;
+    const cwd = try std.process.getCwdAlloc(alloc);
+    defer alloc.free(cwd);
+
+    // Felder: Schlüssel (darf 0x1f enthalten), Repo-Ordner, Seite (skip), Seitengröße
+    const result = try taskGitGraphLog(alloc, try FieldsParam.init(alloc, &.{ "graph\x1f0", cwd, "0", "5" }));
+    defer result.deinit();
+    try std.testing.expect(result.tag == .git_graph_log);
+    const u = git_history.unframe(result.payload).?;
+    try std.testing.expectEqualStrings("graph\x1f0", u.key);
+
+    var view = git_scm.View.init(alloc);
+    defer view.deinit();
+    _ = view.takeLogRequest();
+    try view.applyLog(true, u.body, 5);
+    try std.testing.expectEqualStrings(cwd, view.repo);
+    try std.testing.expect(view.filter.current.len > 0); // Tests laufen auf einem Branch
+    try std.testing.expectEqual(@as(usize, 5), view.commits().len);
+    try std.testing.expect(view.has_more);
+
+    const c = view.commits()[0];
+    const ch_param = try FieldsParam.init(alloc, &.{ c.hash, cwd, c.hash, c.firstParent() });
+    const ch = try taskGitCommitChanges(alloc, ch_param);
+    defer ch.deinit();
+    try std.testing.expect(ch.tag == .git_commit_changes);
+    const cu = git_history.unframe(ch.payload).?;
+    try std.testing.expectEqualStrings(c.hash, cu.key);
+    const changes = try git_scm.parseChanges(alloc, cu.body);
+    defer alloc.free(changes);
+    try std.testing.expect(changes.len > 0);
 }
 
 test "taskGitLog: Fehler von git kommt als Text im Ergebnis, nicht als Task-Fehler" {

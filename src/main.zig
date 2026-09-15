@@ -485,6 +485,8 @@ pub fn main() !void {
                         .git_show, .git_show_error => ui_system.handleGitShow(result.tag == .git_show, result.payload),
                         .git_file_diff, .git_file_diff_error => ui_system.handleGitFileDiff(result.tag == .git_file_diff, result.payload),
                         .git_timeline, .git_timeline_error => ui_system.handleGitTimeline(result.tag == .git_timeline, result.payload),
+                        .git_graph_log, .git_graph_log_error => ui_system.handleGitGraphLog(result.tag == .git_graph_log, result.payload),
+                        .git_commit_changes, .git_commit_changes_error => ui_system.handleGitCommitChanges(result.tag == .git_commit_changes, result.payload),
                         .ai_chat_reply => ui_system.handleAIReply(result.payload),
                         .ai_chat_error => ui_system.handleAIError(result.payload),
                         .ai_chat_delta => ui_system.handleAIDelta(result.payload),
@@ -505,7 +507,9 @@ pub fn main() !void {
                 }
                 if (results.len > 0) wio.cancelWait();
                 // Dateiänderungen: git status und die Timeline der aktiven Datei neu laden
-                if (submitGitStatusIfDue(&git_refresh, scheduler, allocator, git_repo_path)) ui_system.timeline_view.timeline.refresh();
+                if (submitGitStatusIfDue(&git_refresh, scheduler, allocator, git_repo_path)) {
+                    ui_system.timeline_view.timeline.refresh();
+                }
             }
 
             // UI updaten (Animationen)
@@ -790,7 +794,7 @@ pub fn main() !void {
                         // Path cleanup happens below at the common pending_switch_path free.
                         state_dirty = true;
                         wio.cancelWait();
-                    } else if (kind == .binary or kind == .git_history or kind == .git_diff) {
+                    } else if (kind == .binary or kind == .git_history or kind == .git_diff or kind == .git_commit) {
                         // Binärdatei: kein Buffer, der Tab zeigt nur den Hinweis (binary_view.zig).
                         // Git-History: die Ansicht legt renderPane an und lädt selbst (UI.driveGitHistories).
                         state_dirty = true;
