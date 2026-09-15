@@ -8,8 +8,6 @@ Sortiert nach Wichtigkeit. Obsolet = wird nicht mehr verwendet. Doppelt = ersetz
 
 | Script | Beschreibung |
 |--------|--------------|
-| `vscreenshot.py` | **AI Visual Debugging** – Screenshot → Gemini CLI, interaktiv oder one-shot |
-| `describe-png.py` | **PNG beschreiben** – Screenshot → Ollama gemma4 vision → Text-Beschreibung |
 | `sync.sh` | **Repo-Sync** – submodule update, mupdf, referenz-repos, push/pull |
 
 ---
