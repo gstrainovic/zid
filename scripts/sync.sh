@@ -13,7 +13,9 @@ cd "$(dirname "$0")/.."
 REPO_ROOT="$(pwd)"
 
 
-OWN_SUBMODULES=("libs/gooey" "libs/wgpu_native_zig" "libs/wio" "libs/zigdown")
+# Eigene Forks: hier wird committet und gepusht. libs/clay-zig traegt den Fix an
+# Clay_UpdateScrollContainers (Branch zid, siehe AGENTS.md).
+OWN_SUBMODULES=("libs/gooey" "libs/wgpu_native_zig" "libs/wio" "libs/zigdown" "libs/clay-zig")
 
 # Referenz-Repos: Inspiration/Lesequelle, kein Build-Input.
 # Format: "<relativer Pfad>|<git-URL>"
@@ -33,9 +35,16 @@ ok()   { echo -e "  ${GREEN}OK${NC}  $1"; }
 warn() { echo -e "  ${YELLOW}!!${NC}  $1"; }
 err()  { echo -e "  ${RED}ERR${NC} $1"; }
 
+# Branch eines Submoduls: bevorzugt der Eintrag in .gitmodules (libs/clay-zig steht
+# auf "zid"), sonst main bzw. master.
 get_default_branch() {
     local sub_path="$1"
-    if git -C "$sub_path" rev-parse --verify origin/main &>/dev/null; then
+    local rel="${sub_path#"$REPO_ROOT/"}"
+    local configured
+    configured=$(git -C "$REPO_ROOT" config -f .gitmodules --get "submodule.$rel.branch" 2>/dev/null || true)
+    if [[ -n "$configured" ]]; then
+        echo "$configured"
+    elif git -C "$sub_path" rev-parse --verify origin/main &>/dev/null; then
         echo "main"
     else
         echo "master"
