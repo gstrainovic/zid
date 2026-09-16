@@ -690,6 +690,9 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_git_graph_tests.step);
     test_step.dependOn(&run_git_scm_tests.step);
 
+    const run_file_watcher_tests = b.addRunArtifact(b.addTest(.{ .root_module = file_watcher_mod }));
+    test_step.dependOn(&run_file_watcher_tests.step);
+
     const run_ai_worker_tests = b.addRunArtifact(ai_worker_tests);
     run_ai_worker_tests.has_side_effects = true;
     test_step.dependOn(&run_ai_worker_tests.step);

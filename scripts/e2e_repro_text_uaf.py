@@ -171,7 +171,7 @@ def main():
     global PROC
     ai_on = "--ai=on" in sys.argv
     extra = [a for a in sys.argv[1:] if a != "--ai=on"]
-    target = os.path.expanduser("~/projects")
+    target = os.path.realpath(os.path.expanduser("~/projects"))  # zid löst Links/Junctions auf
     log = open(LOG_PATH, "w")
     env = dict(os.environ, XDG_CONFIG_HOME=os.path.join(ROOT, "tmp", "xdg-config"), XDG_DATA_HOME=os.path.join(ROOT, "tmp", "xdg"))
     args = [os.path.join(ROOT, "zig-out", "bin", "zid"), "--headless"] + ([] if ai_on else ["--ai=off"]) + extra

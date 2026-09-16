@@ -84,7 +84,13 @@ def step_recent_switch_and_picker():
         explorer_click(name)
     key("space")
     check(ui_state()["explorer_focused"], "Fokus im Explorer")
-    key("down")  # four.txt
+    # Cursor zu four.txt: der Explorer sortiert nicht, die Reihenfolge ist die des
+    # Dateisystems (ext4 Hash-Reihenfolge, NTFS alphabetisch).
+    order = [e["name"] for e in explorer()["entries"]]
+    cur = next(e["name"] for e in explorer()["entries"] if e["cursor"])
+    step = "down" if order.index("four.txt") > order.index(cur) else "up"
+    for _ in range(abs(order.index("four.txt") - order.index(cur))):
+        key(step)
     key("enter")
     settle(10)
     check(active_name() == "four.txt", "Enter öffnet four.txt")
@@ -192,7 +198,7 @@ def step_scroll_active_into_view():
     # zweites mod.zig (unter b) per Enter
     key("escape")
     key("escape")
-    b_entries = [e for e in explorer()["entries"] if e["path"].endswith("/b/mod.zig")]
+    b_entries = [e for e in explorer()["entries"] if e["path"].endswith(os.sep + os.path.join("b", "mod.zig"))]
     if b_entries:
         rpc("explorer_open", [b_entries[0]["path"]]); settle(10)
     check(tab_names().count("mod.zig") == 2, "zwei Tabs mod.zig (a/ und b/) offen")

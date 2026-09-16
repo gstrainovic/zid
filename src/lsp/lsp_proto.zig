@@ -74,20 +74,30 @@ pub fn definitionParams(alloc: std.mem.Allocator, uri: []const u8, line: u32, ch
     return stringify(alloc, .{ .textDocument = .{ .uri = uri }, .position = .{ .line = line, .character = character } });
 }
 
+/// `C:` am Anfang eines Pfads (Windows-Laufwerk).
+fn hasDriveLetter(path: []const u8) bool {
+    return path.len >= 2 and std.ascii.isAlphabetic(path[0]) and path[1] == ':';
+}
+
 /// `/abs/pfad` → `file:///abs/pfad` (Leerzeichen und `%` prozentkodiert).
+/// Windows: `C:\a\b` → `file:///C:/a/b`.
 pub fn pathToUri(alloc: std.mem.Allocator, path: []const u8) ![]u8 {
     var out: std.ArrayListUnmanaged(u8) = .empty;
     errdefer out.deinit(alloc);
-    try out.appendSlice(alloc, "file://");
+    const windows = hasDriveLetter(path);
+    try out.appendSlice(alloc, if (windows) "file:///" else "file://");
     for (path) |c| {
         if (c == ' ' or c == '%' or c == '#' or c == '?') {
             try out.writer(alloc).print("%{X:0>2}", .{c});
+        } else if (windows and c == '\\') {
+            try out.append(alloc, '/');
         } else try out.append(alloc, c);
     }
     return out.toOwnedSlice(alloc);
 }
 
 /// `file:///abs/pfad` → `/abs/pfad`; andere Schemata → null.
+/// Windows: `file:///C:/a/b` bzw. `file:///c%3A/a/b` → `C:\a\b`.
 pub fn uriToPath(alloc: std.mem.Allocator, uri: []const u8) !?[]u8 {
     if (!std.mem.startsWith(u8, uri, "file://")) return null;
     const rest = uri["file://".len..];
@@ -103,6 +113,11 @@ pub fn uriToPath(alloc: std.mem.Allocator, uri: []const u8) !?[]u8 {
             try out.append(alloc, v);
             i += 2;
         } else try out.append(alloc, rest[i]);
+    }
+    if (out.items.len >= 3 and out.items[0] == '/' and hasDriveLetter(out.items[1..])) {
+        _ = out.orderedRemove(0);
+        out.items[0] = std.ascii.toUpper(out.items[0]);
+        std.mem.replaceScalar(u8, out.items, '/', '\\');
     }
     return try out.toOwnedSlice(alloc);
 }
@@ -223,6 +238,17 @@ test "URIs: Pfad ↔ file://, Leerzeichen kodiert" {
     defer a.free(p);
     try testing.expectEqualStrings("/tmp/my dir/a.zig", p);
     try testing.expect((try uriToPath(a, "untitled:1")) == null);
+
+    const wu = try pathToUri(a, "C:\\Users\\me\\my dir\\a.zig");
+    defer a.free(wu);
+    try testing.expectEqualStrings("file:///C:/Users/me/my%20dir/a.zig", wu);
+    const wp = (try uriToPath(a, wu)).?;
+    defer a.free(wp);
+    try testing.expectEqualStrings("C:\\Users\\me\\my dir\\a.zig", wp);
+    // VS-Code-/zls-Form: Laufwerk klein, Doppelpunkt kodiert
+    const wp2 = (try uriToPath(a, "file:///c%3A/src/b.zig")).?;
+    defer a.free(wp2);
+    try testing.expectEqualStrings("C:\\src\\b.zig", wp2);
 }
 
 test "firstLocation: null, Location, Location[] und LocationLink[]" {

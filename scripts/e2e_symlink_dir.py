@@ -16,6 +16,9 @@ HOST, PORT = "127.0.0.1", 9999
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIX = os.path.join(ROOT, "tmp", "e2e_symlink")
 LOG = os.path.join(ROOT, "tmp", "e2e_symlink_dir.log")
+CAN_REVOKE_READ = os.name != "nt"
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from e2e_open_folder import start_zid  # noqa: E402
 
 
 def rpc(method, params=None):
@@ -93,14 +96,26 @@ def make_fixture():
         f.write("inside\n")
     link = os.path.join(FIX, "dir_link")
     if os.path.lexists(link):
-        os.remove(link)
-    os.symlink("real_dir", link)
+        # Unter Windows ist ein Ordner-Symlink ein Verzeichniseintrag: rmdir, nicht remove.
+        os.rmdir(link) if os.name == "nt" else os.remove(link)
+    try:
+        os.symlink("real_dir", link, target_is_directory=True)
+    except OSError:
+        if os.name != "nt":
+            raise
+        # Windows verlangt für Symlinks Entwicklermodus oder Adminrechte. Eine Junction geht
+        # ohne und ist dort der übliche Ordner-Link (z. B. %USERPROFILE%\projects).
+        subprocess.run(["cmd", "/c", "mklink", "/J", link, os.path.join(FIX, "real_dir")],
+                       check=True, capture_output=True)
     noperm = os.path.join(FIX, "noperm.txt")
     if os.path.lexists(noperm):
+        os.chmod(noperm, stat.S_IWRITE)
         os.remove(noperm)
     with open(noperm, "w") as f:
         f.write("secret\n")
-    os.chmod(noperm, 0)
+    # chmod 0 nimmt nur unter POSIX die Leserechte; unter Windows setzt es bloss Nur-Lesen.
+    if CAN_REVOKE_READ:
+        os.chmod(noperm, 0)
 
 
 def tab_count():
@@ -110,10 +125,7 @@ def tab_count():
 def main():
     make_fixture()
     log = open(LOG, "w")
-    proc = subprocess.Popen(
-        ["zig", "build", "run", "--", "--headless", "--ai=off"],
-        cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
-    )
+    proc = start_zid(["--headless", "--ai=off"], log)
     try:
         wait_port(proc)
         settle(20)
@@ -136,9 +148,10 @@ def main():
         check("IsDir" in res, f"open_file auf Verzeichnis liefert IsDir: {res}")
         check(tab_count() == tabs_before, "open_file auf Verzeichnis legt keinen Tab an")
 
-        res = rpc("open_file", [os.path.join(FIX, "noperm.txt")])
-        settle(30)
-        check(tab_count() == tabs_before, f"Tab der unlesbaren Datei ist wieder zu (open_file: {res})")
+        if CAN_REVOKE_READ:
+            res = rpc("open_file", [os.path.join(FIX, "noperm.txt")])
+            settle(30)
+            check(tab_count() == tabs_before, f"Tab der unlesbaren Datei ist wieder zu (open_file: {res})")
     finally:
         try:
             rpc("shutdown")
@@ -146,10 +159,13 @@ def main():
             pass
         proc.wait(timeout=15)
         log.close()
-    with open(LOG) as f:
+    with open(LOG, encoding="utf-8", errors="replace") as f:
         text = f.read()
-    n_cannot = text.count("Cannot open 'noperm.txt'")
-    check(n_cannot == 1, f"'Cannot open' für noperm.txt genau einmal geloggt (war {n_cannot})")
+    if CAN_REVOKE_READ:
+        n_cannot = text.count("Cannot open 'noperm.txt'")
+        check(n_cannot == 1, f"'Cannot open' für noperm.txt genau einmal geloggt (war {n_cannot})")
+    else:
+        print("SKIP unlesbare Datei: unter Windows entzieht chmod keine Leserechte")
     check("Cannot open 'dir_link'" not in text, "kein 'Cannot open' für dir_link")
     check("result queue full" not in text, "keine volle Result-Queue")
 

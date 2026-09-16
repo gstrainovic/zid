@@ -1584,10 +1584,25 @@ pub const StoreToFileError = error{
     WriteFailed,
 };
 
+/// Unter Windows liefert readLink auf einer normalen Datei STATUS_NOT_A_REPARSE_POINT als
+/// error.Unexpected; im Debug-Build druckt std dafür einen Stack-Trace samt PDB-Laden, das
+/// Speichern dauerte so Sekunden. Deshalb vorher das Reparse-Point-Attribut prüfen.
+fn mayBeSymlink(file_path: []const u8) bool {
+    if (builtin.os.tag != .windows) return true;
+    const windows = std.os.windows;
+    var path_w: [std.fs.max_path_bytes:0]u16 = undefined;
+    const len = std.unicode.wtf8ToWtf16Le(&path_w, file_path) catch return true;
+    if (len >= path_w.len) return true;
+    path_w[len] = 0;
+    const attrs = windows.kernel32.GetFileAttributesW(path_w[0..len :0]);
+    if (attrs == windows.INVALID_FILE_ATTRIBUTES) return false;
+    return attrs & windows.FILE_ATTRIBUTE_REPARSE_POINT != 0;
+}
+
 pub fn store_to_existing_file_const(self: *const Self, file_path_: []const u8) StoreToFileError!void {
     var file_path = file_path_;
     var link_buf: [std.fs.max_path_bytes]u8 = undefined;
-    if (retain_symlinks) blk: {
+    if (retain_symlinks and mayBeSymlink(file_path)) blk: {
         const link = cwd().readLink(file_path, &link_buf) catch break :blk;
         file_path = link;
     }

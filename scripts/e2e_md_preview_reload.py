@@ -9,7 +9,7 @@ Aufruf: python3 scripts/e2e_md_preview_reload.py
 import os, subprocess, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from e2e_open_folder import ROOT, rpc, result_json, wait_port, settle, bounds, check  # noqa: E402
+from e2e_open_folder import ROOT, rpc, result_json, wait_port, settle, bounds, check, start_zid, stop_zid  # noqa: E402
 
 FIXTURE = os.path.join(ROOT, "tmp", "e2e_reload.md")
 
@@ -44,10 +44,7 @@ def main():
     with open(FIXTURE, "w") as f:
         f.write("# Titel\n\nErster Absatz.\n")
     log = open(os.path.join(ROOT, "tmp", "e2e_md_preview_reload.log"), "w")
-    proc = subprocess.Popen(
-        ["zig", "build", "run", "--", "--headless", "--ai=off"],
-        cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
-    )
+    proc = start_zid(["--headless", "--ai=off"], log)
     try:
         wait_port(proc)
         settle(20)
@@ -83,14 +80,8 @@ def main():
         check(after > before, f"Vorschau zeigt den neuen Absatz ohne Neuöffnen ({after} Blöcke, vorher {before})")
         print("PASS alle Prüfungen")
     finally:
-        try:
-            rpc("shutdown")
-        except Exception:
-            pass
-        time.sleep(0.5)
-        if proc.poll() is None:
-            proc.terminate()
-            proc.wait(timeout=10)
+        stop_zid(proc)
+        log.close()
 
 
 if __name__ == "__main__":

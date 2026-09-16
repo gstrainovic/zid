@@ -90,18 +90,33 @@ def step_dialog_keyboard_trash():
     wait_for(lambda: not os.path.exists(os.path.join(FX, "alpha.txt")), "Enter auf Delete: Datei ist weg")
     wait_for(lambda: os.path.exists(os.path.join(TRASH_FILES, "alpha.txt")), "alpha.txt liegt im Papierkorb (tmp/xdg/Trash/files)")
     info = open(os.path.join(XDG, "Trash", "info", "alpha.txt.trashinfo")).read()
-    check("Path=" in info and "e2e_fx2/alpha.txt" in info, "trashinfo enthält den Originalpfad")
+    # Pfad ist prozentkodiert; der Windows-Trenner "\" steht dort als %5C.
+    sep = "/" if os.sep == "/" else "%5C"
+    check("Path=" in info and f"e2e_fx2{sep}alpha.txt" in info, "trashinfo enthält den Originalpfad")
     wait_for(lambda: "alpha.txt" not in names(), "Explorer zeigt alpha.txt nicht mehr")
+
+
+def cursor_to(name):
+    """Cursor per ↑/↓ auf `name` bewegen. Der Explorer sortiert nicht, die Reihenfolge ist
+    die des Dateisystems (ext4 Hash-Reihenfolge, NTFS alphabetisch)."""
+    order = names()
+    cur = next(e["name"] for e in explorer()["entries"] if e["cursor"])
+    delta = order.index(name) - order.index(cur)
+    for _ in range(abs(delta)):
+        key("down" if delta > 0 else "up")
+    return abs(delta)
 
 
 def step_navigation():
     print("--- Tastaturnavigation ↑↓←→ Enter")
     explorer_click("beta.txt")
-    key("down")
-    check(entry("gamma.txt")["cursor"], "↓ setzt den Cursor auf gamma.txt")
-    key("up")
-    key("up")
-    check(entry("sub")["cursor"], "↑↑ setzt den Cursor auf den Ordner sub")
+    order = names()
+    below = order[order.index("beta.txt") + 1] if order.index("beta.txt") + 1 < len(order) else None
+    if below:
+        key("down")
+        check(entry(below)["cursor"], f"↓ setzt den Cursor auf {below}")
+    n = cursor_to("sub")
+    check(entry("sub")["cursor"], f"{n}× ↑/↓ setzt den Cursor auf den Ordner sub")
     check(entry("sub")["selected"], "Ordner ist markiert (vorher markierte ein Klick keine Ordner)")
     key("right")
     check(entry("sub")["expanded"] and "inner.txt" in names(), "→ klappt den Ordner auf")
@@ -111,7 +126,7 @@ def step_navigation():
     check(entry("sub")["cursor"], "← geht zum Elternordner")
     key("left")
     check(not entry("sub")["expanded"], "← klappt den Ordner zu")
-    key("down")
+    cursor_to("beta.txt")
     key("enter")
     wait_for(lambda: result_json("get_active_tab")["editor_file"].endswith("beta.txt"), "Enter öffnet beta.txt")
     check(ui_state()["explorer_focused"], "Fokus bleibt nach Enter im Explorer")
@@ -151,7 +166,8 @@ def step_clipboard():
     key("c")
     check(ui_state()["clipboard_text"] == os.path.join(FX, "gamma.txt"), "c kopiert den absoluten Pfad")
     key("c", shift=True)
-    check(ui_state()["clipboard_text"] == "tmp/e2e_fx2/gamma.txt", "Shift+C kopiert den Projekt-relativen Pfad")
+    rel = ui_state()["clipboard_text"]
+    check(rel == os.path.join("tmp", "e2e_fx2", "gamma.txt"), f"Shift+C kopiert den Projekt-relativen Pfad ({rel})")
     key("y")
     explorer_click("ordner")
     key("p")
@@ -228,9 +244,14 @@ def step_hidden_and_filter():
 def step_drag_drop():
     print("--- Drag & Drop verschiebt mit Bestätigung")
     explorer_click("gamma copy.txt")
+    # Beide Zeilen im selben Scrollzustand messen: explorer_row_center scrollt bei Bedarf,
+    # ein zweites Scrollen machte die erste Position ungültig (Reihenfolge je Dateisystem).
     explorer_row_center("sub")  # scrollt bei Bedarf; danach beide Zeilen neu messen
-    x0, y0 = explorer_row_center("gamma copy.txt")
-    x1, y1 = explorer_row_center("sub")
+    for _ in range(5):
+        x0, y0 = explorer_row_center("gamma copy.txt")
+        x1, y1 = explorer_row_center("sub")
+        if explorer_row_center("gamma copy.txt") == (x0, y0):
+            break
     check(explorer_row_center("gamma copy.txt") == (x0, y0), "Quelle und Ziel gleichzeitig sichtbar")
     rpc("mouse_down", [x0, y0]); settle()
     for i in range(1, 6):

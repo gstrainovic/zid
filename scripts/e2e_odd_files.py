@@ -12,7 +12,7 @@ gpu_renderer.renderText ist nur per Unit-Test (glyph_layout.zig) abgedeckt.
 import os, random, subprocess, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from e2e_open_folder import ROOT, rpc, result_json, wait_port, settle, check, shot  # noqa: E402
+from e2e_open_folder import ROOT, rpc, result_json, wait_port, settle, check, shot, start_zid  # noqa: E402
 
 TMP = os.path.join(ROOT, "tmp")
 
@@ -94,10 +94,7 @@ def check_binary_tab():
 def main():
     names = make_fixtures()
     log = open(os.path.join(TMP, "e2e_odd_files.log"), "w")
-    proc = subprocess.Popen(
-        ["zig", "build", "run", "--", "--headless", "--ai=off"],
-        cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
-    )
+    proc = start_zid(["--headless", "--ai=off"], log)
     try:
         wait_port(proc)
         settle(20)

@@ -9,6 +9,35 @@ import json, os, socket, subprocess, sys, time
 
 HOST, PORT = "127.0.0.1", 9999
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ZID = os.path.join(ROOT, "zig-out", "bin", "zid.exe" if os.name == "nt" else "zid")
+
+
+def start_zid(args, log, env=None):
+    """Baut mit `zig build` und startet dann das Binary direkt (Linux wie Windows).
+
+    Nicht `zig build run`: dort ist zid ein Kind von zig, proc.kill() träfe nur zig
+    und das verwaiste zid bliebe auf Port 9999. Prozessgruppen (killpg) gibt es
+    unter Windows nicht; mit dem Binary als direktem Kind reicht proc.kill()."""
+    log.flush()
+    build = subprocess.run(["zig", "build"], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, env=env)
+    if build.returncode != 0:
+        raise RuntimeError(f"zig build fehlgeschlagen (Code {build.returncode}), siehe {log.name}")
+    log.flush()
+    return subprocess.Popen([ZID] + list(args), cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, env=env)
+
+
+def stop_zid(proc, timeout=10):
+    """Per RPC beenden, notfalls hart. Gibt den Exit-Code zurück (None nach kill)."""
+    try:
+        rpc("shutdown")
+    except Exception:
+        pass
+    try:
+        return proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+        return None
 
 
 def rpc(method, params=None):
@@ -80,13 +109,12 @@ def check(cond, msg):
 
 
 def main():
-    target = os.path.expanduser(sys.argv[1] if len(sys.argv) > 1 else "~/projects")
+    # realpath: zid löst Symlinks/Junctions auf (hier: C:\Users\x.WA\projects -> C:\Users\x\projects),
+    # unter Windows mischt expanduser ausserdem "\" und "/".
+    target = os.path.realpath(os.path.expanduser(sys.argv[1] if len(sys.argv) > 1 else "~/projects"))
     target_input = sys.argv[1] if len(sys.argv) > 1 else "~/projects"
     log = open(os.path.join(ROOT, "tmp", "e2e_open_folder.log"), "w")
-    proc = subprocess.Popen(
-        ["zig", "build", "run", "--", "--headless", "--ai=off"],
-        cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
-    )
+    proc = start_zid(["--headless", "--ai=off"], log)
     try:
         wait_port(proc)
         settle(20)
@@ -145,14 +173,7 @@ def main():
         rpc("key_press", ["escape", False]); settle()
         print("ALL PASSED")
     finally:
-        try:
-            rpc("shutdown")
-        except Exception:
-            pass
-        try:
-            proc.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            proc.kill()
+        stop_zid(proc)
         log.close()
 
 
