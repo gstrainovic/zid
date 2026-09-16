@@ -2378,6 +2378,9 @@ pub const UI = struct {
         var n: usize = 0;
         collectLeaves(self.root_pane, &buf, &n);
         for (buf[0..n]) |p| p.data.leaf.code_editor.setFontSize(size);
+        const preview = self.previewFontSize();
+        var it = self.open_markdown_views.valueIterator();
+        while (it.next()) |v| v.*.font_size = preview;
         self.showToast("Font size {d}", .{self.getActiveEditor().font_size});
         self.saveUserState();
     }
@@ -2752,6 +2755,12 @@ pub const UI = struct {
         old.deinit();
         self.allocator.destroy(old);
         entry.value_ptr.* = new_v;
+    }
+
+    /// Die Vorschau rendert vier Punkt kleiner als der Editor (Standard 24 → 20).
+    /// Zoom-Befehle wirken auf beides, sonst blieb die Vorschau auf ihrer Startgröße.
+    pub fn previewFontSize(self: *Self) u16 {
+        return @max(10, @min(48, self.getActiveEditor().font_size -| 4));
     }
 
     /// Die Markdown-Vorschau des aktiven Tabs, sonst null.
@@ -3417,6 +3426,7 @@ pub const UI = struct {
                                     defer self.allocator.free(content);
                                     const new_v = self.allocator.create(markdown_view_mod.MarkdownView) catch unreachable;
                                     new_v.* = markdown_view_mod.MarkdownView.init(self.allocator, content, source_path);
+                                    new_v.font_size = self.previewFontSize();
                                     self.open_markdown_views.put(self.allocator.dupe(u8, tab.path) catch tab.path, new_v) catch {};
                                     md_view = new_v;
                                 }

@@ -128,11 +128,28 @@ liegen in `src/ui/mod.zig`, das Virtualisierungsmuster in
 `MarkdownView.renderDocumentVirtualized`. E2E: `python3 scripts/e2e_md_preview.py`.
 
 - **Tabellen in der Vorschau:** zigdown liefert eine Tabelle als Container mit flacher
-  Zellliste (je `ncol` Paragraphen eine Zeile, erste Zeile = Kopf, `relative_width` aus der
-  Länge der Trennzeile). `MarkdownView.renderTable` baut daraus das Raster (Spalten per
-  `percent`, Kopf auf `surface`); ohne das lagen alle Zellen untereinander. Fixture:
-  `libs/zigdown/test/table.md`. Spaltenausrichtung (`alignment`) wird nicht umgesetzt, die
-  Inline-Läufe wachsen auf Zellbreite.
+  Zellliste (je `ncol` Paragraphen eine Zeile, erste Zeile = Kopf). `MarkdownView.renderTable`
+  baut daraus das Raster; ohne das lagen alle Zellen untereinander. Die Spaltenbreiten kommen
+  wie im Browser aus dem Inhalt: `measureCell` liefert je Zelle die Wunschbreite (eine Zeile)
+  und die Mindestbreite (breitestes unteilbares Stück), die Tabelle verteilt proportional und
+  staucht notfalls die jeweils breiteste Spalte. `relative_width` aus der Trennzeile bleibt
+  ungenutzt, die Zahl der Striche sagt nichts über den Inhalt. Die Tabelle steht in einer
+  `grow`-Hülle (`md_table_row`) und ist selbst `fit` — gemessen wird die Hülle, sonst
+  schrumpfte die Tabelle Frame für Frame an ihrer eigenen Breite.
+  **Kein `clip` je Zelle:** Clay hält nur zehn Clip-Container, eine Tabelle sprengt das sofort
+  („out of bounds array access"). Zu lange Wörter zerlegt stattdessen `splitWide`, weil die
+  Vorschau keinen waagerechten Scrollbalken hat. Fixture: `libs/zigdown/test/table.md`,
+  geprüft in `scripts/e2e_md_preview.py`. Spaltenausrichtung (`alignment`) wird nicht umgesetzt.
+
+- **Umbruch nur an Leerzeichen:** `word_wrap.wrapLines` trennt zwischen Wörtern, nie zwischen
+  zwei Stücken ohne Leerzeichen dazwischen — zigdown liefert `code`, Satzzeichen und Wortteile
+  einzeln, „Nr." kommt als „Nr" und „.". `measureCell` rechnet genauso und schlägt je
+  Textelement 0.25 px auf, den Zuschlag aus `measureText` in `mod.zig`.
+
+- **Schriftgröße der Vorschau:** `UI.previewFontSize` (Editor minus 4, Standard 24 → 20).
+  `setFontSizeAll` setzt sie bei jedem Zoom auf alle offenen `open_markdown_views`, und beide
+  Stellen, die eine Vorschau anlegen (`src/main.zig` und der Render-Zweig in `mod.zig`),
+  übernehmen sie — sonst blieb die Vorschau auf ihrer Startgröße stehen.
 
 ## Tastenkürzel und Menüs: eine Quelle
 
