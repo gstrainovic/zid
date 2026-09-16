@@ -502,6 +502,7 @@ pub fn createDispatcher(alloc: std.mem.Allocator, ctx: *E2EContext) !*zigjr.RpcD
     try rpc_dispatcher.addWithCtx("editor_lines", ctx, editorLines);
     try rpc_dispatcher.addWithCtx("editor_state", ctx, editorState);
     try rpc_dispatcher.addWithCtx("md_selection", ctx, mdSelection);
+    try rpc_dispatcher.addWithCtx("chat_line_bounds", ctx, chatLineBounds);
     try rpc_dispatcher.addWithCtx("save_file", ctx, saveFile);
     try rpc_dispatcher.addWithCtx("get_state", ctx, getState);
     try rpc_dispatcher.addWithCtx("benchmark_open_file", ctx, benchmarkOpenFile);
@@ -979,16 +980,31 @@ fn editorState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
 /// Textauswahl der aktiven Markdown-Vorschau: `text` (null ohne Auswahl) und die Zahl der im
 /// letzten Frame gezeichneten Zeilen (`md_line`-IDs 0..lines-1).
 fn mdSelection(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
-    const v = ctx.ui_system.activeMarkdownView() orelse return "{\"open\": false}";
     var buf = std.Io.Writer.Allocating.init(dc.arena());
-    try buf.writer.print("{{\"open\": true, \"lines\": {d}, \"text\": ", .{v.frame_lines.items.len});
-    if (v.selectedText(dc.arena())) |t| {
+    const text: ?[]u8 = if (ctx.ui_system.activeMarkdownView()) |v| blk: {
+        try buf.writer.print("{{\"open\": true, \"lines\": {d}, \"text\": ", .{v.frame_lines.items.len});
+        break :blk v.selectedText(dc.arena());
+    } else if (ctx.ui_system.isChatTabActive()) blk: {
+        try buf.writer.writeAll("{\"open\": true, \"lines\": null, \"text\": ");
+        break :blk ctx.ui_system.ai_chat.selectedText(dc.arena());
+    } else return "{\"open\": false}";
+    if (text) |t| {
         try std.json.Stringify.value(t, .{}, &buf.writer);
     } else {
         try buf.writer.writeAll("null");
     }
     try buf.writer.writeAll("}");
     return buf.written();
+}
+
+/// Clay-Box einer Textzeile (`md_line`) in der Bubble der Chat-Nachricht `msg`.
+fn chatLineBounds(ctx: *E2EContext, dc: *zigjr.DispatchCtx, msg: i64, line: i64) ![]const u8 {
+    const chat = &ctx.ui_system.ai_chat;
+    chat.mutex.lock();
+    defer chat.mutex.unlock();
+    if (msg < 0 or @as(usize, @intCast(msg)) >= chat.messages.items.len) return boundsJson(dc, .{ .found = false, .bounding_box = .{ .x = 0, .y = 0, .width = 0, .height = 0 } });
+    const v = &chat.messages.items[@intCast(msg)].md;
+    return boundsJson(dc, clay.getElementData(v.idi("md_line", @intCast(line))));
 }
 
 /// Inhalt des offenen Buffers zu `path` (wie ihn der Editor zeigt), oder open=false.

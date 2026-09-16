@@ -175,9 +175,18 @@ liegen in `src/ui/mod.zig`, das Virtualisierungsmuster in
   (zigdown macht aus Leerzeilen `Break`-Blöcke, die bleiben stumm), Absatzenden verlieren ihr
   Leerzeichen-Stück; ein nie gezeichneter Block dazwischen kommt als Fließtext aus dem Baum.
   Ändern sich Umbruchbreite oder Schriftgröße, wird die Auswahl aufgehoben (Zeilennummern
-  stimmen dann nicht mehr). Deck-Ansicht (Marp) und Chat-Bubbles haben keine Auswahl. Tasten in
-  der Vorschau erreichen sonst weiter den unsichtbaren Editor dahinter. RPC `md_selection`
-  (`open`, `lines`, `text`), E2E in `scripts/e2e_md_preview.py` (`step_selection`).
+  stimmen dann nicht mehr). Tasten in der Vorschau erreichen sonst weiter den unsichtbaren
+  Editor dahinter. RPC `md_selection` (`open`, `lines`, `text`), E2E in
+  `scripts/e2e_md_preview.py` (`step_selection`).
+  **Deck (Marp):** dieselbe Auswahl auf der Folie (`beginSelection("md_slide", …)`, Block 0);
+  ein Folienwechsel hebt sie auf. E2E in `e2e_marp_pdf.py`.
+  **Chat-Bubbles:** jede Nachricht hat ihre eigene `MarkdownView`, `AIChatState.handleMouseDown`
+  trifft die Bubble (`ai_msg_<idx>`) und startet dort die Auswahl (`sel_msg`, unter `mutex`, weil
+  der Worker Nachrichten anhängt); Ctrl+C kopiert markierten Bubble-Text vor dem Eingabefeld,
+  Escape hebt auf. Ein Klick ohne Ziehen kopiert wie bisher die ganze Nachricht — jetzt beim
+  Loslassen (`pending_copy_msg`, im Render, dort ist das Fenster), nicht mehr beim Drücken.
+  Die wachsende Stream-Bubble ist nicht auswählbar (wird je Token neu gebaut). RPC
+  `chat_line_bounds(msg, line)`; E2E `select_in_bubble` in `e2e_ai_chat.py`.
 
 - **Schriftgröße der Vorschau:** `UI.previewFontSize` (Editor minus 4, Standard 24 → 20).
   `setFontSizeAll` setzt sie bei jedem Zoom auf alle offenen `open_markdown_views`, und beide

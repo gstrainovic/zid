@@ -75,6 +75,11 @@ pub const AIChatState = struct {
     download_progress: f32 = 0,
     model_exists: bool = false,
     last_copy_time: i64 = 0,
+    /// Textauswahl in einer Nachrichten-Bubble: Index der Nachricht, deren MarkdownView den
+    /// Anker hält (unter `mutex`, weil der Worker Nachrichten anhängt).
+    sel_msg: ?usize = null,
+    /// Klick ohne Ziehen auf eine Bubble: ganze Nachricht kopieren (im Render, dort ist das Fenster).
+    pending_copy_msg: ?usize = null,
 
     mutex: std.Thread.Mutex = .{},
     stop_flag: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
@@ -592,6 +597,10 @@ pub const AIChatState = struct {
     pub fn handleKeyPress(self: *Self, key: wio.Button) bool {
         switch (key) {
             .escape => {
+                if (self.hasSelection()) {
+                    self.clearSelections();
+                    return true;
+                }
                 if (self.is_loading) {
                     self.cancelRequest();
                     return true;
@@ -641,6 +650,17 @@ pub const AIChatState = struct {
     }
 
     pub fn handleMouseDown(self: *Self, x: f32, y: f32, button: wio.Button) void {
+        if (button == .mouse_left) {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            self.sel_msg = null;
+            for (self.messages.items, 0..) |*msg, idx| {
+                msg.md.clearSelection();
+                if (self.sel_msg == null and bubbleHit(idx, x, y)) {
+                    if (msg.md.beginSelection(null, x, y)) self.sel_msg = idx;
+                }
+            }
+        }
         self.input_editor.handleMouseDown(x, y, button);
     }
 
@@ -650,12 +670,61 @@ pub const AIChatState = struct {
             const new_height = self.input_height + (self.input_splitter_y + self.input_splitter_h - y);
             self.input_height = @max(40, @min(400, new_height));
         }
+        if (self.sel_msg) |idx| {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            if (idx < self.messages.items.len) self.messages.items[idx].md.handleMouseMove(x, y);
+        }
         self.input_editor.handleMouseMove(x, y);
     }
 
     pub fn handleMouseUp(self: *Self) void {
         self.input_splitter_dragging = false;
+        if (self.sel_msg) |idx| {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            if (idx < self.messages.items.len) {
+                const v = &self.messages.items[idx].md;
+                v.handleMouseUp();
+                // Klick ohne Ziehen: wie bisher die ganze Nachricht kopieren
+                if (!v.hasSelection()) self.pending_copy_msg = idx;
+            }
+        }
         self.input_editor.handleMouseUp();
+    }
+
+    /// Liegt (x, y) in der Bubble der Nachricht `idx` (Clay-Box aus dem Vorframe)?
+    fn bubbleHit(idx: usize, x: f32, y: f32) bool {
+        var buf: [32]u8 = undefined;
+        const id = std.fmt.bufPrint(&buf, "ai_msg_{d}", .{idx}) catch return false;
+        const data = clay.getElementData(clay.ElementId.ID(id));
+        if (!data.found) return false;
+        const b = data.bounding_box;
+        return x >= b.x and x <= b.x + b.width and y >= b.y and y <= b.y + b.height;
+    }
+
+    /// Markierter Text einer Bubble (Ctrl+C), gehört dem Aufrufer; null ohne Auswahl.
+    pub fn selectedText(self: *Self, alloc: std.mem.Allocator) ?[]u8 {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        for (self.messages.items) |*msg| {
+            if (msg.md.hasSelection()) return msg.md.selectedText(alloc);
+        }
+        return null;
+    }
+
+    pub fn hasSelection(self: *Self) bool {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        for (self.messages.items) |*msg| if (msg.md.hasSelection()) return true;
+        return false;
+    }
+
+    pub fn clearSelections(self: *Self) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        for (self.messages.items) |*msg| msg.md.clearSelection();
+        self.sel_msg = null;
     }
 
     /// Messages-Scrollbar: Mouse-Down
@@ -833,7 +902,8 @@ pub fn renderAIChat(
                         const msg_id = clay.ElementId.ID(std.fmt.allocPrint(arena, "ai_msg_{d}", .{idx}) catch "ai_msg_x");
                         const hovered = clay.pointerOver(msg_id);
 
-                        if (hovered and mouse_pressed) {
+                        if (state.pending_copy_msg == idx) {
+                            state.pending_copy_msg = null;
                             if (window) |win| {
                                 win.setClipboardText(msg.content);
                                 state.last_copy_time = std.time.milliTimestamp();

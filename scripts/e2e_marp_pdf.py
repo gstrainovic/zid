@@ -198,6 +198,18 @@ def step_slide_preview():
     check(bounds("md_slide_counter")["found"], "Zaehler ist im Layout")
     shot("e2e_marp_slide.ppm")
 
+    # Textauswahl auf der Folie: Ziehen markiert, Folienwechsel hebt auf
+    sel = result_json("md_selection")
+    check(sel["open"] and sel["lines"] > 0, f"Folie hat auswaehlbare Zeilen ({sel})")
+    l0 = bounds("md_line", 0)
+    rpc("mouse_down", [l0["x"] + 1, l0["y"] + l0["h"] / 2]); settle(4)
+    rpc("mouse_up", [l0["x"] + l0["w"] + 20, l0["y"] + l0["h"] / 2]); settle(6)
+    got = result_json("md_selection")["text"]
+    check(got and got.strip(), f"Auswahl auf der Folie: {got!r}")
+    click_center("md_slide_next"); settle(10)
+    check(result_json("md_selection")["text"] is None, "Folienwechsel hebt die Auswahl auf")
+    click_center("md_slide_prev"); settle(10)
+
 
 def step_wide_pane():
     """Ohne Explorer ist die Flaeche breit, die Hoehe begrenzt den Rahmen. Genau

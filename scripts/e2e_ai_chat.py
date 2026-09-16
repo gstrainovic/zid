@@ -128,6 +128,22 @@ def input_newline_and_send():
     check(len(chat()["messages"]) > before and chat()["messages"][before]["content"] == "zeile eins\nzeile zwei", "mehrzeilige Nachricht wurde gesendet")
 
 
+def select_in_bubble():
+    """Text in einer Nachrichten-Bubble markieren: Ziehen ueber die erste Zeile der
+    Assistant-Antwort liefert genau deren Anfang, Escape hebt auf."""
+    print("--- Textauswahl in einer Chat-Bubble")
+    msgs = chat()["messages"]
+    idx = next(i for i, m in enumerate(msgs) if m["role"] == "assistant")
+    l0 = result_json("chat_line_bounds", [idx, 0])
+    check(l0["found"] and l0["h"] > 0, f"Zeile 0 der Antwort im Layout ({l0})")
+    rpc("mouse_down", [l0["x"] + 1, l0["y"] + l0["h"] / 2]); settle(4)
+    rpc("mouse_up", [l0["x"] + l0["w"] + 20, l0["y"] + l0["h"] / 2]); settle(6)
+    got = result_json("md_selection")["text"]
+    check(got and msgs[idx]["content"].startswith(got), f"Auswahl ist der Anfang der Antwort: {got!r}")
+    key("escape")
+    check(result_json("md_selection")["text"] is None, "Escape hebt die Auswahl auf")
+
+
 def run_ai_off():
     print("--- B. --ai=off: Senden erklärt sofort, kein endloses Laden")
     proc, log = start(["--ai=off"], "e2e_ai_chat_off.log")
@@ -143,6 +159,7 @@ def run_ai_off():
         check(last["role"] == "assistant" and "not connected" in last["content"].lower(), f"Erklärung im Chat: {last['content'][:70]!r}")
         input_newline_and_send()
         shot("e2e_ai_chat_off.ppm")
+        select_in_bubble()
     finally:
         stop(proc, log)
 
