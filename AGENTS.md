@@ -734,7 +734,9 @@ Eintrag an, und nur `UI.updateScroll` räumt die (10 Einträge große) Liste auf
   inotify. `src/async/file_watcher.zig` ist ein alter, nicht eingebundener Stub.
 - Suiten mit Fixtures, die nur auf dem Fedora-Laptop liegen: siehe `todo.md`.
 - Pfade in Git-Status (`/`) und LSP-URIs (`file:///C:/…`) werden auf Windows-Trenner umgesetzt
-  (`updateGitStatus`, `lsp_proto.pathToUri`/`uriToPath`).
+  (`updateGitStatus`, `lsp_proto.pathToUri`/`uriToPath`). Dasselbe gilt für die Repo-Wurzel aus
+  `git rev-parse --show-toplevel`: `git_worker.repoRoot` setzt sie um, bevor sie in Timeline- und
+  Graph-Antworten geht — sonst stimmt kein Vergleich gegen einen Editor-Pfad.
 
 ## Use-after-free in Render-Commands (Segfault in `hashText`/`renderText`)
 
