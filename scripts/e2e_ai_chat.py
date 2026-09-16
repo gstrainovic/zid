@@ -12,7 +12,7 @@ Aufruf: python3 scripts/e2e_ai_chat.py [--only-off]
 import os, subprocess, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from e2e_open_folder import ROOT, rpc, result_json, wait_port, settle, check, shot  # noqa: E402
+from e2e_open_folder import ROOT, rpc, result_json, wait_port, settle, check, shot, start_zid  # noqa: E402
 from e2e_shortcuts import key, ui_state  # noqa: E402
 
 
@@ -32,10 +32,7 @@ def wait_for(pred, timeout_s, what):
 
 def start(extra_args, log_name):
     log = open(os.path.join(ROOT, "tmp", log_name), "w")
-    proc = subprocess.Popen(
-        [os.path.join(ROOT, "zig-out", "bin", "zid"), "--headless"] + extra_args,
-        cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
-    )
+    proc = start_zid(["--headless"] + extra_args, log)
     wait_port(proc)
     settle(20)
     return proc, log

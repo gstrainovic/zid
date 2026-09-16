@@ -5,11 +5,24 @@ Startet zid mit --headless --ai=off (kein Fenster), fährt den Dialog
 über RPC und prüft, dass der Explorer danach den neuen Ordner zeigt.
 Aufruf: python3 scripts/e2e_open_folder.py [zielordner]  (Default: ~/projects)
 """
-import json, os, socket, subprocess, sys, time
+import json, os, shutil, socket, subprocess, sys, time
 
 HOST, PORT = "127.0.0.1", 9999
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ZID = os.path.join(ROOT, "zig-out", "bin", "zid.exe" if os.name == "nt" else "zid")
+
+
+def isolated_env(name):
+    """Umgebung mit frischem XDG_CONFIG_HOME und XDG_DATA_HOME unter tmp/e2e_env/<name>.
+
+    Ohne das liest zid die State-Datei des Benutzers (Zeilenumbruch, Schriftgröße,
+    Sidebar-Breite) und die Suite misst Fremdzustand; außerdem überschreibt sie sie."""
+    base = os.path.join(ROOT, "tmp", "e2e_env", name)
+    shutil.rmtree(base, ignore_errors=True)
+    config, data = os.path.join(base, "config"), os.path.join(base, "data")
+    os.makedirs(config)
+    os.makedirs(data)
+    return dict(os.environ, XDG_CONFIG_HOME=config, XDG_DATA_HOME=data)
 
 
 def start_zid(args, log, env=None):
@@ -17,7 +30,12 @@ def start_zid(args, log, env=None):
 
     Nicht `zig build run`: dort ist zid ein Kind von zig, proc.kill() träfe nur zig
     und das verwaiste zid bliebe auf Port 9999. Prozessgruppen (killpg) gibt es
-    unter Windows nicht; mit dem Binary als direktem Kind reicht proc.kill()."""
+    unter Windows nicht; mit dem Binary als direktem Kind reicht proc.kill().
+
+    Ohne `env` bekommt zid eine eigene, frische Konfiguration (`isolated_env`,
+    benannt nach der Log-Datei)."""
+    if env is None:
+        env = isolated_env(os.path.splitext(os.path.basename(log.name))[0])
     log.flush()
     build = subprocess.run(["zig", "build"], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, env=env)
     if build.returncode != 0:
