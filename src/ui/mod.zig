@@ -3243,9 +3243,12 @@ pub const UI = struct {
         if (self.tab_menu) |menu| self.renderTabMenu(menu, t);
         if (self.active_dialog) |*ad| {
             const res = ad.dialog.render(t, self.mouse_pressed_this_frame, ad.focused) orelse ad.key_result;
-            ad.key_result = null;
             // Nicht hier verarbeiten: siehe pending_dialog_result / applyPendingDialogResult
             if (self.pending_dialog_result == null) self.pending_dialog_result = res;
+            // Erst nach dem Übernehmen leeren: `res` kann auf ad.key_result verweisen (Zig-
+            // Aliasing bei `orelse` auf ein Feld). Vorher geleert, kam unter Windows null an
+            // und Escape/Enter/Buchstaben schlossen keinen Dialog.
+            ad.key_result = null;
         }
 
         const commands = self.endLayout();

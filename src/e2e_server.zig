@@ -821,11 +821,12 @@ fn getActiveTabDebug(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     for (tab_bar.tabs.items, 0..) |tab, i| {
         if (i > 0) try buf.writer.writeAll(", ");
         try buf.writer.print(
-            \\{{"index": {d}, "kind": "{s}", "name": "{s}", "is_active": {}, "modified": {}, "pinned": {}}}
-        , .{ i, @tagName(tab.kind), tab.display_name, tab.is_active, tab.modified, tab.pinned });
+            \\{{"index": {d}, "kind": "{s}", "name": {f}, "is_active": {}, "modified": {}, "pinned": {}}}
+        , .{ i, @tagName(tab.kind), std.json.fmt(tab.display_name, .{}), tab.is_active, tab.modified, tab.pinned });
     }
     const ed = ctx.ui_system.getActiveEditor();
-    try buf.writer.print("], \"editor_modified\": {}, \"editor_file\": \"{s}\"}}", .{ ed.is_modified, ed.buffer.get_file_path() });
+    // Pfade immer über std.json.fmt: Windows-Backslashes wären sonst ungültiges JSON.
+    try buf.writer.print("], \"editor_modified\": {}, \"editor_file\": {f}}}", .{ ed.is_modified, std.json.fmt(ed.buffer.get_file_path(), .{}) });
     return buf.written();
 }
 
@@ -834,14 +835,14 @@ fn explorerEntries(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     const fx = &ctx.ui_system.file_explorer;
     var buf = std.Io.Writer.Allocating.init(dc.arena());
     try buf.writer.print(
-        \\{{"viewport": {{"x": {d:.1}, "y": {d:.1}, "w": {d:.1}, "h": {d:.1}}}, "row_height": {d:.1}, "scroll": {d:.1}, "renaming": {}, "creating": {}, "show_hidden": {}, "filter_active": {}, "filter": "{s}", "width": {d:.1}, "menu_open": {}, "menu_x": {d:.1}, "menu_y": {d:.1}, "entries": [
+        \\{{"viewport": {{"x": {d:.1}, "y": {d:.1}, "w": {d:.1}, "h": {d:.1}}}, "row_height": {d:.1}, "scroll": {d:.1}, "renaming": {}, "creating": {}, "show_hidden": {}, "filter_active": {}, "filter": {f}, "width": {d:.1}, "menu_open": {}, "menu_x": {d:.1}, "menu_y": {d:.1}, "entries": [
     , .{
         fx.viewport_x,                                 fx.viewport_y,
         fx.viewport_width,                             fx.viewport_height,
         @import("ui/file_explorer.zig").ROW_HEIGHT,    fx.scroll_offset_y,
         fx.isRenaming(),                               fx.isCreating(),
         fx.show_hidden,                                fx.filter_active,
-        fx.filter.text(),                              fx.width,
+        std.json.fmt(fx.filter.text(), .{}),           fx.width,
         fx.context_menu != null,                       if (fx.context_menu) |m| m.x else @as(f32, 0),
         if (fx.context_menu) |m| m.y else @as(f32, 0),
     });
@@ -849,8 +850,8 @@ fn explorerEntries(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
         const node = fx.nodes.items[e.node_index];
         if (i > 0) try buf.writer.writeAll(", ");
         try buf.writer.print(
-            \\{{"index": {d}, "name": "{s}", "path": "{s}", "is_folder": {}, "expanded": {}, "depth": {d}, "selected": {}, "cursor": {}, "ignored": {}}}
-        , .{ i, node.name, node.path, node.is_folder, e.is_expanded, e.depth, fx.isNodeSelected(e.node_index), fx.selected_index == i, fx.isIgnored(node.path) });
+            \\{{"index": {d}, "name": {f}, "path": {f}, "is_folder": {}, "expanded": {}, "depth": {d}, "selected": {}, "cursor": {}, "ignored": {}}}
+        , .{ i, std.json.fmt(node.name, .{}), std.json.fmt(node.path, .{}), node.is_folder, e.is_expanded, e.depth, fx.isNodeSelected(e.node_index), fx.selected_index == i, fx.isIgnored(node.path) });
     }
     try buf.writer.writeAll("]}");
     return buf.written();
@@ -1062,7 +1063,7 @@ fn uiState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     var buf = std.Io.Writer.Allocating.init(dc.arena());
     try buf.writer.writeAll("{\"dialog\": ");
     if (ui.active_dialog) |ad| {
-        try buf.writer.print("\"{s}\"", .{ad.dialog.title});
+        try std.json.Stringify.value(ad.dialog.title, .{}, &buf.writer);
     } else {
         try buf.writer.writeAll("null");
     }
@@ -1081,8 +1082,8 @@ fn uiState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
         try buf.writer.writeAll("null");
     }
     try buf.writer.print(", \"pane_count\": {d}, \"agent_confirm_pending\": {}", .{ countLeaves(ui.root_pane), ui.agent_confirm != null });
-    try buf.writer.print(", \"clipboard_text\": \"{s}\", \"explorer_selection_count\": {d}, \"dialog_focused\": {d}", .{
-        ui.last_clipboard_text orelse "", ui.file_explorer.selectionCount(), if (ui.active_dialog) |ad| ad.focused else 0,
+    try buf.writer.print(", \"clipboard_text\": {f}, \"explorer_selection_count\": {d}, \"dialog_focused\": {d}", .{
+        std.json.fmt(ui.last_clipboard_text orelse "", .{}), ui.file_explorer.selectionCount(), if (ui.active_dialog) |ad| ad.focused else 0,
     });
     try buf.writer.print(", \"last_frame_ms\": {d:.2}, \"max_frame_ms\": {d:.2}, \"lsp\": \"{s}\", \"tab_switcher\": {d}", .{ ui.last_frame_ms, ui.takeMaxFrameMs(), ui.lspStatus(), if (ui.tab_switcher) |p| @as(i64, @intCast(p)) else @as(i64, -1) });
     // Glyph-Cache-Diagnose: gerasterte Glyphen und komplette Leerungen seit Start.
@@ -1103,10 +1104,9 @@ fn uiState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     try buf.writer.writeAll(", \"tabs\": [");
     for (tb.tabs.items, 0..) |tab, i| {
         if (i > 0) try buf.writer.writeAll(", ");
-        // Pfad escapen: Diff-Tabs trennen ihre Felder mit 0x1f, das ist in JSON ungültig
-        try buf.writer.writeAll("{\"path\": ");
-        try std.json.Stringify.value(tab.path, .{}, &buf.writer);
-        try buf.writer.print(", \"kind\": \"{s}\", \"modified\": {}}}", .{ @tagName(tab.kind), tab.modified });
+        // Pfad escapen: Diff-Tabs trennen ihre Felder mit 0x1f, Windows-Pfade enthalten
+        // Backslashes — beides ist in JSON ungültig.
+        try buf.writer.print("{{\"path\": {f}, \"kind\": \"{s}\", \"modified\": {}}}", .{ std.json.fmt(tab.path, .{}), @tagName(tab.kind), tab.modified });
     }
     try buf.writer.writeAll("]}");
     return buf.written();
@@ -1142,17 +1142,17 @@ fn folderPickerState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     const fp = &ctx.ui_system.folder_picker;
     var buf = std.Io.Writer.Allocating.init(dc.arena());
     try buf.writer.print(
-        \\{{"open": {}, "path": "{s}", "error": 
-    , .{ fp.visible, fp.model.edit.text() });
+        \\{{"open": {}, "path": {f}, "error":
+    , .{ fp.visible, std.json.fmt(fp.model.edit.text(), .{}) });
     if (fp.model.error_msg) |m| {
-        try buf.writer.print("\"{s}\"", .{m});
+        try std.json.Stringify.value(m, .{}, &buf.writer);
     } else {
         try buf.writer.writeAll("null");
     }
     try buf.writer.writeAll(", \"entries\": [");
     for (fp.model.entries, 0..) |name, i| {
         if (i > 0) try buf.writer.writeAll(", ");
-        try buf.writer.print("\"{s}\"", .{name});
+        try std.json.Stringify.value(name, .{}, &buf.writer);
     }
     try buf.writer.writeAll("]}");
     return buf.written();
@@ -1176,8 +1176,8 @@ pub fn getState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     var buf = std.Io.Writer.Allocating.init(dc.arena());
     const root = if (explorer.nodes.items.len > 0) explorer.nodes.items[0].path else "";
     try buf.writer.print(
-        \\{{"root": "{s}", "visible_entries": {d}, "nodes": {d}, "selected": 
-    , .{ root, explorer.visible_entries.items.len, explorer.nodes.items.len });
+        \\{{"root": {f}, "visible_entries": {d}, "nodes": {d}, "selected":
+    , .{ std.json.fmt(root, .{}), explorer.visible_entries.items.len, explorer.nodes.items.len });
     if (explorer.selected_index) |idx| {
         try buf.writer.print("{d}", .{idx});
     } else {
@@ -1397,8 +1397,8 @@ fn benchmarkOpenFile(ctx: *E2EContext, dc: *zigjr.DispatchCtx, path: []const u8,
     const total_ms_str = formatMsX100(bench_alloc, total_ms) catch "error";
 
     const json = try std.fmt.allocPrint(dc.arena(),
-        \\{{"path": "{s}", "iterations": {d}, "min_ms": {s}, "max_ms": {s}, "avg_ms": {s}, "total_ms": {s}}}
-    , .{ path, iterations, min_ms_str, max_ms_str, avg_ms_str, total_ms_str });
+        \\{{"path": {f}, "iterations": {d}, "min_ms": {s}, "max_ms": {s}, "avg_ms": {s}, "total_ms": {s}}}
+    , .{ std.json.fmt(path, .{}), iterations, min_ms_str, max_ms_str, avg_ms_str, total_ms_str });
 
     return json;
 }
@@ -1475,8 +1475,8 @@ fn benchmarkLoadFile(ctx: *E2EContext, dc: *zigjr.DispatchCtx, path: []const u8,
     const file_size = if (file_stat) |s| s.size else 0;
 
     const json = try std.fmt.allocPrint(dc.arena(),
-        \\{{"path": "{s}", "file_size_bytes": {d}, "iterations": {d}, "first_load_ms": {s}, "min_ms": {s}, "max_ms": {s}, "avg_ms": {s}, "total_ms": {s}}}
-    , .{ path, file_size, iterations, formatMsX100(bench_alloc, first_load_ms) catch "error", min_ms_str, max_ms_str, avg_ms_str, total_ms_str });
+        \\{{"path": {f}, "file_size_bytes": {d}, "iterations": {d}, "first_load_ms": {s}, "min_ms": {s}, "max_ms": {s}, "avg_ms": {s}, "total_ms": {s}}}
+    , .{ std.json.fmt(path, .{}), file_size, iterations, formatMsX100(bench_alloc, first_load_ms) catch "error", min_ms_str, max_ms_str, avg_ms_str, total_ms_str });
 
     return json;
 }

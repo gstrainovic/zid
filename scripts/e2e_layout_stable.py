@@ -10,7 +10,7 @@ Aufruf: python3 scripts/e2e_layout_stable.py
 import os, subprocess, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from e2e_open_folder import ROOT, rpc, result_json, wait_port, settle, bounds, click_center, check, shot  # noqa: E402
+from e2e_open_folder import ROOT, rpc, result_json, wait_port, settle, bounds, click_center, check, shot, start_zid, stop_zid  # noqa: E402
 
 
 def editor():
@@ -38,10 +38,7 @@ def stable_for(seconds, label):
 
 def main():
     log = open(os.path.join(ROOT, "tmp", "e2e_layout_stable.log"), "w")
-    proc = subprocess.Popen(
-        ["zig", "build", "run", "--", "--headless", "--ai=off"],
-        cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
-    )
+    proc = start_zid(["--headless", "--ai=off"], log)
     try:
         wait_port(proc)
         settle(20)
@@ -68,14 +65,8 @@ def main():
         shot("e2e_layout_stable.ppm")
         print("PASS alle Prüfungen (Screenshot tmp/e2e_layout_stable.ppm)")
     finally:
-        try:
-            rpc("shutdown")
-        except Exception:
-            pass
-        time.sleep(0.5)
-        if proc.poll() is None:
-            proc.terminate()
-            proc.wait(timeout=10)
+        stop_zid(proc)
+        log.close()
 
 
 if __name__ == "__main__":

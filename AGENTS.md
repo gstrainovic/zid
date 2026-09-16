@@ -127,6 +127,13 @@ Schleifen, Fehlerhandler, Virtualisierung). `UI.MAX_CLAY_ELEMENTS` und `UI.clayE
 liegen in `src/ui/mod.zig`, das Virtualisierungsmuster in
 `MarkdownView.renderDocumentVirtualized`. E2E: `python3 scripts/e2e_md_preview.py`.
 
+- **Tabellen in der Vorschau:** zigdown liefert eine Tabelle als Container mit flacher
+  Zellliste (je `ncol` Paragraphen eine Zeile, erste Zeile = Kopf, `relative_width` aus der
+  Länge der Trennzeile). `MarkdownView.renderTable` baut daraus das Raster (Spalten per
+  `percent`, Kopf auf `surface`); ohne das lagen alle Zellen untereinander. Fixture:
+  `libs/zigdown/test/table.md`. Spaltenausrichtung (`alignment`) wird nicht umgesetzt, die
+  Inline-Läufe wachsen auf Zellbreite.
+
 ## Tastenkürzel und Menüs: eine Quelle
 
 - `src/ui/shortcuts.zig` (Modul `shortcuts`) ist die einzige Tabelle: Command, Taste, Modifier,
@@ -305,6 +312,9 @@ gepinnt, `models/` hält GGUFs flach und ignoriert (nie committen), `llm-bench/`
 - **Dialoge per Tastatur** (`dialog_ops.zig`, unit-getestet): Enter wählt den fokussierten Button
   (Start: erster = primär), Escape Cancel, Tab/Shift+Tab wandern, Anfangsbuchstabe wählt (`d` Delete,
   `s` Save, `n` Don't Save). Bei offenem Dialog erreicht keine Taste und kein Zeichen den Editor.
+  In `renderExample` wird `ad.key_result` erst nach dem Übernehmen in `pending_dialog_result`
+  geleert: `res = render(...) orelse ad.key_result` verwies unter Windows noch auf das Feld, das
+  vorherige Nullen kam als null an und keine Taste schloss einen Dialog.
 - `python3 scripts/e2e_explorer.py` fährt Fokus, Kürzel, Dialog-Tastatur, Papierkorb, Navigation,
   Anlegen/Umbenennen, Zwischenablage, Mehrfachauswahl und Kontextmenü headless durch.
 
@@ -702,10 +712,29 @@ Eintrag an, und nur `UI.updateScroll` räumt die (10 Einträge große) Liste auf
   `reuse_address` setzt beides). Sonst lauscht eine verwaiste Instanz weiter, der Kernel
   verteilt die Verbindungen, und ein Teil der RPC-Antworten kommt aus dem alten Prozess mit
   altem Zustand. Ein zweiter Start meldet jetzt `Port 9999 ist belegt`.
-- E2E-Skripte starten mit `start_new_session=True` und beenden die Prozessgruppe: `zig build
-  run` startet zid als Kind, ein `kill` auf den Vater lässt zid auf dem Port zurück.
-- Verwaiste Headless-Prozesse: `pkill -f '[v]ulkan-ed --headless'` — ohne die Klammer trifft das
-  Muster die eigene Shell, die den Befehl enthält.
+- E2E-Skripte starten zid nie über `zig build run`, sondern über `start_zid` aus
+  `scripts/e2e_open_folder.py`: erst `zig build`, dann das Binary als direktes Kind. Bei `zig build
+  run` ist zid ein Enkel, ein `kill` auf zig lässt zid auf dem Port zurück; Prozessgruppen
+  (`start_new_session`/`killpg`) als Ausweg gibt es unter Windows nicht. `stop_zid` beendet per RPC,
+  notfalls hart.
+- Verwaiste Headless-Prozesse: Linux `pkill -f '[v]ulkan-ed --headless'` — ohne die Klammer trifft
+  das Muster die eigene Shell, die den Befehl enthält. Windows `taskkill /F /IM zid.exe`.
+- **Windows:** Die Suiten laufen headless genauso (`python scripts/e2e_*.py`, kein Fenster).
+  RPC-Antworten mit Pfaden immer über `std.json.fmt`/`Stringify` bauen, nie `"{s}"`: Backslashes
+  ergeben sonst ungültiges JSON und jede Suite scheitert beim ersten `ui_state`. Die Text-Probe
+  (memfd) und der Test auf unlesbare Dateien (`chmod 0`) greifen nur unter Linux; `e2e_symlink_dir.py`
+  nimmt ohne Symlink-Recht eine Junction (`mklink /J`).
+- **Explorer sortiert nicht:** Reihenfolge ist die des Dateisystems (ext4 Hash-Reihenfolge, NTFS
+  alphabetisch). Tests navigieren deshalb per berechneter Anzahl ↑/↓ (`cursor_to` in
+  `e2e_explorer.py`), nie mit fest angenommenen Nachbarn.
+- **File-Watcher Windows** (`src/async/file_watcher_win.zig`): `ReadDirectoryChangesW` auf die
+  Wurzel mit ganzem Baum, überlappende I/O mit Event (Stop-Flag alle 100 ms). Gleiche Ergebnisse
+  und Filter wie Linux (versteckte Pfadteile, `zig-out`, `node_modules`, `.gguf`, 100-ms-Dedupe).
+  Atomares Speichern (Rename) meldet `file_created`, nur Überschreiben `file_changed` — wie
+  inotify. `src/async/file_watcher.zig` ist ein alter, nicht eingebundener Stub.
+- Suiten mit Fixtures, die nur auf dem Fedora-Laptop liegen: siehe `todo.md`.
+- Pfade in Git-Status (`/`) und LSP-URIs (`file:///C:/…`) werden auf Windows-Trenner umgesetzt
+  (`updateGitStatus`, `lsp_proto.pathToUri`/`uriToPath`).
 
 ## Use-after-free in Render-Commands (Segfault in `hashText`/`renderText`)
 

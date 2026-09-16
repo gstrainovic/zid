@@ -84,9 +84,11 @@ pub fn deletePath(path: []const u8, is_folder: bool) !void {
 
 /// true wenn `path` ein Verzeichnis ist; Symlinks werden aufgelöst, damit ein
 /// Link auf einen Ordner wie der Ordner behandelt wird (Explorer, Tab-Öffnen).
+/// Über openDir statt statFile: statFile scheitert unter Windows auf Verzeichnissen.
 pub fn isDirectory(path: []const u8) bool {
-    const st = std.fs.cwd().statFile(path) catch return false;
-    return st.kind == .directory;
+    var dir = std.fs.cwd().openDir(path, .{}) catch return false;
+    dir.close();
+    return true;
 }
 
 test "isDirectory: Ordner und Symlink auf Ordner ja, Datei, Symlink auf Datei und Fehlendes nein" {
@@ -96,8 +98,12 @@ test "isDirectory: Ordner und Symlink auf Ordner ja, Datei, Symlink auf Datei un
     defer std.testing.allocator.free(base);
 
     try tmp.dir.makeDir("real_dir");
-    _ = try tmp.dir.createFile("real_file", .{});
-    try tmp.dir.symLink("real_dir", "dir_link", .{ .is_directory = true });
+    (try tmp.dir.createFile("real_file", .{})).close();
+    tmp.dir.symLink("real_dir", "dir_link", .{ .is_directory = true }) catch |err| {
+        // Windows: Symlinks brauchen Entwicklermodus oder Adminrechte.
+        if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+        return err;
+    };
     try tmp.dir.symLink("real_file", "file_link", .{});
 
     const names = [_]struct { name: []const u8, dir: bool }{

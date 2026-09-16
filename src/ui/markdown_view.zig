@@ -415,6 +415,18 @@ pub const MarkdownView = struct {
             // Container: Kinder aufsummieren, plus Abstand dazwischen.
             .Container => |*c| blk: {
                 var sum: f32 = 0;
+                if (c.content == .Table) {
+                    // Zellen flach, je `ncol` eine Zeile: pro Zeile zählt die höchste Zelle.
+                    const ncol = @max(1, c.content.Table.ncol);
+                    const cells = c.children.items;
+                    var i: usize = 0;
+                    while (i < cells.len) : (i += ncol) {
+                        var row_h: f32 = line_h;
+                        for (cells[i..@min(i + ncol, cells.len)]) |*cell| row_h = @max(row_h, self.estimateBlockHeight(cell));
+                        sum += row_h + 8;
+                    }
+                    break :blk sum;
+                }
                 for (c.children.items) |*child| sum += self.estimateBlockHeight(child) + block_gap * 0.5;
                 break :blk @max(line_h, sum);
             },
@@ -946,6 +958,10 @@ pub const MarkdownView = struct {
     fn renderBlock(self: *Self, block: *Block, arena: std.mem.Allocator, theme: Theme, ui_ptr: *ui_mod.UI) void {
         switch (block.*) {
             .Container => |*container| {
+                if (container.content == .Table) {
+                    self.renderTable(container, arena, theme, ui_ptr);
+                    return;
+                }
                 const layout_options = switch (container.content) {
                     .Document => clay.LayoutConfig{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .top_to_bottom, .child_gap = 16 },
                     .Quote => clay.LayoutConfig{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .top_to_bottom, .padding = .{ .left = 16, .right = 0, .top = 4, .bottom = 4 }, .child_gap = 8 },
@@ -1001,6 +1017,53 @@ pub const MarkdownView = struct {
                 }
             },
         }
+    }
+
+    /// Tabelle als Raster. zigdown liefert die Zellen flach, Zeile für Zeile je `ncol`
+    /// Paragraphen; die erste Zeile ist der Kopf. Spaltenbreiten anteilig aus
+    /// `relative_width` (Länge der Trennzeile), sonst gleich breit. Vorher lagen alle
+    /// Zellen untereinander, weil die Tabelle ein gewöhnlicher top_to_bottom-Container war.
+    fn renderTable(self: *Self, container: *const zigdown.Container, arena: std.mem.Allocator, theme: Theme, ui_ptr: *ui_mod.UI) void {
+        const tbl = container.content.Table;
+        const cells = container.children.items;
+        const ncol = tbl.ncol;
+        if (ncol == 0) return;
+        const nrow = cells.len / ncol;
+        const widths = tbl.relative_width.items;
+        var total: f32 = 0;
+        if (widths.len == ncol) for (widths) |w| {
+            total += @floatFromInt(w);
+        };
+        var head_theme = theme;
+        head_theme.text = theme.primary;
+
+        clay.UI()(.{
+            .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .top_to_bottom },
+            .border = .{ .width = .all(1), .color = theme.border },
+        })({
+            for (0..nrow) |r| {
+                clay.UI()(.{
+                    .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .left_to_right },
+                    .background_color = if (r == 0) theme.surface else .{ 0, 0, 0, 0 },
+                    .border = .{ .width = .{ .between_children = 1 }, .color = theme.border },
+                })({
+                    for (0..ncol) |c| {
+                        const frac: f32 = if (total > 0)
+                            @as(f32, @floatFromInt(widths[c])) / total
+                        else
+                            1.0 / @as(f32, @floatFromInt(ncol));
+                        clay.UI()(.{
+                            .layout = .{
+                                .sizing = .{ .w = .percent(frac), .h = .grow },
+                                .padding = .{ .left = 8, .right = 8, .top = 4, .bottom = 4 },
+                            },
+                        })({
+                            self.renderBlock(&cells[r * ncol + c], arena, if (r == 0) head_theme else theme, ui_ptr);
+                        });
+                    }
+                });
+            }
+        });
     }
 
     const link_color: clay.Color = .{ 100, 149, 237, 255 };

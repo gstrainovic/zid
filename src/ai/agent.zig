@@ -161,6 +161,9 @@ pub const LlamaAgent = struct {
                 }
                 std.log.info("Ollama daemon started", .{});
             }
+            // Der selbst gestartete Daemon hängt an self.process; scheitert init danach
+            // (z. B. ModelNotInstalled), ruft niemand deinit auf.
+            errdefer if (self.process) |p| allocator.destroy(p);
 
             // Kein synchroner Pull: das blockierte den UI-Start minutenlang.
             // Der Chat zeigt stattdessen einen "Pull model"-Knopf (ai_worker.taskOllamaPull).

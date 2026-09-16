@@ -8,13 +8,11 @@ Aufruf: python3 scripts/e2e_pdf_pager.py
 """
 import os
 import shutil
-import signal
-import subprocess
 import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from e2e_open_folder import ROOT, rpc, result_json, wait_port, settle, bounds, click_center, check, shot  # noqa: E402
+from e2e_open_folder import ROOT, rpc, result_json, wait_port, settle, bounds, click_center, check, shot, start_zid  # noqa: E402
 
 PDF = os.path.join(ROOT, "test_data", "marp_test.pdf")
 
@@ -104,11 +102,7 @@ def main():
     shutil.rmtree(cfg, ignore_errors=True)
     env = dict(os.environ, XDG_CONFIG_HOME=cfg)
     wait_port_free()
-    proc = subprocess.Popen(
-        ["zig", "build", "run", "--", "--headless", "--ai=off", PDF],
-        cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, env=env,
-        start_new_session=True,  # eigene Prozessgruppe, siehe finally
-    )
+    proc = start_zid(["--headless", "--ai=off", PDF], log, env=env)
     try:
         wait_port(proc)
         settle(20)
@@ -209,12 +203,9 @@ def main():
         code = proc.wait(timeout=30)
         check(code == 0, f"Prozess beendet sauber (Code {code})")
     finally:
-        # `zig build run` startet zid als Kind: proc.kill() träfe nur zig, das
-        # verwaiste zid bliebe auf Port 9999 und beantwortete später fremde RPCs.
-        try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
+        # zid ist direktes Kind (start_zid), kill() lässt nichts auf Port 9999 zurück.
+        if proc.poll() is None:
+            proc.kill()
         log.close()
     print("OK")
 

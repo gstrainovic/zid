@@ -249,6 +249,8 @@ pub const FileExplorerState = struct {
             if (line[1] != ':') continue;
             const rel = line[2..];
             const abs = std.fs.path.join(self.allocator, &.{ root, rel }) catch continue;
+            // git liefert "/" (auch in root:), die Explorer-Pfade haben unter Windows "\".
+            if (std.fs.path.sep != '/') std.mem.replaceScalar(u8, abs, '/', std.fs.path.sep);
             self.git_status.put(abs, code) catch {
                 self.allocator.free(abs);
             };
