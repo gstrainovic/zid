@@ -85,6 +85,12 @@ def step_comment_move_duplicate():
     check(lines[0] == lines[1] == "pub fn hello() void {}" and ed()["row"] == 1, "Ctrl+Shift+D dupliziert die Zeile")
     key("k", ctrl=True, shift=True)  # Duplikat wieder löschen
     check(text().split("\n")[1] != "pub fn hello() void {}", "Ctrl+Shift+K entfernt das Duplikat")
+    before, row = text().split("\n"), ed()["row"]
+    key("d", ctrl=True, shift=True)
+    key("x", ctrl=True)  # ohne Auswahl: ganze Zeile ausschneiden (VS Code)
+    st = ed()
+    check(st["text"].split("\n") == before and st["row"] == row + 1 and st["col"] == 0,
+          f"Ctrl+X ohne Auswahl schneidet das Duplikat aus ({st['row']},{st['col']}: {st['text']!r})")
 
 
 def step_goto_replace():

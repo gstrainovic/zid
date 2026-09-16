@@ -169,6 +169,63 @@ def step_all_examples(proc):
             TARGETED[n](shot_name)
 
 
+SELECT_MD = os.path.join(ROOT, "tmp", "e2e_md_select.md")
+
+
+def md_selection():
+    return result_json("md_selection")
+
+
+def step_selection():
+    """Text markieren wie im Browser: Ziehen über Zeilen und Blöcke, Hervorhebung sichtbar,
+    Kopiertext mit Leerzeile zwischen Absätzen, Escape hebt auf. Vorher kannte die Vorschau
+    keine Auswahl, Ctrl+C ging ins Leere."""
+    print("--- Textauswahl in der Vorschau")
+    with open(SELECT_MD, "w", encoding="utf-8") as f:
+        f.write("# Titel\n\nAlpha beta gamma.\n\nDelta epsilon.\n\n```zig\nconst a = 1;\nconst b = 2;\n```\n")
+    time.sleep(0.3)
+    open_preview(os.path.join("tmp", "e2e_md_select.md"))
+    settle(10)
+    st = md_selection()
+    check(st["open"] and st["lines"] == 5, f"Vorschau kennt 5 Zeilen ({st})")
+    check(st["text"] is None, "ohne Ziehen keine Auswahl")
+    l1, l2 = bounds("md_line", 1), bounds("md_line", 2)
+    check(l1["h"] > 0 and l2["y"] > l1["y"], "Zeilen 1 und 2 im Layout")
+
+    # Über zwei Absätze ziehen, Ende rechts hinter dem Text: klemmt ans Zeilenende
+    rpc("mouse_down", [l1["x"] + 1, l1["y"] + l1["h"] / 2]); settle(4)
+    rpc("move_mouse", [l2["x"] + l2["w"] + 40, l2["y"] + l2["h"] / 2]); settle(4)
+    rpc("mouse_up", [l2["x"] + l2["w"] + 40, l2["y"] + l2["h"] / 2]); settle(6)
+    got = md_selection()["text"]
+    check(got == "Alpha beta gamma.\n\nDelta epsilon.", f"Auswahl über zwei Absätze: {got!r}")
+    sel = bounds("md_sel", 1)
+    check(sel["w"] > 0 and abs(sel["y"] - l1["y"]) <= 2, "Hervorhebung liegt auf Zeile 1")
+    shot("e2e_md_preview_selection.ppm")
+    inside = pixel("e2e_md_preview_selection.ppm", sel["x"] + 2, sel["y"] + sel["h"] - 3)
+    outside = pixel("e2e_md_preview_selection.ppm", l1["x"] - 6, sel["y"] + sel["h"] - 3)
+    check(differs(inside, outside, 8), f"Hervorhebung ist gezeichnet ({inside} gegen {outside})")
+
+    # Teil einer Zeile: Start in der Mitte, Ende am Zeilenende
+    rpc("mouse_down", [l1["x"] + l1["w"] * 0.05, l1["y"] + l1["h"] / 2]); settle(4)
+    rpc("mouse_up", [l1["x"] + 400, l1["y"] + l1["h"] / 2]); settle(6)
+    got = md_selection()["text"]
+    check(got and got.endswith("gamma.") and len(got) < len("Alpha beta gamma."), f"Teilauswahl endet am Zeilenende: {got!r}")
+
+    # Codeblock: harte Zeilen bleiben Zeilen
+    c1, c2 = bounds("md_line", 3), bounds("md_line", 4)
+    rpc("mouse_down", [c1["x"] + 1, c1["y"] + c1["h"] / 2]); settle(4)
+    rpc("mouse_up", [c2["x"] + c2["w"], c2["y"] + c2["h"] / 2]); settle(6)
+    got = md_selection()["text"]
+    check(got == "const a = 1;\nconst b = 2;", f"Codeblock-Auswahl: {got!r}")
+
+    rpc("key_press", ["escape", False]); settle(4)
+    check(md_selection()["text"] is None, "Escape hebt die Auswahl auf")
+
+    # Klick ohne Ziehen: keine Auswahl, nichts im Menü zu kopieren
+    rpc("click", [l1["x"] + 5, l1["y"] + l1["h"] / 2]); settle(4)
+    check(md_selection()["text"] is None, "Einfacher Klick markiert nichts")
+
+
 def step_no_clay_errors():
     print("--- Clay meldet keine Fehler")
     time.sleep(0.5)
@@ -189,6 +246,7 @@ def main():
         step_table_fits()
         step_table_cells()
         step_all_examples(proc)
+        step_selection()
         step_no_clay_errors()
         print("ALL PASSED")
     finally:

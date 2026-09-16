@@ -18,6 +18,7 @@ const zigjr = @import("zigjr");
 const clay = @import("clay");
 // const zigimg = @import("zigimg");
 const ui_mod = @import("ui/mod.zig");
+const explorer_ops = @import("ui/explorer_ops.zig");
 
 const log = std.log.scoped(.e2e_server);
 
@@ -44,6 +45,8 @@ pub const InputEvent = union(enum) {
     char: u21,
     /// Mausrad an Position: lines > 0 hoch, < 0 runter
     scroll: struct { x: f32, y: f32, lines: i32 },
+    /// Datei in der aktiven Tab-Leiste öffnen (Pfad gehört dem Ereignis, `applyInput` gibt ihn frei)
+    open_file: []const u8,
 };
 
 /// E2E Server Context - teilt State mit Main Thread
@@ -344,7 +347,7 @@ fn gitHistoryState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
 /// Ereignis anwenden oder (Fenstermodus) für den Main-Thread puffern.
 fn dispatchInput(ctx: *E2EContext, ev: InputEvent) void {
     if (!ctx.defer_input) {
-        applyInput(ctx.ui_system, ev);
+        applyInput(ctx, ev);
         return;
     }
     ctx.input_mutex.lock();
@@ -365,12 +368,24 @@ pub fn drainInputs(ctx: *E2EContext) void {
         ctx.pending_inputs.replaceRangeAssumeCapacity(0, n, &.{});
         ctx.input_mutex.unlock();
         if (n == 0) return;
-        for (batch[0..n]) |ev| applyInput(ctx.ui_system, ev);
+        for (batch[0..n]) |ev| applyInput(ctx, ev);
     }
 }
 
-fn applyInput(ui: *ui_mod.UI, ev: InputEvent) void {
+fn applyInput(ctx: *E2EContext, ev: InputEvent) void {
+    const ui = ctx.ui_system;
     switch (ev) {
+        .open_file => |path| {
+            defer ctx.allocator.free(path);
+            const tab_bar = ui.getActiveTabBar();
+            tab_bar.openFile(path) catch |err| {
+                log.warn("open_file('{s}'): {s}", .{ path, @errorName(err) });
+                return;
+            };
+            // tab_bar.openFile setzt active_index, aber nur setActive stößt den Loader-Flow
+            // in main.zig an (pending_switch_path).
+            if (tab_bar.active_index) |idx| tab_bar.setActive(idx);
+        },
         .click => |p| {
             ui.setPointerState(p.x, p.y, true);
             ui.handleMouseMove(p.x, p.y);
@@ -486,6 +501,7 @@ pub fn createDispatcher(alloc: std.mem.Allocator, ctx: *E2EContext) !*zigjr.RpcD
     try rpc_dispatcher.addWithCtx("ui_state", ctx, uiState);
     try rpc_dispatcher.addWithCtx("editor_lines", ctx, editorLines);
     try rpc_dispatcher.addWithCtx("editor_state", ctx, editorState);
+    try rpc_dispatcher.addWithCtx("md_selection", ctx, mdSelection);
     try rpc_dispatcher.addWithCtx("save_file", ctx, saveFile);
     try rpc_dispatcher.addWithCtx("get_state", ctx, getState);
     try rpc_dispatcher.addWithCtx("benchmark_open_file", ctx, benchmarkOpenFile);
@@ -586,25 +602,16 @@ fn saveFile(ctx: *E2EContext, dc: *zigjr.DispatchCtx, params: []const u8) ![]con
 }
 
 /// Datei im Editor öffnen (oder Bild-Vorschau)
+/// Datei öffnen. Die Prüfung auf ein Verzeichnis (error.IsDir) bleibt synchron, damit der
+/// Aufrufer die Antwort bekommt; der Tab selbst entsteht gepuffert im Main-Thread, denn ein
+/// `tabs.append` aus dem Server-Thread hat `renderTabBar` mitten in der Iteration gestört.
 pub fn openFile(ctx: *E2EContext, dc: *zigjr.DispatchCtx, path: []const u8) ![]const u8 {
     log.info("RPC: open_file('{s}')", .{path});
-
-    ctx.ui_system.getActiveTabBar().openFile(path) catch |err| {
-        const msg = try std.fmt.allocPrint(dc.arena(), "error: {}", .{err});
-        return msg;
-    };
-
-    // Wichtig: In main.zig wird pending_switch_path abgefragt, um den Editor-Inhalt zu setzen.
-    // tab_bar.openFile setzt active_index, aber nicht automatisch pending_switch_path (außer in setActive).
-    // Wir rufen setActive auf, um den Loader-Flow in main.zig zu triggern.
-    if (ctx.ui_system.getActiveTabBar().active_index) |idx| {
-        ctx.ui_system.getActiveTabBar().setActive(idx);
+    if (explorer_ops.isDirectory(path)) {
+        return try std.fmt.allocPrint(dc.arena(), "error: {}", .{error.IsDir});
     }
-
-    // Event Loop aufwecken, damit render_commands sofort generiert und geladen werden!
-    const wio = @import("wio");
-    wio.cancelWait();
-
+    const owned = try ctx.allocator.dupe(u8, path);
+    dispatchInput(ctx, .{ .open_file = owned });
     return "ok";
 }
 
@@ -965,6 +972,21 @@ fn editorState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     }
     try buf.writer.writeAll(", \"text\": ");
     try std.json.Stringify.value(text, .{}, &buf.writer);
+    try buf.writer.writeAll("}");
+    return buf.written();
+}
+
+/// Textauswahl der aktiven Markdown-Vorschau: `text` (null ohne Auswahl) und die Zahl der im
+/// letzten Frame gezeichneten Zeilen (`md_line`-IDs 0..lines-1).
+fn mdSelection(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
+    const v = ctx.ui_system.activeMarkdownView() orelse return "{\"open\": false}";
+    var buf = std.Io.Writer.Allocating.init(dc.arena());
+    try buf.writer.print("{{\"open\": true, \"lines\": {d}, \"text\": ", .{v.frame_lines.items.len});
+    if (v.selectedText(dc.arena())) |t| {
+        try std.json.Stringify.value(t, .{}, &buf.writer);
+    } else {
+        try buf.writer.writeAll("null");
+    }
     try buf.writer.writeAll("}");
     return buf.written();
 }

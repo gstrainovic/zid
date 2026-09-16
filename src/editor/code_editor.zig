@@ -1534,6 +1534,20 @@ pub const CodeEditor = struct {
                             win.setClipboardText(text);
                         }
                         _ = self.deleteSelection();
+                    } else {
+                        // Ohne Auswahl schneidet Ctrl+X die ganze Zeile aus (VS Code, Zed).
+                        const row = self.cursor.row;
+                        const line_text = self.getTextInRange(.{
+                            .begin = .{ .row = row, .col = 0 },
+                            .end = .{ .row = row, .col = self.lineWidth(row) },
+                        }) catch "";
+                        defer if (line_text.len > 0) self.allocator.free(line_text);
+                        if (self.window) |win| {
+                            const with_eol = std.mem.concat(self.allocator, u8, &.{ line_text, "\n" }) catch line_text;
+                            defer if (with_eol.ptr != line_text.ptr) self.allocator.free(with_eol);
+                            win.setClipboardText(with_eol);
+                        }
+                        self.dispatchAction(.DeleteLine);
                     }
                 } else |err| {
                     std.log.err("Failed to cut text: {}", .{err});
@@ -3832,6 +3846,34 @@ test "DeleteLine: getippter Text, letzte Zeile verschwindet" {
     defer std.testing.allocator.free(after);
     try std.testing.expectEqual(@as(usize, 2), t.ed.lineCount());
     try std.testing.expectEqualStrings("abc\nzwei", after);
+}
+
+test "Cut ohne Auswahl entfernt die ganze Zeile (VS-Code-Verhalten)" {
+    var t = try testEditor(std.testing.allocator, "eins\nzwei\ndrei");
+    defer t.buffer.deinit();
+    defer t.ed.deinit();
+    t.ed.cursor.row = 1;
+    t.ed.cursor.col = 2;
+    t.ed.dispatchAction(.Cut);
+    const after = try t.ed.getTextInRange(.{ .begin = .{ .row = 0, .col = 0 }, .end = .{ .row = 1, .col = 100 } });
+    defer std.testing.allocator.free(after);
+    try std.testing.expectEqual(@as(usize, 2), t.ed.lineCount());
+    try std.testing.expectEqualStrings("eins\ndrei", after);
+    try std.testing.expectEqual(@as(usize, 1), t.ed.cursor.row);
+    try std.testing.expectEqual(@as(usize, 0), t.ed.cursor.col);
+}
+
+test "Cut mit Auswahl entfernt nur die Auswahl" {
+    var t = try testEditor(std.testing.allocator, "eins\nzwei");
+    defer t.buffer.deinit();
+    defer t.ed.deinit();
+    t.ed.cursor.row = 0;
+    t.ed.cursor.col = 0;
+    t.ed.selection_anchor = .{ .row = 0, .col = 2 };
+    t.ed.dispatchAction(.Cut);
+    const after = try t.ed.getTextInRange(.{ .begin = .{ .row = 0, .col = 0 }, .end = .{ .row = 1, .col = 100 } });
+    defer std.testing.allocator.free(after);
+    try std.testing.expectEqualStrings("ns\nzwei", after);
 }
 
 test "Tippen nach Klick (Anker = Cursor, kein Ziehen) behält jedes Zeichen" {

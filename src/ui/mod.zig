@@ -831,7 +831,20 @@ pub const UI = struct {
             }
             return;
         }
+        // Markdown-Vorschau: Ctrl+C kopiert die Textauswahl, Escape hebt sie auf. Beides
+        // darf nicht im unsichtbaren Editor dahinter landen.
+        if (self.activeMarkdownView()) |v| {
+            if (self.is_ctrl_down and key == .c) return self.copyPreviewSelection(v);
+            if (key == .escape and v.hasSelection()) return v.clearSelection();
+        }
         self.getActiveEditor().handleKeyPress(key);
+    }
+
+    /// Auswahl der Markdown-Vorschau in die Zwischenablage (Ctrl+C, Kontextmenü Copy).
+    pub fn copyPreviewSelection(self: *Self, v: *markdown_view_mod.MarkdownView) void {
+        const text = v.selectedText(self.allocator) orelse return;
+        defer self.allocator.free(text);
+        if (self.window) |win| win.setClipboardText(text);
     }
 
     fn handleDialogKey(self: *Self, ad: *ActiveDialog, key: wio.Button) void {
@@ -1153,7 +1166,7 @@ pub const UI = struct {
                 return;
             } else if (tab.kind == .markdown_preview) {
                 if (self.open_markdown_views.get(tab.path)) |v| {
-                    v.handleScrollbarMouseMove(x, y);
+                    v.handleMouseMove(x, y);
                 }
                 return;
             } else if (tab.kind == .chat) {
@@ -3446,6 +3459,10 @@ pub const UI = struct {
                                     if (v.pending_export_pdf) {
                                         v.pending_export_pdf = false;
                                         self.exportMarpPdf(tab.path["preview://".len..]);
+                                    }
+                                    if (v.pending_copy) {
+                                        v.pending_copy = false;
+                                        self.copyPreviewSelection(v);
                                     }
                                     special_active = true;
                                 }
