@@ -1,24 +1,42 @@
 #!/usr/bin/env python3
 """Headless-Repro für Use-after-free im Text der Render-Commands.
 
-Fährt Ordnerwechsel nach ~/projects, Bilder aus dem Explorer (per Klick und per RPC),
-Tooltip-Hover, Picker (Ctrl+P / Ctrl+E) mit Mausklick, Tab-Wechsel und Tab-Schließen.
+Fährt Ordnerwechsel in einen erzeugten Baum unter tmp/e2e_uaf, Bilder aus dem Explorer
+(per Klick und per RPC), Tooltip-Hover, Picker (Ctrl+P / Ctrl+E) mit Mausklick,
+Tab-Wechsel und Tab-Schließen.
 Mit `--page-alloc` meldet die Text-Probe im Headless-Loop jeden Render-Command, dessen
 Text auf freigegebenen Speicher zeigt, samt Stack-Trace der Freigabe.
 Aufruf: python3 scripts/e2e_repro_text_uaf.py [--page-alloc] [--ai=on]
 """
-import json, os, socket, subprocess, sys, time
+import os, shutil, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from e2e_open_folder import rpc, result_json, wait_port, settle, bounds, click_center, ROOT
+from e2e_fixtures import write_png
+from e2e_open_folder import rpc, result_json, wait_port, settle, click_center, start_zid, stop_zid, ROOT
 
-JOBS_NAME = "find" + "-jobs"
-IMG_SUBDIR = "goran"
-JOBS_DIR = os.path.expanduser("~/projects/" + JOBS_NAME + "/" + IMG_SUBDIR)
-IMAGES = ["goran-portrait.png", "goran-portrait-square.png"]
+TREE = os.path.join(ROOT, "tmp", "e2e_uaf")
+ROOT_NAME = os.path.basename(TREE)
+JOBS_NAME = "bilder"
+IMG_SUBDIR = "portraits"
+JOBS_DIR = os.path.join(TREE, JOBS_NAME, IMG_SUBDIR)
+IMAGES = ["portrait-hoch.png", "portrait-quadrat.png"]
 
 PROC = None
 LOG_PATH = os.path.join(ROOT, "tmp", "e2e_repro_text_uaf.log")
+
+
+def make_tree():
+    """Baum mit Bildern und genug Nachbarordnern, dass der Explorer scrollen muss."""
+    shutil.rmtree(TREE, ignore_errors=True)
+    write_png(os.path.join(JOBS_DIR, IMAGES[0]), 120, 160)
+    write_png(os.path.join(JOBS_DIR, IMAGES[1]), 128, 128)
+    with open(os.path.join(TREE, JOBS_NAME, "notizen.md"), "w", encoding="utf-8") as f:
+        f.write("# Notizen\n")
+    for i in range(30):
+        sub = os.path.join(TREE, f"ordner-{i:02d}", "unter")
+        os.makedirs(sub)
+        with open(os.path.join(sub, "datei.txt"), "w") as f:
+            f.write(f"{i}\n")
 
 
 def alive(what):
@@ -97,7 +115,7 @@ def ensure_expanded(name):
 
 def scenario_explorer_clicks():
     scroll_top()
-    ensure_expanded("projects")  # Root kann nach Tastatur-Kürzeln zugeklappt sein
+    ensure_expanded(ROOT_NAME)  # Root kann nach Tastatur-Kürzeln zugeklappt sein
     ensure_expanded(JOBS_NAME)
     ensure_expanded(IMG_SUBDIR)
     for img in IMAGES:
@@ -145,7 +163,7 @@ def scenario_tabs():
 def scenario_pickers():
     key("p", ctrl=True); settle(60)
     alive("ctrl+p open")
-    rpc("type_text", ["goran"]); settle(40)
+    rpc("type_text", ["portrait"]); settle(40)
     alive("ctrl+p typed")
     b = result_json("element_bounds_i", ["pk_row", 0])
     if b["found"]:
@@ -171,18 +189,19 @@ def main():
     global PROC
     ai_on = "--ai=on" in sys.argv
     extra = [a for a in sys.argv[1:] if a != "--ai=on"]
-    target = os.path.realpath(os.path.expanduser("~/projects"))  # zid löst Links/Junctions auf
+    make_tree()
+    target = os.path.realpath(TREE)  # zid löst Links/Junctions auf
     log = open(LOG_PATH, "w")
     env = dict(os.environ, XDG_CONFIG_HOME=os.path.join(ROOT, "tmp", "xdg-config"), XDG_DATA_HOME=os.path.join(ROOT, "tmp", "xdg"))
-    args = [os.path.join(ROOT, "zig-out", "bin", "zid"), "--headless"] + ([] if ai_on else ["--ai=off"]) + extra
-    PROC = subprocess.Popen(args, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, env=env)
+    args = ["--headless"] + ([] if ai_on else ["--ai=off"]) + extra
+    PROC = start_zid(args, log, env=env)
     try:
         wait_port(PROC)
         settle(30)
         if ai_on:
             time.sleep(25)
         alive("start")
-        open_folder("~/projects", target)
+        open_folder(TREE, target)
         scenario_explorer_clicks()
         scenario_rpc_open()
         scenario_tabs()
@@ -193,14 +212,7 @@ def main():
         alive("idle")
         print("NO CRASH")
     finally:
-        try:
-            rpc("shutdown")
-        except Exception:
-            pass
-        try:
-            PROC.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            PROC.kill()
+        stop_zid(PROC)
         log.close()
 
 

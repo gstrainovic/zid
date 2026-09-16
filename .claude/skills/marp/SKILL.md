@@ -80,7 +80,7 @@ python3 scripts/e2e_marp_pdf.py            # headless, deckt alles ab
 mutool draw -F txt -o - DATEI.pdf SEITE    # einzelne Seite als Text
 ```
 
-Fixture: `test_data/marp_test.md`.
+Fixture: `scripts/fixtures/marp_test.md` (eingecheckt, sieben Folien).
 
 ## Grenzen
 
