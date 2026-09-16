@@ -1,25 +1,5 @@
 # Offene Punkte
 
-## Markdown-Vorschau: E2E für Tabellen und alle zigdown-Beispieldateien
-
-Tabellen wurden nie getestet: die Zellen standen bis 15.09.2026 untereinander, ohne dass eine
-Suite es merkte. zigdown testet Tabellen nur als Parser-Strings
-(`libs/zigdown/src/lib/parsers/blocks.zig`), und `zig build test` in zid führt diese Tests
-nicht aus.
-
-- `step_table_fits` in `scripts/e2e_md_preview.py` prüft seit 16.09.2026, dass jede Tabelle aus
-  `libs/zigdown/test/table.md` im Viewport endet (IDs `md_table_row`, Screenshot
-  `tmp/e2e_md_preview_table.ppm`). Offen bleibt die Prüfung der Zellen selbst: gleiches `y` je
-  Zeile, steigendes `x`, Kopfzeile über der ersten Datenzeile. Dafür brauchen die Zellen in
-  `MarkdownView.renderTable` abfragbare IDs (z. B. `md_tcell` per `idi`, Zähler je Frame wie
-  `run_counter`, damit mehrere Tabellen nicht kollidieren).
-- Alle Beispieldateien unter `libs/zigdown/test/*.md` headless in der Vorschau öffnen (alert,
-  code, directive, link, list, list2, mini, quote, sample, sample2, spaced-list, table, toc,
-  yaml): je Datei mindestens ein `md_block` im Layout, keine Clay-Fehler im Log, kein Absturz,
-  ein Screenshot pro Datei. Neue Dateien im Ordner automatisch mitnehmen (Glob statt Liste).
-  Wo sinnvoll gezielte Prüfungen wie beim Tabellen-Schritt (Zitat mit linkem Rand, Liste mit
-  Aufzählungszeichen, Codeblock mit Hintergrund).
-
 ## Fedora-Laptop: reproduzierbare Testdaten für die E2E-Suiten
 
 Unter Windows (15.09.2026) laufen alle Suiten headless, bis auf drei, die an Daten hängen,
