@@ -767,8 +767,16 @@ pub const UI = struct {
             return;
         }
 
-        // If a chat tab is active, handle chat input
+        // If a chat tab is active, handle chat input. Ctrl+C mit markiertem Bubble-Text
+        // kopiert diesen statt aus dem Eingabefeld.
         if (self.isChatTabActive()) {
+            if (self.is_ctrl_down and key == .c) {
+                if (self.ai_chat.selectedText(self.allocator)) |text| {
+                    defer self.allocator.free(text);
+                    if (self.window) |win| win.setClipboardText(text);
+                    return;
+                }
+            }
             if (self.ai_chat.handleKeyPress(key)) return;
         }
 

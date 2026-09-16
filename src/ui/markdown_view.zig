@@ -229,14 +229,14 @@ pub const MarkdownView = struct {
                 self.nextSlide();
                 return true;
             }
-            return false;
+            return self.beginSelection("md_slide", x, y);
         }
 
         // Scrollbalken zuerst, jeder andere Klick gilt dem Text (Auswahl).
         const on_scrollbar = self.content_height > self.viewport_height and
             x >= self.scrollbar_track_x and x <= self.scrollbar_track_x + self.scrollbar_width and
             y >= self.scrollbar_track_y and y <= self.scrollbar_track_y + self.viewport_height;
-        if (!on_scrollbar) return self.beginSelection(x, y);
+        if (!on_scrollbar) return self.beginSelection("md_viewport", x, y);
 
         if (y >= self.scrollbar_thumb_y and y <= self.scrollbar_thumb_y + self.scrollbar_thumb_height) {
             self.scrollbar_dragging = true;
@@ -313,9 +313,11 @@ pub const MarkdownView = struct {
     // ---- Textauswahl ----------------------------------------------------------------
 
     /// Klick auf eine Zeile setzt den Anker; ein Klick ohne Zeile hebt die Auswahl nur auf.
-    fn beginSelection(self: *Self, x: f32, y: f32) bool {
+    /// `container` begrenzt den Klick auf ein Element (Viewport, Folie); null = der Aufrufer
+    /// hat den Bereich schon geprüft (Chat-Bubble).
+    pub fn beginSelection(self: *Self, container: ?[]const u8, x: f32, y: f32) bool {
         self.clearSelection();
-        if (!self.hitElement("md_viewport", x, y)) return false;
+        if (container) |c| if (!self.hitElement(c, x, y)) return false;
         const pos = self.hitLine(x, y) orelse return false;
         self.sel_anchor = pos;
         self.sel_head = pos;
@@ -562,6 +564,7 @@ pub const MarkdownView = struct {
         if (clamped == self.current_slide and self.slide_parsed != null) return;
         self.current_slide = clamped;
         self.slide_overflow = false;
+        self.clearSelection();
         self.dropSlideDocument();
         self.scroll_offset_y = 0;
     }
@@ -607,6 +610,7 @@ pub const MarkdownView = struct {
         const doc = self.cachedDocument() orelse return;
         var effective_theme = theme;
         if (self.text_color) |c| effective_theme.text = c;
+        self.sel_color = .{ theme.primary[0], theme.primary[1], theme.primary[2], 110 };
         self.resetCounters();
         self.beginBlock(0);
         self.renderBlock(doc, arena, effective_theme, ui_ptr);
@@ -885,7 +889,9 @@ pub const MarkdownView = struct {
                         const outer = self.font_size;
                         self.font_size = @max(6, scaled(pdf_content_em, scale));
                         self.wrap_width_hint = @max(0, frame_w - 2 * @as(f32, @floatFromInt(scaled(pdf_margin_x, scale))));
+                        self.beginBlock(0);
                         self.renderBlock(block, arena, effective_theme, ui_ptr);
+                        self.endBlock();
                         self.font_size = outer;
                     }
                 });
@@ -973,6 +979,12 @@ pub const MarkdownView = struct {
     }
 
     pub fn render(self: *Self, arena: std.mem.Allocator, theme: Theme, ui_ptr: *ui_mod.UI) void {
+        self.sel_color = .{ theme.primary[0], theme.primary[1], theme.primary[2], 110 };
+        const layout_key = (self.wrap_width_hint orelse 0) * 1000 + @as(f32, @floatFromInt(self.font_size));
+        if (layout_key != self.sel_layout_key) {
+            if (self.sel_layout_key >= 0) self.clearSelection();
+            self.sel_layout_key = layout_key;
+        }
         if (self.deck != null) return self.renderDeck(arena, theme, ui_ptr);
 
         // Update layout info from previous frame
@@ -988,12 +1000,6 @@ pub const MarkdownView = struct {
         if (content_data.found) {
             self.content_height = content_data.bounding_box.height;
         }
-        const layout_key = (self.wrap_width_hint orelse 0) * 1000 + @as(f32, @floatFromInt(self.font_size));
-        if (layout_key != self.sel_layout_key) {
-            if (self.sel_layout_key >= 0) self.clearSelection();
-            self.sel_layout_key = layout_key;
-        }
-        self.sel_color = .{ theme.primary[0], theme.primary[1], theme.primary[2], 110 };
 
         clay.UI()(.{
             .id = self.idi("markdown_view_root", 0),
