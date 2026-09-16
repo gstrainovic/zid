@@ -5,10 +5,10 @@ Mehrfachauswahl, Kontextmenü. Aufruf: python3 scripts/e2e_explorer.py
 
 Papierkorb: XDG_DATA_HOME zeigt auf tmp/xdg, damit nichts im echten Papierkorb landet.
 """
-import os, shutil, subprocess, sys, time
+import os, shutil, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from e2e_open_folder import ROOT, rpc, result_json, wait_port, settle, bounds, click_center, check, shot  # noqa: E402
+from e2e_open_folder import ROOT, rpc, result_json, wait_port, settle, bounds, click_center, check, shot, start_zid, stop_zid  # noqa: E402
 from e2e_shortcuts import key, explorer, explorer_click, explorer_row_center, ui_state, dialog_open  # noqa: E402
 
 FX = os.path.join(ROOT, "tmp", "e2e_fx2")
@@ -241,18 +241,34 @@ def step_hidden_and_filter():
     check(explorer()["filter"] == "" and "renamed.md" in names(), "Escape leert den Filter")
 
 
+def rows_in_view(*paths):
+    """Zeilenmitten mehrerer Einträge aus EINEM Snapshot, nach Pfad statt Name gesucht.
+    Zwei getrennte explorer_row_center-Aufrufe scrollen je für sich: die erste Position
+    stimmte dann nicht mehr, und der Drop traf eine Datei im Projekt-Root."""
+    for _ in range(40):
+        ex = explorer()
+        by_path = {e["path"]: e["index"] for e in ex["entries"]}
+        missing = [p for p in paths if p not in by_path]
+        if missing:
+            raise AssertionError(f"Explorer-Einträge fehlen: {missing}")
+        vp, rh = ex["viewport"], ex["row_height"]
+        ys = [vp["y"] + by_path[p] * rh + rh / 2 - ex["scroll"] for p in paths]
+        if all(vp["y"] <= y < vp["y"] + vp["h"] for y in ys):
+            return [(vp["x"] + 60, y) for y in ys], ex["scroll"]
+        center = vp["y"] + vp["h"] / 2
+        mid = (min(ys) + max(ys)) / 2
+        lines = max(1, round(abs(mid - center) / 60))  # scrollLines: 60 px je Zeile
+        rpc("scroll", [vp["x"] + 60, center, -lines if mid >= center else lines])
+        settle()
+    raise AssertionError(f"{paths} nicht gleichzeitig in den Viewport gescrollt")
+
+
 def step_drag_drop():
     print("--- Drag & Drop verschiebt mit Bestätigung")
     explorer_click("gamma copy.txt")
-    # Beide Zeilen im selben Scrollzustand messen: explorer_row_center scrollt bei Bedarf,
-    # ein zweites Scrollen machte die erste Position ungültig (Reihenfolge je Dateisystem).
-    explorer_row_center("sub")  # scrollt bei Bedarf; danach beide Zeilen neu messen
-    for _ in range(5):
-        x0, y0 = explorer_row_center("gamma copy.txt")
-        x1, y1 = explorer_row_center("sub")
-        if explorer_row_center("gamma copy.txt") == (x0, y0):
-            break
-    check(explorer_row_center("gamma copy.txt") == (x0, y0), "Quelle und Ziel gleichzeitig sichtbar")
+    src_path, dst_path = os.path.join(FX, "gamma copy.txt"), os.path.join(FX, "sub")
+    [(x0, y0), (x1, y1)], scroll = rows_in_view(src_path, dst_path)
+    check(rows_in_view(src_path, dst_path)[1] == scroll, "Quelle und Ziel gleichzeitig sichtbar")
     rpc("mouse_down", [x0, y0]); settle()
     for i in range(1, 6):
         rpc("move_mouse", [x0, y0 + (y1 - y0) * i / 5]); settle(3)
@@ -300,10 +316,7 @@ def main():
     setup_fixture()
     log = open(os.path.join(ROOT, "tmp", "e2e_explorer.log"), "w")
     env = dict(os.environ, XDG_DATA_HOME=XDG, XDG_CONFIG_HOME=XDG_CONFIG)
-    proc = subprocess.Popen(
-        [os.path.join(ROOT, "zig-out", "bin", "zid"), "--headless", "--ai=off"],
-        cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, env=env,
-    )
+    proc = start_zid(["--headless", "--ai=off"], log, env=env)
     try:
         wait_port(proc)
         settle(20)
@@ -311,14 +324,7 @@ def main():
             step()
         print("ALL PASSED")
     finally:
-        try:
-            rpc("shutdown")
-        except Exception:
-            pass
-        try:
-            proc.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            proc.kill()
+        stop_zid(proc)
         log.close()
 
 
