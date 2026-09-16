@@ -86,7 +86,10 @@ echo -e "open ./README.md\nget-state\nshutdown" | zig build run -- --interactive
   (Bounding-Box des Editors aus dem Vorframe, muss über Frames konstant bleiben). `element_bounds(id)` /
   `element_bounds_i(id, index)` geben Clay-Bounding-Boxen für Klicks; für "existiert das Element
   gerade?" sind sie unzuverlässig (Clay behält Daten verschwundener Elemente), dafür `ui_state`.
-  Fixtures unter `tmp/` anlegen (gitignored, im Explorer sichtbar).
+  Fixtures unter `tmp/` anlegen (gitignored, im Explorer sichtbar). Keine Suite liest aus
+  `test_data/` außer der dort getrackten `syntax_test.md` (Startdatei): eingecheckte Vorlagen
+  liegen unter `scripts/fixtures/`, PDF und PNG erzeugt `scripts/e2e_fixtures.py` ohne
+  Fremdbibliothek (`write_pdf`, `write_png`; Selbsttest per Direktaufruf).
 
 ## Projektordner wechseln ("Open Folder…")
 
@@ -538,7 +541,7 @@ Details in der Skill `.claude/skills/marp/SKILL.md`. Kurz: Parser `src/ui/marp.z
 (Modul `marp`), HTML `src/ui/marp_html.zig`, PDF `src/rendering/marp_pdf.zig` über
 MuPDFs Story-Engine. Folienvorschau in `MarkdownView` (`deck`-Feld), Command
 `md_export_pdf`. E2E: `python3 scripts/e2e_marp_pdf.py`, Fixture
-`test_data/marp_test.md`.
+`scripts/fixtures/marp_test.md`.
 
 ## PDF-Vorschau: Blättern
 
@@ -554,7 +557,8 @@ MuPDFs Story-Engine. Folienvorschau in `MarkdownView` (`deck`-Feld), Command
   `beginLayout` setzt die Arena zurück, Clay liest den Text erst beim Zeichnen.
 - Zustand für E2E: `pdf_state` liest Felder im `E2EContext`, die der Main-Thread pro Frame
   setzt. Über Tabs und `open_pdfs` im Server-Thread zu laufen lieferte springende Werte.
-- E2E: `python3 scripts/e2e_pdf_pager.py`, Fixture `test_data/marp_test.pdf`. Der Test startet
+- E2E: `python3 scripts/e2e_pdf_pager.py`, das siebenseitige PDF erzeugt `write_pdf` nach
+  `tmp/e2e_pdf/pager.pdf`. Der Test startet
   mit eigenem, frischem `XDG_CONFIG_HOME` und übergibt das PDF als Startdatei: über eine
   wiederhergestellte Sitzung wechselt der aktive Tab und die Messung trifft Fremdzustand.
   `open_file` öffnet keinen PDF-Tab, das Laden hängt am Explorer-Pfad.
@@ -788,8 +792,8 @@ Eintrag an, und nur `UI.updateScroll` räumt die (10 Einträge große) Liste auf
   `src/debug/free_log.zig` (page_allocator: jede Freigabe = munmap, kein In-Place-Remap) und
   die Meldung enthält den Stack-Trace der Freigabe. So laufen lassen:
   `ZID_PAGE_ALLOC=1 python3 scripts/e2e_explorer.py` (jede E2E-Suite geht) oder
-  `python3 scripts/e2e_repro_text_uaf.py --page-alloc` (Ordnerwechsel, Bilder, Tooltip,
-  Picker-Klicks, Tab-Schließen). Der GPA unmappt kleine Buckets erst, wenn sie ganz leer sind,
+  `python3 scripts/e2e_repro_text_uaf.py --page-alloc` (Ordnerwechsel in einen erzeugten Baum
+  unter `tmp/e2e_uaf`, Bilder, Tooltip, Picker-Klicks, Tab-Schließen). Der GPA unmappt kleine Buckets erst, wenn sie ganz leer sind,
   darum fällt der Fehler im Fenster nur sporadisch auf.
 
 ## Bekannte Grenzen (kein Todo, bewusst so)

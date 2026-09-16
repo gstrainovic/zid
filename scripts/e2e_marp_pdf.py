@@ -16,7 +16,8 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from e2e_open_folder import ROOT, rpc, result_json, wait_port, settle, bounds, click_center, check, shot  # noqa: E402
+from e2e_fixtures import MARP_DECK  # noqa: E402
+from e2e_open_folder import ROOT, rpc, result_json, wait_port, settle, bounds, click_center, check, shot, start_zid, stop_zid  # noqa: E402
 from e2e_shortcuts import ui_state  # noqa: E402
 
 FX = os.path.join(ROOT, "tmp", "e2e_marp")
@@ -29,7 +30,7 @@ DECK_PDF = os.path.join(FX, "deck.pdf")
 def setup():
     shutil.rmtree(FX, ignore_errors=True)
     os.makedirs(FX)
-    shutil.copy(os.path.join(ROOT, "test_data", "marp_test.md"), DECK)
+    shutil.copy(MARP_DECK, DECK)
     with open(PLAIN, "w") as f:
         f.write("# Gewoehnliches Markdown\n\nOhne Front-Matter.\n")
     with open(NOTE, "w") as f:
@@ -257,10 +258,7 @@ STEPS = [
 def main():
     setup()
     log = open(os.path.join(ROOT, "tmp", "e2e_marp_pdf.log"), "w")
-    proc = subprocess.Popen(
-        [os.path.join(ROOT, "zig-out", "bin", "zid"), "--headless", "--ai=off"],
-        cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
-    )
+    proc = start_zid(["--headless", "--ai=off"], log)
     try:
         wait_port(proc)
         settle(20)
@@ -268,14 +266,7 @@ def main():
             step()
         print("ALL PASSED")
     finally:
-        try:
-            rpc("shutdown")
-        except Exception:
-            pass
-        try:
-            proc.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            proc.kill()
+        stop_zid(proc)
         log.close()
 
 

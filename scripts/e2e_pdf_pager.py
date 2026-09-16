@@ -12,9 +12,11 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from e2e_fixtures import write_pdf  # noqa: E402
 from e2e_open_folder import ROOT, rpc, result_json, wait_port, settle, bounds, click_center, check, shot, start_zid  # noqa: E402
 
-PDF = os.path.join(ROOT, "test_data", "marp_test.pdf")
+# Erzeugt statt eingecheckt: sieben Seiten wie das Marp-Testdeck.
+PDF = os.path.join(ROOT, "tmp", "e2e_pdf", "pager.pdf")
 
 
 def page():
@@ -101,6 +103,7 @@ def main():
     cfg = os.path.join(ROOT, "tmp", "e2e_pdf_cfg")
     shutil.rmtree(cfg, ignore_errors=True)
     env = dict(os.environ, XDG_CONFIG_HOME=cfg)
+    write_pdf(PDF, 7)
     wait_port_free()
     proc = start_zid(["--headless", "--ai=off", PDF], log, env=env)
     try:
