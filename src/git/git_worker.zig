@@ -286,7 +286,7 @@ pub fn taskGitTimeline(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.T
     switch (runGitCapture(alloc, dir, git_timeline.logArgs(&args_buf, param.text))) {
         .ok => |log_out| {
             defer alloc.free(log_out);
-            const body = try std.mem.concat(alloc, u8, &.{ std.mem.trimRight(u8, toplevel, "\r\n"), "\n", staged, "\x1c", log_out });
+            const body = try std.mem.concat(alloc, u8, &.{ repoRoot(toplevel), "\n", staged, "\x1c", log_out });
             defer alloc.free(body);
             return .{ .tag = .git_timeline, .payload = try git_history.frame(alloc, param.text, body), .allocator = alloc };
         },
@@ -327,6 +327,15 @@ pub const FieldsParam = struct {
         return "";
     }
 };
+
+/// Repo-Wurzel aus `rev-parse --show-toplevel`: Zeilenende weg, und unter Windows
+/// die "/" von git auf "\" — der Pfad wird mit Editor- und Explorer-Pfaden verglichen
+/// und zu Tab-Schlüsseln zusammengesetzt.
+fn repoRoot(toplevel: []u8) []const u8 {
+    const root = std.mem.trimRight(u8, toplevel, "\r\n");
+    if (std.fs.path.sep != '/') std.mem.replaceScalar(u8, toplevel[0..root.len], '/', std.fs.path.sep);
+    return root;
+}
 
 /// Erste Zeile einer git-Ausgabe oder leer (owned), Fehler zählen als leer.
 fn firstLineOrEmpty(alloc: std.mem.Allocator, cwd: []const u8, args: []const []const u8) []u8 {
@@ -376,7 +385,7 @@ pub fn taskGitGraphLog(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.T
             defer alloc.free(log_out);
             const branch = if (std.mem.startsWith(u8, current, "refs/heads/")) current["refs/heads/".len..] else "HEAD";
             const body = try std.mem.concat(alloc, u8, &.{
-                branch, "\x1f", current, "\x1f", upstream, "\x1f", base, "\x1f", std.mem.trimRight(u8, toplevel, "\r\n"), "\n", log_out,
+                branch, "\x1f", current, "\x1f", upstream, "\x1f", base, "\x1f", repoRoot(toplevel), "\n", log_out,
             });
             defer alloc.free(body);
             return .{ .tag = .git_graph_log, .payload = try git_history.frame(alloc, key, body), .allocator = alloc };
