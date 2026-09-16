@@ -60,6 +60,21 @@ def step_virtualized():
     shot("e2e_md_preview_scrolled.ppm")
 
 
+def step_table_fits():
+    """Tabellen bleiben im Fenster: die Spaltenbreiten werden aus dem Inhalt berechnet
+    und notfalls gestaucht. Vorher liefen breite Tabellen über den rechten Rand hinaus."""
+    print("--- Tabelle bleibt innerhalb des Viewports")
+    open_preview(os.path.join("libs", "zigdown", "test", "table.md"))
+    view = result_json("element_bounds", ["md_viewport"])
+    rows = [result_json("element_bounds_i", ["md_table_row", i]) for i in range(1, 4)]
+    found = [r for r in rows if r["found"] and r["h"] > 0]
+    check(len(found) >= 2, f"Tabellen im Layout: {len(found)}")
+    for i, r in enumerate(found):
+        right = r["x"] + r["w"]
+        check(right <= view["x"] + view["w"] + 1, f"Tabelle {i} endet bei {right:.0f} im Viewport")
+    shot("e2e_md_preview_table.ppm")
+
+
 def step_no_clay_errors():
     print("--- Clay meldet keine Fehler")
     time.sleep(0.5)
@@ -70,7 +85,7 @@ def step_no_clay_errors():
     check(not errors, f"{len(errors)} Clay-Fehler im Log")
 
 
-STEPS = [step_virtualized, step_no_clay_errors]
+STEPS = [step_virtualized, step_table_fits, step_no_clay_errors]
 
 
 def main():

@@ -23,12 +23,15 @@ pub const MarkdownView = struct {
     text_color: ?clay.Color = null,
     /// Laufende Nummer der Fließtext-Container im aktuellen Frame (für Element-IDs).
     run_counter: u32 = 0,
+    table_counter: u32 = 0,
     /// Salz der Pane, die diese Ansicht gerade zeichnet (`UI.renderPane`): dieselbe Ansicht in
     /// zwei Panes bekommt so verschiedene Clay-IDs.
     pane_salt: u32 = 0,
     /// Obergrenze für die Umbruchbreite. Nötig in horizontal scrollbaren
     /// Viewports, wo Clay dem Container die volle Inhaltsbreite meldet.
     wrap_width_hint: ?f32 = null,
+    /// Feste Umbruchbreite während eine Tabellenzelle gerendert wird, sonst null.
+    wrap_width_forced: ?f32 = null,
 
     /// Gemessene Höhe je Block auf oberster Ebene, für die Virtualisierung.
     block_heights: std.ArrayListUnmanaged(f32) = .empty,
@@ -379,6 +382,7 @@ pub const MarkdownView = struct {
         var effective_theme = theme;
         if (self.text_color) |c| effective_theme.text = c;
         self.run_counter = 0;
+        self.table_counter = 0;
         self.renderBlock(doc, arena, effective_theme, ui_ptr);
     }
 
@@ -487,6 +491,7 @@ pub const MarkdownView = struct {
         var effective_theme = theme;
         if (self.text_color) |c| effective_theme.text = c;
         self.run_counter = 0;
+        self.table_counter = 0;
 
         // Sichtbaren Bereich bestimmen. Ein Bildschirm Vorlauf nach oben und
         // unten, damit beim Scrollen nichts nachklappt.
@@ -633,6 +638,7 @@ pub const MarkdownView = struct {
                         var effective_theme = theme;
                         if (self.text_color) |cc| effective_theme.text = cc;
                         self.run_counter = 0;
+        self.table_counter = 0;
                         // Grundschrift wie im Export, skaliert auf den Rahmen. Die
                         // Überschriften-Faktoren in renderBlock (2.0 / 1.5 / 1.2)
                         // sind dieselben wie im Export-CSS.
@@ -1019,50 +1025,189 @@ pub const MarkdownView = struct {
         }
     }
 
+    /// Breite einer Zelle, wie sie ein Browser für die Tabellenberechnung misst:
+    /// `max` ist die Breite in einer einzigen Zeile, `min` die des breitesten
+    /// unteilbaren Stücks (längstes Wort, ganzer Codespan). Leerzeichen sind
+    /// Umbruchstellen und zählen nicht zur Mindestbreite.
+    const CellWidth = struct { min: f32 = 0, max: f32 = 0 };
+
+    /// Ein Textstück in die Messung einrechnen. Ein Leerzeichen beendet das laufende Wort.
+    fn addPiece(line: *f32, word: *f32, out: *CellWidth, text: []const u8, size: f32, fudge: f32) void {
+        const w = ui_mod.measureTextWidth(text, size) + fudge;
+        line.* += w;
+        if (std.mem.eql(u8, text, " ")) {
+            out.min = @max(out.min, word.*);
+            word.* = 0;
+        } else {
+            word.* += w;
+        }
+    }
+
+    fn measureCell(self: *const Self, block: *const Block, size: f32) CellWidth {
+        // Clay schlägt je Textelement 0.25 px auf (siehe `measureText` in mod.zig). Ohne
+        // denselben Aufschlag ist eine Spalte ein Viertelpixel je Wort zu schmal und der
+        // Umbruch schlägt zu früh zu — sichtbar an einer Kopfzelle wie „Nr.", die in
+        // „Nr" und „." zerfiel.
+        const fudge: f32 = 0.25;
+        var out: CellWidth = .{};
+        switch (block.*) {
+            .Container => |*c| for (c.children.items) |*child| {
+                const w = self.measureCell(child, size);
+                out.min = @max(out.min, w.min);
+                out.max = @max(out.max, w.max);
+            },
+            .Leaf => |*leaf| {
+                // `line` ist die Breite ohne Umbruch, `word` die des laufenden Worts.
+                // Umgebrochen wird nur an Leerzeichen, also zählen aufeinanderfolgende
+                // Stücke ohne Leerzeichen dazwischen als ein Wort: „Nr." kommt als „Nr"
+                // und „." und passt sonst scheinbar in eine zu schmale Spalte.
+                var line: f32 = 0;
+                var word: f32 = 0;
+                for (leaf.inlines.items) |*item| {
+                    switch (item.content) {
+                        .text => |t| addPiece(&line, &word, &out, t.text, size, fudge),
+                        .codespan => |cs| addPiece(&line, &word, &out, cs.text, size, fudge),
+                        .autolink => |a| addPiece(&line, &word, &out, a.url, size, fudge),
+                        .link => |l| for (l.text.items) |t| addPiece(&line, &word, &out, t.text, size, fudge),
+                        .linebreak => {
+                            out.max = @max(out.max, line);
+                            out.min = @max(out.min, word);
+                            line = 0;
+                            word = 0;
+                        },
+                        else => {},
+                    }
+                }
+                out.max = @max(out.max, line);
+                out.min = @max(out.min, word);
+            },
+        }
+        return out;
+    }
+
     /// Tabelle als Raster. zigdown liefert die Zellen flach, Zeile für Zeile je `ncol`
-    /// Paragraphen; die erste Zeile ist der Kopf. Spaltenbreiten anteilig aus
-    /// `relative_width` (Länge der Trennzeile), sonst gleich breit. Vorher lagen alle
-    /// Zellen untereinander, weil die Tabelle ein gewöhnlicher top_to_bottom-Container war.
+    /// Paragraphen; die erste Zeile ist der Kopf. Vorher lagen alle Zellen untereinander,
+    /// weil die Tabelle ein gewöhnlicher top_to_bottom-Container war.
+    ///
+    /// Spaltenbreiten wie im Browser (und damit wie in der VS-Code-Vorschau): jede Spalte
+    /// will ihre Wunschbreite `max` (längste Zelle ohne Umbruch); passt die Summe nicht,
+    /// wird proportional verkleinert, aber keine Spalte unter ihre Mindestbreite `min`.
+    /// `relative_width` aus der Trennzeile (`|---|-----|`) bleibt ungenutzt — die Zahl der
+    /// Striche sagt nichts über den Inhalt, und Browser werten sie ebenso wenig aus.
+    ///
+    /// Anders als der Browser bricht die Tabelle nie über den Rand: es gibt keinen
+    /// waagerechten Scrollbalken in der Vorschau, überstehende Spalten wären verloren.
+    /// Notfalls werden deshalb auch die Mindestbreiten anteilig gestaucht; zu lange Wörter
+    /// schneidet dann die Zelle ab.
     fn renderTable(self: *Self, container: *const zigdown.Container, arena: std.mem.Allocator, theme: Theme, ui_ptr: *ui_mod.UI) void {
-        const tbl = container.content.Table;
         const cells = container.children.items;
-        const ncol = tbl.ncol;
+        const ncol = container.content.Table.ncol;
         if (ncol == 0) return;
         const nrow = cells.len / ncol;
-        const widths = tbl.relative_width.items;
-        var total: f32 = 0;
-        if (widths.len == ncol) for (widths) |w| {
-            total += @floatFromInt(w);
+        if (nrow == 0) return;
+
+        self.table_counter += 1;
+        // Gemessen wird die Hülle, nicht die Tabelle: die Tabelle ist `fit` und schrumpft,
+        // ihre eigene Breite als Vorgabe zu nehmen würde sie Frame für Frame enger machen.
+        const row_id = self.idi("md_table_row", self.table_counter);
+        const data = clay.getElementData(row_id);
+        var avail: f32 = self.wrap_width_hint orelse 800;
+        if (data.found and data.bounding_box.width > 0) avail = data.bounding_box.width;
+
+        const size_f: f32 = @floatFromInt(self.font_size);
+        const cell_pad: f32 = 16; // 8 links + 8 rechts
+        const ncol_f: f32 = @floatFromInt(ncol);
+        // Rahmen: außen 1 px je Seite, zwischen den Spalten je 1 px
+        const inner = @max(ncol_f, avail - 2 - (ncol_f - 1) - cell_pad * ncol_f);
+
+        const cols = arena.alloc(CellWidth, ncol) catch return;
+        @memset(cols, .{});
+        for (0..nrow) |r| for (0..ncol) |c| {
+            const w = self.measureCell(&cells[r * ncol + c], size_f);
+            cols[c].min = @max(cols[c].min, w.min);
+            cols[c].max = @max(cols[c].max, w.max);
         };
+
+        const widths = arena.alloc(f32, ncol) catch return;
+        var sum_max: f32 = 0;
+        for (cols) |cw| sum_max += cw.max;
+        if (sum_max <= inner or sum_max <= 0) {
+            for (cols, widths) |cw, *w| w.* = cw.max;
+        } else {
+            // Proportional stauchen, dabei Spalten an ihrer Mindestbreite festnageln und
+            // den Rest neu verteilen. Zwei Durchgänge reichen für die üblichen Tabellen.
+            var scale = inner / sum_max;
+            for (0..2) |_| {
+                var pinned: f32 = 0;
+                var flex: f32 = 0;
+                for (cols) |cw| {
+                    if (cw.max * scale < cw.min) pinned += cw.min else flex += cw.max;
+                }
+                if (flex <= 0) break;
+                scale = @max(0, inner - pinned) / flex;
+            }
+            for (cols, widths) |cw, *w| w.* = @max(cw.min, cw.max * scale);
+            var total: f32 = 0;
+            for (widths) |w| total += w;
+            // Reichen selbst die Mindestbreiten nicht, zahlt die jeweils breiteste Spalte:
+            // sie hat die meisten Wörter und bricht anständig um, während eine schmale
+            // Spalte wie „Nr." schon bei zwei Pixeln weniger mitten im Wort umbräche.
+            var deficit = total - inner;
+            var guard: usize = 0;
+            while (deficit > 0.01 and guard < 1000) : (guard += 1) {
+                var widest: usize = 0;
+                for (widths, 0..) |w, k| {
+                    if (w > widths[widest]) widest = k;
+                }
+                var second: f32 = 0;
+                for (widths, 0..) |w, k| {
+                    if (k != widest and w > second) second = w;
+                }
+                const cut = @min(deficit, @max(1, widths[widest] - second));
+                widths[widest] -= cut;
+                deficit -= cut;
+            }
+        }
+
         var head_theme = theme;
         head_theme.text = theme.primary;
 
         clay.UI()(.{
-            .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .top_to_bottom },
-            .border = .{ .width = .all(1), .color = theme.border },
+            .id = row_id,
+            .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .left_to_right },
         })({
-            for (0..nrow) |r| {
-                clay.UI()(.{
-                    .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .left_to_right },
-                    .background_color = if (r == 0) theme.surface else .{ 0, 0, 0, 0 },
-                    .border = .{ .width = .{ .between_children = 1 }, .color = theme.border },
-                })({
-                    for (0..ncol) |c| {
-                        const frac: f32 = if (total > 0)
-                            @as(f32, @floatFromInt(widths[c])) / total
-                        else
-                            1.0 / @as(f32, @floatFromInt(ncol));
-                        clay.UI()(.{
-                            .layout = .{
-                                .sizing = .{ .w = .percent(frac), .h = .grow },
-                                .padding = .{ .left = 8, .right = 8, .top = 4, .bottom = 4 },
-                            },
-                        })({
-                            self.renderBlock(&cells[r * ncol + c], arena, if (r == 0) head_theme else theme, ui_ptr);
-                        });
-                    }
-                });
-            }
+            clay.UI()(.{
+                .layout = .{ .sizing = .{ .w = .fit, .h = .fit }, .direction = .top_to_bottom },
+                .border = .{ .width = .all(1), .color = theme.border },
+            })({
+                for (0..nrow) |r| {
+                    clay.UI()(.{
+                        .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .left_to_right },
+                        .background_color = if (r == 0) theme.surface else .{ 0, 0, 0, 0 },
+                        .border = .{ .width = .{ .between_children = 1 }, .color = theme.border },
+                    })({
+                        for (0..ncol) |c| {
+                            clay.UI()(.{
+                                .layout = .{
+                                    .sizing = .{ .w = .fixed(widths[c] + cell_pad), .h = .grow },
+                                    .padding = .{ .left = 8, .right = 8, .top = 4, .bottom = 4 },
+                                },
+                            })({
+                                // Kein `clip` je Zelle: Clay hält nur zehn Clip-Container im
+                                // Kontext, eine Tabelle sprengt das sofort („out of bounds array
+                                // access"). Stattdessen bricht `splitWide` zu lange Wörter um.
+                                // Der Umbruch richtet sich nach der berechneten Spaltenbreite,
+                                // nicht nach dem gemessenen Element.
+                                // +2: `wrapLines` rechnet mit `avail - 2` Sicherheitsabstand,
+                                // sonst bräche eine Zelle genau an ihrer eigenen Wunschbreite um.
+                                self.wrap_width_forced = widths[c] + 2;
+                                self.renderBlock(&cells[r * ncol + c], arena, if (r == 0) head_theme else theme, ui_ptr);
+                                self.wrap_width_forced = null;
+                            });
+                        }
+                    });
+                }
+            });
         });
     }
 
@@ -1119,6 +1264,39 @@ pub const MarkdownView = struct {
         self.flushPieces(&pieces, base_size, theme, arena);
     }
 
+    /// Stücke, die für sich allein breiter sind als die Zeile, in passende Teile zerlegen.
+    /// Betrifft lange Pfade und URLs ohne Leerzeichen: sonst ragen sie aus ihrer Spalte
+    /// oder aus dem Fenster, und die Vorschau hat keinen waagerechten Scrollbalken.
+    /// Getrennt wird an UTF-8-Grenzen, nicht mitten in einem Zeichen.
+    fn splitWide(arena: std.mem.Allocator, pieces: []const Piece, size: f32, max_width: f32) []const Piece {
+        if (max_width <= 0) return pieces;
+        var any = false;
+        for (pieces) |p| {
+            if (ui_mod.measureTextWidth(p.text, size) > max_width) any = true;
+        }
+        if (!any) return pieces;
+
+        var out: std.ArrayListUnmanaged(Piece) = .empty;
+        for (pieces) |p| {
+            var rest = p.text;
+            while (rest.len > 0 and ui_mod.measureTextWidth(rest, size) > max_width) {
+                // Längstes Präfix suchen, das noch passt; mindestens ein Zeichen.
+                var take: usize = 0;
+                var i: usize = 0;
+                while (i < rest.len) {
+                    i += std.unicode.utf8ByteSequenceLength(rest[i]) catch 1;
+                    if (ui_mod.measureTextWidth(rest[0..i], size) > max_width) break;
+                    take = i;
+                }
+                if (take == 0) take = std.unicode.utf8ByteSequenceLength(rest[0]) catch 1;
+                out.append(arena, .{ .text = rest[0..take], .color = p.color, .is_space = false }) catch return pieces;
+                rest = rest[take..];
+            }
+            if (rest.len > 0) out.append(arena, .{ .text = rest, .color = p.color, .is_space = p.is_space }) catch return pieces;
+        }
+        return out.items;
+    }
+
     fn flushPieces(self: *Self, pieces: *std.ArrayListUnmanaged(Piece), base_size: u16, theme: Theme, arena: std.mem.Allocator) void {
         if (pieces.items.len == 0) return;
         defer pieces.clearRetainingCapacity();
@@ -1127,8 +1305,12 @@ pub const MarkdownView = struct {
         const id_str = std.fmt.allocPrint(arena, "md_run_{x}_{x}_{d}", .{ @intFromPtr(self), self.pane_salt, self.run_counter }) catch "md_run";
         const run_id = clay.ElementId.ID(id_str);
         const data = clay.getElementData(run_id);
-        var avail: f32 = if (data.found) data.bounding_box.width else 0;
+        // In einer Tabellenzelle steht die Breite fest (`wrap_width_forced`); die gemessene
+        // Breite des Laufs taugt dort nicht, weil die klippende Zelle ihre Kinder am Inhalt
+        // misst und ein zu kleiner Wert vorzeitig umbräche.
+        var avail: f32 = if (data.found) data.bounding_box.width else (self.wrap_width_hint orelse 0);
         if (self.wrap_width_hint) |hint| avail = @min(avail, hint);
+        if (self.wrap_width_forced) |w| avail = w;
         const size_f: f32 = @floatFromInt(base_size);
 
         clay.UI()(.{
@@ -1142,14 +1324,15 @@ pub const MarkdownView = struct {
                 const text = std.mem.trim(u8, run.items, " ");
                 if (text.len > 0) clay.text(text, .{ .font_size = base_size, .color = theme.text, .wrap_mode = .words });
             } else {
-                const items = arena.alloc(word_wrap.Item, pieces.items.len) catch return;
-                for (pieces.items, 0..) |p, i| {
+                const parts = splitWide(arena, pieces.items, size_f, avail - 2);
+                const items = arena.alloc(word_wrap.Item, parts.len) catch return;
+                for (parts, 0..) |p, i| {
                     items[i] = .{ .width = ui_mod.measureTextWidth(p.text, size_f), .is_space = p.is_space };
                 }
                 const lines = word_wrap.wrapLines(arena, items, avail - 2) catch return;
                 for (lines) |line| {
                     clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .left_to_right, .child_gap = 0 } })({
-                        for (pieces.items[line.start..line.end]) |p| {
+                        for (parts[line.start..line.end]) |p| {
                             clay.text(p.text, .{ .font_size = base_size, .color = p.color, .wrap_mode = .none });
                         }
                     });

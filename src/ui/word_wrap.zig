@@ -18,10 +18,13 @@ pub const Line = struct {
     end: usize,
 };
 
-/// Regeln: Stücke werden greedy aufgefüllt. Ein Stück, das die Breite sprengt,
-/// wandert auf die nächste Zeile; Leerzeichen am Zeilenanfang werden verschluckt,
-/// am Zeilenende dürfen sie stehen bleiben. Ein einzelnes Stück breiter als
-/// max_width bekommt eine eigene Zeile. Rückgabe gehört dem Aufrufer.
+/// Regeln: Wörter werden greedy aufgefüllt. Umgebrochen wird nur an Leerzeichen —
+/// ein Wort ist die ganze Folge der Stücke bis zum nächsten Leerzeichen, denn
+/// zigdown liefert `code`, Satzzeichen und Wortteile als eigene Stücke: „Nr." kommt
+/// als „Nr" und „.", und eine Trennung dazwischen gäbe es in keinem Browser.
+/// Leerzeichen am Zeilenanfang werden verschluckt, am Zeilenende dürfen sie stehen
+/// bleiben, solange sie noch passen. Ein Wort breiter als max_width bekommt eine
+/// eigene Zeile. Rückgabe gehört dem Aufrufer.
 pub fn wrapLines(alloc: std.mem.Allocator, items: []const Item, max_width: f32) ![]Line {
     var lines: std.ArrayListUnmanaged(Line) = .empty;
     errdefer lines.deinit(alloc);
@@ -34,10 +37,24 @@ pub fn wrapLines(alloc: std.mem.Allocator, items: []const Item, max_width: f32) 
 
         const start = i;
         var width: f32 = 0;
-        while (i < items.len) : (i += 1) {
-            const item_w = items[i].width;
-            if (width + item_w > max_width and i > start) break;
-            width += item_w;
+        while (i < items.len) {
+            var end = i;
+            var word: f32 = 0;
+            while (end < items.len and !items[end].is_space) : (end += 1) word += items[end].width;
+            if (width + word > max_width and i > start) break;
+            width += word;
+            i = end;
+            // Leerzeichen hinter dem Wort gehören noch auf diese Zeile, solange sie passen
+            var fits = true;
+            while (i < items.len and items[i].is_space) {
+                if (width + items[i].width > max_width) {
+                    fits = false;
+                    break;
+                }
+                width += items[i].width;
+                i += 1;
+            }
+            if (!fits) break;
         }
         try lines.append(alloc, .{ .start = start, .end = i });
     }
@@ -82,6 +99,16 @@ test "wrapLines: überlanges Wort bekommt eine eigene Zeile" {
     const lines = try wrapLines(testing.allocator, &.{ w, sp, long, sp, w }, 24);
     defer testing.allocator.free(lines);
     try expectLines(&.{ .{ .start = 0, .end = 2 }, .{ .start = 2, .end = 3 }, .{ .start = 4, .end = 5 } }, lines);
+}
+
+test "wrapLines: Stücke ohne Leerzeichen dazwischen bleiben zusammen" {
+    // „Nr" + „." ist ein Wort: bei 12 passt es nicht neben das erste, wandert aber
+    // als Ganzes auf die nächste Zeile statt zwischen „Nr" und „." zu brechen.
+    const nr = Item{ .width = 8 };
+    const dot = Item{ .width = 4 };
+    const lines = try wrapLines(testing.allocator, &.{ w, sp, nr, dot }, 12);
+    defer testing.allocator.free(lines);
+    try expectLines(&.{ .{ .start = 0, .end = 2 }, .{ .start = 2, .end = 4 } }, lines);
 }
 
 test "wrapLines: leere Eingabe und nur Leerzeichen ergeben keine Zeilen" {

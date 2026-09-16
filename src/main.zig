@@ -904,6 +904,7 @@ pub fn main() !void {
                         } else {
                             const view = allocator.create(@import("ui/markdown_view.zig").MarkdownView) catch unreachable;
                             view.* = @import("ui/markdown_view.zig").MarkdownView.init(ui_system.allocator, md_content, abs_source_path);
+                            view.font_size = ui_system.previewFontSize();
                             const path_copy = allocator.dupe(u8, path) catch unreachable;
                             ui_system.open_markdown_views.put(path_copy, view) catch {};
                         }
