@@ -2,6 +2,7 @@ const std = @import("std");
 const clay = @import("clay");
 const zigdown = @import("zigdown");
 const word_wrap = @import("word_wrap.zig");
+const md_select = @import("md_select.zig");
 const ui_mod = @import("mod.zig");
 const shortcuts = @import("shortcuts");
 const marp = @import("marp");
@@ -84,6 +85,26 @@ pub const MarkdownView = struct {
     pending_split_v: bool = false,
     pending_split_h: bool = false,
     pending_export_pdf: bool = false,
+    pending_copy: bool = false,
+
+    /// Textauswahl (Logik in `md_select.zig`): Anker = Mausdruck, Kopf folgt dem Ziehen.
+    sel_anchor: ?md_select.Pos = null,
+    sel_head: ?md_select.Pos = null,
+    selecting: bool = false,
+    sel_color: clay.Color = .{ 100, 120, 200, 110 },
+    sel_counter: u32 = 0,
+    /// Block auf oberster Ebene, der gerade gezeichnet wird, und seine Zeilen bisher.
+    cur_block: u32 = 0,
+    block_line_counter: u32 = 0,
+    /// Im letzten Frame gezeichnete Zeilen; der Index ist die `md_line`-ID, die Geometrie
+    /// holt `hitLine` aus Clay.
+    frame_lines: std.ArrayListUnmanaged(FrameLine) = .empty,
+    /// Text jeder je gezeichneten Zeile (Schlüssel Block<<32 | Zeile). Bleibt über Frames,
+    /// damit eine Auswahl auch kopierbar ist, wenn ihre Enden aus dem Sichtbereich sind.
+    line_texts: std.AutoHashMapUnmanaged(u64, LineText) = .empty,
+    /// Umbruchbreite und Schriftgröße des letzten Frames: ändern sie sich, stimmen die
+    /// Zeilennummern der Auswahl nicht mehr, sie wird aufgehoben.
+    sel_layout_key: f32 = -1,
 
     /// Geparster Dokumentbaum, einmal pro View erzeugt. Arena und Ergebnis
     /// liegen auf dem Heap: Views leben in ArrayLists und dürfen wandern,
@@ -96,6 +117,14 @@ pub const MarkdownView = struct {
     code_highlighters: ?std.StringHashMap(*flow_core.highlight.SyntaxHighlighter) = null,
 
     const Self = @This();
+
+    const FrameLine = struct { block: u32, line: u32, size: f32 };
+    const LineText = struct { text: []u8, soft: bool };
+    const LineCtx = struct { id: clay.ElementId, range: ?md_select.Range };
+
+    fn lineKey(block: u32, line: u32) u64 {
+        return (@as(u64, block) << 32) | line;
+    }
 
     fn colorFromTag(fg: u32) clay.Color {
         return .{
@@ -124,6 +153,10 @@ pub const MarkdownView = struct {
 
     pub fn deinit(self: *Self) void {
         self.block_heights.deinit(self.allocator);
+        self.frame_lines.deinit(self.allocator);
+        var lt = self.line_texts.valueIterator();
+        while (lt.next()) |v| self.allocator.free(v.text);
+        self.line_texts.deinit(self.allocator);
         self.dropSlideDocument();
         if (self.deck) |*d| {
             d.deinit();
@@ -180,6 +213,7 @@ pub const MarkdownView = struct {
                     .split_vertical => self.pending_split_v = true,
                     .split_horizontal => self.pending_split_h = true,
                     .md_export_pdf => self.pending_export_pdf = true,
+                    .copy => self.pending_copy = true,
                     else => {},
                 }
                 return true;
@@ -198,12 +232,11 @@ pub const MarkdownView = struct {
             return false;
         }
 
-        if (self.content_height <= self.viewport_height) return false;
-
-        if (x < self.scrollbar_track_x) return false;
-        if (x > self.scrollbar_track_x + self.scrollbar_width) return false;
-        if (y < self.scrollbar_track_y) return false;
-        if (y > self.scrollbar_track_y + self.viewport_height) return false;
+        // Scrollbalken zuerst, jeder andere Klick gilt dem Text (Auswahl).
+        const on_scrollbar = self.content_height > self.viewport_height and
+            x >= self.scrollbar_track_x and x <= self.scrollbar_track_x + self.scrollbar_width and
+            y >= self.scrollbar_track_y and y <= self.scrollbar_track_y + self.viewport_height;
+        if (!on_scrollbar) return self.beginSelection(x, y);
 
         if (y >= self.scrollbar_thumb_y and y <= self.scrollbar_thumb_y + self.scrollbar_thumb_height) {
             self.scrollbar_dragging = true;
@@ -267,6 +300,194 @@ pub const MarkdownView = struct {
 
     pub fn handleMouseUp(self: *Self) void {
         self.scrollbar_dragging = false;
+        self.selecting = false;
+    }
+
+    pub fn handleMouseMove(self: *Self, x: f32, y: f32) void {
+        self.handleScrollbarMouseMove(x, y);
+        if (self.selecting) {
+            if (self.hitLine(x, y)) |p| self.sel_head = p;
+        }
+    }
+
+    // ---- Textauswahl ----------------------------------------------------------------
+
+    /// Klick auf eine Zeile setzt den Anker; ein Klick ohne Zeile hebt die Auswahl nur auf.
+    fn beginSelection(self: *Self, x: f32, y: f32) bool {
+        self.clearSelection();
+        if (!self.hitElement("md_viewport", x, y)) return false;
+        const pos = self.hitLine(x, y) orelse return false;
+        self.sel_anchor = pos;
+        self.sel_head = pos;
+        self.selecting = true;
+        return true;
+    }
+
+    pub fn clearSelection(self: *Self) void {
+        self.sel_anchor = null;
+        self.sel_head = null;
+        self.selecting = false;
+    }
+
+    fn span(self: *const Self) ?md_select.Span {
+        return md_select.ordered(self.sel_anchor orelse return null, self.sel_head orelse return null);
+    }
+
+    pub fn hasSelection(self: *const Self) bool {
+        return self.span() != null;
+    }
+
+    /// Position unter (x, y) aus den Zeilen des letzten Frames: die getroffene Zeile, sonst
+    /// die nächste darüber (Ziehen über den Rand hinaus klemmt an Anfang und Ende).
+    fn hitLine(self: *Self, x: f32, y: f32) ?md_select.Pos {
+        const n = self.frame_lines.items.len;
+        if (n == 0) return null;
+        const boxes = self.allocator.alloc(md_select.LineBox, n) catch return null;
+        defer self.allocator.free(boxes);
+        for (boxes, 0..) |*b, i| {
+            const bb = clay.getElementData(self.idi("md_line", @intCast(i))).bounding_box;
+            b.* = .{ .y = bb.y, .h = bb.height };
+        }
+        const i = md_select.lineAtY(boxes, y) orelse return null;
+        const fl = self.frame_lines.items[i];
+        const bb = clay.getElementData(self.idi("md_line", @intCast(i))).bounding_box;
+        const lt = self.line_texts.get(lineKey(fl.block, fl.line)) orelse return null;
+        return .{ .block = fl.block, .line = fl.line, .offset = md_select.offsetAtX(ui_mod.measureTextWidth, fl.size, lt.text, x - bb.x) };
+    }
+
+    /// Ausgewählter Text, gehört dem Aufrufer; null ohne Auswahl. Zeilen kommen aus dem
+    /// Cache, weiche Umbrüche werden wieder zu Leerzeichen; ein Block dazwischen, der nie
+    /// gezeichnet wurde, kommt als Fließtext aus dem Dokumentbaum.
+    pub fn selectedText(self: *Self, alloc: std.mem.Allocator) ?[]u8 {
+        const sp = self.span() orelse return null;
+        var out: std.ArrayListUnmanaged(u8) = .empty;
+        var prev_block: ?u32 = null;
+        var block = sp.start.block;
+        while (block <= sp.end.block) : (block += 1) {
+            var line: u32 = if (block == sp.start.block) sp.start.line else 0;
+            var any = false;
+            while (self.line_texts.get(lineKey(block, line))) |lt| : (line += 1) {
+                if (block == sp.end.block and line > sp.end.line) break;
+                const from: usize = if (block == sp.start.block and line == sp.start.line) @min(@as(usize, sp.start.offset), lt.text.len) else 0;
+                const to: usize = if (block == sp.end.block and line == sp.end.line) @min(@as(usize, sp.end.offset), lt.text.len) else lt.text.len;
+                if (prev_block) |pb| {
+                    trimTrailingSpaces(&out);
+                    out.appendSlice(alloc, md_select.joinWith(pb, block, lt.soft)) catch {};
+                }
+                out.appendSlice(alloc, lt.text[from..@max(from, to)]) catch {};
+                // Absätze enden auf ein Leerzeichen-Stück; das gehört nicht in die Zwischenablage.
+                if (to == lt.text.len) trimTrailingSpaces(&out);
+                prev_block = block;
+                any = true;
+            }
+            if (!any and block != sp.start.block and block != sp.end.block) {
+                // Nie gezeichneter Block: Fließtext aus dem Baum. Leere Blöcke (zigdown macht
+                // aus einer Leerzeile einen `Break`) lassen keinen Trenner zurück.
+                const before = out.items.len;
+                self.appendBlockText(alloc, block, &out);
+                if (out.items.len == before) continue;
+                if (prev_block != null) out.insertSlice(alloc, before, "\n\n") catch {};
+                prev_block = block;
+            }
+        }
+        if (out.items.len == 0) {
+            out.deinit(alloc);
+            return null;
+        }
+        return out.toOwnedSlice(alloc) catch {
+            out.deinit(alloc);
+            return null;
+        };
+    }
+
+    fn trimTrailingSpaces(out: *std.ArrayListUnmanaged(u8)) void {
+        while (out.items.len > 0 and out.items[out.items.len - 1] == ' ') out.items.len -= 1;
+    }
+
+    fn appendBlockText(self: *Self, alloc: std.mem.Allocator, block: u32, out: *std.ArrayListUnmanaged(u8)) void {
+        const doc = self.cachedDocument() orelse return;
+        const children = switch (doc.*) {
+            .Container => |*c| c.children.items,
+            else => return,
+        };
+        if (block >= children.len) return;
+        appendPlainText(alloc, &children[block], out);
+    }
+
+    fn appendPlainText(alloc: std.mem.Allocator, block: *const Block, out: *std.ArrayListUnmanaged(u8)) void {
+        switch (block.*) {
+            .Container => |*c| for (c.children.items, 0..) |*child, i| {
+                if (i > 0) out.append(alloc, '\n') catch {};
+                appendPlainText(alloc, child, out);
+            },
+            .Leaf => |*l| switch (l.content) {
+                .Code => |c| out.appendSlice(alloc, c.text orelse "") catch {},
+                else => for (l.inlines.items) |*it| appendInlineText(alloc, it, out),
+            },
+        }
+    }
+
+    fn appendInlineText(alloc: std.mem.Allocator, item: *const Inline, out: *std.ArrayListUnmanaged(u8)) void {
+        switch (item.content) {
+            .text => |t| out.appendSlice(alloc, t.text) catch {},
+            .codespan => |c| out.appendSlice(alloc, c.text) catch {},
+            .link => |l| for (l.text.items) |t| out.appendSlice(alloc, t.text) catch {},
+            else => {},
+        }
+    }
+
+    fn beginBlock(self: *Self, index: u32) void {
+        self.cur_block = index;
+        self.block_line_counter = 0;
+    }
+
+    /// Zeilen aus einem früheren Frame, die es nach neuem Umbruch nicht mehr gibt, vergessen.
+    fn endBlock(self: *Self) void {
+        var line = self.block_line_counter;
+        while (self.line_texts.fetchRemove(lineKey(self.cur_block, line))) |kv| : (line += 1) {
+            self.allocator.free(kv.value.text);
+        }
+    }
+
+    /// Merkt eine auswählbare Zeile (Text im Cache, Geometrie-Index für den nächsten Frame)
+    /// und liefert die Clay-ID der Reihe samt ausgewähltem Bereich.
+    fn registerLine(self: *Self, text: []const u8, soft: bool, size: u16) LineCtx {
+        const block = self.cur_block;
+        const line = self.block_line_counter;
+        self.block_line_counter += 1;
+        const idx: u32 = @intCast(self.frame_lines.items.len);
+        self.frame_lines.append(self.allocator, .{ .block = block, .line = line, .size = @floatFromInt(size) }) catch {};
+        const id = self.idi("md_line", idx);
+        const gop = self.line_texts.getOrPut(self.allocator, lineKey(block, line)) catch return .{ .id = id, .range = null };
+        if (!gop.found_existing or !std.mem.eql(u8, gop.value_ptr.text, text) or gop.value_ptr.soft != soft) {
+            if (gop.found_existing) self.allocator.free(gop.value_ptr.text);
+            gop.value_ptr.* = .{ .text = self.allocator.dupe(u8, text) catch "", .soft = soft };
+        }
+        const range = if (self.span()) |sp| md_select.lineRange(sp, block, line) else null;
+        return .{ .id = id, .range = range };
+    }
+
+    /// Ein Textstück mit Auswahlhervorhebung: der ausgewählte Teil steht in einem eigenen
+    /// Element mit Hintergrund (`md_sel`, ab 1), Text davor und danach bleiben nackte
+    /// Textelemente. Leere Stücke bleiben leere Textelemente (Zeilenhöhe in Codeblöcken).
+    fn textSel(self: *Self, text: []const u8, piece_start: u32, size: u16, color: clay.Color, range: ?md_select.Range) void {
+        const cfg: clay.TextElementConfig = .{ .font_size = size, .color = color, .wrap_mode = .none };
+        if (range) |r| {
+            if (md_select.intersect(r, piece_start, @intCast(text.len))) |ir| {
+                if (ir.start > 0) clay.text(text[0..ir.start], cfg);
+                self.sel_counter += 1;
+                clay.UI()(.{
+                    .id = self.idi("md_sel", self.sel_counter),
+                    .layout = .{ .sizing = .{ .w = .fit, .h = .fit } },
+                    .background_color = self.sel_color,
+                })({
+                    clay.text(text[ir.start..ir.end], cfg);
+                });
+                if (ir.end < text.len) clay.text(text[ir.end..], cfg);
+                return;
+            }
+        }
+        clay.text(text, cfg);
     }
 
     pub fn showContextMenu(self: *Self, x: f32, y: f32) void {
@@ -279,6 +500,7 @@ pub const MarkdownView = struct {
     fn menuHidden(self: *const Self) ctx_menu.Hidden {
         var hidden = ctx_menu.none;
         if (self.deck == null) hidden.insert(.md_export_pdf);
+        if (!self.hasSelection()) hidden.insert(.copy);
         return hidden;
     }
 
@@ -386,7 +608,9 @@ pub const MarkdownView = struct {
         var effective_theme = theme;
         if (self.text_color) |c| effective_theme.text = c;
         self.resetCounters();
+        self.beginBlock(0);
         self.renderBlock(doc, arena, effective_theme, ui_ptr);
+        self.endBlock();
     }
 
     /// Zu Beginn jedes Frames: gleiche Elemente bekommen so in jedem Frame dieselbe ID.
@@ -396,6 +620,10 @@ pub const MarkdownView = struct {
         self.quote_counter = 0;
         self.list_item_counter = 0;
         self.code_counter = 0;
+        self.sel_counter = 0;
+        self.frame_lines.clearRetainingCapacity();
+        self.cur_block = 0;
+        self.block_line_counter = 0;
     }
 
     /// Abstand zwischen zwei Blöcken auf oberster Ebene (`child_gap` im Dokument).
@@ -534,12 +762,14 @@ pub const MarkdownView = struct {
 
         self.spacer("md_v_top", before);
         for (children[first .. last + 1], first..) |*child, i| {
+            self.beginBlock(@intCast(i));
             clay.UI()(.{
                 .id = self.idi("md_block", @intCast(i)),
                 .layout = .{ .sizing = .{ .w = .grow, .h = .fit } },
             })({
                 self.renderBlock(child, arena, effective_theme, ui_ptr);
             });
+            self.endBlock();
         }
         self.spacer("md_v_bottom", after);
 
@@ -758,6 +988,12 @@ pub const MarkdownView = struct {
         if (content_data.found) {
             self.content_height = content_data.bounding_box.height;
         }
+        const layout_key = (self.wrap_width_hint orelse 0) * 1000 + @as(f32, @floatFromInt(self.font_size));
+        if (layout_key != self.sel_layout_key) {
+            if (self.sel_layout_key >= 0) self.clearSelection();
+            self.sel_layout_key = layout_key;
+        }
+        self.sel_color = .{ theme.primary[0], theme.primary[1], theme.primary[2], 110 };
 
         clay.UI()(.{
             .id = self.idi("markdown_view_root", 0),
@@ -939,7 +1175,9 @@ pub const MarkdownView = struct {
                 else
                     null;
 
-                clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .left_to_right, .child_gap = 0 } })({
+                const code_size = self.font_size - 2;
+                const ctx = self.registerLine(line, false, code_size);
+                clay.UI()(.{ .id = ctx.id, .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .left_to_right, .child_gap = 0 } })({
                     if (tags_opt) |tags| {
                         std.sort.insertion(flow_core.highlight.ColorTag, tags, {}, lessThanTag);
                         var pos: usize = 0;
@@ -949,19 +1187,16 @@ pub const MarkdownView = struct {
                             const actual_start = @max(tag.start, pos);
                             if (actual_start >= tag.end) continue;
                             if (actual_start > pos) {
-                                const seg = arena.dupe(u8, line[pos..actual_start]) catch "";
-                                clay.text(seg, .{ .font_size = self.font_size - 2, .color = theme.text, .wrap_mode = .none });
+                                self.textSel(line[pos..actual_start], @intCast(pos), code_size, theme.text, ctx.range);
                             }
-                            const seg = arena.dupe(u8, line[actual_start..tag.end]) catch "";
-                            clay.text(seg, .{ .font_size = self.font_size - 2, .color = colorFromTag(tag.fg), .wrap_mode = .none });
+                            self.textSel(line[actual_start..tag.end], @intCast(actual_start), code_size, colorFromTag(tag.fg), ctx.range);
                             pos = tag.end;
                         }
                         if (pos < line_len) {
-                            const seg = arena.dupe(u8, line[pos..]) catch "";
-                            clay.text(seg, .{ .font_size = self.font_size - 2, .color = theme.text, .wrap_mode = .none });
+                            self.textSel(line[pos..], @intCast(pos), code_size, theme.text, ctx.range);
                         }
                     } else {
-                        clay.text(line, .{ .font_size = self.font_size - 2, .color = theme.text, .wrap_mode = .none });
+                        self.textSel(line, 0, code_size, theme.text, ctx.range);
                     }
                 });
 
@@ -1357,10 +1592,15 @@ pub const MarkdownView = struct {
                     items[i] = .{ .width = ui_mod.measureTextWidth(p.text, size_f), .is_space = p.is_space };
                 }
                 const lines = word_wrap.wrapLines(arena, items, avail - 2) catch return;
-                for (lines) |line| {
-                    clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .left_to_right, .child_gap = 0 } })({
+                for (lines, 0..) |line, li| {
+                    var line_text: std.ArrayListUnmanaged(u8) = .empty;
+                    for (parts[line.start..line.end]) |p| line_text.appendSlice(arena, p.text) catch {};
+                    const ctx = self.registerLine(line_text.items, li > 0, base_size);
+                    clay.UI()(.{ .id = ctx.id, .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .left_to_right, .child_gap = 0 } })({
+                        var pos: u32 = 0;
                         for (parts[line.start..line.end]) |p| {
-                            clay.text(p.text, .{ .font_size = base_size, .color = p.color, .wrap_mode = .none });
+                            self.textSel(p.text, pos, base_size, p.color, ctx.range);
+                            pos += @intCast(p.text.len);
                         }
                     });
                 }

@@ -560,6 +560,14 @@ pub fn build(b: *std.Build) void {
     const run_user_state_tests = b.addRunArtifact(user_state_tests);
     run_user_state_tests.has_side_effects = true;
 
+    const md_select_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("src/ui/md_select.zig"),
+        .target = target,
+        .optimize = optimize,
+    }) });
+    const run_md_select_tests = b.addRunArtifact(md_select_tests);
+    run_md_select_tests.has_side_effects = true;
+
     const fuzzy_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("src/ui/fuzzy.zig"),
         .target = target,
@@ -727,6 +735,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_dialog_ops_tests.step);
     test_step.dependOn(&run_edit_ops_tests.step);
     test_step.dependOn(&run_fuzzy_tests.step);
+    test_step.dependOn(&run_md_select_tests.step);
     test_step.dependOn(&run_user_state_tests.step);
     test_step.dependOn(&run_backup_tests.step);
     test_step.dependOn(&run_tiny_regex_tests.step);

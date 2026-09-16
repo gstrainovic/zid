@@ -59,7 +59,10 @@ echo -e "open ./README.md\nget-state\nshutdown" | zig build run -- --interactive
   `type_text` und `screenshot` werden gepuffert und vom Main-Thread pro Frame angewendet
   (`drainInputs` / `serviceScreenshot`); `close_active_tab` geht über `pending_tab_closes`.
   Nur `--interactive` (stdin) wendet Handler direkt an, dort gibt es keinen Loop.
-  `open_file`, `split_pane`, `show_context_menu` mutieren noch direkt aus dem Server-Thread.
+  `open_file` prüft nur IsDir synchron und legt den Tab gepuffert an (ein `tabs.append` aus dem
+  Server-Thread traf `renderTabBar` mitten in der Iteration: General protection exception in
+  `tabLabel`); nach `open_file` also `settle`, bevor Tabs abgefragt werden. `split_pane` und
+  `show_context_menu` mutieren noch direkt aus dem Server-Thread.
 - **Lesende RPCs laufen weiterhin im Server-Thread.** Gemeinsame Daten brauchen deshalb eine
   Sperre: `file_explorer.git_status` hängt an `git_status_mutex`, weil der Main-Thread die Map in
   `updateGitStatus` ersetzt (Keys werden freigegeben) und `explorer_entries` sie gleichzeitig liest
@@ -157,6 +160,24 @@ liegen in `src/ui/mod.zig`, das Virtualisierungsmuster in
   zwei Stücken ohne Leerzeichen dazwischen — zigdown liefert `code`, Satzzeichen und Wortteile
   einzeln, „Nr." kommt als „Nr" und „.". `measureCell` rechnet genauso und schlägt je
   Textelement 0.25 px auf, den Zuschlag aus `measureText` in `mod.zig`.
+
+- **Textauswahl in der Vorschau** (Logik in `src/ui/md_select.zig`, unit-getestet): Ziehen mit
+  der Maus markiert wie im Browser, Ctrl+C und Kontextmenü „Copy“ kopieren, Escape oder ein Klick
+  ohne Ziehen heben auf. Position = (Block auf oberster Ebene, Zeile im Block, Byte-Offset), damit
+  die Auswahl gültig bleibt, während die Virtualisierung andere Blöcke zeichnet. Jede Textreihe
+  aus `flushPieces` und jede Codeblock-Zeile trägt die ID `md_line` (laufend je Frame) und landet
+  mit Text in `line_texts` (bleibt über Frames, damit ein herausgescrolltes Ende kopierbar ist;
+  `endBlock` wirft Zeilen weg, die es nach neuem Umbruch nicht mehr gibt). Hit-Test nimmt die
+  Clay-Box der Reihe aus dem Vorframe und misst Codepoints (`offsetAtX`). Hervorhebung: `textSel`
+  teilt ein Stück an den Auswahlgrenzen, der markierte Teil steht in einem `md_sel`-Element mit
+  Hintergrund — kein Floating, keine Alpha-Überlagerung, Elemente nur für markierte Stücke.
+  Kopiertext: weiche Umbrüche werden wieder Leerzeichen, harte Zeilen `\n`, Blockwechsel `\n\n`
+  (zigdown macht aus Leerzeilen `Break`-Blöcke, die bleiben stumm), Absatzenden verlieren ihr
+  Leerzeichen-Stück; ein nie gezeichneter Block dazwischen kommt als Fließtext aus dem Baum.
+  Ändern sich Umbruchbreite oder Schriftgröße, wird die Auswahl aufgehoben (Zeilennummern
+  stimmen dann nicht mehr). Deck-Ansicht (Marp) und Chat-Bubbles haben keine Auswahl. Tasten in
+  der Vorschau erreichen sonst weiter den unsichtbaren Editor dahinter. RPC `md_selection`
+  (`open`, `lines`, `text`), E2E in `scripts/e2e_md_preview.py` (`step_selection`).
 
 - **Schriftgröße der Vorschau:** `UI.previewFontSize` (Editor minus 4, Standard 24 → 20).
   `setFontSizeAll` setzt sie bei jedem Zoom auf alle offenen `open_markdown_views`, und beide
@@ -357,6 +378,8 @@ gepinnt, `models/` hält GGUFs flach und ignoriert (nie committen), `llm-bench/`
   an (Actions IndentLines/OutdentLines/ToggleComment/MoveLineUp/Down/DuplicateLine/GotoLine/Replace/
   GotoDefinition; Keymap Shift+Tab, Ctrl+/, Alt+↑/↓, Ctrl+Shift+D, Ctrl+G, Ctrl+H, F12; Tab mit
   mehrzeiliger Auswahl rückt ein). Zeilenoperationen laufen über `replaceLineSpan`.
+- **Ctrl+X ohne Auswahl schneidet die ganze Zeile aus** (VS Code, Zed): Zeile plus Umbruch in
+  die Zwischenablage, dann `DeleteLine`. Mit Auswahl bleibt Cut wie gehabt.
 - **Metrik-Fix:** `egc_chunk_width` lieferte für jeden Chunk 1; `insert_chars` addiert die Chunk-
   Breite zur Cursor-Spalte, der Cursor stand nach Einfügen/Autoclose eine Spalte zu weit links.
 - **Anzeige im Editor** (`renderRowOverlays`, schwebende Elemente über dem Zeilentext, x = Spalte ×

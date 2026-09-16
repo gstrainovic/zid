@@ -265,7 +265,7 @@ pub const explorer_menu_items = [_]Command{
 };
 
 /// Kontextmenü der Markdown-Vorschau
-pub const markdown_menu_items = [_]Command{ .md_export_pdf, .split_vertical, .split_horizontal };
+pub const markdown_menu_items = [_]Command{ .copy, .md_export_pdf, .split_vertical, .split_horizontal };
 
 /// Kontextmenü des Terminals (eigene Commands: Ctrl+C/V gehen dort an die Shell)
 pub const terminal_menu_items = [_]Command{ .terminal_copy, .terminal_paste };
