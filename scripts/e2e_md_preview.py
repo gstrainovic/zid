@@ -2,9 +2,11 @@
 """Headless-E2E für die Markdown-Vorschau grosser Dateien.
 
 Deckt ab: die Vorschau legt nur die sichtbaren Bloecke als Clay-Elemente an
-(Virtualisierung), Scrollen zeigt andere Bloecke, und Clay meldet waehrend der
-ganzen Sitzung keinen Fehler — weder `duplicate_id` noch die gesprengte
-Elementgrenze, an der die Vorschau von AGENTS.md im Fenster abbrach.
+(Virtualisierung), Scrollen zeigt andere Bloecke, Tabellen passen in den Viewport
+und bilden ein Raster, jede Beispieldatei aus libs/zigdown/test rendert ohne
+Absturz, und Clay meldet waehrend der ganzen Sitzung keinen Fehler — weder
+`duplicate_id` noch die gesprengte Elementgrenze, an der die Vorschau von
+AGENTS.md im Fenster abbrach.
 
 Aufruf: python3 scripts/e2e_md_preview.py
 """
@@ -14,7 +16,10 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from e2e_open_folder import ROOT, rpc, result_json, wait_port, settle, check, shot  # noqa: E402
+from e2e_open_folder import (  # noqa: E402
+    ROOT, rpc, result_json, wait_port, settle, check, shot, bounds, start_zid, stop_zid,
+)
+from e2e_pdf_pager import pixel  # noqa: E402
 from e2e_shortcuts import ui_state  # noqa: E402
 
 TARGET = "AGENTS.md"
@@ -75,6 +80,95 @@ def step_table_fits():
     shot("e2e_md_preview_table.ppm")
 
 
+def fixture_tables(path):
+    """(Spalten, Zeilen inkl. Kopf) je Tabelle, direkt aus dem Markdown gelesen."""
+    tables, block = [], []
+    with open(path, encoding="utf-8") as f:
+        for line in list(f) + [""]:
+            if line.lstrip().startswith("|"):
+                block.append(line.strip())
+                continue
+            if len(block) >= 2:
+                ncol = len(block[0].strip("|").split("|"))
+                tables.append((ncol, len(block) - 1))  # ohne Trennzeile
+            block = []
+    return tables
+
+
+def step_table_cells():
+    """Das Raster selbst: Zellen einer Zeile auf gleicher Höhe, von links nach rechts,
+    jede Zeile unter der vorigen (Kopf zuerst). Vorher standen alle Zellen untereinander."""
+    print("--- Tabellenzellen bilden ein Raster")
+    rel = os.path.join("libs", "zigdown", "test", "table.md")
+    tables = fixture_tables(os.path.join(ROOT, rel))
+    check(len(tables) == 3, f"Fixture hat {len(tables)} Tabellen")
+    for t, (ncol, nrow) in enumerate(tables, start=1):
+        cells = [[result_json("element_bounds_i", ["md_tcell", t * 100000 + r * ncol + c])
+                  for c in range(ncol)] for r in range(nrow)]
+        missing = sum(1 for row in cells for b in row if not (b["found"] and b["h"] > 0))
+        check(missing == 0, f"Tabelle {t}: alle {ncol * nrow} Zellen im Layout ({missing} fehlen)")
+        for r, row in enumerate(cells):
+            check(all(abs(b["y"] - row[0]["y"]) <= 1 for b in row), f"Tabelle {t} Zeile {r}: gleiches y")
+            check(all(row[c + 1]["x"] > row[c]["x"] for c in range(ncol - 1)),
+                  f"Tabelle {t} Zeile {r}: x steigt")
+            if r > 0:
+                prev = cells[r - 1][0]
+                check(row[0]["y"] >= prev["y"] + prev["h"] - 1, f"Tabelle {t} Zeile {r} unter Zeile {r - 1}")
+
+
+EXAMPLES = os.path.join(ROOT, "libs", "zigdown", "test")
+
+
+def differs(a, b, tol=12):
+    return any(abs(x - y) > tol for x, y in zip(a, b))
+
+
+def check_quote(name):
+    """Zitat: linker Rand in Akzentfarbe, daneben Hintergrund, erst dann der Text."""
+    q = bounds("md_quote", 1)
+    y = q["y"] + q["h"] / 2
+    edge, gap = pixel(name, q["x"] + 1, y), pixel(name, q["x"] + 10, y)
+    check(differs(edge, gap), f"Zitat hat linken Rand ({edge} neben {gap})")
+
+
+def check_list(name):
+    """Liste: Aufzählungszeichen links vom Eintrag, mit sichtbarer Glyphe."""
+    b, row = bounds("md_bullet", 1), bounds("md_li", 1)
+    check(b["w"] > 0 and b["h"] > 0, "Aufzählungszeichen hat eine Fläche")
+    check(abs(b["x"] - row["x"]) <= 1 and b["x"] + b["w"] < row["x"] + row["w"], "Aufzählungszeichen steht vorn")
+    bg = pixel(name, row["x"] - 4, b["y"] + 1)
+    ink = [pixel(name, b["x"] + dx, b["y"] + dy)
+           for dx in range(int(b["w"])) for dy in range(int(b["h"]))]
+    check(any(differs(p, bg, 40) for p in ink), "Aufzählungszeichen ist gezeichnet")
+
+
+def check_code(name):
+    """Codeblock: eigener Hintergrund gegenüber der Fläche daneben."""
+    c = bounds("md_code", 1)
+    inside, outside = pixel(name, c["x"] + 8, c["y"] + 8), pixel(name, c["x"] - 4, c["y"] + 8)
+    check(differs(inside, outside, 4), f"Codeblock hat Hintergrund ({inside} gegen {outside})")
+
+
+TARGETED = {"quote.md": check_quote, "list.md": check_list, "code.md": check_code}
+
+
+def step_all_examples(proc):
+    """Jede Beispieldatei aus zigdown in der Vorschau: rendert Blöcke, stürzt nicht ab.
+    Neue Dateien im Ordner laufen automatisch mit. Clay-Fehler prüft step_no_clay_errors."""
+    names = sorted(n for n in os.listdir(EXAMPLES) if n.endswith(".md"))
+    print(f"--- {len(names)} Beispieldateien aus libs/zigdown/test")
+    check(len(names) >= 14, f"Beispieldateien gefunden: {len(names)}")
+    for n in names:
+        open_preview(os.path.join("libs", "zigdown", "test", n))
+        check(proc.poll() is None, f"{n}: zid läuft noch")
+        first = result_json("element_bounds_i", ["md_block", 0])
+        check(first["found"] and first["h"] > 0, f"{n}: erster Block im Layout")
+        shot_name = f"e2e_md_example_{n[:-3]}.ppm"
+        shot(shot_name)
+        if n in TARGETED:
+            TARGETED[n](shot_name)
+
+
 def step_no_clay_errors():
     print("--- Clay meldet keine Fehler")
     time.sleep(0.5)
@@ -85,30 +179,20 @@ def step_no_clay_errors():
     check(not errors, f"{len(errors)} Clay-Fehler im Log")
 
 
-STEPS = [step_virtualized, step_table_fits, step_no_clay_errors]
-
-
 def main():
     log = open(LOG, "w")
-    proc = subprocess.Popen(
-        [os.path.join(ROOT, "zig-out", "bin", "zid"), "--headless", "--ai=off"],
-        cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, bufsize=0,
-    )
+    proc = start_zid(["--headless", "--ai=off"], log)
     try:
         wait_port(proc)
         settle(20)
-        for step in STEPS:
-            step()
+        step_virtualized()
+        step_table_fits()
+        step_table_cells()
+        step_all_examples(proc)
+        step_no_clay_errors()
         print("ALL PASSED")
     finally:
-        try:
-            rpc("shutdown")
-        except Exception:
-            pass
-        try:
-            proc.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            proc.kill()
+        stop_zid(proc)
         log.close()
 
 

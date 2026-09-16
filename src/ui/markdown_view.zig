@@ -24,6 +24,10 @@ pub const MarkdownView = struct {
     /// Laufende Nummer der Fließtext-Container im aktuellen Frame (für Element-IDs).
     run_counter: u32 = 0,
     table_counter: u32 = 0,
+    /// Laufende Nummern für abfragbare IDs (E2E): `md_quote`, `md_li`/`md_bullet`, `md_code`.
+    quote_counter: u32 = 0,
+    list_item_counter: u32 = 0,
+    code_counter: u32 = 0,
     /// Salz der Pane, die diese Ansicht gerade zeichnet (`UI.renderPane`): dieselbe Ansicht in
     /// zwei Panes bekommt so verschiedene Clay-IDs.
     pane_salt: u32 = 0,
@@ -381,9 +385,17 @@ pub const MarkdownView = struct {
         const doc = self.cachedDocument() orelse return;
         var effective_theme = theme;
         if (self.text_color) |c| effective_theme.text = c;
+        self.resetCounters();
+        self.renderBlock(doc, arena, effective_theme, ui_ptr);
+    }
+
+    /// Zu Beginn jedes Frames: gleiche Elemente bekommen so in jedem Frame dieselbe ID.
+    fn resetCounters(self: *Self) void {
         self.run_counter = 0;
         self.table_counter = 0;
-        self.renderBlock(doc, arena, effective_theme, ui_ptr);
+        self.quote_counter = 0;
+        self.list_item_counter = 0;
+        self.code_counter = 0;
     }
 
     /// Abstand zwischen zwei Blöcken auf oberster Ebene (`child_gap` im Dokument).
@@ -490,8 +502,7 @@ pub const MarkdownView = struct {
 
         var effective_theme = theme;
         if (self.text_color) |c| effective_theme.text = c;
-        self.run_counter = 0;
-        self.table_counter = 0;
+        self.resetCounters();
 
         // Sichtbaren Bereich bestimmen. Ein Bildschirm Vorlauf nach oben und
         // unten, damit beim Scrollen nichts nachklappt.
@@ -637,8 +648,7 @@ pub const MarkdownView = struct {
                     if (doc) |block| {
                         var effective_theme = theme;
                         if (self.text_color) |cc| effective_theme.text = cc;
-                        self.run_counter = 0;
-        self.table_counter = 0;
+                        self.resetCounters();
                         // Grundschrift wie im Export, skaliert auf den Rahmen. Die
                         // Überschriften-Faktoren in renderBlock (2.0 / 1.5 / 1.2)
                         // sind dieselben wie im Export-CSS.
@@ -975,14 +985,26 @@ pub const MarkdownView = struct {
                     .ListItem => |_| clay.LayoutConfig{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .top_to_bottom, .child_gap = 4 },
                     .Table => |_| clay.LayoutConfig{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .top_to_bottom, .child_gap = 0 },
                 };
+                const quote_id = if (container.content == .Quote) blk: {
+                    self.quote_counter += 1;
+                    break :blk self.idi("md_quote", self.quote_counter);
+                } else (clay.ElementDeclaration{}).id;
                 clay.UI()(.{
+                    .id = quote_id,
                     .layout = layout_options,
                     .border = if (container.content == .Quote) .{ .width = .{ .left = 4 }, .color = theme.accent } else .{},
                 })({
                     for (container.children.items) |*child| {
                         if (container.content == .List) {
-                            clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .left_to_right, .child_gap = 8 } })({
-                                clay.text("•", .{ .font_size = self.font_size, .color = theme.text });
+                            self.list_item_counter += 1;
+                            const n = self.list_item_counter;
+                            clay.UI()(.{
+                                .id = self.idi("md_li", n),
+                                .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .left_to_right, .child_gap = 8 },
+                            })({
+                                clay.UI()(.{ .id = self.idi("md_bullet", n), .layout = .{ .sizing = .{ .w = .fit, .h = .fit } } })({
+                                    clay.text("•", .{ .font_size = self.font_size, .color = theme.text });
+                                });
                                 self.renderBlock(child, arena, theme, ui_ptr);
                             });
                         } else {
@@ -1007,7 +1029,8 @@ pub const MarkdownView = struct {
                         self.renderInlineRun(leaf.inlines.items, self.font_size, theme, arena, ui_ptr);
                     },
                     .Code => |c| {
-                        clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .padding = .all(16) }, .background_color = theme.surface, .corner_radius = .all(4) })({
+                        self.code_counter += 1;
+                        clay.UI()(.{ .id = self.idi("md_code", self.code_counter), .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .padding = .all(16) }, .background_color = theme.surface, .corner_radius = .all(4) })({
                             self.renderCodeBlock(c.text orelse "", c.tag, arena, theme);
                         });
                     },
@@ -1112,7 +1135,9 @@ pub const MarkdownView = struct {
         const row_id = self.idi("md_table_row", self.table_counter);
         const data = clay.getElementData(row_id);
         var avail: f32 = self.wrap_width_hint orelse 800;
-        if (data.found and data.bounding_box.width > 0) avail = data.bounding_box.width;
+        // Die Hülle wächst mit einer zu breiten Tabelle mit (`grow` ist nie schmaler als
+        // ihr Kind). Ohne Deckel hielte sie die Überbreite aus dem ersten Frame fest.
+        if (data.found and data.bounding_box.width > 0) avail = @min(avail, data.bounding_box.width);
 
         const size_f: f32 = @floatFromInt(self.font_size);
         const cell_pad: f32 = 16; // 8 links + 8 rechts
@@ -1187,7 +1212,9 @@ pub const MarkdownView = struct {
                         .border = .{ .width = .{ .between_children = 1 }, .color = theme.border },
                     })({
                         for (0..ncol) |c| {
+                            // E2E: `md_tcell` mit Tabelle * 100000 + Zellindex (Zeile * ncol + Spalte).
                             clay.UI()(.{
+                                .id = self.idi("md_tcell", self.table_counter * 100000 + @as(u32, @intCast(r * ncol + c))),
                                 .layout = .{
                                     .sizing = .{ .w = .fixed(widths[c] + cell_pad), .h = .grow },
                                     .padding = .{ .left = 8, .right = 8, .top = 4, .bottom = 4 },

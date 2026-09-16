@@ -135,11 +135,20 @@ liegen in `src/ui/mod.zig`, das Virtualisierungsmuster in
   staucht notfalls die jeweils breiteste Spalte. `relative_width` aus der Trennzeile bleibt
   ungenutzt, die Zahl der Striche sagt nichts über den Inhalt. Die Tabelle steht in einer
   `grow`-Hülle (`md_table_row`) und ist selbst `fit` — gemessen wird die Hülle, sonst
-  schrumpfte die Tabelle Frame für Frame an ihrer eigenen Breite.
+  schrumpfte die Tabelle Frame für Frame an ihrer eigenen Breite. Die Hüllenbreite ist nach
+  oben durch `wrap_width_hint` gedeckelt: `grow` wird nie schmaler als das Kind und hielte
+  sonst eine Überbreite aus dem ersten Frame (noch ohne Hint, 800 px) für immer fest.
   **Kein `clip` je Zelle:** Clay hält nur zehn Clip-Container, eine Tabelle sprengt das sofort
   („out of bounds array access"). Zu lange Wörter zerlegt stattdessen `splitWide`, weil die
   Vorschau keinen waagerechten Scrollbalken hat. Fixture: `libs/zigdown/test/table.md`,
   geprüft in `scripts/e2e_md_preview.py`. Spaltenausrichtung (`alignment`) wird nicht umgesetzt.
+
+- **Abfragbare IDs der Vorschau (E2E):** `md_tcell` mit Index Tabelle × 100000 + Zeile × ncol
+  + Spalte (Tabellen ab 1), `md_quote`, `md_li`/`md_bullet` und `md_code` mit laufender
+  Nummer ab 1. Alle Zähler setzt `resetCounters` zu Beginn jedes Frames zurück.
+  `e2e_md_preview.py` öffnet jede `libs/zigdown/test/*.md` (Glob), legt je Datei
+  `tmp/e2e_md_example_<name>.ppm` ab und prüft Zitatrand, Aufzählungszeichen und
+  Codeblock-Hintergrund an Pixeln des Screenshots.
 
 - **Umbruch nur an Leerzeichen:** `word_wrap.wrapLines` trennt zwischen Wörtern, nie zwischen
   zwei Stücken ohne Leerzeichen dazwischen — zigdown liefert `code`, Satzzeichen und Wortteile
