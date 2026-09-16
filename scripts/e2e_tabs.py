@@ -6,7 +6,7 @@ Aufruf: python3 scripts/e2e_tabs.py
 import os, shutil, subprocess, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from e2e_open_folder import ROOT, rpc, result_json, wait_port, settle, bounds, click_center, check, shot  # noqa: E402
+from e2e_open_folder import ROOT, rpc, result_json, wait_port, settle, bounds, click_center, check, shot, start_zid, stop_zid  # noqa: E402
 from e2e_shortcuts import key, explorer, explorer_click, ui_state, dialog_open  # noqa: E402
 
 FX = os.path.join(ROOT, "tmp", "e2e_tabs")
@@ -260,17 +260,38 @@ def step_md_preview_from_tab_menu():
     check("notes.md" not in tab_names(), "aufgeräumt")
 
 
-STEPS = [step_default_own_tab, step_recent_switch_and_picker, step_dot_and_middle_click, step_context_menu_and_reopen, step_drag_reorder, step_scroll_active_into_view, step_reveal, step_md_preview_from_tab_menu]
+def step_split_keeps_chat_and_terminal():
+    """Split behält Chat- und Terminal-Tabs in der ursprünglichen Hälfte. cloneFrom lässt sie
+    bewusst aus (sonst doppelt gezeichnet), splitActivePane klonte aber beide Hälften und
+    verwarf die Quelle: Chat und Terminal waren nach jedem Split weg."""
+    print("--- Split behält Chat und Terminal")
+    # Eine Datei dazu, sonst bliebe die neue Hälfte leer und würde gleich wieder eingeklappt
+    rpc("open_file", [os.path.join(FX, "one.txt")]); settle(10)
+    rpc("open_chat"); settle(10)
+    rpc("open_terminal"); settle(10)
+    before = ui_state()
+    chats = [p for p in before["all_tabs"] if p.startswith("Chat ")]
+    terms = [p for p in before["all_tabs"] if p.startswith("Terminal ")]
+    check(len(chats) == 1 and len(terms) == 1, f"Chat und Terminal offen: {before['all_tabs']}")
+    panes = before["pane_count"]
+    rpc("split_pane", ["v"])
+    # Der Split wird vor dem nächsten Layout ausgeführt; headless entsteht das Layout beim Screenshot.
+    shot("e2e_tabs_split.ppm")
+    after = ui_state()
+    check(after["pane_count"] == panes + 1, f"Split erzeugt ein Pane ({after['pane_count']})")
+    for name in chats + terms:
+        n = after["all_tabs"].count(name)
+        check(n == 1, f"{name} bleibt genau einmal erhalten ({n}x): {after['all_tabs']}")
+
+
+STEPS = [step_default_own_tab, step_recent_switch_and_picker, step_dot_and_middle_click, step_context_menu_and_reopen, step_drag_reorder, step_scroll_active_into_view, step_reveal, step_md_preview_from_tab_menu, step_split_keeps_chat_and_terminal]
 
 
 def main():
     setup()
     log = open(os.path.join(ROOT, "tmp", "e2e_tabs.log"), "w")
-    proc = subprocess.Popen(
-        [os.path.join(ROOT, "zig-out", "bin", "zid"), "--headless", "--ai=off"],
-        cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
-        env=dict(os.environ, XDG_DATA_HOME=os.path.join(ROOT, "tmp", "xdg"), XDG_CONFIG_HOME=os.path.join(ROOT, "tmp", "xdg-config")),
-    )
+    env = dict(os.environ, XDG_DATA_HOME=os.path.join(ROOT, "tmp", "xdg"), XDG_CONFIG_HOME=os.path.join(ROOT, "tmp", "xdg-config"))
+    proc = start_zid(["--headless", "--ai=off"], log, env=env)
     try:
         wait_port(proc)
         settle(20)
@@ -278,14 +299,7 @@ def main():
             step()
         print("ALL PASSED")
     finally:
-        try:
-            rpc("shutdown")
-        except Exception:
-            pass
-        try:
-            proc.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            proc.kill()
+        stop_zid(proc)
         log.close()
 
 

@@ -421,9 +421,13 @@ gepinnt, `models/` hält GGUFs flach und ignoriert (nie committen), `llm-bench/`
   mit alter Geometrie. E2E-Prüfungen auf „Element ist weg“ sind wertlos; Zustand per RPC prüfen.
   Für ausgeblendete Kontextmenü-Einträge geht es trotzdem: der Eintrag muss innerhalb des frisch
   gezeichneten `<prefix>_container` liegen (`menu_entry_visible` in `scripts/e2e_marp_pdf.py`).
-- **E2E immer mit `XDG_CONFIG_HOME=tmp/xdg-config`:** `e2e_editor.py` lief ohne und hat
-  `~/.config/zid/state` mit Testwerten (Word-Wrap an) überschrieben; jetzt setzen alle
-  Skripte beide XDG-Variablen.
+- **E2E nie mit der echten Konfiguration:** `start_zid` in `scripts/e2e_open_folder.py` setzt ohne
+  eigenes `env` frische `XDG_CONFIG_HOME`/`XDG_DATA_HOME` unter `tmp/e2e_env/<log-name>`. Mit
+  `~/.config/zid/state` (Word-Wrap, Schriftgröße, Sidebar-Breite) messen Suiten Fremdzustand und
+  überschreiben ihn. Neue Suiten starten zid deshalb über `start_zid`, nie per `Popen`.
+- **Split behält Chat und Terminal:** `splitActivePane` gibt die bisherige Tab-Leiste an die
+  erste Hälfte weiter, nur die neue Hälfte bekommt `cloneFrom` (ohne Chat und Terminal). Zwei
+  Kopien ließen Chat-Tabs und Terminal-Instanzen verschwinden. E2E: `e2e_tabs.py`.
 - **setText verwirft den Undo-Verlauf.** `libs/flow-core` gibt in `Buffer.load` die Leaf-Puffer des
   vorherigen Ladevorgangs frei (Leak-Fix gegenüber upstream flow). Alle Undo-/Redo-Knoten zeigen aber
   auf Bäume in genau diesen Puffern: Undo nach einem externen Reload endete in „switch on corrupt

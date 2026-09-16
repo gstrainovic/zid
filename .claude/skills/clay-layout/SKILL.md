@@ -117,7 +117,8 @@ Vorschau und den aktiven Editor, Skripte dürfen weiter `element_bounds_i("code"
 Die Markdown-Vorschau (`MarkdownView.idi`) salzt mit Instanz **und** Pane (`pane_salt`, setzt
 `UI.renderPane`): Views hängen am Pfad, ein Split kopiert die Tabs, dieselbe Ansicht steht dann
 in zwei Panes. Chat und Terminal kopiert `TabBarState.cloneFrom` gar nicht erst, ihr Zustand
-(Chat-Eingabe ist ein CodeEditor) kann nur einmal je Frame gezeichnet werden.
+(Chat-Eingabe ist ein CodeEditor) kann nur einmal je Frame gezeichnet werden; sie bleiben in der
+ersten Hälfte, die die ursprüngliche Tab-Leiste übernimmt.
 
 `duplicate_id` nennt das Element nicht. `UI.clayError` loggt je Elternelement einmal dessen ID;
 `python3 scripts/clay_id_decode.py <id>` rechnet sie auf einen Namen zurück (nur ungesalzene IDs).

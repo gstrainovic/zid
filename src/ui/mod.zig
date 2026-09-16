@@ -3678,24 +3678,24 @@ pub const UI = struct {
         const old_content_leaf = try pane_mod.Pane.createLeaf(self.allocator, current_buffer);
         const new_split_leaf = try pane_mod.Pane.createLeaf(self.allocator, current_buffer);
 
-        // 3. Deep-copy tab state (dupes strings); Anzeigeoptionen und Schrift übernehmen
-        try old_content_leaf.data.leaf.tab_bar.cloneFrom(&current_leaf.tab_bar);
+        // 3. Die neue Hälfte bekommt eine Kopie der Tabs (ohne Chat und Terminal, siehe
+        // cloneFrom). Die bisherige Hälfte übernimmt die Tab-Leiste selbst: Chat-Tabs und
+        // Terminal-Instanzen gibt es nur einmal, eine zweite Kopie ließe sie verschwinden.
         try new_split_leaf.data.leaf.tab_bar.cloneFrom(&current_leaf.tab_bar);
+        old_content_leaf.data.leaf.tab_bar.deinit();
+        old_content_leaf.data.leaf.tab_bar = current_leaf.tab_bar;
         copyEditorOptions(old_content_leaf.data.leaf.code_editor, current_leaf.code_editor, self.theme);
         copyEditorOptions(new_split_leaf.data.leaf.code_editor, current_leaf.code_editor, self.theme);
 
-        // 4. CLEANUP ORIGINAL DATA before overwriting
-        // Copy the old data so we can deinit it safely after replacing the union branch
+        // 4. Den alten Editor sichern, bevor die Union überschrieben wird
         var old_editor = current_leaf.code_editor;
-        var old_tab_bar = current_leaf.tab_bar;
 
         // 5. Transform original pane into a split node
         pane.data = .{ .split = .{ .direction = direction, .ratio = 0.5, .children = .{ old_content_leaf, new_split_leaf } } };
 
-        // 6. Now it's safe to deinit old resources
+        // 6. Now it's safe to deinit old resources (die Tab-Leiste gehört jetzt old_content_leaf)
         old_editor.deinit();
         self.allocator.destroy(old_editor);
-        old_tab_bar.deinit();
 
         // 7. Update focus
         self.active_pane = new_split_leaf;
