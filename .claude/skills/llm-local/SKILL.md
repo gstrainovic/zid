@@ -32,9 +32,23 @@ auf reiner CPU etwa doppelt so schnell, braucht aber die gepinnte Engine.
 (`-dev none -t N`). **iGPUs werden übersprungen**, sie liefern laut Bench ein Drittel
 der CPU-Leistung.
 
-Argumente: `--jinja -c 8192 --log-disable`, auf GPU zusätzlich `-dev VulkanN -ngl 99`.
-Port 8080 (`default_llama_port`), Ollama bleibt auf 11434. Ohne `-dev` landet das Modell
-womöglich auf der iGPU, ohne `--jinja` stimmt das Qwen3-Chat-Template nicht.
+Argumente: `--jinja -c 8192 --log-disable --chat-template-kwargs {"enable_thinking":false}`,
+auf GPU zusätzlich `-dev VulkanN -ngl 99`. Port 8080 (`default_llama_port`), Ollama bleibt
+auf 11434. Ohne `-dev` landet das Modell womöglich auf der iGPU, ohne `--jinja` stimmt das
+Qwen3-Chat-Template nicht. `enable_thinking=false` ist für Qwen3-Instruct wirkungslos,
+schaltet aber bei gemma4 das Denken ab; `--reasoning-budget 0` tut das nicht (gemma4 denkt
+dann im Antwortkanal weiter, 0/10 Werkzeugwahl). Über Ollama entspricht dem
+`reasoning_effort: "none"` im Request (`buildPayload`); `think: false` wirkt dort nicht.
+
+Unter Windows heisst die Engine `llama-server.exe` (`paths.exe_suffix`); ohne Endung schlug
+der Existenztest fehl und zid nahm still Ollama.
+
+**Werkzeug-Prompt klein halten.** Das `command`-Werkzeug trägt die 106 Kommandos nur als
+Enum; eine Liste mit Label und Kürzel im Text kostete 1000 Token und auf CPU 20 s vor dem
+ersten Delta (2392 → 1362 Token, 45 → 22 s auf dem i5-13500T) und liess gemma4
+`open_folder` statt `command` wählen. Jeder Stream fordert `stream_options.include_usage`
+an und loggt `usage: prompt_tokens=… prompt_ms=…`; vor Prompt-Änderungen vorher/nachher
+ablesen. Messreihe: `llm-bench/results/windows-i5-13500T-gemma4-vs-qwen3.md`.
 
 ## Streaming und Zustand
 

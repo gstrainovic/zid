@@ -111,7 +111,11 @@ pub const LlamaAgent = struct {
             var argv: std.ArrayListUnmanaged([]const u8) = .empty;
             defer argv.deinit(allocator);
             // -c 8192 passt bei 4B-Q4-Modellen samt KV-Cache in 4 GB VRAM (Bench-Einstellung).
-            try argv.appendSlice(allocator, &.{ llama_server_path, "-m", self.model_path, "--port", port_str, "--jinja", "-c", "8192", "--log-disable" });
+            // enable_thinking=false: Denkende Modelle (gemma4) würden sonst erst 20–30 s
+            // reasoning streamen; Qwen3-Instruct kennt den Schalter nicht, er ist dort wirkungslos.
+            // `--reasoning-budget 0` ist der falsche Weg: gemma4 denkt dann im Antwortkanal weiter
+            // (llm-bench/results/windows-i5-13500T-gemma4-vs-qwen3.md).
+            try argv.appendSlice(allocator, &.{ llama_server_path, "-m", self.model_path, "--port", port_str, "--jinja", "-c", "8192", "--log-disable", "--chat-template-kwargs", "{\"enable_thinking\":false}" });
             switch (choice) {
                 .gpu => |dev| try argv.appendSlice(allocator, &.{ "-dev", dev.id, "-ngl", "99" }),
                 .cpu => try argv.appendSlice(allocator, &.{ "-dev", "none", "-ngl", "0", "-t", threads_str }),
@@ -269,6 +273,12 @@ pub const LlamaAgent = struct {
         if (stream) {
             try jw.objectField("stream");
             try jw.write(true);
+            // Letzter Chunk trägt dann `usage` (llama-server auch `timings`), siehe logUsage.
+            try jw.objectField("stream_options");
+            try jw.beginObject();
+            try jw.objectField("include_usage");
+            try jw.write(true);
+            try jw.endObject();
         }
         if (max_tokens) |mt| {
             try jw.objectField("max_tokens");
@@ -451,6 +461,7 @@ pub const LlamaAgent = struct {
                 if (std.mem.eql(u8, data, "[DONE]")) return try self.finishToolCalls(&calls);
                 const parsed = std.json.parseFromSlice(std.json.Value, self.allocator, data, .{ .ignore_unknown_fields = true }) catch continue;
                 defer parsed.deinit();
+                logUsage(parsed.value);
                 const choices = parsed.value.object.get("choices") orelse continue;
                 if (choices != .array or choices.array.items.len == 0) continue;
                 const delta = choices.array.items[0].object.get("delta") orelse continue;
@@ -511,6 +522,27 @@ pub const LlamaAgent = struct {
     fn isSet(flag: ?*const std.atomic.Value(bool)) bool {
         if (flag) |f| return f.load(.acquire);
         return false;
+    }
+
+    /// Prompt- und Antwortgrösse aus dem letzten Stream-Chunk (llama-server: `usage` und
+    /// `timings`). Macht sichtbar, was der Werkzeug-Prompt kostet: auf CPU steht die
+    /// Prompt-Auswertung vor dem ersten Delta.
+    fn logUsage(v: std.json.Value) void {
+        if (v != .object) return;
+        const usage = v.object.get("usage") orelse return;
+        if (usage != .object) return;
+        const p = usage.object.get("prompt_tokens") orelse return;
+        const c = usage.object.get("completion_tokens") orelse std.json.Value{ .integer = 0 };
+        if (p != .integer or c != .integer) return;
+        var prompt_ms: f64 = 0;
+        if (v.object.get("timings")) |t| if (t == .object) {
+            if (t.object.get("prompt_ms")) |ms| prompt_ms = switch (ms) {
+                .float => |f| f,
+                .integer => |i| @floatFromInt(i),
+                else => 0,
+            };
+        };
+        std.log.info("usage: prompt_tokens={d} completion_tokens={d} prompt_ms={d:.0}", .{ p.integer, c.integer, prompt_ms });
     }
 
     /// 1 s in 100-ms-Schritten schlafen, bricht bei Stop/Cancel ab.

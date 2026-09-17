@@ -206,15 +206,12 @@ pub fn toolsJson(alloc: std.mem.Allocator) ![]u8 {
 fn commandDescription(alloc: std.mem.Allocator) ![]u8 {
     var out: std.Io.Writer.Allocating = .init(alloc);
     errdefer out.deinit();
+    // Keine Liste der Kommandos mehr im Text: die Namen stehen schon als Enum im Schema,
+    // Label und Kürzel wiederholten sie nur. Jedes Token hier kostet auf CPU Prompt-Zeit
+    // vor dem ersten Delta (i5-13500T: 2392 Token / 52 s mit Liste samt Kürzeln,
+    // 2124 / 44 s ohne Kürzel; Messreihe in llm-bench/results/windows-i5-13500T-gemma4-vs-qwen3.md).
     try out.writer.writeAll(tools[0].description);
-    try out.writer.writeAll(" Commands: ");
-    inline for (@typeInfo(shortcuts.Command).@"enum".fields, 0..) |f, i| {
-        const cmd = @field(shortcuts.Command, f.name);
-        if (i > 0) try out.writer.writeAll("; ");
-        try out.writer.print("{s} = {s}", .{ f.name, shortcuts.label(cmd) });
-        const sc = shortcuts.shortcutText(cmd);
-        if (sc.len > 0) try out.writer.print(" ({s})", .{sc});
-    }
+    try out.writer.writeAll(" `name` is one of the enum values; the names describe the action (e.g. toggle_explorer, split_vertical, open_folder).");
     return out.toOwnedSlice();
 }
 
@@ -329,8 +326,12 @@ test "toolsJson: gültiges JSON mit allen Werkzeugen und allen Commands als Enum
     try testing.expectEqualStrings("command", cmd_tool.get("name").?.string);
     const enum_arr = cmd_tool.get("parameters").?.object.get("properties").?.object.get("name").?.object.get("enum").?.array;
     try testing.expectEqual(@typeInfo(shortcuts.Command).@"enum".fields.len, enum_arr.items.len);
-    try testing.expect(std.mem.indexOf(u8, cmd_tool.get("description").?.string, "split_vertical = Split Vertically") != null);
-    try testing.expect(std.mem.indexOf(u8, cmd_tool.get("description").?.string, "open_folder = Open Folder… (Ctrl+O)") != null);
+    // Kommandos nur im Enum, nicht noch einmal als Liste mit Label/Kürzel im Text
+    const desc = cmd_tool.get("description").?.string;
+    try testing.expect(std.mem.indexOf(u8, desc, "enum values") != null);
+    try testing.expect(std.mem.indexOf(u8, desc, "Split Vertically") == null);
+    try testing.expect(std.mem.indexOf(u8, desc, "Ctrl+") == null);
+    try testing.expect(desc.len < 300);
 }
 
 test "parseEnvelope: Aufrufe mit id/name/arguments, Rohdaten bleiben erhalten" {

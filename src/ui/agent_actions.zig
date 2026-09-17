@@ -175,11 +175,12 @@ fn executeInner(ui: *UI, alloc: std.mem.Allocator, call: *const ai_tools.ToolCal
         defer alloc.free(expanded);
         const real = std.fs.cwd().realpathAlloc(alloc, expanded) catch return .{ .done = errorJson(alloc, "folder not found: {s}", .{raw}) };
         errdefer alloc.free(real);
-        const st = try std.fs.cwd().statFile(real);
-        if (st.kind != .directory) {
+        // openDir statt statFile: statFile scheitert unter Windows auf Verzeichnissen (IsDir).
+        var dir = std.fs.cwd().openDir(real, .{}) catch {
             alloc.free(real);
             return .{ .done = errorJson(alloc, "not a folder: {s}", .{raw}) };
-        }
+        };
+        dir.close();
         // main.zig holt pending_open_folder ab und stellt Explorer, Git und Watcher um
         if (ui.pending_open_folder) |old| ui.allocator.free(old);
         ui.pending_open_folder = try ui.allocator.dupe(u8, real);
