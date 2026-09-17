@@ -432,9 +432,15 @@ gepinnt, `models/` hält GGUFs flach und ignoriert (nie committen), `llm-bench/`
   `src/lsp` wird nirgends gestartet), Ziehen über den Rand scrollt (`autoScrollWhileDragging` im Render).
 - Statusleiste (oben, neben dem Branch): `UI.statusText` — Ln/Col, Auswahl, LF/CRLF, UTF-8,
   Sprache, „Spaces: 4“; RPC `ui_state.status_text`.
-- Datei außerhalb geändert: Watcher-`file_changed` → `UI.handleExternalChange`: gleicher Inhalt
-  (eigener Save) ignoriert, ungeänderter Buffer wird still neu geladen, geänderter fragt („File
-  Changed“: Reload / Keep Mine).
+- Datei außerhalb geändert: Watcher-`file_changed` oder `file_created` (atomares Ersetzen per
+  rename meldet IN_MOVED_TO) → `UI.handleExternalChange`: gleicher Inhalt (eigener Save)
+  ignoriert, ungeänderter Buffer wird still neu geladen, geänderter fragt („File Changed“:
+  Reload / Keep Mine). Symlink-Ordner: der Linux-Watcher steigt auch in Link-Ordner ab (inotify
+  folgt dem Link; schon bekannter Watch-Deskriptor = kein zweiter Abstieg), und
+  `bufferKeyForPath` findet den Buffer notfalls über realpath, weil Ereignis- und Öffnungspfad
+  verschiedene Schreibweisen derselben Datei sein können. E2E:
+  `python3 scripts/e2e_external_change.py` (in-place, atomic, Symlink im und außerhalb des
+  Projekts). Der Windows-Watcher kennt den Symlink-Abstieg nicht.
 - Panes: Ctrl+\ splittet, Ctrl+Alt+Pfeil oder Chord Ctrl+K dann Pfeil wechselt geometrisch
   (`focusPane` über die Pane-Bounds des letzten Frames), Ctrl+Shift+E fokussiert den Explorer,
   Ctrl+J wechselt zum Terminal-Tab und zurück (`terminal_return_index`). Ctrl+K erreicht die Shell
