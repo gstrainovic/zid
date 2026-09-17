@@ -141,12 +141,14 @@ pub const MarkdownView = struct {
     }
 
     pub fn init(allocator: std.mem.Allocator, text: []const u8, base_path: []const u8) Self {
+        // CRLF-Dateien: sonst hängt an jeder Codeblock-Zeile ein `\r` (siehe md_select.ownedLf).
+        const lf = md_select.ownedLf(allocator, text);
         return .{
             .allocator = allocator,
-            .text = allocator.dupe(u8, text) catch "",
+            .text = lf,
             .base_path = allocator.dupe(u8, base_path) catch "",
             // Kein Deck ist der Normalfall, nicht der Fehlerfall.
-            .deck = marp.parse(allocator, text) catch null,
+            .deck = marp.parse(allocator, lf) catch null,
             .view = .{},
         };
     }

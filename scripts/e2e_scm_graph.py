@@ -17,7 +17,7 @@ Aufruf: python3 scripts/e2e_scm_graph.py
 import os, shutil, subprocess, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from e2e_open_folder import ROOT, rpc, result_json, wait_port, settle, click_center, check, shot  # noqa: E402
+from e2e_open_folder import ROOT, rpc, result_json, wait_port, settle, click_center, check, shot, rmtree  # noqa: E402
 from e2e_shortcuts import key, explorer_click  # noqa: E402
 
 BASE = os.path.join(ROOT, "tmp", "e2e_scm")
@@ -39,7 +39,7 @@ def write(name, text):
 
 
 def setup_fixture():
-    shutil.rmtree(BASE, ignore_errors=True)
+    rmtree(BASE)
     shutil.rmtree(XDG_CONFIG, ignore_errors=True)
     os.makedirs(FX)
     git("init", "-q", "-b", "main")

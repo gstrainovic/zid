@@ -122,6 +122,20 @@ pub fn findTool(name: []const u8) ?*const Tool {
     return null;
 }
 
+/// Kleine Modelle (gemma4:e2b über Ollama) rufen den Enum-Wert direkt als Werkzeug auf:
+/// `toggle_explorer` statt `command` mit `name: toggle_explorer`. Gemeint ist dasselbe;
+/// statt „unknown tool" wird das Kommando ausgeführt. Echte Werkzeugnamen haben Vorrang.
+pub fn commandFromToolName(name: []const u8) ?shortcuts.Command {
+    if (findTool(name) != null) return null;
+    return std.meta.stringToEnum(shortcuts.Command, name);
+}
+
+test "commandFromToolName: Enum-Wert als Werkzeugname, echte Werkzeuge und Fremdes nicht" {
+    try testing.expectEqual(shortcuts.Command.toggle_explorer, commandFromToolName("toggle_explorer").?);
+    try testing.expectEqual(@as(?shortcuts.Command, null), commandFromToolName("open_file"));
+    try testing.expectEqual(@as(?shortcuts.Command, null), commandFromToolName("hide_explorer"));
+}
+
 /// Komma-getrennte Liste aller Werkzeugnamen (für Fehlermeldungen ans Modell).
 pub fn toolNames(alloc: std.mem.Allocator) ![]u8 {
     var out: std.Io.Writer.Allocating = .init(alloc);

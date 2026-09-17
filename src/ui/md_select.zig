@@ -8,6 +8,33 @@
 
 const std = @import("std");
 
+/// Kopie des Quelltexts mit LF-Zeilenenden. Der Editor normalisiert CRLF beim Laden,
+/// die Vorschau liest die Datei aber roh (und der Editor gibt beim Export den
+/// Datei-Modus zurück): ohne das trägt jede Codeblock-Zeile ein `\r`, das mitgezeichnet
+/// und mitkopiert wird. Ein einzelnes `\r` ohne `\n` bleibt stehen.
+pub fn ownedLf(allocator: std.mem.Allocator, text: []const u8) []u8 {
+    const crlf = std.mem.count(u8, text, "\r\n");
+    if (crlf == 0) return allocator.dupe(u8, text) catch "";
+    const out = allocator.alloc(u8, text.len - crlf) catch return "";
+    var n: usize = 0;
+    for (text, 0..) |c, i| {
+        if (c == '\r' and i + 1 < text.len and text[i + 1] == '\n') continue;
+        out[n] = c;
+        n += 1;
+    }
+    return out;
+}
+
+test "ownedLf: CRLF wird zu LF, LF und einzelnes CR bleiben" {
+    const a = std.testing.allocator;
+    const crlf = ownedLf(a, "# T\r\n\r\n```\r\nx\r\n```\r\n");
+    defer a.free(crlf);
+    try std.testing.expectEqualStrings("# T\n\n```\nx\n```\n", crlf);
+    const lf = ownedLf(a, "a\nb\r");
+    defer a.free(lf);
+    try std.testing.expectEqualStrings("a\nb\r", lf);
+}
+
 pub const Pos = struct {
     block: u32,
     line: u32,
