@@ -113,6 +113,41 @@ Thinking-Segment, das Modell setzt dieselbe Überlegung im Antwortkanal fort.
   jetzt 90 s statt 30. Der Prompt selbst ist der Hebel: die Kürzel im
   Werkzeugtext braucht das Modell nicht.
 
+## Nachtrag: native `tools` in zid und der Werkzeug-Prompt
+
+Gleiche Maschine, gleiche Engine, zid-Suiten `e2e_ai_chat` und `e2e_ai_tools`
+(native OpenAI-`tools`, nicht der JSON-Prompt oben), llama-server mit
+`--chat-template-kwargs {"enable_thinking":false}`, CPU, 8 Threads (zid-Vorgabe).
+`prompt_tokens`/`prompt_ms` aus dem `usage`-Chunk des Streams (zid loggt sie seit
+17.09.2026 als `usage:`-Zeile).
+
+| Werkzeug-Prompt (`command`-Beschreibung) | Prompt-Token | Prompt-Zeit | erstes Delta (Chat) | `e2e_ai_tools` Qwen3 | `e2e_ai_tools` gemma4 |
+|---|---|---|---|---|---|
+| Liste aller 106 Kommandos mit Label und Kürzel (Stand 16.09.) | 2392 | 51.7 s | 45.2 s | grün, Schritt 1 nach 57 s, gesamt 208 s | **rot**: `open_folder` statt `command` |
+| Liste mit Label, ohne Kürzel | 2124 | 44.2 s | 37.5 s | grün, 50 s / 186 s | **rot**: `open_folder` statt `command` |
+| **keine Liste, nur das Enum im Schema** | **1362** | **27.6 s** | **21.8 s** | grün, 29 s / 132 s | **grün**, 15 s / 62 s |
+
+Drei Befunde:
+
+1. **Die Kommandoliste im Text war reiner Ballast.** Die Namen stehen ohnehin
+   als Enum im Schema; Label und Kürzel wiederholten sie. Ohne die Liste sinkt
+   der Prompt um 43 %, das erste Delta auf CPU von 45 auf 22 s, die
+   Werkzeug-Suite mit Qwen3 von 208 auf 132 s. Qualität unverändert 7/7 Schritte.
+2. **gemma4 scheiterte an der Liste, nicht an nativen Tools.** Mit der langen
+   Beschreibung wählte es für „Blende den Datei-Explorer aus" zweimal
+   `open_folder(".")` — vermutlich, weil „Open Folder" als Label im Text stand.
+   Ohne die Liste ruft es `command` mit `toggle_explorer` und besteht alle
+   sieben Schritte, doppelt so schnell wie Qwen3 (62 gegen 132 s).
+3. **Die Enum-als-Werkzeug-Schwäche vom Ollama-Lauf trat über llama-server nicht
+   auf.** Ob das an Ollamas Tool-Template oder am Prompt lag, bleibt offen; über
+   llama-server ist gemma4 mit dem kurzen Prompt sauber.
+
+Damit steht gemma4-E2B auf dieser Maschine in allen drei Messungen mindestens
+gleichauf mit Qwen3-4B und ist durchweg schneller. Die Entscheidung über das
+Standardmodell (`src/ai/paths.zig`, `llm-bench/CLAUDE.md` nennt Qwen3 als
+Pflicht) liegt beim Projektinhaber; auf dem Laptop mit P1000 wäre vorher zu
+messen, ob gemma4 in die 4 GB passt (`gemma4:e2b` über Ollama tat das laut Skill nicht).
+
 ## Windows-Eigenheiten dieses Laufs
 
 - **cpp-httplib verlangt Windows 10** (`#error … Please use Windows 10 or later`,

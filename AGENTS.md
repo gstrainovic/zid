@@ -247,10 +247,27 @@ Details in der Skill `.claude/skills/llm-local/SKILL.md`: Backend- und Gerätewa
 llama-server-Argumente, Streaming und `AgentStatus`, Chat-Eingabe als CodeEditor,
 gepinnte Engines unter `engines/`, Modellablage und die Messregeln aus `llm-bench/`.
 
-Kurz: Standard ist `engines/llama.cpp-vulkan/build/bin/llama-server` mit
+Kurz: Standard ist `engines/llama.cpp-vulkan/build/bin/llama-server` (unter Windows
+`.exe`, sonst fällt zid still auf Ollama zurück) mit
 `models/Qwen3-4B-Instruct-2507-Q4_K_M.gguf` (`src/ai/paths.zig`), Fallback Ollama.
 `LLAMA_SERVER_PATH` und `LLAMA_MODEL_PATH` überschreiben. RPC `chat_state`,
-E2E `python3 scripts/e2e_ai_chat.py`.
+E2E `python3 scripts/e2e_ai_chat.py` und `scripts/e2e_ai_tools.py`.
+
+Drei Regeln aus der Messreihe vom 17.09.2026
+(`llm-bench/results/windows-i5-13500T-gemma4-vs-qwen3.md`):
+
+- **Thinking aus.** llama-server bekommt `--chat-template-kwargs {"enable_thinking":false}`,
+  Ollama-Requests `reasoning_effort: "none"`. Denkende Modelle (gemma4) streamen sonst
+  20–30 s `reasoning`, bevor das erste `content`-Delta kommt. `--reasoning-budget 0` und
+  `think: false` wirken nicht.
+- **Werkzeug-Prompt klein halten.** Das `command`-Werkzeug trägt die Kommandos nur als
+  Enum im Schema, keine Liste mit Label oder Kürzel im Text. Die Liste kostete 1000 Token,
+  auf CPU 20 s vor dem ersten Delta, und brachte gemma4 dazu, `open_folder` statt
+  `command` zu wählen. Jeder Stream endet mit einer `usage:`-Logzeile (Prompt-Token,
+  `prompt_ms`) — vor Prompt-Änderungen vorher/nachher ablesen.
+- **Enum-Wert als Werkzeugname** (`toggle_explorer` statt `command{name}`) führt
+  `agent_actions` als Kommando aus (`ai_tools.commandFromToolName`), statt „unknown tool"
+  zu melden; kleine Modelle über Ollama tun das.
 
 ## Engines und Modelle (`engines/`, `models/`, `llm-bench/`)
 
@@ -763,7 +780,7 @@ Eintrag an, und nur `UI.updateScroll` räumt die (10 Einträge große) Liste auf
   zeigt nur `binary_view.zig` (Name, Größe). Bewusst ohne „Trotzdem öffnen“ (VS Code hat das, Zed
   nicht). UTF-16 gilt als binär, es gibt keinen Decoder. Bild/PDF entscheidet weiter die Endung.
   Eingaben auf einem Binär-Tab gehen wie bei Bild-Tabs an den Editor des vorherigen Buffers —
-  bekanntes Verhalten, Tastatur-Fokus pro Tab-Art steht in todo.md.
+  bekanntes Verhalten (Tastatur-Fokus pro Tab-Art ist nicht umgesetzt).
 - Runs über `ShapedRunCache.MAX_TEXT_LEN` (2048 Bytes) liefert der Shaper stumm leer. Deshalb gibt der
   Editor pro Zeile nur den sichtbaren Spaltenausschnitt an Clay (`CodeEditor.visibleSliceOf`: ab
   `view.col`, `view.cols + 2` Spalten; `view.cols` kommt aus `visibleColCount` = Editor-Breite minus
@@ -798,7 +815,12 @@ Eintrag an, und nur `UI.updateScroll` räumt die (10 Einträge große) Liste auf
   und Filter wie Linux (versteckte Pfadteile, `zig-out`, `node_modules`, `.gguf`, 100-ms-Dedupe).
   Atomares Speichern (Rename) meldet `file_created`, nur Überschreiben `file_changed` — wie
   inotify. `src/async/file_watcher.zig` ist ein alter, nicht eingebundener Stub.
-- Suiten mit Fixtures, die nur auf dem Fedora-Laptop liegen: siehe `todo.md`.
+- Testdaten der Suiten kommen aus `scripts/fixtures/` und `scripts/e2e_fixtures.py` (PDF, PNG
+  werden erzeugt), nicht aus dem ignorierten `test_data/`. Git-Fixtures löscht
+  `e2e_open_folder.rmtree` (setzt Rechte auf `.git/objects`, sonst bleibt das Fixture unter
+  Windows still stehen); die Suiten stellen stdout auf UTF-8 (Pfeile in Meldungen).
+- Windows-Build der Engine: clang + ninja, `-DGGML_VULKAN=OFF`, dazu
+  `-D_WIN32_WINNT=0x0A00` in C- und CXX-Flags (cpp-httplib verlangt Windows 10).
 - Pfade in Git-Status (`/`) und LSP-URIs (`file:///C:/…`) werden auf Windows-Trenner umgesetzt
   (`updateGitStatus`, `lsp_proto.pathToUri`/`uriToPath`). Dasselbe gilt für die Repo-Wurzel aus
   `git rev-parse --show-toplevel`: `git_worker.repoRoot` setzt sie um, bevor sie in Timeline- und

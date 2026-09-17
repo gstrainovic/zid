@@ -73,9 +73,10 @@ def run_with_backend():
         check(s["tabs"][s["active_tab"]]["kind"] == "chat", "Chat-Tab ist aktiv")
 
         # 1) Lange Antwort: Streaming muss schnell sichtbar werden, Escape bricht ab.
-        # Vor dem ersten Delta steht die Prompt-Auswertung (System-Prompt plus Werkzeug-JSON
-        # mit allen 106 Kommandos); auf reiner CPU sind das ~50 tok/s (i5-13500T, 8–14
-        # Threads gleich), also deutlich über 30 s. Auf der GPU bleibt die Grenze eng.
+        # Vor dem ersten Delta steht die Prompt-Auswertung (System-Prompt plus Werkzeug-JSON,
+        # ~1360 Token); auf reiner CPU sind das ~50 tok/s (i5-13500T, 8–14 Threads gleich),
+        # also ~22 s mit Streuung bis nahe 30. Auf der GPU bleibt die Grenze eng. Die
+        # Prompt-Grösse steht im zid-Log als `usage:`-Zeile.
         first_delta_s = 90 if st["title"].endswith("· CPU") else 30
         send("Erkläre ausführlich in etwa 400 Wörtern, was die Vulkan-Grafik-API ist.")
         st, dt = wait_for(lambda s: s["streaming_len"] > 0 or not s["loading"], first_delta_s, "erstes Streaming-Delta")
