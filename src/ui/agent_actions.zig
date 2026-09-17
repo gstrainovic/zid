@@ -199,6 +199,13 @@ fn executeInner(ui: *UI, alloc: std.mem.Allocator, call: *const ai_tools.ToolCal
         return .{ .done = try alloc.dupe(u8, "{\"ok\":true,\"matches\":0}") };
     }
 
+    // Enum-Wert direkt als Werkzeugname aufgerufen (siehe ai_tools.commandFromToolName)
+    if (ai_tools.commandFromToolName(call.name)) |cmd| {
+        ui.executeCommand(cmd);
+        log.info("agent: command {s} (als Werkzeugname aufgerufen)", .{call.name});
+        return .{ .done = try std.fmt.allocPrint(alloc, "{{\"ok\":true,\"command\":\"{s}\",\"label\":\"{s}\"}}", .{ call.name, shortcuts.label(cmd) }) };
+    }
+
     const names = try ai_tools.toolNames(alloc);
     defer alloc.free(names);
     return .{ .done = errorJson(alloc, "unknown tool '{s}'. Available tools: {s}", .{ call.name, names }) };

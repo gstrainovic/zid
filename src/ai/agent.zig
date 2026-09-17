@@ -258,6 +258,14 @@ pub const LlamaAgent = struct {
         try jw.write(messages);
         try jw.objectField("temperature");
         try jw.write(0.7);
+        if (self.is_ollama) {
+            // Denkende Modelle (gemma4) streamen über Ollama erst 20–30 s `reasoning`,
+            // bevor das erste `content`-Delta kommt; der Chat zeigt solange nichts und
+            // Werkzeugaufrufe verzögern sich entsprechend. `think: false` wirkt auf dem
+            // OpenAI-Endpunkt nicht, `reasoning_effort: "none"` schon (Ollama 0.30.7).
+            try jw.objectField("reasoning_effort");
+            try jw.write("none");
+        }
         if (stream) {
             try jw.objectField("stream");
             try jw.write(true);
@@ -514,3 +522,16 @@ pub const LlamaAgent = struct {
         }
     }
 };
+
+test "buildPayload: reasoning_effort none nur für Ollama" {
+    const a = std.testing.allocator;
+    var agent = LlamaAgent{ .allocator = a, .process = null, .model_path = "m", .server_port = 11434, .connect_timeout_ns = 0, .is_ollama = true };
+    const ollama = try agent.buildPayload(&.{}, true, null, null);
+    defer a.free(ollama);
+    try std.testing.expect(std.mem.indexOf(u8, ollama, "\"reasoning_effort\":\"none\"") != null);
+
+    agent.is_ollama = false;
+    const llama = try agent.buildPayload(&.{}, true, null, null);
+    defer a.free(llama);
+    try std.testing.expect(std.mem.indexOf(u8, llama, "reasoning_effort") == null);
+}

@@ -900,7 +900,7 @@ pub fn main() !void {
 
                         if (ui_system.open_markdown_views.getPtr(path)) |view_ptr| {
                             view_ptr.*.allocator.free(view_ptr.*.text);
-                            view_ptr.*.text = view_ptr.*.allocator.dupe(u8, md_content) catch "";
+                            view_ptr.*.text = @import("ui/md_select.zig").ownedLf(view_ptr.*.allocator, md_content);
                         } else {
                             const view = allocator.create(@import("ui/markdown_view.zig").MarkdownView) catch unreachable;
                             view.* = @import("ui/markdown_view.zig").MarkdownView.init(ui_system.allocator, md_content, abs_source_path);

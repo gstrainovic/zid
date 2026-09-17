@@ -389,6 +389,11 @@ pub fn taskOllamaPull(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.Ta
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
+test {
+    // agent.zig ist kein eigenes Test-Root; seine Tests laufen über dieses hier mit.
+    _ = agent_mod;
+}
+
 test "ChatParams init/deinit owns message strings (no leaks)" {
     const alloc = std.testing.allocator;
 

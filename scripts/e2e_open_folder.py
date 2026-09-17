@@ -7,9 +7,28 @@ Aufruf: python3 scripts/e2e_open_folder.py [zielordner]  (Default: ~/projects)
 """
 import json, os, shutil, socket, subprocess, sys, time
 
+# Windows: umgeleitetes stdout ist cp1252, die Suiten drucken aber Pfeile (↑↓) und
+# sterben dann mit UnicodeEncodeError, bevor der eigentliche Schritt läuft.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 HOST, PORT = "127.0.0.1", 9999
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ZID = os.path.join(ROOT, "zig-out", "bin", "zid.exe" if os.name == "nt" else "zid")
+
+
+def rmtree(path):
+    """Verzeichnis samt Inhalt löschen, auch schreibgeschützte Dateien.
+
+    Git legt Objekte unter .git/objects schreibgeschützt an; unter Windows scheitert
+    shutil.rmtree daran mit PermissionError, mit ignore_errors=True bleibt das Fixture
+    dann still stehen und das folgende os.makedirs wirft FileExistsError."""
+    def force(func, p, _exc):
+        os.chmod(p, 0o700)
+        func(p)
+
+    if os.path.exists(path):
+        shutil.rmtree(path, onexc=force)
 
 
 def isolated_env(name):
