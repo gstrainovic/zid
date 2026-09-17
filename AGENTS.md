@@ -440,7 +440,7 @@ gepinnt, `models/` hält GGUFs flach und ignoriert (nie committen), `llm-bench/`
   `bufferKeyForPath` findet den Buffer notfalls über realpath, weil Ereignis- und Öffnungspfad
   verschiedene Schreibweisen derselben Datei sein können. E2E:
   `python3 scripts/e2e_external_change.py` (in-place, atomic, Symlink im und außerhalb des
-  Projekts). Der Windows-Watcher kennt den Symlink-Abstieg nicht.
+  Projekts). Der Windows-Watcher folgt Symlink-Ordnern nicht (ungetestet, offen in `todo.md`).
 - Panes: Ctrl+\ splittet, Ctrl+Alt+Pfeil oder Chord Ctrl+K dann Pfeil wechselt geometrisch
   (`focusPane` über die Pane-Bounds des letzten Frames), Ctrl+Shift+E fokussiert den Explorer,
   Ctrl+J wechselt zum Terminal-Tab und zurück (`terminal_return_index`). Ctrl+K erreicht die Shell
