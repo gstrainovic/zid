@@ -51,7 +51,7 @@ Umgebungsvariablen:
 
 ```bash
 export LLAMA_SERVER_PATH=/pfad/zu/llama-server
-export LLAMA_MODEL_PATH=/pfad/zu/Qwen3-4B-Instruct-2507-Q4_K_M.gguf   # z. B. Qwen3 statt gemma4
+export LLAMA_MODEL_PATH=/pfad/zu/anderes-modell.gguf
 # Optional: NVIDIA GPU erzwingen (Index 1)
 export GGML_VULKAN_DEVICE=1
 ```

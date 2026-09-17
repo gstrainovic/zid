@@ -15,7 +15,8 @@ Maschinen (`results/windows-i5-13500T-gemma4-vs-qwen3.md`,
 `results/linux-p1000-gemma4-vs-qwen3.md`): gemma4-E2B Q4_0 mit
 `enable_thinking=false` erreicht ebenfalls 10/10 und ist schneller (CPU 18.2
 gegen 11.9 tok/s, P1000 27.6 gegen 19.3); es ist seither das Standardmodell von
-zid, Qwen3-4B bleibt als Vergleichsmodell. **Es sind keine weiteren Läufe
+zid; die Qwen3-GGUF ist auf beiden Maschinen gelöscht (Download: unsloth, sha256
+`3605803b…`, Kennungen in beiden Nachtrags-Dateien). **Es sind keine weiteren Läufe
 geplant.** Dieses Dokument ersetzt das frühere `HANDOFF.md`; es enthält das
 Betriebswissen für den Fall, dass doch noch einmal gemessen wird, und die
 Entscheidungen, die nicht erneut aufgerollt werden.

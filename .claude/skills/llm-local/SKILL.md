@@ -142,6 +142,7 @@ beginnen.
 - Entscheidungen des Projektinhabers und die Liste „nicht erneut aufrollen" stehen in
   `llm-bench/CLAUDE.md`.
 - **Standardmodell des Chats** ist gemma-4-E2B-it Q4_0 (ggml-org). Qwen3-4B-Instruct-2507
-  bleibt als Vergleichsmodell im Repo (gleiche Werkzeugwahl, langsamer); Llama-3.2-3B und
-  das BitNet-Referenzmodell sind sinnvoll; die fünf reinen Bench-Modelle bleiben, bis
+  ist auf beiden Maschinen gelöscht; ein erneuter Vergleich braucht den Download (unsloth,
+  sha256 `3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597`). Llama-3.2-3B
+  und das BitNet-Referenzmodell sind sinnvoll; die fünf reinen Bench-Modelle bleiben, bis
   der Projektinhaber entscheidet.
