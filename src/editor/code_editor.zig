@@ -2495,16 +2495,21 @@ pub const CodeEditor = struct {
             const rel = (self.mouse_x - data.bounding_box.x - thumb_w / 2) / @max(1, track_w - thumb_w);
             self.view.col = @intFromFloat(@max(0, @min(1, rel)) * @as(f32, @floatFromInt(max_col)));
         }
+        // Gleiche Farben und Stärke wie die vertikale Leiste (renderScrollbar): vorher 8 px
+        // mit Schwarz bei Alpha 60 und Thumb in Gutter-Farbe — auf dunklem Hintergrund
+        // praktisch unsichtbar, die Leiste galt als fehlend.
         clay.UI()(.{
             .id = id,
-            .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(8) } },
+            .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(self.scrollbar_width) } },
             .floating = .{ .attach_to = .to_parent, .attach_points = .{ .element = .left_bottom, .parent = .left_bottom }, .offset = .{ .x = self.gutter_width, .y = 0 }, .z_index = 50 },
-            .background_color = .{ 0, 0, 0, 60 },
+            .background_color = .{ 30, 30, 46, 255 },
         })({
+            if (clay.hovered()) self.desired_cursor = .arrow;
             clay.UI()(.{
                 .layout = .{ .sizing = .{ .w = .fixed(thumb_w), .h = .grow } },
-                .floating = .{ .attach_to = .to_parent, .attach_points = .{ .element = .left_top, .parent = .left_top }, .offset = .{ .x = thumb_x, .y = 0 } },
-                .background_color = .{ self.line_number_color[0], self.line_number_color[1], self.line_number_color[2], 180 },
+                // z_index über der Leiste: mit deckendem Track läge der Thumb sonst darunter
+                .floating = .{ .attach_to = .to_parent, .attach_points = .{ .element = .left_top, .parent = .left_top }, .offset = .{ .x = thumb_x, .y = 0 }, .z_index = 51 },
+                .background_color = .{ 88, 88, 120, 200 },
                 .corner_radius = .all(3),
             })({});
         });
@@ -3080,6 +3085,11 @@ pub const CodeEditor = struct {
     pub fn render(self: *Self, arena: std.mem.Allocator, mouse_pressed: bool) void {
         self.desired_cursor = .arrow;
         self.last_frame_hovered = false; // Reset each frame
+        // Sichtbare Spalten aus der aktuellen Breite. Vorher stand view.cols nur nach einer
+        // Cursorbewegung (ensureCursorVisible) auf dem Wert der Breite; nach dem Öffnen einer
+        // Datei galt die Vorgabe von 800 px (50 Spalten): Zeilen endeten in breiten Fenstern
+        // bei Spalte 50 und die horizontale Leiste erschien, obwohl alles Platz hatte.
+        if (!self.word_wrap) self.view.cols = self.visibleColCount();
 
         const editor_id = clay.ElementId.IDI("code_editor", @truncate(@intFromPtr(self)));
 

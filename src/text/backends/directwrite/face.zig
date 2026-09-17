@@ -205,10 +205,15 @@ pub const DirectWriteFace = struct {
         
         // Render at padding offset
         const padding = 8.0;
-        // The glyph starts at baseline_x + gm.bearing_x * size_ratio. 
-        // We want the resulting RasterizedGlyph to have the correct internal offsets.
-        const baseline_x = padding - (gm.bearing_x * size_ratio) + subpixel_x;
-        const baseline_y = padding + (gm.bearing_y * size_ratio);
+        // Die Grundlinie liegt auf einem ganzen Pixel, die Bitmap-Kante um den ganzzahligen
+        // Teil der Bearing darüber bzw. links davon. Vorher lag die Grundlinie bei
+        // padding + bearing (gebrochen) und offset_y war floor(bearing): jeder Glyph wurde bis
+        // zu 1 px zu tief gesetzt, je nach Nachkommateil seiner Bearing — die Buchstaben
+        // einer Zeile standen sichtbar auf verschiedenen Grundlinien.
+        const bearing_x_px = @floor(gm.bearing_x * size_ratio);
+        const bearing_y_px = @ceil(gm.bearing_y * size_ratio);
+        const baseline_x = padding - bearing_x_px + subpixel_x;
+        const baseline_y = padding + bearing_y_px;
 
         // Create default rendering params
         var rendering_params: ?*anyopaque = null;
@@ -249,8 +254,8 @@ pub const DirectWriteFace = struct {
         return RasterizedGlyph{
             .width = physical_width,
             .height = physical_height,
-            .offset_x = @as(i32, @intFromFloat(@floor(gm.bearing_x * size_ratio))),
-            .offset_y = @as(i32, @intFromFloat(@floor(gm.bearing_y * size_ratio))),
+            .offset_x = @as(i32, @intFromFloat(bearing_x_px)),
+            .offset_y = @as(i32, @intFromFloat(bearing_y_px)),
             .advance_x = gm.advance_x * (font_size / self.point_size),
             .is_color = false,
         };
