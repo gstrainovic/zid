@@ -6,7 +6,10 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-pub const engine_rel = "engines/llama.cpp-vulkan/build/bin/llama-server";
+/// Unter Windows heisst die Datei `llama-server.exe`; ohne Endung schlägt der
+/// Existenztest in agent.zig fehl und zid fällt still auf Ollama zurück.
+pub const engine_rel = "engines/llama.cpp-vulkan/build/bin/llama-server" ++ exe_suffix;
+pub const exe_suffix = if (builtin.os.tag == .windows) ".exe" else "";
 pub const model_rel = "models/Qwen3-4B-Instruct-2507-Q4_K_M.gguf";
 
 /// `<repo>/zig-out/bin` → `<repo>`; null, wenn die Datei woanders liegt.
@@ -49,7 +52,7 @@ test "Standardpfade liegen unter engines/ und models/ des Repos, nicht unter HOM
     defer a.free(e);
     // Trenner ist plattformabhängig, deshalb Anfang und Ende statt Volltext prüfen.
     try testing.expect(std.mem.startsWith(u8, e, root ++ std.fs.path.sep_str ++ "engines"));
-    try testing.expect(std.mem.endsWith(u8, e, "llama-server"));
+    try testing.expect(std.mem.endsWith(u8, e, "llama-server" ++ exe_suffix));
     const m = try defaultModel(a, root);
     defer a.free(m);
     try testing.expect(std.mem.startsWith(u8, m, root ++ std.fs.path.sep_str ++ "models"));
