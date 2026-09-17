@@ -2543,7 +2543,12 @@ pub const UI = struct {
     }
 
     /// Datei auf der Platte geändert (Watcher): ungeänderte Buffer still neu laden, geänderte fragen.
-    pub fn handleExternalChange(self: *Self, path: []const u8) void {
+    pub fn handleExternalChange(self: *Self, event_path: []const u8) void {
+        // Der Watcher meldet den Pfad, unter dem er das Verzeichnis registriert hat; der
+        // Buffer ist unter dem Pfad geschlüsselt, mit dem die Datei geöffnet wurde. Bei
+        // Symlink-Ordnern (Link im Projekt, Ziel woanders) sind das zwei Schreibweisen
+        // derselben Datei, deshalb notfalls über realpath vergleichen.
+        const path = self.bufferKeyForPath(event_path) orelse return;
         const buf = self.open_buffers.get(path) orelse return;
         const content = std.fs.cwd().readFileAlloc(self.allocator, path, 64 * 1024 * 1024) catch return;
         defer self.allocator.free(content);
@@ -2571,6 +2576,22 @@ pub const UI = struct {
             .callback = handleExternalChangeDialog,
             .message_needs_free = true,
         };
+    }
+
+    /// Schlüssel in `open_buffers` für einen Pfad: direkt, sonst der Buffer mit demselben
+    /// realpath (Symlink-Ordner). null, wenn die Datei nicht offen ist.
+    fn bufferKeyForPath(self: *Self, path: []const u8) ?[]const u8 {
+        if (self.open_buffers.getKey(path)) |k| return k;
+        const real = std.fs.cwd().realpathAlloc(self.allocator, path) catch return null;
+        defer self.allocator.free(real);
+        var it = self.open_buffers.keyIterator();
+        while (it.next()) |key| {
+            if (!std.fs.path.isAbsolute(key.*)) continue; // "scratchpad", "error"
+            const key_real = std.fs.cwd().realpathAlloc(self.allocator, key.*) catch continue;
+            defer self.allocator.free(key_real);
+            if (std.mem.eql(u8, key_real, real)) return key.*;
+        }
+        return null;
     }
 
     fn showMoveDialog(self: *Self, mv: file_explorer_mod.PendingMove) void {

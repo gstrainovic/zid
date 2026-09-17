@@ -500,7 +500,9 @@ pub fn main() !void {
                         .file_changed, .file_created, .file_deleted => {
                             log.debug("file event: {} for {s}", .{ result.tag, result.payload });
                             git_refresh.mark(std.time.milliTimestamp());
-                            if (result.tag == .file_changed) ui_system.handleExternalChange(result.payload);
+                            // file_created auch: atomares Ersetzen (nach .tmp schreiben, dann rename)
+                            // meldet IN_MOVED_TO, die offene Datei hat trotzdem neuen Inhalt.
+                            if (result.tag != .file_deleted) ui_system.handleExternalChange(result.payload);
                         },
                         else => {},
                     }

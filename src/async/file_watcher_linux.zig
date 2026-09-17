@@ -73,7 +73,11 @@ pub const FileWatcher = struct {
 
     fn addTree(self: *Self, dir_path: []const u8) !void {
         if (self.should_stop.load(.acquire)) return;
+        // inotify folgt Symlinks: ein Link-Ordner liefert den Watch-Deskriptor seines Ziels.
+        // Ist der schon registriert (Ziel im Baum, oder Link auf einen Vorfahren), bleibt
+        // die erste Schreibweise und der Abstieg entfällt — sonst Endlosschleife.
         const wd = try std.posix.inotify_add_watch(self.inotify_fd, dir_path, WATCH_MASK);
+        if (self.wd_to_path.contains(wd)) return;
         const owned = try self.allocator.dupe(u8, dir_path);
         try self.wd_to_path.put(wd, owned);
 
@@ -82,7 +86,12 @@ pub const FileWatcher = struct {
 
         var iter = dir.iterate();
         while (iter.next() catch null) |entry| {
-            if (entry.kind == .directory and !std.mem.startsWith(u8, entry.name, ".") and !isIgnoredDir(entry.name)) {
+            if (std.mem.startsWith(u8, entry.name, ".") or isIgnoredDir(entry.name)) continue;
+            // Symlink-Ordner mitnehmen (statFile folgt dem Link); Ziel außerhalb des
+            // Projekts wäre sonst unbeobachtet, eine offene Datei dort bliebe veraltet.
+            const is_dir = entry.kind == .directory or
+                (entry.kind == .sym_link and if (dir.statFile(entry.name)) |st| st.kind == .directory else |_| false);
+            if (is_dir) {
                 const child_path = std.fs.path.join(self.allocator, &.{ dir_path, entry.name }) catch continue;
                 defer self.allocator.free(child_path);
                 self.addTree(child_path) catch |err| {
