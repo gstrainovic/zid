@@ -318,6 +318,7 @@ pub const UI = struct {
             // Standard: llama.cpp-Vulkan-Build + Qwen3-4B (Testsieger in llm-bench/: 18,8 tok/s
             // auf der P1000, 10/10 Werkzeugwahl), beides im Repo (engines/, models/). Repo-Wurzel
             // aus dem Ort der ausführbaren Datei (<repo>/zig-out/bin), sonst Arbeitsverzeichnis.
+            // Windows ohne diskrete GPU nimmt gemma4-E2B (schneller bei gleicher Werkzeugwahl).
             // Fehlt der Build, fällt es auf Ollama mit gemma4:e2b zurück.
             const ai_paths = @import("ai_paths");
             const exe_dir = std.fs.selfExeDirPathAlloc(allocator) catch null;
@@ -327,9 +328,19 @@ pub const UI = struct {
             const repo_root = (if (exe_dir) |d| ai_paths.repoRootFromExeDir(d) else null) orelse cwd_root;
             const default_engine = try ai_paths.defaultEngine(allocator, repo_root);
             defer allocator.free(default_engine);
-            const default_model = try ai_paths.defaultModel(allocator, repo_root);
-            defer allocator.free(default_model);
             const engine_available = if (std.fs.cwd().access(default_engine, .{})) |_| true else |_| false;
+            // Windows ohne diskrete GPU → gemma4-E2B (ai_paths.model_rel_windows_cpu). Die
+            // Geräteabfrage läuft in LlamaAgent.init noch einmal; ~1 s, nur unter Windows.
+            const windows_cpu = @import("builtin").os.tag == .windows and engine_available and blk: {
+                const choice = agent_mod.LlamaAgent.detectDevice(allocator, default_engine);
+                defer if (choice == .gpu) {
+                    allocator.free(choice.gpu.id);
+                    allocator.free(choice.gpu.name);
+                };
+                break :blk choice == .cpu;
+            };
+            const default_model = try ai_paths.defaultModelFor(allocator, repo_root, windows_cpu);
+            defer allocator.free(default_model);
 
             const server_path = std.process.getEnvVarOwned(allocator, "LLAMA_SERVER_PATH") catch |err| blk: {
                 if (err == error.EnvironmentVariableNotFound) break :blk try allocator.dupe(u8, if (engine_available) default_engine else "ollama");
