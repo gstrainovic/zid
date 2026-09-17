@@ -10,10 +10,15 @@ Linux i7-8850H (CPU-Runde) und die zweite Laptop-Runde (GPU via Vulkan plus
 Qwen3-4B, Phi-4-mini, Gemma-3-4B). Die Fragen des Projekts sind beantwortet;
 Kernbefund der zweiten Runde: mit der Quadro P1000 des Laptops ist Llama-Q4
 auf der GPU (24.1 tok/s) schneller als BitNet auf der CPU (22.4), und
-Qwen3-4B erreicht als erstes Modell 10/10 Werkzeugwahl. **Es sind keine
-weiteren Läufe geplant.** Dieses Dokument ersetzt das frühere `HANDOFF.md`; es
-enthält das Betriebswissen für den Fall, dass doch noch einmal gemessen wird,
-und die Entscheidungen, die nicht erneut aufgerollt werden.
+Qwen3-4B erreicht als erstes Modell 10/10 Werkzeugwahl. Nachtrag auf beiden
+Maschinen (`results/windows-i5-13500T-gemma4-vs-qwen3.md`,
+`results/linux-p1000-gemma4-vs-qwen3.md`): gemma4-E2B Q4_0 mit
+`enable_thinking=false` erreicht ebenfalls 10/10 und ist schneller (CPU 18.2
+gegen 11.9 tok/s, P1000 27.6 gegen 19.3); es ist seither das Standardmodell von
+zid, Qwen3-4B bleibt als Vergleichsmodell. **Es sind keine weiteren Läufe
+geplant.** Dieses Dokument ersetzt das frühere `HANDOFF.md`; es enthält das
+Betriebswissen für den Fall, dass doch noch einmal gemessen wird, und die
+Entscheidungen, die nicht erneut aufgerollt werden.
 
 ## Bevor irgendetwas gemessen wird
 
@@ -78,7 +83,9 @@ und kein taugliches Vulkan hat. Die Zuordnung ist fest:
 
 - **BitNet i2_s → nur die gepinnte BitNet-Engine** (`engines/BitNet`). Auf der
   neuen Engine ist i2_s kaputt (der `Q1_0`-Defekt aus Abschnitt oben).
-- **Qwen3/Phi-4/Gemma-3 → nur b10524**, CPU wie GPU.
+- **Qwen3/Phi-4/Gemma-3/gemma4 → nur b10524**, CPU wie GPU. gemma4 zusätzlich mit
+  `--chat-template-kwargs {"enable_thinking":false}`, sonst frisst das Denken das
+  Token-Budget (8/10) und `--reasoning-budget 0` macht es schlimmer (0/10).
 - **Llama-3.2-3B läuft auf beiden** und dient als Brücke: tg64 13.64 (b3962)
   gegen 12.22 (b10524), pp128 36.73 gegen 49.30 — Zahlen über die
   Engine-Grenze hinweg nie ohne diese Verschiebung vergleichen.

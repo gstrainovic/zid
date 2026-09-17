@@ -10,12 +10,11 @@ const builtin = @import("builtin");
 /// Existenztest in agent.zig fehl und zid fällt still auf Ollama zurück.
 pub const engine_rel = "engines/llama.cpp-vulkan/build/bin/llama-server" ++ exe_suffix;
 pub const exe_suffix = if (builtin.os.tag == .windows) ".exe" else "";
-pub const model_rel = "models/Qwen3-4B-Instruct-2507-Q4_K_M.gguf";
-/// Windows ohne diskrete GPU: gemma4-E2B ist dort bei gleicher Werkzeugwahl (10/10 im
-/// Bench, 7/7 in e2e_ai_tools) rund die Hälfte schneller als Qwen3 (18.2 gegen 11.9 tok/s,
-/// llm-bench/results/windows-i5-13500T-gemma4-vs-qwen3.md). Auf dem Laptop mit P1000 nicht
-/// gemessen, deshalb bleibt Qwen3 dort Standard.
-pub const model_rel_windows_cpu = "models/gemma-4-E2B-it-Q4_0.gguf";
+/// gemma4-E2B Q4_0 (ggml-org) auf allen Plattformen: gleiche Werkzeugwahl wie Qwen3-4B
+/// (10/10 im Bench, e2e_ai_tools grün), aber schneller — 18.2 gegen 11.9 tok/s auf CPU
+/// (llm-bench/results/windows-i5-13500T-gemma4-vs-qwen3.md), 27.6 gegen 19.3 tok/s auf der
+/// P1000 (llm-bench/results/linux-p1000-gemma4-vs-qwen3.md).
+pub const model_rel = "models/gemma-4-E2B-it-Q4_0.gguf";
 
 /// `<repo>/zig-out/bin` → `<repo>`; null, wenn die Datei woanders liegt.
 pub fn repoRootFromExeDir(exe_dir: []const u8) ?[]const u8 {
@@ -32,12 +31,7 @@ pub fn defaultEngine(alloc: std.mem.Allocator, root: []const u8) ![]u8 {
 }
 
 pub fn defaultModel(alloc: std.mem.Allocator, root: []const u8) ![]u8 {
-    return defaultModelFor(alloc, root, false);
-}
-
-/// `windows_cpu`: Windows und kein brauchbares Gerät laut `--list-devices` → gemma4-E2B.
-pub fn defaultModelFor(alloc: std.mem.Allocator, root: []const u8, windows_cpu: bool) ![]u8 {
-    return std.fs.path.join(alloc, &.{ root, if (windows_cpu) model_rel_windows_cpu else model_rel });
+    return std.fs.path.join(alloc, &.{ root, model_rel });
 }
 
 const testing = std.testing;
@@ -66,10 +60,6 @@ test "Standardpfade liegen unter engines/ und models/ des Repos, nicht unter HOM
     const m = try defaultModel(a, root);
     defer a.free(m);
     try testing.expect(std.mem.startsWith(u8, m, root ++ std.fs.path.sep_str ++ "models"));
-    try testing.expect(std.mem.endsWith(u8, m, "Qwen3-4B-Instruct-2507-Q4_K_M.gguf"));
+    try testing.expect(std.mem.endsWith(u8, m, "gemma-4-E2B-it-Q4_0.gguf"));
     try testing.expect(std.mem.indexOf(u8, e, "projects/ki") == null);
-    const g = try defaultModelFor(a, root, true);
-    defer a.free(g);
-    try testing.expect(std.mem.startsWith(u8, g, root ++ std.fs.path.sep_str ++ "models"));
-    try testing.expect(std.mem.endsWith(u8, g, "gemma-4-E2B-it-Q4_0.gguf"));
 }

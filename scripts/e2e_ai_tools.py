@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Headless-E2E: der Agent bedient den Editor über Werkzeuge.
 
-Braucht das konfigurierte KI-Backend (Default llama-server + Qwen3-4B). Prüft:
+Braucht das konfigurierte KI-Backend (Default llama-server + gemma4-E2B). Prüft:
 1. Editor-Kommando per Chat (toggle_explorer) → Explorer aus und wieder an
 2. Datei anlegen und öffnen ohne zweites Pane → Split entsteht, Datei im neuen Pane,
    Fokus bleibt im Chat

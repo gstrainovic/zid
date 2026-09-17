@@ -14,16 +14,20 @@ description: >
 
 `UI.init`, sofern nicht `--ai=off`. Standard ist der llama.cpp-Vulkan-Build
 `engines/llama.cpp-vulkan/build/bin/llama-server` mit
-`models/Qwen3-4B-Instruct-2507-Q4_K_M.gguf`, beides relativ zur Repo-Wurzel
-(`src/ai/paths.zig`, unit-getestet: Wurzel aus `<repo>/zig-out/bin` der ausführbaren
-Datei, sonst das Arbeitsverzeichnis; nichts über `$HOME`). Fehlt der Build, Fallback auf
-Ollama mit `gemma4:e2b`. `LLAMA_SERVER_PATH` (Pfad oder `ollama`) und `LLAMA_MODEL_PATH`
-überschreiben.
+`models/gemma-4-E2B-it-Q4_0.gguf` (ggml-org, sha256 `8e30dff3…`), beides relativ zur
+Repo-Wurzel (`src/ai/paths.zig`, unit-getestet: Wurzel aus `<repo>/zig-out/bin` der
+ausführbaren Datei, sonst das Arbeitsverzeichnis; nichts über `$HOME`). Fehlt der Build,
+Fallback auf Ollama mit `gemma4:e2b`. `LLAMA_SERVER_PATH` (Pfad oder `ollama`) und
+`LLAMA_MODEL_PATH` überschreiben.
 
-**Warum Qwen3-4B:** auf diesem Laptop (i7-8850H, Quadro P1000 4 GB) liefert gemma4:e2b
-über Ollama 4,4 tok/s (das 5,2-GB-Modell passt nicht in den VRAM), Qwen3-4B Q4 über
-llama-server auf der P1000 18,8 tok/s. Ohne GPU laufen ~7–10 tok/s. BitNet-b1.58 wäre
-auf reiner CPU etwa doppelt so schnell, braucht aber die gepinnte Engine.
+**Warum gemma4-E2B Q4_0:** gleiche Werkzeugwahl wie Qwen3-4B-Instruct-2507 (10/10 in
+`bench/agent_eval.py`, `e2e_ai_tools` grün), aber auf beiden Referenzmaschinen schneller:
+27.6 gegen 19.3 tok/s auf der P1000 des Laptops (i7-8850H, 4 GB VRAM, Modell passt ganz
+hinein), 18.2 gegen 11.9 tok/s auf der CPU des i5-13500T. Erstes Delta im Chat 8 s auf der
+P1000 (Qwen3: 15 s). Antwortet auf deutsche Fragen deutsch (`bench/probe.py`, Chat-Suite).
+Messreihen: `llm-bench/results/windows-i5-13500T-gemma4-vs-qwen3.md`,
+`llm-bench/results/linux-p1000-gemma4-vs-qwen3.md`. Das Ollama-Modell `gemma4:e2b`
+(5,2 GB, 4,4 tok/s auf dem Laptop) ist eine andere Datei und nur Fallback.
 
 ## llama-server starten
 
@@ -41,10 +45,7 @@ dann im Antwortkanal weiter, 0/10 Werkzeugwahl). Über Ollama entspricht dem
 `reasoning_effort: "none"` im Request (`buildPayload`); `think: false` wirkt dort nicht.
 
 Unter Windows heisst die Engine `llama-server.exe` (`paths.exe_suffix`); ohne Endung schlug
-der Existenztest fehl und zid nahm still Ollama. Windows ohne diskrete GPU nimmt
-`paths.model_rel_windows_cpu` (gemma4-E2B Q4_0): gleiche Werkzeugwahl, 18.2 statt 11.9 tok/s
-auf dem i5-13500T, erstes Delta 13 s. Auf Linux bleibt Qwen3, bis die P1000-Messung vorliegt
-(`todo.md`).
+der Existenztest fehl und zid nahm still Ollama.
 
 **Werkzeug-Prompt klein halten.** Das `command`-Werkzeug trägt die 106 Kommandos nur als
 Enum; eine Liste mit Label und Kürzel im Text kostete 1000 Token und auf CPU 20 s vor dem
@@ -140,6 +141,7 @@ beginnen.
   Perplexity nur mit `llm-bench/bench/ppl-corpus.txt` bei `-c 512`.
 - Entscheidungen des Projektinhabers und die Liste „nicht erneut aufrollen" stehen in
   `llm-bench/CLAUDE.md`.
-- **Standardmodell des Chats** ist Qwen3-4B-Instruct-2507 (Pflicht). Llama-3.2-3B und
+- **Standardmodell des Chats** ist gemma-4-E2B-it Q4_0 (ggml-org). Qwen3-4B-Instruct-2507
+  bleibt als Vergleichsmodell im Repo (gleiche Werkzeugwahl, langsamer); Llama-3.2-3B und
   das BitNet-Referenzmodell sind sinnvoll; die fünf reinen Bench-Modelle bleiben, bis
   der Projektinhaber entscheidet.
