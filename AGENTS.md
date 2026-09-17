@@ -249,7 +249,9 @@ gepinnte Engines unter `engines/`, Modellablage und die Messregeln aus `llm-benc
 
 Kurz: Standard ist `engines/llama.cpp-vulkan/build/bin/llama-server` (unter Windows
 `.exe`, sonst fällt zid still auf Ollama zurück) mit
-`models/Qwen3-4B-Instruct-2507-Q4_K_M.gguf` (`src/ai/paths.zig`), Fallback Ollama.
+`models/Qwen3-4B-Instruct-2507-Q4_K_M.gguf`; Windows ohne diskrete GPU nimmt
+`models/gemma-4-E2B-it-Q4_0.gguf` (`src/ai/paths.zig`, `ui/mod.zig` fragt dafür
+`detectDevice`). Fallback Ollama.
 `LLAMA_SERVER_PATH` und `LLAMA_MODEL_PATH` überschreiben. RPC `chat_state`,
 E2E `python3 scripts/e2e_ai_chat.py` und `scripts/e2e_ai_tools.py`.
 

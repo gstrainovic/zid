@@ -195,7 +195,8 @@ pub const LlamaAgent = struct {
     }
 
     /// `llama-server --list-devices` fragen und per device_select wählen.
-    fn detectDevice(allocator: std.mem.Allocator, llama_server_path: []const u8) device_select.Choice {
+    /// Gerätewahl per `llama-server --list-devices`; bei `.gpu` gehören id/name dem Aufrufer.
+    pub fn detectDevice(allocator: std.mem.Allocator, llama_server_path: []const u8) device_select.Choice {
         const result = std.process.Child.run(.{
             .allocator = allocator,
             .argv = &[_][]const u8{ llama_server_path, "--list-devices" },

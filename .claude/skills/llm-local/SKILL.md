@@ -41,7 +41,10 @@ dann im Antwortkanal weiter, 0/10 Werkzeugwahl). Über Ollama entspricht dem
 `reasoning_effort: "none"` im Request (`buildPayload`); `think: false` wirkt dort nicht.
 
 Unter Windows heisst die Engine `llama-server.exe` (`paths.exe_suffix`); ohne Endung schlug
-der Existenztest fehl und zid nahm still Ollama.
+der Existenztest fehl und zid nahm still Ollama. Windows ohne diskrete GPU nimmt
+`paths.model_rel_windows_cpu` (gemma4-E2B Q4_0): gleiche Werkzeugwahl, 18.2 statt 11.9 tok/s
+auf dem i5-13500T, erstes Delta 13 s. Auf Linux bleibt Qwen3, bis die P1000-Messung vorliegt
+(`todo.md`).
 
 **Werkzeug-Prompt klein halten.** Das `command`-Werkzeug trägt die 106 Kommandos nur als
 Enum; eine Liste mit Label und Kürzel im Text kostete 1000 Token und auf CPU 20 s vor dem
