@@ -339,6 +339,18 @@ pub fn build(b: *std.Build) void {
     const run_git_timeline_tests = b.addRunArtifact(git_timeline_tests);
     run_git_timeline_tests.has_side_effects = true;
 
+    // Source Control „Changes“ (VS-Code-Stil): Status-Gruppen, Buchstaben, Diff-Specs, Auswahl.
+    const git_changes_mod = b.createModule(.{
+        .root_source_file = b.path("src/git/git_changes.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    git_changes_mod.addImport("git_diff", git_diff_mod);
+    exe_mod.addImport("git_changes", git_changes_mod);
+    const git_changes_tests = b.addTest(.{ .root_module = git_changes_mod });
+    const run_git_changes_tests = b.addRunArtifact(git_changes_tests);
+    run_git_changes_tests.has_side_effects = true;
+
     // Source Control Graph (VS-Code-Stil): Bahnen und Zeichenelemente je Zeile.
     const git_graph_mod = b.createModule(.{
         .root_source_file = b.path("src/git/git_graph.zig"),
@@ -707,6 +719,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_git_list_tests.step);
     test_step.dependOn(&run_git_diff_tests.step);
     test_step.dependOn(&run_git_timeline_tests.step);
+    test_step.dependOn(&run_git_changes_tests.step);
     test_step.dependOn(&run_git_graph_tests.step);
     test_step.dependOn(&run_git_scm_tests.step);
 

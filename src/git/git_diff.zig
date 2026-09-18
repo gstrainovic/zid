@@ -213,6 +213,9 @@ pub const scheme = "git-diff://";
 /// Ref für den Index (gestagter Stand) wie VS Code `GitTimelineItem('~', 'HEAD', …)`.
 pub const index_ref = "~";
 
+/// Ref für die Arbeitskopie (Source Control „Changes“): Inhalt liest der Worker von der Platte.
+pub const worktree_ref = "*";
+
 /// Hash des leeren Baums: VS Code vergleicht einen Wurzel-Commit damit.
 pub const empty_tree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
@@ -249,14 +252,24 @@ fn short(hash: []const u8) []const u8 {
 }
 
 pub fn specTitle(alloc: std.mem.Allocator, s: Spec) ![]u8 {
-    // VS Code: '{0} (Index)' für den gestagten Stand
+    // VS Code: '{0} (Index)' für den gestagten Stand, '{0} (Working Tree)' für die Arbeitskopie
     if (std.mem.eql(u8, s.hash, index_ref)) return std.fmt.allocPrint(alloc, "{s} (Index)", .{std.fs.path.basename(s.path)});
+    if (std.mem.eql(u8, s.hash, worktree_ref)) return std.fmt.allocPrint(alloc, "{s} (Working Tree)", .{std.fs.path.basename(s.path)});
     return title(alloc, s.path, short(if (s.parent.len > 0) s.parent else empty_tree), short(s.hash));
 }
 
-/// `git show <ref>:<pfad>` für den Dateiinhalt; null ohne Ref (Wurzel-Commit hat keinen Vorgänger).
+/// Hunk-Kopf für eine neue Datei (Untracked: leerer Baum gegen Arbeitskopie), leer ohne Zeilen (owned).
+pub fn syntheticAddHunk(alloc: std.mem.Allocator, content: []const u8) ![]u8 {
+    if (content.len == 0) return alloc.dupe(u8, "");
+    var n = std.mem.count(u8, content, "\n");
+    if (content[content.len - 1] != '\n') n += 1;
+    return std.fmt.allocPrint(alloc, "@@ -0,0 +1,{d} @@\n", .{n});
+}
+
+/// `git show <ref>:<pfad>` für den Dateiinhalt; null ohne Ref (Wurzel-Commit hat keinen Vorgänger)
+/// und für die Arbeitskopie (Datei von der Platte).
 pub fn contentArgs(buf: *[16][]const u8, spec_buf: []u8, ref: []const u8, path: []const u8) ?[]const []const u8 {
-    if (ref.len == 0 or path.len == 0) return null;
+    if (ref.len == 0 or path.len == 0 or std.mem.eql(u8, ref, worktree_ref)) return null;
     // Index: `git show :pfad`
     const object = std.fmt.bufPrint(spec_buf, "{s}:{s}", .{ if (std.mem.eql(u8, ref, index_ref)) "" else ref, path }) catch return null;
     buf[0] = "show";
@@ -271,6 +284,9 @@ pub fn hunkArgs(buf: *[16][]const u8, spec_buf: []u8, s: Spec) []const []const u
     var n: usize = 0;
     const head: []const []const u8 = if (std.mem.eql(u8, s.hash, index_ref))
         &.{ "diff", "--no-color", "--no-ext-diff", "--cached", "-U0", "-M", s.parent, "--" }
+    else if (std.mem.eql(u8, s.hash, worktree_ref))
+        // Arbeitskopie gegen den Index (Untracked baut der Worker über syntheticAddHunk)
+        &.{ "diff", "--no-color", "--no-ext-diff", "-U0", "-M", "--" }
     else if (s.parent.len > 0)
         &.{ "diff", "--no-color", "--no-ext-diff", "-U0", "-M", s.parent, s.hash, "--" }
     else
@@ -944,4 +960,36 @@ test "splitLines: Zeilen ohne Umbruch, letzte leere Zeile nach \\n zählt nicht,
     const empty = try splitLines(testing.allocator, "");
     defer testing.allocator.free(empty);
     try testing.expectEqual(@as(usize, 0), empty.len);
+}
+
+test "Arbeitskopie (Changes) wie VS Code: Titel „name (Working Tree)“, Inhalt von der Platte, Hunks Index gegen Arbeitskopie" {
+    const spec = Spec{ .hash = worktree_ref, .parent = index_ref, .repo = "/r", .path = "a.zig", .previous_path = "a.zig" };
+    const t = try specTitle(testing.allocator, spec);
+    defer testing.allocator.free(t);
+    try testing.expectEqualStrings("a.zig (Working Tree)", t);
+
+    var buf: [16][]const u8 = undefined;
+    var spec_buf: [512]u8 = undefined;
+    // Arbeitskopie kommt nicht aus git show: kein Argument, der Worker liest die Datei
+    try testing.expect(contentArgs(&buf, &spec_buf, spec.hash, spec.path) == null);
+    const old = contentArgs(&buf, &spec_buf, spec.parent, spec.previous_path).?;
+    try testing.expectEqualStrings(":a.zig", old[old.len - 1]);
+    const h = hunkArgs(&buf, &spec_buf, spec);
+    try testing.expectEqualStrings("diff", h[0]);
+    try testing.expect(!containsArg(h, "--cached"));
+    try testing.expect(!containsArg(h, index_ref));
+    try testing.expect(!containsArg(h, worktree_ref));
+    try testing.expectEqualStrings(":(top)a.zig", h[h.len - 1]);
+
+    // Untracked: leerer Baum gegen Arbeitskopie, Hunks werden vom Worker gebaut
+    const fresh = Spec{ .hash = worktree_ref, .parent = "", .repo = "/r", .path = "neu.txt", .previous_path = "neu.txt" };
+    const t2 = try specTitle(testing.allocator, fresh);
+    defer testing.allocator.free(t2);
+    try testing.expectEqualStrings("neu.txt (Working Tree)", t2);
+    const synth = try syntheticAddHunk(testing.allocator, "eins\nzwei\n");
+    defer testing.allocator.free(synth);
+    try testing.expectEqualStrings("@@ -0,0 +1,2 @@\n", synth);
+    const none = try syntheticAddHunk(testing.allocator, "");
+    defer testing.allocator.free(none);
+    try testing.expectEqualStrings("", none);
 }

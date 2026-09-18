@@ -31,6 +31,15 @@ pub const Theme = struct {
     border: clay.Color,
     border_focus: clay.Color,
 
+    // Git-Status (VS Code `gitDecoration.*`): Explorer-Dekoration und Source-Control-Zeilen
+    git_added: clay.Color,
+    git_modified: clay.Color,
+    git_deleted: clay.Color,
+    git_untracked: clay.Color,
+    git_renamed: clay.Color,
+    git_ignored: clay.Color,
+    git_conflict: clay.Color,
+
     // Radius
     radius_sm: f32 = 4.0,
     radius_md: f32 = 8.0,
@@ -63,6 +72,15 @@ pub const Theme = struct {
 
             .border = .{ 188, 194, 208, 255 },
             .border_focus = .{ 30, 102, 245, 255 },
+
+            // VS Code light: #587C0C #895503 #AD0707 #007100 #007100 #8E8E90 #AD0707
+            .git_added = .{ 88, 124, 12, 255 },
+            .git_modified = .{ 137, 85, 3, 255 },
+            .git_deleted = .{ 173, 7, 7, 255 },
+            .git_untracked = .{ 0, 113, 0, 255 },
+            .git_renamed = .{ 0, 113, 0, 255 },
+            .git_ignored = .{ 142, 142, 144, 255 },
+            .git_conflict = .{ 173, 7, 7, 255 },
         };
     }
 
@@ -88,6 +106,15 @@ pub const Theme = struct {
 
             .border = .{ 69, 71, 90, 255 },
             .border_focus = .{ 138, 173, 244, 255 },
+
+            // VS Code dark: #81B88B #E2C08D #C74E39 #73C991 #73C991 #8C8C8C #E4676B
+            .git_added = .{ 129, 184, 139, 255 },
+            .git_modified = .{ 226, 192, 141, 255 },
+            .git_deleted = .{ 199, 78, 57, 255 },
+            .git_untracked = .{ 115, 201, 145, 255 },
+            .git_renamed = .{ 115, 201, 145, 255 },
+            .git_ignored = .{ 140, 140, 140, 255 },
+            .git_conflict = .{ 228, 103, 107, 255 },
         };
     }
 };
