@@ -302,9 +302,12 @@ pub const CodeEditor = struct {
         self.buffer = new_buf;
         self.setLanguageFromPath(path);
         self.is_modified = new_buf.last_save != null and new_buf.root != new_buf.last_save.?; // Rough check
-        // We might want to save/restore cursor/view per buffer too...
-        // For now, reset them
+        // Cursor, Auswahl und Mehrfach-Cursor gehören zur alten Datei: alles zurücksetzen,
+        // sonst bleibt der alte Anker stehen und markiert ab Zeile 0 bis dorthin.
         self.cursor = .{};
+        self.selection_anchor = null;
+        self.clearExtraCursors();
+        self.mouse_down = false;
         self.view.row = 0;
         self.view.col = 0;
         self.edits_fully_tracked = false;
@@ -4342,4 +4345,23 @@ test "H-Scrollbar: Klick auf den Track blättert, Thumb ziehen scrollt Spalten" 
     const m3 = t.ed.hscrollModel().?;
     t.ed.handleMouseDown(m3.x + 1, m3.y + 2, .mouse_left);
     try std.testing.expectEqual(m3.max_offset - t.ed.view.cols, t.ed.view.col);
+}
+
+test "setBuffer: Auswahl und Zusatz-Cursor der alten Datei bleiben nicht hängen" {
+    var t = try testEditor(std.testing.allocator, "eins\nzwei\ndrei\nvier\n");
+    defer t.buffer.deinit();
+    defer t.ed.deinit();
+    // Zustand wie nach Klick in Zeile 3 der alten Datei (Anker = Cursor) plus Mehrfach-Cursor
+    t.ed.cursor = .{ .row = 3, .col = 2, .target = 2 };
+    t.ed.selection_anchor = t.ed.cursor;
+    t.ed.extra_cursors.append(std.testing.allocator, .{ .cursor = .{ .row = 1, .col = 0 }, .anchor = null }) catch unreachable;
+
+    const other = try flow_core.Buffer.create(std.testing.allocator);
+    defer other.deinit();
+    other.root = try other.load_from_string("a\nb\nc\n", &other.file_eol_mode, &other.file_utf8_sanitized);
+    t.ed.setBuffer(other, "/tmp/other.txt");
+
+    try std.testing.expect(!t.ed.hasSelection());
+    try std.testing.expect(t.ed.selection_anchor == null);
+    try std.testing.expectEqual(@as(usize, 0), t.ed.extra_cursors.items.len);
 }
