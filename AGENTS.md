@@ -904,6 +904,18 @@ Eintrag an, und nur `UI.updateScroll` räumt die (10 Einträge große) Liste auf
   Gutter durch Zeichenbreite). Highlight-Tags, Auswahl und Cursor rechnen mit dem Byte-Offset des
   Ausschnitts. `View.clamp` (flow-core) zieht `view.col` dem Cursor nach; Shift+Mausrad bzw.
   `scroll_horizontal` scrollt Spalten (`scrollColumns`). RPC `editor_state` liefert `view_col`/`view_cols`.
+- **Spalten sind Bytes.** `CodeEditor.metrics` zählt jedes Byte als eine Spalte (`egc_length`
+  liefert 1; Ausnahme Tab = 4 Spalten). `cursor.col`, `view.col` und alles aus
+  `get_line_width_to_pos`/`pos_to_width` sind darum Byte-Offsets, ←/→ laufen in zwei Schritten
+  durch ein „ü“. Jeder Schnitt an solchen Spalten kann mitten in einer UTF-8-Sequenz liegen —
+  der Shaper meldet das als `warning(shaper): invalid UTF-8 text … "> **Tab 1 \xe2\x80"` und
+  zeichnet U+FFFD (18.09.2026 mit `view.cols` = 10 in einer schmalen Pane). Deshalb rücken
+  `visibleSliceOf` (Anfang zurück, Ende vor; `VisibleSlice.col` trägt die verschobene Spalte),
+  `renderCursor` und `renderSelection` ihre Schnitte mit `snapToCharBoundary`/
+  `snapToCharBoundaryForward` an die Zeichengrenze. Die Tags aus tree-sitter liegen sauber
+  (Test „markdown tags end on codepoint boundaries“), nur das Zerschneiden im Editor war schuld.
+  Wer Spalten zeichenbasiert machen will, muss `egc_length` UTF-8-bewusst machen und die
+  Stellen anpassen, die Byte-Spalten annehmen (`find_ops` liefert Byte-Offsets als `col`).
 - `python3 scripts/e2e_odd_files.py` legt unter `tmp/` eine 3-KB-Binärdatei ohne Zeilenumbruch,
   eine 5000-Zeichen-Zeile und eine 5-MB-Datei an, öffnet sie headless, tippt und misst die Latenz
   bis das Zeichen in `editor_state` steht (gemessen 0,06 s bei der langen Zeile,

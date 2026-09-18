@@ -69,6 +69,44 @@ test "tagsForLine performance" {
     try testing.expect(avg < 10_000_000); // 10ms in ns
 }
 
+// tree-sitter liest den Rope über `get_from_pos` (Byte-Metriken); die Tag-Grenzen müssen
+// auf Zeichengrenzen liegen — sonst schneidet der Editor beim Zeichnen UTF-8-Sequenzen auf.
+test "markdown tags end on codepoint boundaries" {
+    const allocator = testing.allocator;
+    const content =
+        "# Titel\n\n## Positive Befunde\n\n> **Tab 1 \xe2\x80\x93 Positive Befunde (erf\xc3\xbcllt)**\n\n### E01\n\n" ++
+        "- **Aspekt / Teil-Feststellung bzw. Teil-Empfehlung:** Zustellung als Reset-Link \xe2\x87\x92 gepr\xc3\xbcft.\n";
+
+    var buffer = try flow_core.Buffer.create(allocator);
+    defer buffer.deinit();
+    var eol_mode: flow_core.Buffer.EolMode = .lf;
+    var utf8_sanitized: bool = false;
+    const root = try buffer.load_from_string(content, &eol_mode, &utf8_sanitized);
+    const metrics = createTestMetrics();
+
+    var highlighter = try flow_core.highlight.SyntaxHighlighter.create(allocator, "markdown");
+    defer highlighter.destroy();
+    try highlighter.reparseFromBuffer(root, metrics);
+
+    var line_buf: std.Io.Writer.Allocating = .init(allocator);
+    defer line_buf.deinit();
+    var line_idx: usize = 0;
+    while (line_idx < root.lines()) : (line_idx += 1) {
+        line_buf.clearRetainingCapacity();
+        try root.get_line(line_idx, &line_buf.writer, metrics);
+        const line = line_buf.written();
+        const tags = try highlighter.tagsForLine(line_idx, line.len, allocator);
+        for (tags) |tag| {
+            for ([_]usize{ tag.start, tag.end }) |b| {
+                if (b < line.len and (line[b] & 0xC0) == 0x80) {
+                    std.debug.print("line {d}: tag boundary {d} inside UTF-8 sequence\n", .{ line_idx, b });
+                    return error.TestUnexpectedResult;
+                }
+            }
+        }
+    }
+}
+
 /// Generiere eine Testdatei mit Zig-Code
 fn generateZigFile(allocator: std.mem.Allocator, num_lines: usize) ![]u8 {
     var buffer = std.ArrayListUnmanaged(u8){};
