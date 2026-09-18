@@ -13,14 +13,21 @@ pub const Entry = struct {
     chars: usize,
 };
 
-/// Index, ab dem die Historie mitgeschickt wird. Der letzte Eintrag (die aktuelle Frage bzw. das
-/// jüngste Werkzeugergebnis) bleibt immer erhalten, auch wenn er allein das Budget sprengt.
+/// Index, ab dem die Historie mitgeschickt wird. Die laufende Runde (letzte Frage samt Aufrufen und
+/// Werkzeugergebnissen) bleibt immer ganz erhalten, auch wenn sie allein das Budget sprengt: ein
+/// Ergebnis ohne Frage und Aufruf verwirft das Chat-Template, das Modell sähe gar nichts.
 pub fn keepFrom(entries: []const Entry, budget_chars: usize) usize {
     if (entries.len == 0) return 0;
+    const turn = lastUserIndex(entries) orelse entries.len - 1;
     var start = entries.len - 1;
     var used = entries[start].chars;
     while (start > 0) {
         const next = entries[start - 1].chars;
+        if (start > turn) {
+            used += next;
+            start -= 1;
+            continue;
+        }
         if (used + next > budget_chars) break;
         used += next;
         start -= 1;
@@ -28,6 +35,15 @@ pub fn keepFrom(entries: []const Entry, budget_chars: usize) usize {
     // Nicht mit einem verwaisten Werkzeugergebnis beginnen
     while (start < entries.len - 1 and entries[start].role == .tool) start += 1;
     return start;
+}
+
+fn lastUserIndex(entries: []const Entry) ?usize {
+    var i = entries.len;
+    while (i > 0) {
+        i -= 1;
+        if (entries[i].role == .user) return i;
+    }
+    return null;
 }
 
 // ---------------------------------------------------------------- Tests
@@ -64,6 +80,18 @@ test "keepFrom: Fenster beginnt nie mit einem Werkzeugergebnis" {
     try testing.expectEqual(@as(usize, 4), keepFrom(&e, 100));
     // Budget 200: der Assistant-Aufruf passt mit → Start 1
     try testing.expectEqual(@as(usize, 1), keepFrom(&e, 200));
+}
+
+test "keepFrom: laufende Runde bleibt ganz, auch wenn ein Werkzeugergebnis das Budget sprengt" {
+    const e = [_]Entry{
+        .{ .role = .user, .chars = 30 }, // ältere Frage
+        .{ .role = .assistant, .chars = 50 },
+        .{ .role = .user, .chars = 60 }, // aktuelle Frage
+        .{ .role = .assistant, .chars = 80 }, // read_file-Aufruf
+        .{ .role = .tool, .chars = 20_000 },
+    };
+    // Ohne Frage und Aufruf weiß das Modell nicht, wozu das Ergebnis gehört
+    try testing.expectEqual(@as(usize, 2), keepFrom(&e, 12_000));
 }
 
 test "keepFrom: leer und einzelnes Werkzeugergebnis" {
