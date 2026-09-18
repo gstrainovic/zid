@@ -972,7 +972,7 @@ pub const UI = struct {
             return;
         }
         if (self.folder_picker.visible) {
-            if (button == .mouse_left) self.folder_picker.handleMouseDown();
+            if (button == .mouse_left) self.folder_picker.handleMouseDown(x);
             return;
         }
         // Header-Menü: offen → Eintrag ausführen oder schließen; Klick auf "File" → öffnen

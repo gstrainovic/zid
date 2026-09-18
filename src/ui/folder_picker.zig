@@ -8,6 +8,11 @@ const wio = @import("wio");
 const folder_ops = @import("folder_ops.zig");
 const Theme = @import("theme.zig").Theme;
 const svg = @import("components/svg.zig");
+const edit_caret = @import("edit_caret.zig");
+
+/// Schrift und linker Innenabstand des Pfadfelds
+const input_font_size: f32 = 20;
+const input_pad_left: f32 = 10;
 
 const log = std.log.scoped(.folder_picker);
 
@@ -65,7 +70,8 @@ pub const FolderPicker = struct {
             .enter, .kp_enter => self.confirm(),
             .escape => self.close(),
             .backspace => self.model.backspace(),
-            else => {},
+            .delete => self.model.delete(),
+            else => _ = edit_caret.handleKey(&self.model.edit, key),
         }
     }
 
@@ -80,8 +86,9 @@ pub const FolderPicker = struct {
         self.scroll_y = std.math.clamp(self.scroll_y - @as(f32, @floatFromInt(lines)) * ROW_HEIGHT, 0, max_scroll);
     }
 
-    /// Klick im Dialog auswerten (Hover-Zustand des letzten Layouts).
-    pub fn handleMouseDown(self: *Self) void {
+    /// Klick im Dialog auswerten (Hover-Zustand des letzten Layouts, `x` in Fensterkoordinaten).
+    pub fn handleMouseDown(self: *Self, x: f32) void {
+        if (edit_caret.handleClick(&self.model.edit, "fp_input", x, input_font_size, input_pad_left)) return;
         if (clay.pointerOver(clay.ElementId.ID("fp_cancel"))) return self.close();
         if (clay.pointerOver(clay.ElementId.ID("fp_open"))) return self.confirm();
         if (clay.pointerOver(clay.ElementId.ID("fp_up"))) {
@@ -166,8 +173,8 @@ pub const FolderPicker = struct {
                         .border = .{ .width = .all(1), .color = t.border_focus },
                         .corner_radius = .all(4),
                     })({
-                        const shown = std.fmt.allocPrint(arena, "{s}|", .{self.model.edit.text()}) catch self.model.edit.text();
-                        clay.text(shown, .{ .font_size = 20, .color = t.text });
+                        clay.text(self.model.edit.text(), .{ .font_size = input_font_size, .color = t.text, .wrap_mode = .none });
+                        edit_caret.render("fp_caret", self.model.edit.textBeforeCursor(), input_font_size, input_pad_left, t);
                     });
                 });
 
