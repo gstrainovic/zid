@@ -31,6 +31,10 @@ pub const context_menu_items = shortcuts.explorer_menu_items;
 const context_menu_height: f32 = ctx_menu.height(context_menu_items.len);
 
 /// Laufendes Inline-Umbenennen
+/// Schrift und linker Innenabstand der Inline-Editierfelder (Umbenennen, Anlegen)
+const edit_font_size: f32 = 22;
+const edit_pad_left: f32 = 6;
+
 pub const RenameState = struct { node_index: u32, edit: explorer_ops.RenameEdit };
 
 /// Laufendes Anlegen einer Datei / eines Ordners unter `parent`
@@ -889,6 +893,17 @@ pub const FileExplorerState = struct {
         }
     }
 
+    /// Klick ins Inline-Editierfeld: Cursor an die Mausposition. False, wenn
+    /// die Maus nicht über dem Feld steht.
+    fn clickCursor(edit: *explorer_ops.RenameEdit, comptime box_id: []const u8, x: f32) bool {
+        const id = clay.ElementId.ID(box_id);
+        if (!clay.pointerOver(id)) return false;
+        const data = clay.getElementData(id);
+        if (!data.found) return false;
+        edit.setCursorAtX(ui.measureTextWidth, edit_font_size, x - data.bounding_box.x - edit_pad_left);
+        return true;
+    }
+
     /// Cursor- und Löschtasten im Inline-Editierfeld (Umbenennen, Anlegen).
     fn editKey(edit: *explorer_ops.RenameEdit, key: wio.Button) void {
         switch (key) {
@@ -1231,7 +1246,11 @@ pub const FileExplorerState = struct {
             if (ctx_menu.hit("fx_menu", &context_menu_items, ctx_menu.none)) |cmd| self.pending_command = cmd;
             return true;
         }
-        // Laufendes Umbenennen/Anlegen: jeder Klick bricht ab
+        // Laufendes Umbenennen/Anlegen: Klick ins Feld setzt den Cursor, jeder andere bricht ab
+        if (button == .mouse_left) {
+            if (self.rename) |*st| if (clickCursor(&st.edit, "fx_rename_box", x)) return true;
+            if (self.creating) |*st| if (clickCursor(&st.edit, "fx_create_box", x)) return true;
+        }
         self.rename = null;
         self.creating = null;
 
@@ -1536,8 +1555,8 @@ fn renderCreateRow(arena: std.mem.Allocator, cs: CreateState, depth: u32, theme:
             .border = .{ .width = .all(1), .color = theme.border_focus },
             .corner_radius = .all(3),
         })({
-            clay.text(cs.edit.text(), .{ .font_size = 22, .color = theme.text, .wrap_mode = .none });
-            renderEditCaret("fx_create_caret", cs.edit.textBeforeCursor(), 22, 6, theme);
+            clay.text(cs.edit.text(), .{ .font_size = edit_font_size, .color = theme.text, .wrap_mode = .none });
+            renderEditCaret("fx_create_caret", cs.edit.textBeforeCursor(), theme);
         });
     });
 }
@@ -1545,8 +1564,8 @@ fn renderCreateRow(arena: std.mem.Allocator, cs: CreateState, depth: u32, theme:
 /// Schmaler Cursorstrich im Inline-Editierfeld, wie im Editor: eigenes Rechteck
 /// an der gemessenen Textbreite statt eines eingefügten "|"-Zeichens, damit
 /// sich der Text hinter dem Cursor nicht verschiebt.
-fn renderEditCaret(comptime id: []const u8, before: []const u8, font_size: f32, pad_left: f32, theme: Theme) void {
-    const x = pad_left + ui.measureTextWidth(before, font_size);
+fn renderEditCaret(comptime id: []const u8, before: []const u8, theme: Theme) void {
+    const x = edit_pad_left + ui.measureTextWidth(before, edit_font_size);
     clay.UI()(.{
         .id = clay.ElementId.ID(id),
         .floating = .{
@@ -1556,7 +1575,7 @@ fn renderEditCaret(comptime id: []const u8, before: []const u8, font_size: f32, 
             .z_index = 10,
             .pointer_capture_mode = .passthrough,
         },
-        .layout = .{ .sizing = .{ .w = .fixed(2), .h = .fixed(font_size) } },
+        .layout = .{ .sizing = .{ .w = .fixed(2), .h = .fixed(edit_font_size) } },
         .background_color = theme.text,
     })({});
 }
@@ -1722,8 +1741,8 @@ fn renderTreeEntry(
                 .border = .{ .width = .all(1), .color = theme.border_focus },
                 .corner_radius = .all(3),
             })({
-                clay.text(edit.text(), .{ .font_size = 22, .color = theme.text, .wrap_mode = .none });
-                renderEditCaret("fx_rename_caret", edit.textBeforeCursor(), 22, 6, theme);
+                clay.text(edit.text(), .{ .font_size = edit_font_size, .color = theme.text, .wrap_mode = .none });
+                renderEditCaret("fx_rename_caret", edit.textBeforeCursor(), theme);
             });
         } else {
             // Verfügbare Breite: Sidebar minus Einrückung, Chevron, Icon, Git-Marker, Abstände, Scrollbar
