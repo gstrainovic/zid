@@ -9,6 +9,7 @@ const marp = @import("marp");
 const marp_pdf = @import("../rendering/marp_pdf.zig");
 const ctx_menu = @import("context_menu");
 const scrollbar = @import("scrollbar");
+const wio = @import("wio");
 const Theme = ui_mod.Theme;
 const ImageTexture = @import("../clay_renderer/image_renderer.zig").ImageTexture;
 const flow_core = @import("flow_core");
@@ -45,6 +46,11 @@ pub const MarkdownView = struct {
     wrap_width_hint: ?f32 = null,
     /// Feste Umbruchbreite während eine Tabellenzelle gerendert wird, sonst null.
     wrap_width_forced: ?f32 = null,
+    /// Summe der Einrückungen um den gerade gezeichneten Block (Liste 24 px plus Punkt,
+    /// Zitat 16 px, Alert 32 px). `availWidth` zieht sie vom Hint ab: vorher brach Text in
+    /// Listen an der vollen Breite um, ragte um die Einrückung über den Rand und wurde vom
+    /// Viewport abgeschnitten.
+    indent: f32 = 0,
 
     /// Gemessene Höhe je Block auf oberster Ebene, für die Virtualisierung.
     block_heights: std.ArrayListUnmanaged(f32) = .empty,
@@ -68,18 +74,14 @@ pub const MarkdownView = struct {
     /// View for scrolling
     view: flow_core.View,
 
-    /// Scrollbar-Dragging State
-    scrollbar_dragging: bool = false,
-    scrollbar_drag_start_y: f32 = 0,
-    scrollbar_scroll_offset_at_drag_start: f32 = 0,
-
-    /// Scrollbar Bounds
+    /// Beide Balken kommen aus `scrollbar.zig` (Geometrie, Klick, Ziehen, Zeichnen) mit Pixeln
+    /// als Einheiten; hier nur Lage des Viewports und der laufende Zug.
     scrollbar_track_x: f32 = 0,
     scrollbar_track_y: f32 = 0,
-    scrollbar_thumb_y: f32 = 0,
-    scrollbar_thumb_height: f32 = 0,
-    scrollbar_container_width: f32 = 0,
     scrollbar_width: f32 = 10,
+    vdrag: ?scrollbar.Drag = null,
+    /// Maus stand im letzten Frame über einem der Balken: Pfeil statt I-Beam (`cursorAt`)
+    scrollbar_hovered: bool = false,
 
     scroll_offset_y: f32 = 0,
     viewport_height: f32 = 0,
@@ -228,12 +230,46 @@ pub const MarkdownView = struct {
         }
     }
 
+    /// Umbruchbreite an der aktuellen Stelle: Hint minus Einrückung, null solange der Hint
+    /// unbekannt ist (erster Frame).
+    fn availWidth(self: *const Self) ?f32 {
+        const hint = self.wrap_width_hint orelse return null;
+        return @max(0, hint - self.indent);
+    }
+
     /// Shift+Rad bzw. Touchpad waagrecht: 60 px je Schritt, positiv = nach links (wie
     /// `CodeEditor.scrollColumns`).
     pub fn scrollColumns(self: *Self, delta: i32) void {
         if (self.deck != null) return;
         const max_x = @max(0, self.content_width - self.viewport_width);
         self.scroll_offset_x = std.math.clamp(self.scroll_offset_x - @as(f32, @floatFromInt(delta)) * 60.0, 0, max_x);
+    }
+
+    /// Modell des senkrechten Balkens (Pixel als Einheiten), null wenn alles hineinpasst.
+    fn vModel(self: *const Self) ?scrollbar.Model {
+        if (self.deck != null) return null;
+        const over = self.content_height - self.viewport_height;
+        if (over <= 0.5 or self.viewport_height <= 0) return null;
+        return .{
+            .axis = .vertical,
+            .x = self.scrollbar_track_x - self.scrollbar_width,
+            .y = self.scrollbar_track_y,
+            .len = self.viewport_height,
+            .thickness = self.scrollbar_width,
+            .total = @intFromFloat(@round(self.content_height)),
+            .visible = @intFromFloat(@round(self.viewport_height)),
+            .offset = @intFromFloat(@round(@max(0, self.scroll_offset_y))),
+            .max_offset = @intFromFloat(@round(over)),
+        };
+    }
+
+    /// Cursorform über der Vorschau: Pfeil über den Balken, I-Beam über dem Inhalt, null
+    /// außerhalb (dann entscheidet die UI).
+    pub fn cursorAt(self: *const Self, x: f32, y: f32) ?wio.Cursor {
+        if (self.scrollbar_hovered or self.vdrag != null or self.hdrag != null) return .arrow;
+        if (self.show_context_menu) return .arrow;
+        if (self.deck != null) return null;
+        return if (self.hitElement("md_viewport", x, y)) .text else null;
     }
 
     /// Modell des waagrechten Balkens (Pixel als Einheiten), null wenn nichts überragt.
@@ -295,31 +331,18 @@ pub const MarkdownView = struct {
                 return true;
             },
         };
-        const on_scrollbar = self.content_height > self.viewport_height and
-            x >= self.scrollbar_track_x and x <= self.scrollbar_track_x + self.scrollbar_width and
-            y >= self.scrollbar_track_y and y <= self.scrollbar_track_y + self.viewport_height;
-        if (!on_scrollbar) return self.beginSelection("md_viewport", x, y);
-
-        if (y >= self.scrollbar_thumb_y and y <= self.scrollbar_thumb_y + self.scrollbar_thumb_height) {
-            self.scrollbar_dragging = true;
-            self.scrollbar_drag_start_y = y;
-            self.scrollbar_scroll_offset_at_drag_start = self.scroll_offset_y;
-            return true;
-        }
-
-        // Jump to position
-        const track_height = self.viewport_height;
-        const total_height = self.content_height;
-        const thumb_height = self.scrollbar_thumb_height;
-        const scrollable_height = track_height - thumb_height;
-
-        if (scrollable_height > 0) {
-            const click_pos_rel = (y - self.scrollbar_track_y) - (thumb_height / 2.0);
-            const scroll_frac = @max(0, @min(1.0, click_pos_rel / scrollable_height));
-            self.scroll_offset_y = scroll_frac * (total_height - track_height);
-        }
-
-        return true;
+        if (self.vModel()) |m| switch (scrollbar.hitTest(m, x, y)) {
+            .none => {},
+            .thumb => |d| {
+                self.vdrag = d;
+                return true;
+            },
+            else => |h| {
+                self.scroll_offset_y = @floatFromInt(scrollbar.pageOffset(m, h));
+                return true;
+            },
+        };
+        return self.beginSelection("md_viewport", x, y);
     }
 
     /// Clay-ID mit Instanz-Salz: zwei Vorschauen in zwei Panes (oder Deck und Dokument) haben
@@ -337,37 +360,16 @@ pub const MarkdownView = struct {
         return x >= b.x and x <= b.x + b.width and y >= b.y and y <= b.y + b.height;
     }
 
-    pub fn handleScrollbarMouseMove(self: *Self, x: f32, y: f32) void {
-        _ = x;
-        if (!self.scrollbar_dragging) return;
-        if (self.content_height <= self.viewport_height) return;
-
-        const track_height = self.viewport_height;
-        const total_height = self.content_height;
-        const thumb_height = self.scrollbar_thumb_height;
-        const scrollable_height = track_height - thumb_height;
-
-        if (scrollable_height <= 0) return;
-
-        const delta_y = y - self.scrollbar_drag_start_y;
-        const scroll_delta_frac = delta_y / scrollable_height;
-        const scroll_delta_px = scroll_delta_frac * (total_height - track_height);
-
-        var new_offset = self.scrollbar_scroll_offset_at_drag_start + scroll_delta_px;
-        const max_scroll = total_height - track_height;
-        new_offset = @max(0, @min(new_offset, max_scroll));
-
-        self.scroll_offset_y = new_offset;
-    }
-
     pub fn handleMouseUp(self: *Self) void {
-        self.scrollbar_dragging = false;
+        self.vdrag = null;
         self.hdrag = null;
         self.selecting = false;
     }
 
     pub fn handleMouseMove(self: *Self, x: f32, y: f32) void {
-        self.handleScrollbarMouseMove(x, y);
+        if (self.vdrag) |d| if (self.vModel()) |m| {
+            self.scroll_offset_y = @floatFromInt(scrollbar.dragOffset(m, d, x, y));
+        };
         if (self.hdrag) |d| if (self.hModel()) |m| {
             self.scroll_offset_x = @floatFromInt(scrollbar.dragOffset(m, d, x, y));
         };
@@ -1126,60 +1128,18 @@ pub const MarkdownView = struct {
                 });
             });
 
-            // Scrollbar
-            if (self.content_height > self.viewport_height) {
-                self.renderScrollbar();
+            // Balken: senkrecht rechts, waagrecht unten (nur wenn Code über den Rand ragt).
+            // `render` meldet, ob die Maus darüber steht → Pfeil statt I-Beam.
+            self.scrollbar_hovered = false;
+            if (self.vModel()) |m| {
+                if (scrollbar.render(m, .{ .track = self.idi("md_scrollbar_track", 0), .thumb = self.idi("md_scrollbar_thumb", 0) })) self.scrollbar_hovered = true;
             }
-            // Waagrechter Balken unten, nur wenn Code über den Rand ragt
             if (self.hModel()) |m| {
-                _ = scrollbar.render(m, .{ .track = self.idi("md_hscroll_track", 0), .thumb = self.idi("md_hscroll_thumb", 0) });
+                if (scrollbar.render(m, .{ .track = self.idi("md_hscroll_track", 0), .thumb = self.idi("md_hscroll_thumb", 0) })) self.scrollbar_hovered = true;
             }
         });
 
         self.renderContextMenu(theme);
-    }
-
-    fn renderScrollbar(self: *Self) void {
-        const total = self.content_height;
-        const visible = self.viewport_height;
-        if (total <= visible) return;
-
-        const track_height = visible;
-        const thumb_ratio = visible / total;
-        const thumb_height = @max(20.0, track_height * thumb_ratio);
-        const max_scroll = total - visible;
-        const scroll_frac = if (max_scroll > 0) self.scroll_offset_y / max_scroll else 0;
-        const thumb_y = scroll_frac * (track_height - thumb_height);
-
-        self.scrollbar_thumb_y = self.scrollbar_track_y + thumb_y;
-        self.scrollbar_thumb_height = thumb_height;
-
-        const track_color: clay.Color = .{ 30, 30, 46, 255 }; // Fully opaque track
-        const thumb_color: clay.Color = .{ 88, 88, 120, 200 };
-
-        clay.UI()(.{
-            .id = self.idi("md_scrollbar_track", 0),
-            .floating = .{
-                .attach_to = .to_parent,
-                .attach_points = .{ .element = .right_top, .parent = .right_top },
-                .z_index = 1000,
-            },
-            .layout = .{
-                .sizing = .{ .w = .fixed(self.scrollbar_width), .h = .grow },
-                .direction = .top_to_bottom,
-            },
-            .background_color = track_color,
-        })({
-            clay.UI()(.{
-                .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(thumb_y) } },
-            })({});
-            clay.UI()(.{
-                .id = self.idi("md_scrollbar_thumb", 0),
-                .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(thumb_height) } },
-                .background_color = thumb_color,
-                .corner_radius = .all(3),
-            })({});
-        });
     }
 
     /// Highlighter für eine Sprache holen oder einmalig anlegen (null = keine Sprache / unbekannt).
@@ -1269,7 +1229,8 @@ pub const MarkdownView = struct {
         const code_size = self.font_size - 2;
         // Mit Word Wrap bricht jede Zeile an der Inhaltsbreite (md_code hat 16 px Padding je
         // Seite); ohne läuft sie nach rechts hinaus und der Viewport scrollt waagrecht.
-        const wrap_at: f32 = if (self.wrap_code) @max(0, (self.wrap_width_hint orelse 0) - 32) else 0;
+        // -4: je Highlight-Segment schlägt Clay 0.25 px auf, eine Reihe hat selten mehr als 16
+        const wrap_at: f32 = if (self.wrap_code) @max(0, (self.availWidth() orelse 0) - 32 - 4) else 0;
 
         clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .top_to_bottom } })({
             while (start < code.len) {
@@ -1359,6 +1320,14 @@ pub const MarkdownView = struct {
                     self.quote_counter += 1;
                     break :blk self.idi("md_quote", self.quote_counter);
                 } else (clay.ElementDeclaration{}).id;
+                // Einrückung dieses Containers für die Umbruchbreite der Kinder (siehe `indent`)
+                const pad: f32 = switch (container.content) {
+                    .Quote => 16,
+                    .List => 24,
+                    else => 0,
+                };
+                self.indent += pad;
+                defer self.indent -= pad;
                 clay.UI()(.{
                     .id = quote_id,
                     .layout = layout_options,
@@ -1375,6 +1344,10 @@ pub const MarkdownView = struct {
                                 clay.UI()(.{ .id = self.idi("md_bullet", n), .layout = .{ .sizing = .{ .w = .fit, .h = .fit } } })({
                                     clay.text("•", .{ .font_size = self.font_size, .color = theme.text });
                                 });
+                                // Punkt plus child_gap nehmen dem Text Breite weg
+                                const bullet_w = ui_mod.measureTextWidth("•", @floatFromInt(self.font_size)) + 0.25 + 8;
+                                self.indent += bullet_w;
+                                defer self.indent -= bullet_w;
                                 self.renderBlock(child, arena, theme, ui_ptr);
                             });
                         } else {
@@ -1407,6 +1380,8 @@ pub const MarkdownView = struct {
                     .Alert => |a| {
                         clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .top_to_bottom, .padding = .all(16) }, .background_color = theme.surface, .border = .{ .width = .{ .left = 4 }, .color = theme.accent } })({
                             clay.text(if (a.alert) |at| at else "ALERT", .{ .font_size = self.font_size, .color = theme.accent });
+                            self.indent += 32; // Padding links und rechts
+                            defer self.indent -= 32;
                             self.renderInlineRun(leaf.inlines.items, self.font_size, theme, arena, ui_ptr);
                         });
                     },
@@ -1509,7 +1484,7 @@ pub const MarkdownView = struct {
         const row_id = self.idi("md_table_row", self.table_counter);
         const box_id = self.idi("md_table_box", self.cur_block *% 1024 +% self.block_table_counter);
         const data = clay.getElementData(box_id);
-        var avail: f32 = self.wrap_width_hint orelse 800;
+        var avail: f32 = self.availWidth() orelse 800;
         // Die Hülle wächst mit einer zu breiten Tabelle mit (`grow` ist nie schmaler als
         // ihr Kind). Ohne Deckel hielte sie die Überbreite aus dem ersten Frame fest.
         if (data.found and data.bounding_box.width > 0) avail = @min(avail, data.bounding_box.width);
@@ -1716,8 +1691,10 @@ pub const MarkdownView = struct {
         // In einer Tabellenzelle steht die Breite fest (`wrap_width_forced`); die gemessene
         // Breite des Laufs taugt dort nicht, weil die klippende Zelle ihre Kinder am Inhalt
         // misst und ein zu kleiner Wert vorzeitig umbräche.
-        var avail: f32 = if (data.found) data.bounding_box.width else (self.wrap_width_hint orelse 0);
-        if (self.wrap_width_hint) |hint| avail = @min(avail, hint);
+        // Gemessene Breite des Laufs, gedeckelt durch Hint minus Einrückung: der Lauf ist
+        // `grow` und wäre nach einem Überlauf so breit wie der ganze Inhalt.
+        var avail: f32 = if (data.found) data.bounding_box.width else (self.availWidth() orelse 0);
+        if (self.availWidth()) |cap| avail = @min(avail, cap);
         if (self.wrap_width_forced) |w| avail = w;
         const size_f: f32 = @floatFromInt(base_size);
 
@@ -1735,7 +1712,10 @@ pub const MarkdownView = struct {
                 const parts = splitWide(arena, pieces.items, size_f, avail - 2);
                 const items = arena.alloc(word_wrap.Item, parts.len) catch return;
                 for (parts, 0..) |p, i| {
-                    items[i] = .{ .width = ui_mod.measureTextWidth(p.text, size_f), .is_space = p.is_space };
+                    // +0.25: Clay schlägt je Textelement ein Viertelpixel auf (`measureText` in
+                    // mod.zig), und jedes Stück wird ein eigenes Element. Ohne den Zuschlag war
+                    // eine Zeile aus 40 Wörtern 10 px breiter als berechnet und ragte über den Rand.
+                    items[i] = .{ .width = ui_mod.measureTextWidth(p.text, size_f) + 0.25, .is_space = p.is_space };
                 }
                 const lines = word_wrap.wrapLines(arena, items, avail - 2) catch return;
                 for (lines, 0..) |line, li| {
