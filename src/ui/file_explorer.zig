@@ -11,6 +11,7 @@ const explorer_ops = @import("explorer_ops.zig");
 const shortcuts = @import("shortcuts");
 const ctx_menu = @import("context_menu");
 const ui = @import("../ui/mod.zig");
+const edit_caret = @import("edit_caret.zig");
 const Theme = ui.Theme;
 
 const log = std.log.scoped(.file_explorer);
@@ -34,6 +35,9 @@ const context_menu_height: f32 = ctx_menu.height(context_menu_items.len);
 /// Schrift und linker Innenabstand der Inline-Editierfelder (Umbenennen, Anlegen)
 const edit_font_size: f32 = 22;
 const edit_pad_left: f32 = 6;
+/// Dasselbe für das Filterfeld
+const filter_font_size: f32 = 18;
+const filter_pad_left: f32 = 6;
 
 pub const RenameState = struct { node_index: u32, edit: explorer_ops.RenameEdit };
 
@@ -864,15 +868,11 @@ pub const FileExplorerState = struct {
             switch (key) {
                 .enter, .kp_enter => self.filter_active = false,
                 .escape => self.clearFilter(),
-                .backspace => {
-                    self.filter.backspace();
-                    self.rebuildVisible();
-                },
                 .up, .down => {
                     self.filter_active = false;
                     _ = self.handleNavKey(key, false);
                 },
-                else => {},
+                else => if (edit_caret.handleKey(&self.filter, key)) self.rebuildVisible(),
             }
             return;
         }
@@ -881,7 +881,7 @@ pub const FileExplorerState = struct {
             switch (key) {
                 .enter, .kp_enter => self.commitCreate(),
                 .escape => self.creating = null,
-                else => editKey(&st.edit, key),
+                else => _ = edit_caret.handleKey(&st.edit, key),
             }
             return;
         }
@@ -889,31 +889,7 @@ pub const FileExplorerState = struct {
         switch (key) {
             .enter, .kp_enter => self.commitRename(),
             .escape => self.rename = null,
-            else => editKey(&st.edit, key),
-        }
-    }
-
-    /// Klick ins Inline-Editierfeld: Cursor an die Mausposition. False, wenn
-    /// die Maus nicht über dem Feld steht.
-    fn clickCursor(edit: *explorer_ops.RenameEdit, comptime box_id: []const u8, x: f32) bool {
-        const id = clay.ElementId.ID(box_id);
-        if (!clay.pointerOver(id)) return false;
-        const data = clay.getElementData(id);
-        if (!data.found) return false;
-        edit.setCursorAtX(ui.measureTextWidth, edit_font_size, x - data.bounding_box.x - edit_pad_left);
-        return true;
-    }
-
-    /// Cursor- und Löschtasten im Inline-Editierfeld (Umbenennen, Anlegen).
-    fn editKey(edit: *explorer_ops.RenameEdit, key: wio.Button) void {
-        switch (key) {
-            .backspace => edit.backspace(),
-            .delete => edit.delete(),
-            .left => edit.moveLeft(),
-            .right => edit.moveRight(),
-            .home => edit.moveHome(),
-            .end => edit.moveEnd(),
-            else => {},
+            else => _ = edit_caret.handleKey(&st.edit, key),
         }
     }
 
@@ -1248,8 +1224,15 @@ pub const FileExplorerState = struct {
         }
         // Laufendes Umbenennen/Anlegen: Klick ins Feld setzt den Cursor, jeder andere bricht ab
         if (button == .mouse_left) {
-            if (self.rename) |*st| if (clickCursor(&st.edit, "fx_rename_box", x)) return true;
-            if (self.creating) |*st| if (clickCursor(&st.edit, "fx_create_box", x)) return true;
+            if (self.rename) |*st| if (edit_caret.handleClick(&st.edit, "fx_rename_box", x, edit_font_size, edit_pad_left)) return true;
+            if (self.creating) |*st| if (edit_caret.handleClick(&st.edit, "fx_create_box", x, edit_font_size, edit_pad_left)) return true;
+            // Klick ins Filterfeld: Cursor setzen und Eingabe (wieder) aktivieren
+            if (edit_caret.handleClick(&self.filter, "fx_filter_box", x, filter_font_size, filter_pad_left)) {
+                self.rename = null;
+                self.creating = null;
+                self.filter_active = true;
+                return true;
+            }
         }
         self.rename = null;
         self.creating = null;
@@ -1399,7 +1382,7 @@ pub fn renderFileExplorer(
         // Fokus sichtbar: Tastatur (↑↓, d, r, a …) wirkt hier, nicht im Editor
         .border = .{ .width = .{ .right = 1, .left = 2 }, .color = if (focused) theme.border_focus else theme.border },
     })({
-        if (state.filter_active or state.filter.text().len > 0) renderFilterRow(arena, state, theme);
+        if (state.filter_active or state.filter.text().len > 0) renderFilterRow(state, theme);
         clay.UI()(.{
             .id = clay.ElementId.ID("file_tree_viewport"),
             .layout = .{
@@ -1434,7 +1417,7 @@ pub fn renderFileExplorer(
 }
 
 /// Filterfeld über dem Baum (Taste `/`)
-fn renderFilterRow(arena: std.mem.Allocator, state: *FileExplorerState, theme: Theme) void {
+fn renderFilterRow(state: *FileExplorerState, theme: Theme) void {
     clay.UI()(.{
         .id = clay.ElementId.ID("fx_filter_row"),
         .layout = .{
@@ -1454,11 +1437,8 @@ fn renderFilterRow(arena: std.mem.Allocator, state: *FileExplorerState, theme: T
             .border = .{ .width = .all(1), .color = if (state.filter_active) theme.border_focus else theme.border },
             .corner_radius = .all(3),
         })({
-            const shown = if (state.filter_active)
-                std.fmt.allocPrint(arena, "{s}|", .{state.filter.text()}) catch state.filter.text()
-            else
-                state.filter.text();
-            clay.text(shown, .{ .font_size = 18, .color = theme.text, .wrap_mode = .none });
+            clay.text(state.filter.text(), .{ .font_size = filter_font_size, .color = theme.text, .wrap_mode = .none });
+            if (state.filter_active) edit_caret.render("fx_filter_caret", state.filter.textBeforeCursor(), filter_font_size, filter_pad_left, theme);
         });
     });
 }
@@ -1556,28 +1536,9 @@ fn renderCreateRow(arena: std.mem.Allocator, cs: CreateState, depth: u32, theme:
             .corner_radius = .all(3),
         })({
             clay.text(cs.edit.text(), .{ .font_size = edit_font_size, .color = theme.text, .wrap_mode = .none });
-            renderEditCaret("fx_create_caret", cs.edit.textBeforeCursor(), theme);
+            edit_caret.render("fx_create_caret", cs.edit.textBeforeCursor(), edit_font_size, edit_pad_left, theme);
         });
     });
-}
-
-/// Schmaler Cursorstrich im Inline-Editierfeld, wie im Editor: eigenes Rechteck
-/// an der gemessenen Textbreite statt eines eingefügten "|"-Zeichens, damit
-/// sich der Text hinter dem Cursor nicht verschiebt.
-fn renderEditCaret(comptime id: []const u8, before: []const u8, theme: Theme) void {
-    const x = edit_pad_left + ui.measureTextWidth(before, edit_font_size);
-    clay.UI()(.{
-        .id = clay.ElementId.ID(id),
-        .floating = .{
-            .attach_to = .to_parent,
-            .attach_points = .{ .element = .left_center, .parent = .left_center },
-            .offset = .{ .x = x, .y = 0 },
-            .z_index = 10,
-            .pointer_capture_mode = .passthrough,
-        },
-        .layout = .{ .sizing = .{ .w = .fixed(2), .h = .fixed(edit_font_size) } },
-        .background_color = theme.text,
-    })({});
 }
 
 /// Einzelnen Tree-Eintrag rendern
@@ -1742,7 +1703,7 @@ fn renderTreeEntry(
                 .corner_radius = .all(3),
             })({
                 clay.text(edit.text(), .{ .font_size = edit_font_size, .color = theme.text, .wrap_mode = .none });
-                renderEditCaret("fx_rename_caret", edit.textBeforeCursor(), theme);
+                edit_caret.render("fx_rename_caret", edit.textBeforeCursor(), edit_font_size, edit_pad_left, theme);
             });
         } else {
             // Verfügbare Breite: Sidebar minus Einrückung, Chevron, Icon, Git-Marker, Abstände, Scrollbar
