@@ -826,7 +826,10 @@ MuPDFs Story-Engine. Folienvorschau in `MarkdownView` (`deck`-Feld), Command
   Graph → Feld. In der Liste ↑↓/PgUp/PgDn/Home/End, Enter öffnet den Diff bzw. klappt den Kopf,
   Entf = Discard mit Rückfrage, Escape gibt ab. Buchstaben gehen nur ins Feld.
 - E2E `python3 scripts/e2e_scm_changes.py` (Fixture: geändert, gelöscht, untracked; stage, Diffs,
-  unstage, discard mit Dialog, commit mit Rückfrage, Tastatur), Zustand in `scm_state.changes`.
+  unstage, discard mit Dialog, commit mit Rückfrage, Publish, Sync mit Vorsprung, Sync holt fremde
+  Commits aus einem zweiten Klon über den großen Knopf nach Fetch und über den Kopf-Knopf ohne
+  Fetch, Tastatur), Zustand in `scm_state.changes`. Das Skript baut **nicht** selbst, sondern
+  startet `zig-out/bin/zid` direkt — vorher `zig build`, sonst testet es den alten Stand.
   Der RPC `open_project` wechselt den Projektordner wie der Dialog (Explorer, Watcher, Branch,
   git status), `open_folder` lädt nur den Explorer.
 
