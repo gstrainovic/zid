@@ -12,6 +12,8 @@ Prüft:
      und committet; Graph zeigt den Commit, Feld leer, Liste leer
   4b. Knopf „Publish Branch“ ohne Upstream (push -u origin main); mehrzeilige Nachricht (Enter =
      neue Zeile, Feld wächst, ↑/Pos1 bewegen in der Zeile); danach „Sync Changes 1↑“, Remote hat den Commit
+  4c. Sync holt fremde Commits: zweiter Klon pusht, nach fetch „Sync Changes 1↓“ am großen Knopf;
+     ohne fetch bleibt „Commit“, der Kopf-Knopf „Sync Changes“ pullt trotzdem
   5. Tastatur: Tab wechselt Feld → Liste → Graph, ↓/Enter in der Liste, Escape gibt ab
 Aufruf: python3 scripts/e2e_scm_changes.py
 """
@@ -265,6 +267,48 @@ def step_publish_push_multiline():
     shot("e2e_scm_pushed.ppm")
 
 
+def step_sync_pull():
+    print("--- 4c. Sync Changes holt fremde Commits: großer Knopf nach Fetch, Kopf-Knopf ohne Fetch")
+    other = os.path.join(BASE, "other")
+
+    def other_git(*args):
+        env = dict(os.environ, GIT_AUTHOR_NAME="Bob", GIT_AUTHOR_EMAIL="bob@example.com",
+                   GIT_COMMITTER_NAME="Bob", GIT_COMMITTER_EMAIL="bob@example.com")
+        return subprocess.run(["git", *args], cwd=other, check=True, env=env, capture_output=True, text=True).stdout.strip()
+
+    # -b main: HEAD des bare Remotes zeigt auf master, der Klon hätte sonst keinen Branch
+    subprocess.run(["git", "clone", "-q", "-b", "main", REMOTE, other], check=True, capture_output=True)
+    with open(os.path.join(other, "fremd1.txt"), "w") as f:
+        f.write("von Bob\n")
+    other_git("add", "fremd1.txt"); other_git("commit", "-q", "-m", "fremd eins"); other_git("push", "-q", "origin", "main")
+    # nach fetch weiß der Status, dass main zurückliegt: großer Knopf „Sync Changes 1↓“
+    git("fetch", "-q")
+    h = ch()["header"]
+    rpc("move_mouse", [h["x"] + h["w"] / 2, h["y"] + h["h"] / 2]); settle(6)
+    click_center("sc_btn_refresh")
+    wait(lambda s: s["changes"]["behind"] == 1 and s["changes"]["button"] == "Sync Changes 1↓", "nach Fetch: Knopf „Sync Changes 1↓“")
+    click_center("sc_btn_commit_big")
+    wait(lambda s: s["changes"]["behind"] == 0 and s["changes"]["button"] == "Commit" and not s["changes"]["busy"], "Sync: nichts mehr zurück")
+    check(os.path.exists(os.path.join(FX, "fremd1.txt")), "Pull hat fremd1.txt gebracht")
+    check(git("log", "-1", "--format=%s") == "fremd eins", "HEAD ist der fremde Commit (fast-forward)")
+    check("Synced with origin/main" in result_json("ui_state").get("toast", ""), "Toast nach Sync")
+    # ohne Fetch zeigt der große Knopf „Commit“; der Kopf-Knopf syncht trotzdem (pull holt selbst)
+    with open(os.path.join(other, "fremd2.txt"), "w") as f:
+        f.write("noch einer\n")
+    other_git("add", "fremd2.txt"); other_git("commit", "-q", "-m", "fremd zwei"); other_git("push", "-q", "origin", "main")
+    s = ch()
+    check(s["behind"] == 0 and s["button"] == "Commit", "ohne Fetch: Rückstand unbekannt, Knopf „Commit“")
+    rpc("move_mouse", [h["x"] + h["w"] / 2, h["y"] + h["h"] / 2]); settle(6)
+    b = bounds("sc_btn_sync")
+    rpc("move_mouse", [b["x"] + b["w"] / 2, b["y"] + b["h"] / 2]); time.sleep(1.0); settle(4)
+    check(result_json("ui_state")["tooltip"] == "Sync Changes", f"Tooltip „Sync Changes“: {result_json('ui_state')['tooltip']!r}")
+    click_center("sc_btn_sync")
+    wait(lambda s: not s["changes"]["busy"] and os.path.exists(os.path.join(FX, "fremd2.txt")), "Kopf-Knopf: Pull hat fremd2.txt gebracht")
+    check(git("log", "-1", "--format=%s") == "fremd zwei", "HEAD ist der zweite fremde Commit")
+    check(git("status", "--porcelain") == "", "Arbeitskopie sauber")
+    shot("e2e_scm_synced.ppm")
+
+
 def step_keyboard():
     print("--- 5. Tastatur")
     write("a.txt", "eins\nzwei\ndrei\nvier\nfünf\n")
@@ -304,7 +348,7 @@ def main():
         # open_project wie der Dialog: Explorer, Watcher, Branch und git status folgen dem Repo
         check(rpc("open_project", [FX]) == "ok", "Fixture-Repo als Projektordner")
         settle(20)
-        for step in (step_show, step_stage_and_diffs, step_unstage_discard, step_commit, step_publish_push_multiline, step_keyboard):
+        for step in (step_show, step_stage_and_diffs, step_unstage_discard, step_commit, step_publish_push_multiline, step_sync_pull, step_keyboard):
             step()
         print("ALL PASSED")
     finally:
