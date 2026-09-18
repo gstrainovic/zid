@@ -289,11 +289,23 @@ def step_wide_code():
     check(ui_state()["cursor"] == "arrow", f"Pfeil ueber dem senkrechten Balken ({ui_state()['cursor']})")
     rpc("move_mouse", [vp["x"] + vp["w"] / 2, vp["y"] + 60]); settle(4)
     check(ui_state()["cursor"] == "text", f"I-Beam ueber dem Text ({ui_state()['cursor']})")
+    # Screenshot: Thumb heller als der Track daneben, Track dunkler als der Seitenhintergrund
+    shot("e2e_md_preview_wide.ppm")
+    ty = track["y"] + track["h"] / 2
+    on_thumb = pixel("e2e_md_preview_wide.ppm", thumb["x"] + thumb["w"] / 2, ty)
+    on_track = pixel("e2e_md_preview_wide.ppm", thumb["x"] + thumb["w"] + 40, ty)
+    on_page = pixel("e2e_md_preview_wide.ppm", thumb["x"] + thumb["w"] + 40, ty - 40)
+    check(differs(on_thumb, on_track), f"Thumb ist gezeichnet ({on_thumb} neben Track {on_track})")
+    # Track (30,30,46) liegt nur wenige Stufen unter dem Seitenhintergrund (36,39,58): enge Toleranz
+    check(differs(on_track, on_page, tol=4), f"Track ist gezeichnet ({on_track} gegen Seite {on_page})")
     x0 = bounds("md_content")["x"]
     rpc("click", [track["x"] + track["w"] - 3, track["y"] + track["h"] / 2]); settle(8)
     x1 = bounds("md_content")["x"]
     check(x1 < x0 - 100, f"Klick rechts vom Thumb blaettert nach rechts ({x0:.0f} -> {x1:.0f})")
-    shot("e2e_md_preview_wide.ppm")
+    shot("e2e_md_preview_wide_scrolled.ppm")
+    thumb2 = bounds("md_hscroll_thumb")
+    check(thumb2["x"] > thumb["x"] + 100, f"Thumb ist nach rechts gewandert ({thumb['x']:.0f} -> {thumb2['x']:.0f})")
+    check(differs(pixel("e2e_md_preview_wide_scrolled.ppm", thumb2["x"] + thumb2["w"] / 2, ty), on_track), "Thumb an neuer Stelle gezeichnet")
     # Alt+Z schaltet Word Wrap der Editoren, die Vorschau bleibt wie sie ist (VS Code: pre scrollt)
     rpc("key_press_alt", ["z", False, False, True]); settle(20)
     check("word_wrap on" in ui_state().get("toast", ""), f"Toast: {ui_state().get('toast')!r}")
