@@ -3172,7 +3172,9 @@ pub const CodeEditor = struct {
         };
         std.log.debug("INSERT OK: row={} col={}", .{ self.cursor.row, self.cursor.col });
         self.buffer.root = result[2];
-        self.cursor.col += @as(usize, @intCast(len));
+        // Neue Spalte aus insert_chars (Anzeigebreite), nicht die Byte-Länge: ein Umlaut ist
+        // 2 Bytes, aber 1 Spalte
+        self.cursor.col = result[1];
         self.cursor.target = self.cursor.col;
         self.recordCursorMovement();
     }
@@ -3849,6 +3851,23 @@ test "DeleteLine: einzige Zeile wird nur geleert" {
     t.ed.dispatchAction(.DeleteLine);
     try std.testing.expectEqual(@as(usize, 1), t.ed.lineCount());
     try std.testing.expectEqual(@as(usize, 0), t.ed.cursor.row);
+}
+
+test "handleChar: nach einem Umlaut steht der Cursor eine Spalte weiter, nicht zwei" {
+    var t = try testEditor(std.testing.allocator, "x");
+    defer t.buffer.deinit();
+    defer t.ed.deinit();
+    for ([_]u21{ 'a', 'b', 0xE4, 'c', 'd' }) |c| t.ed.handleChar(c);
+    try std.testing.expectEqualStrings("abäcdx", t.ed.getLine(0));
+    try std.testing.expectEqual(@as(usize, 5), t.ed.cursor.col);
+}
+
+test "handleChar: Umlaut am Zeilenende, danach geht Tippen weiter (Chat-Eingabe)" {
+    var t = try testEditor(std.testing.allocator, "");
+    defer t.buffer.deinit();
+    defer t.ed.deinit();
+    for ([_]u21{ 0xD6, 'f', 'f', 'n', 'e' }) |c| t.ed.handleChar(c);
+    try std.testing.expectEqualStrings("Öffne", t.ed.getLine(0));
 }
 
 test "DeleteLine: getippter Text, letzte Zeile verschwindet" {
