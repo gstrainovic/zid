@@ -510,6 +510,9 @@ gepinnt, `models/` hält GGUFs flach und ignoriert (nie committen), `llm-bench/`
   die Zwischenablage, dann `DeleteLine`. Mit Auswahl bleibt Cut wie gehabt.
 - **Metrik-Fix:** `egc_chunk_width` lieferte für jeden Chunk 1; `insert_chars` addiert die Chunk-
   Breite zur Cursor-Spalte, der Cursor stand nach Einfügen/Autoclose eine Spalte zu weit links.
+- **Cursor-Spalte nach Tippen kommt aus `insert_chars`** (`result[1]`), nie aus der Byte-Länge: ein
+  Umlaut ist 2 Bytes, aber 1 Spalte. Mit Byte-Länge stand der Cursor danach im Chat-Eingabefeld
+  hinter dem Zeilenende und jede weitere Eingabe scheiterte still (`INSERT FAILED`).
 - **Anzeige im Editor** (`renderRowOverlays`, schwebende Elemente über dem Zeilentext, x = Spalte ×
   `charWidth`): Einrück-Guides je 4 Spalten führenden Whitespace, Whitespace-Punkte/Tab-Striche
   (`show_whitespace`, Standard aus), Klammerpaar am Cursor (`findBracketPair`, max. 2000 Zeilen,
