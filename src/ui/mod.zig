@@ -1049,6 +1049,10 @@ pub const UI = struct {
                     self.saveUserState();
                     return;
                 },
+                .pin_toggled => {
+                    self.resetTimelineFollow();
+                    return;
+                },
                 .open_changes => |i| {
                     self.openTimelineChanges(i);
                     return;
@@ -1295,6 +1299,19 @@ pub const UI = struct {
         self.driveGitHistories();
         self.driveGitDiffs();
         self.timeline_view.update(delta_ms);
+        // „File History“ aus dem Editor-Menü: vor dem Layout, nie im Render-Pfad
+        {
+            var leaves_buf: [32]*pane_mod.Pane = undefined;
+            var n: usize = 0;
+            collectLeaves(self.root_pane, &leaves_buf, &n);
+            for (leaves_buf[0..n]) |leaf| {
+                const ed = leaf.data.leaf.code_editor;
+                if (ed.pending_file_history) {
+                    ed.pending_file_history = false;
+                    self.openFileHistory(ed.buffer.get_file_path());
+                }
+            }
+        }
         self.followActiveFileForTimeline();
         self.driveTimeline();
         self.scm_graph.update(delta_ms);
@@ -1715,7 +1732,10 @@ pub const UI = struct {
             .timeline_copy_commit_id => if (self.selectedTimelineItem()) |it| self.setClipboard(it.hash),
             .timeline_copy_commit_message => if (self.selectedTimelineItem()) |it| self.setClipboard(it.message),
             .timeline_refresh => self.timeline_view.timeline.refresh(),
-            .timeline_toggle_pin => self.timeline_view.timeline.togglePin(),
+            .timeline_toggle_pin => {
+                self.timeline_view.timeline.togglePin();
+                self.resetTimelineFollow();
+            },
             .timeline_open_commit => if (self.selectedTimelineItem()) |it| {
                 const t = &self.timeline_view.timeline;
                 if (it.kind == .commit) self.openCommitTab(.{ .hash = it.hash, .parent = it.parent, .repo = t.repo, .subject = it.label });
@@ -1890,6 +1910,12 @@ pub const UI = struct {
 
     /// Timeline folgt der Datei des aktiven Tabs (Datei-Tabs, Vorschau-Quelle, Diff-Editor-Datei).
     /// Nur bei geändertem Tab-Pfad wird neu aufgelöst (realpath).
+    /// Nächster Frame löst die Datei des aktiven Tabs neu auf (nach Lösen des Pins).
+    fn resetTimelineFollow(self: *Self) void {
+        if (self.timeline_follow_key) |k| self.allocator.free(k);
+        self.timeline_follow_key = null;
+    }
+
     fn followActiveFileForTimeline(self: *Self) void {
         const tab = self.getActiveTabBar().getActiveTab();
         const key: []const u8 = if (tab) |t| t.path else "";
@@ -2039,7 +2065,12 @@ pub const UI = struct {
             self.showToast("Not in a git repository: {s}", .{std.fs.path.basename(abs)});
             return;
         }
-        self.openHistoryTab(.{ .file = abs });
+        // Wie VS Code `files.openTimeline`: Timeline im Explorer auf die Datei stellen
+        self.show_file_explorer = true;
+        self.sidebar_mode = .explorer;
+        self.explorer_focused = false;
+        self.timeline_view.timeline.show(abs);
+        self.saveUserState();
     }
 
     /// Tab öffnen bzw. aktivieren; main.zig öffnet `pending_tab_switch` im nächsten Frame.
@@ -3440,10 +3471,8 @@ pub const UI = struct {
                         leaf.code_editor.pending_md_export_pdf = false;
                         self.exportMarpPdf(leaf.code_editor.buffer.get_file_path());
                     }
-                    if (leaf.code_editor.pending_file_history) {
-                        leaf.code_editor.pending_file_history = false;
-                        self.openFileHistory(leaf.code_editor.buffer.get_file_path());
-                    }
+                    // pending_file_history wird in update() abgeholt: die Timeline gibt dabei ihren
+                    // Log frei, auf den Clay-Texte dieses Frames noch zeigen würden.
 
                     // Aktiven Tab prüfen
                     var special_active = false;

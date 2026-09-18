@@ -310,6 +310,17 @@ pub const Timeline = struct {
         }
     }
 
+    /// „File History“ aus Explorer, Tab- oder Editor-Menü (VS Code `files.openTimeline`):
+    /// Datei anzeigen, auch wenn sie nicht offen ist. Aufgeklappt und angepinnt, damit sie
+    /// beim nächsten Tab-Wechsel stehen bleibt; dieselbe Datei lädt neu.
+    pub fn show(self: *Timeline, path: []const u8) void {
+        self.pinned = false;
+        self.expanded = true;
+        self.follow(path);
+        self.pinned = true;
+        self.want_load = true;
+    }
+
     pub fn setExpanded(self: *Timeline, expanded: bool) void {
         self.expanded = expanded;
         if (expanded and self.file != null and !self.loaded and !self.loading) self.want_load = true;
@@ -605,4 +616,21 @@ test "Timeline: gestagte Datei bekommt „Staged Changes“ oben, Diff Index geg
 fn contains(args: []const []const u8, arg: []const u8) bool {
     for (args) |a| if (std.mem.eql(u8, a, arg)) return true;
     return false;
+}
+
+test "Timeline: show zeigt eine Datei aus dem Explorer, klappt auf, pinnt und lädt" {
+    var t = Timeline.init(testing.allocator);
+    defer t.deinit();
+    t.follow("/r/offen.zig");
+    t.show("/r/andere.zig");
+    try testing.expectEqualStrings("/r/andere.zig", t.file.?);
+    try testing.expect(t.expanded);
+    try testing.expect(t.pinned);
+    try testing.expect(t.takeRequest());
+    // Aktiver Tab wechselt: angepinnte Datei bleibt
+    t.follow("/r/offen.zig");
+    try testing.expectEqualStrings("/r/andere.zig", t.file.?);
+    // Gleiche Datei noch einmal: lädt neu wie Refresh
+    t.show("/r/andere.zig");
+    try testing.expect(t.takeRequest());
 }

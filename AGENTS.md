@@ -718,6 +718,11 @@ MuPDFs Story-Engine. Folienvorschau in `MarkdownView` (`deck`-Feld), Command
 - Folgt dem aktiven Tab (Text, Bild, PDF, Binär, Vorschau-Quelle); Diff-Tabs lassen die Timeline
   stehen, weil ihr Pfad der historische Name ist (sonst sprang sie nach einer Umbenennung auf die
   alte Datei). Geladen wird nur aufgeklappt; Dateiereignisse (git-status-Debounce) laden neu.
+- „File History“ im Explorer-, Tab- und Editor-Kontextmenü (`file_history`, `file_history_entry`)
+  stellt die Timeline wie VS Code `files.openTimeline` auf diese Datei: aufgeklappt, angepinnt,
+  ohne Tab zu öffnen (`Timeline.show`). Aus dem Editor-Menü läuft das über `pending_file_history`
+  in `update()`, nie im Render-Pfad: `show` gibt den Log frei, auf den Clay-Texte des Frames zeigen.
+  Pin lösen folgt sofort dem aktiven Tab (`resetTimelineFollow`).
 - E2E `python3 scripts/e2e_timeline.py` (Fixture-Repo mit festen Commit-Zeiten), RPC `timeline_state`.
 
 ## Source Control Graph und Multi-File-Diff (VS-Code-Stil)
