@@ -13,6 +13,8 @@ pub fn EditBuffer(comptime capacity: usize) type {
     return struct {
         buf: [capacity]u8 = undefined,
         len: usize = 0,
+        /// Byte-Offset des Cursors (immer auf einer Codepoint-Grenze).
+        cursor: usize = 0,
 
         const Self = @This();
 
@@ -22,31 +24,86 @@ pub fn EditBuffer(comptime capacity: usize) type {
             return e;
         }
 
+        /// Ersetzt den Inhalt, Cursor steht danach am Ende.
         pub fn set(self: *Self, value: []const u8) void {
             const n = @min(value.len, capacity);
             @memcpy(self.buf[0..n], value[0..n]);
             self.len = n;
+            self.cursor = n;
         }
 
         pub fn text(self: *const Self) []const u8 {
             return self.buf[0..self.len];
         }
 
+        pub fn textBeforeCursor(self: *const Self) []const u8 {
+            return self.buf[0..self.cursor];
+        }
+
+        pub fn textAfterCursor(self: *const Self) []const u8 {
+            return self.buf[self.cursor..self.len];
+        }
+
+        /// Fügt ein Codepoint an der Cursorposition ein.
         pub fn insertCodepoint(self: *Self, cp: u21) void {
             var tmp: [4]u8 = undefined;
             const n = std.unicode.utf8Encode(cp, &tmp) catch return;
             if (self.len + n > capacity) return;
-            @memcpy(self.buf[self.len .. self.len + n], tmp[0..n]);
+            std.mem.copyBackwards(u8, self.buf[self.cursor + n .. self.len + n], self.buf[self.cursor..self.len]);
+            @memcpy(self.buf[self.cursor .. self.cursor + n], tmp[0..n]);
             self.len += n;
+            self.cursor += n;
         }
 
-        /// Entfernt das letzte Codepoint (nicht nur das letzte Byte).
+        /// Entfernt das Codepoint vor dem Cursor (nicht nur das letzte Byte).
         pub fn backspace(self: *Self) void {
-            if (self.len == 0) return;
-            var i = self.len - 1;
+            if (self.cursor == 0) return;
+            const start = prevBoundary(self.buf[0..self.len], self.cursor);
+            self.removeRange(start, self.cursor);
+            self.cursor = start;
+        }
+
+        /// Entfernt das Codepoint hinter dem Cursor.
+        pub fn delete(self: *Self) void {
+            if (self.cursor >= self.len) return;
+            const end = nextBoundary(self.buf[0..self.len], self.cursor);
+            self.removeRange(self.cursor, end);
+        }
+
+        pub fn moveLeft(self: *Self) void {
+            if (self.cursor > 0) self.cursor = prevBoundary(self.buf[0..self.len], self.cursor);
+        }
+
+        pub fn moveRight(self: *Self) void {
+            if (self.cursor < self.len) self.cursor = nextBoundary(self.buf[0..self.len], self.cursor);
+        }
+
+        pub fn moveHome(self: *Self) void {
+            self.cursor = 0;
+        }
+
+        pub fn moveEnd(self: *Self) void {
+            self.cursor = self.len;
+        }
+
+        fn removeRange(self: *Self, start: usize, end: usize) void {
+            std.mem.copyForwards(u8, self.buf[start .. self.len - (end - start)], self.buf[end..self.len]);
+            self.len -= end - start;
+        }
+
+        /// Byte-Offset des Codepoint-Starts vor `pos`.
+        fn prevBoundary(s: []const u8, pos: usize) usize {
+            var i = pos - 1;
             // UTF-8-Fortsetzungsbytes (10xxxxxx) überspringen bis zum Startbyte
-            while (i > 0 and (self.buf[i] & 0xC0) == 0x80) i -= 1;
-            self.len = i;
+            while (i > 0 and (s[i] & 0xC0) == 0x80) i -= 1;
+            return i;
+        }
+
+        /// Byte-Offset des nächsten Codepoint-Starts nach `pos`.
+        fn nextBoundary(s: []const u8, pos: usize) usize {
+            var i = pos + 1;
+            while (i < s.len and (s[i] & 0xC0) == 0x80) i += 1;
+            return i;
         }
     };
 }
@@ -542,4 +599,38 @@ test "trashPath: Datei landet in files/, info/ bekommt trashinfo mit Pfad" {
     const oname = try trashPath(testing.allocator, o, trash);
     defer testing.allocator.free(oname);
     try tmp.dir.access("Trash/files/ordner/inner", .{});
+}
+
+test "RenameEdit: Cursor läuft mit Pfeiltasten, Einfügen und Löschen wirken an der Cursorposition" {
+    var e = RenameEdit.init("aüc");
+    try testing.expectEqualStrings("aüc", e.textBeforeCursor());
+    try testing.expectEqualStrings("", e.textAfterCursor());
+    e.moveLeft();
+    e.moveLeft();
+    try testing.expectEqualStrings("a", e.textBeforeCursor());
+    try testing.expectEqualStrings("üc", e.textAfterCursor());
+    e.insertCodepoint('X');
+    try testing.expectEqualStrings("aXüc", e.text());
+    try testing.expectEqualStrings("aX", e.textBeforeCursor());
+    e.moveRight();
+    e.backspace();
+    try testing.expectEqualStrings("aXc", e.text());
+    try testing.expectEqualStrings("aX", e.textBeforeCursor());
+    e.moveHome();
+    e.delete();
+    try testing.expectEqualStrings("Xc", e.text());
+    try testing.expectEqualStrings("", e.textBeforeCursor());
+    e.moveEnd();
+    e.delete();
+    try testing.expectEqualStrings("Xc", e.text());
+    e.moveLeft();
+    e.moveLeft();
+    e.moveLeft();
+    try testing.expectEqualStrings("", e.textBeforeCursor());
+    e.moveRight();
+    e.moveRight();
+    e.moveRight();
+    try testing.expectEqualStrings("Xc", e.textBeforeCursor());
+    e.set("neu");
+    try testing.expectEqualStrings("neu", e.textBeforeCursor());
 }
