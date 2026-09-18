@@ -17,7 +17,10 @@ const svg = @import("components/svg.zig");
 
 pub const HEADER_HEIGHT: f32 = 30;
 pub const ROW_HEIGHT: f32 = 26;
-pub const INPUT_HEIGHT: f32 = 36;
+/// Zeilenhöhe im Eingabefeld; es wächst bis `INPUT_MAX_LINES` (VS Code scm.inputMaxLineCount)
+pub const INPUT_LINE_HEIGHT: f32 = 22;
+pub const INPUT_MAX_LINES: usize = 6;
+const INPUT_PAD: f32 = 5;
 const BUTTON_HEIGHT: f32 = 28;
 const ACTION_SIZE: f32 = 22;
 const NAME_FONT: u16 = 16;
@@ -47,6 +50,8 @@ pub const Action = union(enum) {
     unstage_all,
     discard_all,
     commit,
+    /// Publish Branch (ohne Upstream) bzw. Push
+    push,
     refresh,
 };
 
@@ -56,8 +61,10 @@ pub const ScmChangesView = struct {
     hover_row: ?usize = null,
     /// Hinweis unter dem Feld (VS Code inputValidation), z. B. bei leerer Nachricht
     validation: ?[]const u8 = null,
-    /// Commit läuft: Knopf und Kopf-Aktion gesperrt
+    /// Commit oder Push läuft: Knopf und Kopf-Aktion gesperrt
     busy: bool = false,
+    /// Erste sichtbare Zeile des Eingabefelds, wenn es mehr als INPUT_MAX_LINES Zeilen hat
+    input_first_line: usize = 0,
 
     const Self = @This();
 
@@ -157,10 +164,27 @@ pub const ScmChangesView = struct {
         if (!self.contains(x, y)) return .none;
         if (right) return .consumed;
         if (box(clay.ElementId.ID("sc_btn_refresh"))) |b| if (inside(b, x, y)) return .refresh;
+        if (box(clay.ElementId.ID("sc_btn_push"))) |b| if (inside(b, x, y)) return .push;
         if (box(clay.ElementId.ID("sc_btn_commit"))) |b| if (inside(b, x, y)) return .commit;
-        if (box(clay.ElementId.ID("sc_btn_commit_big"))) |b| if (inside(b, x, y)) return .commit;
+        if (box(clay.ElementId.ID("sc_btn_commit_big"))) |b| if (inside(b, x, y)) {
+            return if (self.view.actionButton() == .commit) .commit else .push;
+        };
         if (box(inputId())) |b| if (inside(b, x, y)) {
-            if (!line_edit.handleClick(&self.message, input_field, x)) self.message.moveEnd();
+            // Zeile aus y, Spalte aus x (Codepoints der Zeile messen)
+            const rel_line: usize = @intFromFloat(@max(0, (y - b.y - INPUT_PAD) / INPUT_LINE_HEIGHT));
+            const line_idx = @min(self.input_first_line + rel_line, self.message.lineCount() - 1);
+            const text = self.message.line(line_idx);
+            const rel_x = x - b.x - 6;
+            var col: usize = 0;
+            var left: f32 = 0;
+            var it = std.unicode.Utf8View.initUnchecked(text).iterator();
+            while (it.nextCodepointSlice()) |cp| {
+                const w = ui.measureTextWidth(cp, input_field.font_size);
+                if (rel_x < left + w / 2) break;
+                left += w;
+                col += 1;
+            }
+            self.message.setCursorAtLine(line_idx, col);
             return .focus_input;
         };
         const i = self.rowAt(x, y) orelse return .consumed;
@@ -221,10 +245,23 @@ pub const ScmChangesView = struct {
         return action;
     }
 
-    /// Tasten im Eingabefeld: Ctrl+Enter = Commit, sonst Cursor/Backspace/Entf über line_edit.
+    /// Tasten im Eingabefeld: Ctrl+Enter = Commit, Enter = neue Zeile, ↑↓ zwischen Zeilen,
+    /// Pos1/Ende in der Zeile, sonst Cursor/Backspace/Entf über line_edit.
     pub fn handleInputKey(self: *Self, key: wio.Button, ctrl: bool) Action {
-        if ((key == .enter or key == .kp_enter) and ctrl) return .commit;
-        if (line_edit.handleKey(&self.message, key) == .edited) self.validation = null;
+        switch (key) {
+            .enter, .kp_enter => {
+                if (ctrl) return .commit;
+                self.message.insertCodepoint('\n');
+                self.validation = null;
+            },
+            .up => self.message.moveUp(),
+            .down => self.message.moveDown(),
+            .home => self.message.moveLineHome(),
+            .end => self.message.moveLineEnd(),
+            else => if (line_edit.handleKey(&self.message, key) == .edited) {
+                self.validation = null;
+            },
+        }
         return .consumed;
     }
 
@@ -258,30 +295,51 @@ pub const ScmChangesView = struct {
                 clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow } } })({});
                 if (header_hover) {
                     headerButton(arena, theme, "sc_btn_commit", svg.Lucide.check, mouse_x, mouse_y);
+                    headerButton(arena, theme, "sc_btn_push", svg.Lucide.upload, mouse_x, mouse_y);
                     headerButton(arena, theme, "sc_btn_refresh", svg.Lucide.refresh_cw, mouse_x, mouse_y);
                 }
             });
 
-            // Eingabefeld (26 px + 10 px Rand wie scm.css)
-            clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(INPUT_HEIGHT) }, .padding = .{ .left = 8, .right = 8, .top = 5, .bottom = 5 } } })({
+            // Eingabefeld: wächst mit den Zeilen bis INPUT_MAX_LINES, danach scrollt es zur Cursorzeile
+            const line_count = self.message.lineCount();
+            const shown = @min(line_count, INPUT_MAX_LINES);
+            const cur_line = self.message.cursorLine();
+            if (cur_line < self.input_first_line) self.input_first_line = cur_line;
+            if (cur_line >= self.input_first_line + shown) self.input_first_line = cur_line + 1 - shown;
+            if (self.input_first_line + shown > line_count) self.input_first_line = line_count - shown;
+            const input_h = @as(f32, @floatFromInt(shown)) * INPUT_LINE_HEIGHT + 2 * INPUT_PAD;
+            clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(input_h + 10) }, .padding = .{ .left = 8, .right = 8, .top = 5, .bottom = 5 } } })({
                 clay.UI()(.{
                     .id = inputId(),
-                    .layout = .{ .sizing = .grow, .child_alignment = .{ .y = .center }, .padding = .{ .left = 6, .right = 6 } },
+                    .layout = .{ .sizing = .grow, .direction = .top_to_bottom, .padding = .{ .left = 6, .right = 6, .top = INPUT_PAD, .bottom = INPUT_PAD } },
                     .background_color = theme.bg,
                     .border = .{ .width = .all(1), .color = if (input_focused) theme.border_focus else theme.border },
                     .corner_radius = .all(4),
                 })({
-                    if (self.message.len == 0 and !input_focused) {
+                    if (self.message.len == 0) {
                         var buf: [128]u8 = undefined;
-                        clay.text(fitText(arena, v.placeholder(&buf), width - 32, 16), .{ .font_size = 16, .color = theme.muted, .wrap_mode = .none });
-                    } else {
-                        if (self.message.len == 0) {
-                            var buf: [128]u8 = undefined;
-                            clay.UI()(.{ .floating = .{ .attach_to = .to_parent, .attach_points = .{ .element = .left_center, .parent = .left_center }, .offset = .{ .x = 6, .y = 0 }, .pointer_capture_mode = .passthrough }, .layout = .{ .sizing = .{ .w = .fit, .h = .fit } } })({
-                                clay.text(fitText(arena, v.placeholder(&buf), width - 32, 16), .{ .font_size = 16, .color = theme.muted, .wrap_mode = .none });
-                            });
-                        }
-                        line_edit.render(&self.message, input_field, theme.text, input_focused, theme);
+                        clay.UI()(.{ .floating = .{ .attach_to = .to_parent, .attach_points = .{ .element = .left_top, .parent = .left_top }, .offset = .{ .x = 6, .y = INPUT_PAD }, .pointer_capture_mode = .passthrough }, .layout = .{ .sizing = .{ .w = .fit, .h = .fixed(INPUT_LINE_HEIGHT) }, .child_alignment = .{ .y = .center } } })({
+                            clay.text(fitText(arena, v.placeholder(&buf), width - 32, 16), .{ .font_size = 16, .color = theme.muted, .wrap_mode = .none });
+                        });
+                    }
+                    for (self.input_first_line..self.input_first_line + shown) |li| {
+                        const text = self.message.line(li);
+                        clay.UI()(.{
+                            .id = clay.ElementId.IDI("sc_input_line", @intCast(li)),
+                            .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(INPUT_LINE_HEIGHT) }, .child_alignment = .{ .y = .center } },
+                        })({
+                            clay.text(text, .{ .font_size = 16, .color = theme.text, .wrap_mode = .none });
+                            if (input_focused and li == cur_line) {
+                                const before = self.message.textBeforeCursor();
+                                const ls = if (std.mem.lastIndexOfScalar(u8, before, '\n')) |i| i + 1 else 0;
+                                clay.UI()(.{
+                                    .id = clay.ElementId.ID("sc_input_caret"),
+                                    .floating = .{ .attach_to = .to_parent, .attach_points = .{ .element = .left_center, .parent = .left_center }, .offset = .{ .x = ui.measureTextWidth(before[ls..], 16), .y = 0 }, .z_index = 10, .pointer_capture_mode = .passthrough },
+                                    .layout = .{ .sizing = .{ .w = .fixed(2), .h = .fixed(16) } },
+                                    .background_color = theme.text,
+                                })({});
+                            }
+                        });
                     }
                 });
             });
@@ -303,8 +361,11 @@ pub const ScmChangesView = struct {
                     .background_color = if (self.busy) theme.overlay else if (hovered) mix(theme.primary, theme.text, 0.12) else theme.primary,
                     .corner_radius = .all(4),
                 })({
-                    svg.Svg(arena, "sc_icon_commit", svg.Lucide.check, 16, theme.text_on_primary);
-                    clay.text(if (self.busy) "Committing..." else "Commit", .{ .font_size = 15, .color = theme.text_on_primary, .wrap_mode = .none });
+                    const kind = v.actionButton();
+                    var label_buf: [64]u8 = undefined;
+                    svg.Svg(arena, "sc_icon_commit", if (kind == .commit) svg.Lucide.check else svg.Lucide.upload, 16, theme.text_on_primary);
+                    const label: []const u8 = if (self.busy) (if (kind == .commit) "Committing..." else "Pushing...") else v.buttonLabel(&label_buf);
+                    clay.text(arena.dupe(u8, label) catch "", .{ .font_size = 15, .color = theme.text_on_primary, .wrap_mode = .none });
                 });
             });
 

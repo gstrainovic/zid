@@ -752,8 +752,13 @@ MuPDFs Story-Engine. Folienvorschau in `MarkdownView` (`deck`-Feld), Command
 
 ### Changes-Bereich mit Commit (über dem Graphen)
 
-- Kopf „SOURCE CONTROL“ (Commit, Refresh beim Überfahren), einzeiliges Eingabefeld (`line_edit`,
-  Platzhalter `Message (Ctrl+Enter to commit on "<branch>")`), Commit-Knopf, Gruppen „Merge
+- Kopf „SOURCE CONTROL“ (Commit, Push, Refresh beim Überfahren), mehrzeiliges Eingabefeld
+  (`EditBuffer` mit Zeilenfunktionen `moveUp/moveDown/moveLineHome/moveLineEnd/setCursorAtLine`,
+  Enter = neue Zeile, Ctrl+Enter = Commit, wächst bis `INPUT_MAX_LINES` = 6 wie
+  `scm.inputMaxLineCount`, danach scrollt es zur Cursorzeile; Platzhalter `Message (Ctrl+Enter to
+  commit on "<branch>")`), großer Knopf wie `scm.showActionButton`: „Commit“ solange Änderungen da
+  sind, sauber ohne Upstream „Publish Branch“ (`push -u origin <branch>`), sauber und voraus
+  „Push N↑“ (`push`; Upstream/Vorsprung aus `# branch.upstream` und `# branch.ab`), Gruppen „Merge
   Changes“ (nur bei Konflikten), „Staged Changes“ (nur wenn nicht leer), „Changes“ (immer,
   untracked darin = `git.untrackedChanges: mixed`). Zeile: Name, Ordner gedimmt, rechts Buchstabe
   in `theme.git_*` (VS Code `gitDecoration.*`), gelöscht durchgestrichen. Aktionen nur beim
@@ -768,7 +773,8 @@ MuPDFs Story-Engine. Folienvorschau in `MarkdownView` (`deck`-Feld), Command
 - Worker `taskGitAction` (`FieldsParam`: Aktion, Repo, Pfade bzw. Nachricht): `stage` = `add -A --`,
   `unstage` = `reset -q HEAD --`, `discard_tracked` = `checkout -q --`, `discard_untracked` =
   `clean -f -q --`, `commit` = `commit --quiet --file - --allow-empty-message` (Nachricht über
-  stdin, `runGitCaptureStdin`), `commit_all` = vorher `add -A` (VS Code smartCommit). Fehler kommen
+  stdin, `runGitCaptureStdin`), `commit_all` = vorher `add -A` (VS Code smartCommit), `push` =
+  `push --quiet` plus weitere Felder als Argumente. Fehler kommen
   als `git_action_error` mit stderr → Toast. Ergebnis setzt `git_status_wanted`, main.zig lädt
   den Status über den Debounce; nach Commit auch Graph und Timeline.
 - Commit-Verhalten wie `smartCommit`: leere Nachricht → Hinweis unter dem Feld; keine Staged
