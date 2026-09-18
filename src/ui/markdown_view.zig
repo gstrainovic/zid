@@ -8,6 +8,7 @@ const shortcuts = @import("shortcuts");
 const marp = @import("marp");
 const marp_pdf = @import("../rendering/marp_pdf.zig");
 const ctx_menu = @import("context_menu");
+const scrollbar = @import("scrollbar");
 const Theme = ui_mod.Theme;
 const ImageTexture = @import("../clay_renderer/image_renderer.zig").ImageTexture;
 const flow_core = @import("flow_core");
@@ -22,8 +23,15 @@ pub const MarkdownView = struct {
     /// Überschreibt theme.text, wenn der Inhalt auf einem Hintergrund liegt,
     /// der nicht dem Theme-Hintergrund entspricht (z.B. Chat-Bubbles).
     text_color: ?clay.Color = null,
-    /// Laufende Nummer der Fließtext-Container im aktuellen Frame (für Element-IDs).
+    /// Laufende Nummer der Fließtext-Container und Tabellen **im aktuellen Block** (für die
+    /// Element-IDs, an denen `flushPieces` und `renderTable` ihre Breite vom letzten Frame
+    /// ablesen). Je Block gezählt, nicht je Frame: die virtualisierte Vorschau zeichnet nur ein
+    /// Fenster von Blöcken, und sobald oben ein Block herausfiel, rutschten frameweite Nummern
+    /// um eins — jeder Lauf las die Breite eines anderen Laufs (Listenpunkt, Zitat) und brach
+    /// einen Frame lang falsch um. Die Vorschau zappelte beim Rad-Scrollen auf und ab.
     run_counter: u32 = 0,
+    block_table_counter: u32 = 0,
+    /// Laufende Nummer der Tabellen im Frame, nur für die abfragbaren `md_tcell`-IDs (E2E).
     table_counter: u32 = 0,
     /// Laufende Nummern für abfragbare IDs (E2E): `md_quote`, `md_li`/`md_bullet`, `md_code`.
     quote_counter: u32 = 0,
@@ -443,6 +451,8 @@ pub const MarkdownView = struct {
     fn beginBlock(self: *Self, index: u32) void {
         self.cur_block = index;
         self.block_line_counter = 0;
+        self.run_counter = 0;
+        self.block_table_counter = 0;
     }
 
     /// Zeilen aus einem früheren Frame, die es nach neuem Umbruch nicht mehr gibt, vergessen.
@@ -622,6 +632,7 @@ pub const MarkdownView = struct {
     /// Zu Beginn jedes Frames: gleiche Elemente bekommen so in jedem Frame dieselbe ID.
     fn resetCounters(self: *Self) void {
         self.run_counter = 0;
+        self.block_table_counter = 0;
         self.table_counter = 0;
         self.quote_counter = 0;
         self.list_item_counter = 0;
@@ -634,6 +645,8 @@ pub const MarkdownView = struct {
 
     /// Abstand zwischen zwei Blöcken auf oberster Ebene (`child_gap` im Dokument).
     const block_gap: f32 = 16;
+    /// Innenabstand von `md_content` (Clay `.padding = .all(24)`), Oberkante des ersten Blocks
+    const content_pad: f32 = 24;
 
     /// Geschätzte Höhe eines Blocks, der noch nie gezeichnet wurde. Aus Blockart
     /// und Textlänge, damit Bildlaufleiste und Scrollweg schon vor dem ersten
@@ -793,6 +806,12 @@ pub const MarkdownView = struct {
 
     /// Höhenliste auf die Blockzahl bringen und die im letzten Frame
     /// gezeichneten Blöcke nachmessen.
+    ///
+    /// Der Vorlauf oberhalb des Sichtbereichs (`renderDocumentVirtualized`) misst
+    /// auch Blöcke, die noch über der Oberkante liegen. Ersetzt dort die Messung
+    /// eine Schätzung, rutscht alles darunter um die Differenz, und die Vorschau
+    /// sprang beim Rad-Scrollen auf und ab. Der Offset geht deshalb um dieselbe
+    /// Differenz mit (`scrollbar.anchorShift`), der sichtbare Inhalt bleibt stehen.
     fn syncBlockHeights(self: *Self, children: []Block) void {
         const count = children.len;
         while (self.block_heights.items.len < count) {
@@ -802,13 +821,21 @@ pub const MarkdownView = struct {
         if (self.block_heights.items.len > count) {
             self.block_heights.shrinkRetainingCapacity(count);
         }
-        var i = self.measured_from;
-        while (i <= self.measured_to and i < count) : (i += 1) {
-            const data = clay.getElementData(self.idi("md_block", @intCast(i)));
-            if (data.found and data.bounding_box.height > 0) {
-                self.block_heights.items[i] = data.bounding_box.height;
+        // Oberkante des Blocks i mit den alten Höhen, ab dem Inhaltsrand (content_pad)
+        var top: f32 = content_pad;
+        var shift: f32 = 0;
+        for (self.block_heights.items, 0..) |old, i| {
+            if (i >= self.measured_from and i <= self.measured_to) {
+                const data = clay.getElementData(self.idi("md_block", @intCast(i)));
+                if (data.found and data.bounding_box.height > 0) {
+                    const new = data.bounding_box.height;
+                    shift += scrollbar.anchorShift(self.scroll_offset_y, top, old, new);
+                    self.block_heights.items[i] = new;
+                }
             }
+            top += old + block_gap;
         }
+        if (shift != 0) self.scroll_offset_y = @max(0, self.scroll_offset_y + shift);
     }
 
     /// Folienvorschau: eine Folie im 16:9-Rahmen plus Blätterleiste. Der Rahmen
@@ -1373,10 +1400,15 @@ pub const MarkdownView = struct {
         if (nrow == 0) return;
 
         self.table_counter += 1;
+        self.block_table_counter += 1;
         // Gemessen wird die Hülle, nicht die Tabelle: die Tabelle ist `fit` und schrumpft,
         // ihre eigene Breite als Vorgabe zu nehmen würde sie Frame für Frame enger machen.
+        // Zwei Hüllen: `md_table_row` mit Frame-Nummer für die E2E, darin `md_table_box` mit
+        // je Block stabiler Nummer (siehe `run_counter`) zum Messen — sonst liest die Tabelle
+        // nach einem Fensterwechsel die Breite einer anderen ab.
         const row_id = self.idi("md_table_row", self.table_counter);
-        const data = clay.getElementData(row_id);
+        const box_id = self.idi("md_table_box", self.cur_block *% 1024 +% self.block_table_counter);
+        const data = clay.getElementData(box_id);
         var avail: f32 = self.wrap_width_hint orelse 800;
         // Die Hülle wächst mit einer zu breiten Tabelle mit (`grow` ist nie schmaler als
         // ihr Kind). Ohne Deckel hielte sie die Überbreite aus dem ersten Frame fest.
@@ -1445,38 +1477,43 @@ pub const MarkdownView = struct {
             .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .left_to_right },
         })({
             clay.UI()(.{
-                .layout = .{ .sizing = .{ .w = .fit, .h = .fit }, .direction = .top_to_bottom },
-                .border = .{ .width = .all(1), .color = theme.border },
+                .id = box_id,
+                .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .left_to_right },
             })({
-                for (0..nrow) |r| {
-                    clay.UI()(.{
-                        .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .left_to_right },
-                        .background_color = if (r == 0) theme.surface else .{ 0, 0, 0, 0 },
-                        .border = .{ .width = .{ .between_children = 1 }, .color = theme.border },
-                    })({
-                        for (0..ncol) |c| {
-                            // E2E: `md_tcell` mit Tabelle * 100000 + Zellindex (Zeile * ncol + Spalte).
-                            clay.UI()(.{
-                                .id = self.idi("md_tcell", self.table_counter * 100000 + @as(u32, @intCast(r * ncol + c))),
-                                .layout = .{
-                                    .sizing = .{ .w = .fixed(widths[c] + cell_pad), .h = .grow },
-                                    .padding = .{ .left = 8, .right = 8, .top = 4, .bottom = 4 },
-                                },
-                            })({
-                                // Kein `clip` je Zelle: Clay hält nur zehn Clip-Container im
-                                // Kontext, eine Tabelle sprengt das sofort („out of bounds array
-                                // access"). Stattdessen bricht `splitWide` zu lange Wörter um.
-                                // Der Umbruch richtet sich nach der berechneten Spaltenbreite,
-                                // nicht nach dem gemessenen Element.
-                                // +2: `wrapLines` rechnet mit `avail - 2` Sicherheitsabstand,
-                                // sonst bräche eine Zelle genau an ihrer eigenen Wunschbreite um.
-                                self.wrap_width_forced = widths[c] + 2;
-                                self.renderBlock(&cells[r * ncol + c], arena, if (r == 0) head_theme else theme, ui_ptr);
-                                self.wrap_width_forced = null;
-                            });
-                        }
-                    });
-                }
+                clay.UI()(.{
+                    .layout = .{ .sizing = .{ .w = .fit, .h = .fit }, .direction = .top_to_bottom },
+                    .border = .{ .width = .all(1), .color = theme.border },
+                })({
+                    for (0..nrow) |r| {
+                        clay.UI()(.{
+                            .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .left_to_right },
+                            .background_color = if (r == 0) theme.surface else .{ 0, 0, 0, 0 },
+                            .border = .{ .width = .{ .between_children = 1 }, .color = theme.border },
+                        })({
+                            for (0..ncol) |c| {
+                                // E2E: `md_tcell` mit Tabelle * 100000 + Zellindex (Zeile * ncol + Spalte).
+                                clay.UI()(.{
+                                    .id = self.idi("md_tcell", self.table_counter * 100000 + @as(u32, @intCast(r * ncol + c))),
+                                    .layout = .{
+                                        .sizing = .{ .w = .fixed(widths[c] + cell_pad), .h = .grow },
+                                        .padding = .{ .left = 8, .right = 8, .top = 4, .bottom = 4 },
+                                    },
+                                })({
+                                    // Kein `clip` je Zelle: Clay hält nur zehn Clip-Container im
+                                    // Kontext, eine Tabelle sprengt das sofort („out of bounds array
+                                    // access"). Stattdessen bricht `splitWide` zu lange Wörter um.
+                                    // Der Umbruch richtet sich nach der berechneten Spaltenbreite,
+                                    // nicht nach dem gemessenen Element.
+                                    // +2: `wrapLines` rechnet mit `avail - 2` Sicherheitsabstand,
+                                    // sonst bräche eine Zelle genau an ihrer eigenen Wunschbreite um.
+                                    self.wrap_width_forced = widths[c] + 2;
+                                    self.renderBlock(&cells[r * ncol + c], arena, if (r == 0) head_theme else theme, ui_ptr);
+                                    self.wrap_width_forced = null;
+                                });
+                            }
+                        });
+                    }
+                });
             });
         });
     }
@@ -1572,7 +1609,8 @@ pub const MarkdownView = struct {
         defer pieces.clearRetainingCapacity();
 
         self.run_counter += 1;
-        const id_str = std.fmt.allocPrint(arena, "md_run_{x}_{x}_{d}", .{ @intFromPtr(self), self.pane_salt, self.run_counter }) catch "md_run";
+        // Block-Index in der ID: stabil über Frames, auch wenn das virtualisierte Fenster wandert
+        const id_str = std.fmt.allocPrint(arena, "md_run_{x}_{x}_{d}_{d}", .{ @intFromPtr(self), self.pane_salt, self.cur_block, self.run_counter }) catch "md_run";
         const run_id = clay.ElementId.ID(id_str);
         const data = clay.getElementData(run_id);
         // In einer Tabellenzelle steht die Breite fest (`wrap_width_forced`); die gemessene

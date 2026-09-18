@@ -77,6 +77,17 @@ pub fn dragOffset(m: Model, drag: Drag, x: f32, y: f32) usize {
     return @intCast(@max(0, @min(new, @as(isize, @intCast(m.max_offset)))));
 }
 
+/// Virtualisierte Ansichten mit geschätzten Blockhöhen (Markdown-Vorschau): wird ein Block
+/// nachgemessen, der ganz oberhalb der Oberkante liegt, rutscht alles darunter um die
+/// Differenz — der sichtbare Inhalt springt. Liefert, um wie viel der Offset mitgehen muss,
+/// damit er stehen bleibt: die Differenz für Blöcke über der Kante, 0 für Blöcke, die die
+/// Kante schneiden oder darunter liegen. `top` ist die Oberkante des Blocks mit der alten Höhe,
+/// in denselben Einheiten wie `offset`.
+pub fn anchorShift(offset: f32, top: f32, old: f32, new: f32) f32 {
+    if (top + old > offset) return 0;
+    return new - old;
+}
+
 pub const Ids = struct { track: clay.ElementId, thumb: clay.ElementId };
 
 pub const track_color: clay.Color = .{ 30, 30, 46, 255 };
@@ -163,6 +174,15 @@ test "hitTest: Thumb, Seite zurück/vor, außerhalb nichts, senkrecht und waagre
     try testing.expect(hitTest(h, 10, 405) == .thumb);
     try testing.expect(hitTest(h, 150, 405) == .page_forward);
     try testing.expect(hitTest(h, 150, 395) == .none);
+}
+
+test "anchorShift: nur Blöcke ganz über der Oberkante verschieben den Offset" {
+    try testing.expectEqual(@as(f32, 30), anchorShift(500, 100, 50, 80)); // über der Kante, gewachsen
+    try testing.expectEqual(@as(f32, -20), anchorShift(500, 100, 50, 30)); // geschrumpft
+    try testing.expectEqual(@as(f32, 0), anchorShift(500, 480, 50, 80)); // schneidet die Kante
+    try testing.expectEqual(@as(f32, 0), anchorShift(500, 600, 50, 80)); // darunter
+    try testing.expectEqual(@as(f32, 30), anchorShift(500, 450, 50, 80)); // Unterkante genau auf der Kante
+    try testing.expectEqual(@as(f32, 0), anchorShift(0, 0, 50, 80)); // ganz oben: nichts über der Kante
 }
 
 test "pageOffset und dragOffset klemmen auf 0..max_offset" {
