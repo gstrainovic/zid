@@ -777,6 +777,13 @@ MuPDFs Story-Engine. Folienvorschau in `MarkdownView` (`deck`-Feld), Command
   `push --quiet` plus weitere Felder als Argumente. Fehler kommen
   als `git_action_error` mit stderr → Toast. Ergebnis setzt `git_status_wanted`, main.zig lädt
   den Status über den Debounce; nach Commit auch Graph und Timeline.
+- **Generate Commit Message** (Sparkle rechts oben im Feld, wie VS Code Copilot / Zed): Worker-
+  Aktion `commit_diff` liefert den gestagten Diff, sonst Arbeitskopie plus untracked Dateien;
+  `git_changes.commitPrompt` (Conventional Commits, 72 Zeichen, Body, nur die Nachricht; Diff auf
+  24 KiB gekappt) geht blockierend über `ai_worker.taskChatCompletion` mit eigenen Tags
+  `ai_commit_message`/`_error` (`ChatParams.reply_tag`), damit die Antwort nicht im Chat landet;
+  `cleanGeneratedMessage` entfernt Zäune, Anführungszeichen und Label. Ohne KI (`--ai=off`,
+  Agent nicht `ready`) nur ein Toast. Kein Streaming, kein eigener Systemprompt-Schalter.
 - Commit-Verhalten wie `smartCommit`: leere Nachricht → Hinweis unter dem Feld; keine Staged
   Changes → Rückfrage „stage all and commit“; nichts geändert → Toast. Discard fragt immer
   (Texte und Knöpfe aus `commands.ts`: Discard File / Restore File / Delete File / Discard All n

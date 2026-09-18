@@ -4089,7 +4089,66 @@ pub const UI = struct {
             },
             .commit => self.scmCommit(),
             .push => self.scmPush(),
+            .generate_message => self.scmGenerateMessage(),
         }
+    }
+
+    /// „Generate Commit Message“ wie VS Code Copilot / Zed: Diff holen (gestagt, sonst Arbeitskopie),
+    /// dann als Prompt ans Modell; die Antwort landet im Feld (`handleAICommitMessage`).
+    fn scmGenerateMessage(self: *Self) void {
+        const sc = &self.scm_changes;
+        if (sc.generating) return;
+        if (self.ai_chat.agent == null or self.ai_chat.agent_status != .ready) {
+            self.showToast("AI is not available: start zid without --ai=off", .{});
+            return;
+        }
+        if (sc.view.isClean()) {
+            self.showToast("There are no changes to describe.", .{});
+            return;
+        }
+        sc.generating = true;
+        self.submitScm("commit_diff", &.{}, null);
+    }
+
+    /// Diff da: Prompt bauen und blockierend ans Modell schicken (eigene Ergebnis-Tags).
+    fn scmSubmitCommitPrompt(self: *Self, diff: []const u8) void {
+        const sched = self.scheduler orelse return self.scmGenerateFailed("no scheduler");
+        const agent = self.ai_chat.agent orelse return self.scmGenerateFailed("AI is not available");
+        if (std.mem.trim(u8, diff, " \r\n").len == 0) return self.scmGenerateFailed("no diff");
+        const prompt = git_changes.commitPrompt(self.allocator, diff, 24 * 1024) catch return self.scmGenerateFailed("out of memory");
+        defer self.allocator.free(prompt);
+        const ai_worker = @import("ai_worker");
+        const messages = [_]@import("agent").LlamaAgent.ChatMessage{.{ .role = "user", .content = prompt }};
+        const params = ai_worker.ChatParams.initWithStop(self.allocator, agent, &messages, &sched.should_stop) catch return self.scmGenerateFailed("out of memory");
+        params.reply_tag = .ai_commit_message;
+        params.error_tag = .ai_commit_message_error;
+        if (!sched.submit(.{ .func = ai_worker.taskChatCompletion, .data = params })) {
+            params.deinit();
+            self.scmGenerateFailed("worker busy");
+        }
+    }
+
+    fn scmGenerateFailed(self: *Self, why: []const u8) void {
+        self.scm_changes.generating = false;
+        self.showToast("Generate commit message: {s}", .{why});
+    }
+
+    /// Antwort des Modells: bereinigt ins Feld, Fokus ins Feld.
+    pub fn handleAICommitMessage(self: *Self, ok: bool, payload: []const u8) void {
+        const sc = &self.scm_changes;
+        sc.generating = false;
+        if (!ok) {
+            self.showToast("Generate commit message: {s}", .{payload});
+            return;
+        }
+        const text = git_changes.cleanGeneratedMessage(payload);
+        if (text.len == 0) {
+            self.showToast("Generate commit message: empty reply", .{});
+            return;
+        }
+        sc.message.set(text);
+        sc.validation = null;
+        self.sidebar_focus = .commit_input;
     }
 
     /// Push wie VS Code: ohne Upstream „Publish Branch“ (`push -u origin <branch>`), sonst `push`.
@@ -4209,6 +4268,11 @@ pub const UI = struct {
     pub fn handleGitAction(self: *Self, ok: bool, payload: []const u8) void {
         const u = git_worker.unframe(payload) orelse return;
         const sc = &self.scm_changes;
+        // Diff für die Commit-Nachricht: kein Status-Refresh, weiter ans Modell
+        if (std.mem.eql(u8, u.key, "commit_diff")) {
+            if (ok) self.scmSubmitCommitPrompt(u.body) else self.scmGenerateFailed(u.body[0 .. std.mem.indexOfScalar(u8, u.body, '\n') orelse u.body.len]);
+            return;
+        }
         const is_commit = std.mem.startsWith(u8, u.key, "commit");
         const is_push = std.mem.eql(u8, u.key, "push");
         if (is_commit or is_push) sc.busy = false;

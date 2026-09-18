@@ -54,6 +54,8 @@ pub const Action = union(enum) {
     /// Publish Branch (ohne Upstream) bzw. Push
     push,
     refresh,
+    /// Sparkle im Feld: Commit-Nachricht vom Modell (VS Code Copilot / Zed)
+    generate_message,
 };
 
 pub const ScmChangesView = struct {
@@ -66,6 +68,8 @@ pub const ScmChangesView = struct {
     busy: bool = false,
     /// Erste sichtbare Zeile des Eingabefelds, wenn es mehr als INPUT_MAX_LINES Zeilen hat
     input_first_line: usize = 0,
+    /// Commit-Nachricht wird gerade vom Modell erzeugt (Sparkle dreht, Platzhalter „Generating…“)
+    generating: bool = false,
 
     const Self = @This();
 
@@ -166,6 +170,7 @@ pub const ScmChangesView = struct {
         if (right) return .consumed;
         if (box(clay.ElementId.ID("sc_btn_refresh"))) |b| if (inside(b, x, y)) return .refresh;
         if (box(clay.ElementId.ID("sc_btn_push"))) |b| if (inside(b, x, y)) return .push;
+        if (box(clay.ElementId.ID("sc_btn_generate"))) |b| if (inside(b, x, y)) return .generate_message;
         if (box(clay.ElementId.ID("sc_btn_commit"))) |b| if (inside(b, x, y)) return .commit;
         if (box(clay.ElementId.ID("sc_btn_commit_big"))) |b| if (inside(b, x, y)) {
             return if (self.view.actionButton() == .commit) .commit else .push;
@@ -320,10 +325,15 @@ pub const ScmChangesView = struct {
                 })({
                     if (self.message.len == 0) {
                         var buf: [128]u8 = undefined;
+                        const ph = if (self.generating) "Generating commit message..." else v.placeholder(&buf);
                         clay.UI()(.{ .floating = .{ .attach_to = .to_parent, .attach_points = .{ .element = .left_top, .parent = .left_top }, .offset = .{ .x = 6, .y = INPUT_PAD }, .pointer_capture_mode = .passthrough }, .layout = .{ .sizing = .{ .w = .fit, .h = .fixed(INPUT_LINE_HEIGHT) }, .child_alignment = .{ .y = .center } } })({
-                            clay.text(fitText(arena, v.placeholder(&buf), width - 32, 16), .{ .font_size = 16, .color = theme.muted, .wrap_mode = .none });
+                            clay.text(fitText(arena, ph, width - 60, 16), .{ .font_size = 16, .color = theme.muted, .wrap_mode = .none });
                         });
                     }
+                    // Sparkle rechts oben im Feld wie VS Code Copilot: Nachricht vom Modell
+                    clay.UI()(.{ .floating = .{ .attach_to = .to_parent, .attach_points = .{ .element = .right_top, .parent = .right_top }, .offset = .{ .x = -3, .y = 3 }, .z_index = 5 }, .layout = .{ .sizing = .{ .w = .fit, .h = .fit } } })({
+                        tooltip.iconButton(arena, theme, clay.ElementId.ID("sc_btn_generate"), "sc_btn_generate_icon", if (self.generating) svg.Lucide.loader_circle else svg.Lucide.sparkles, if (self.generating) "Generating commit message..." else "Generate Commit Message", .{ .size = 20, .icon_size = 14 });
+                    });
                     for (self.input_first_line..self.input_first_line + shown) |li| {
                         const text = self.message.line(li);
                         clay.UI()(.{

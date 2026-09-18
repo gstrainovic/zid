@@ -97,6 +97,31 @@ pub fn taskGitAction(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.Tas
     var argv: std.ArrayListUnmanaged([]const u8) = .empty;
     defer argv.deinit(alloc);
     var stdin: ?[]const u8 = null;
+    if (std.mem.eql(u8, action, "commit_diff")) {
+        // Diff für „Generate Commit Message“: gestagt, sonst Arbeitskopie plus untracked Dateien
+        const staged = switch (runGitCapture(alloc, repo, &.{ "diff", "--cached", "--no-color", "--no-ext-diff" })) {
+            .ok => |out| out,
+            .failed => |msg| return framedResult(alloc, action, .{ .failed = msg }, .git_action, .git_action_error),
+        };
+        defer alloc.free(staged);
+        if (std.mem.trim(u8, staged, " \r\n").len > 0) return .{ .tag = .git_action, .payload = try frame(alloc, action, staged), .allocator = alloc };
+        const work = switch (runGitCapture(alloc, repo, &.{ "diff", "--no-color", "--no-ext-diff" })) {
+            .ok => |out| out,
+            .failed => |msg| return framedResult(alloc, action, .{ .failed = msg }, .git_action, .git_action_error),
+        };
+        defer alloc.free(work);
+        const untracked = switch (runGitCapture(alloc, repo, &.{ "ls-files", "--others", "--exclude-standard" })) {
+            .ok => |out| out,
+            .failed => |msg| blk: {
+                alloc.free(msg);
+                break :blk try alloc.dupe(u8, "");
+            },
+        };
+        defer alloc.free(untracked);
+        const body = if (untracked.len > 0) try std.mem.concat(alloc, u8, &.{ work, "\nUntracked files:\n", untracked }) else try alloc.dupe(u8, work);
+        defer alloc.free(body);
+        return .{ .tag = .git_action, .payload = try frame(alloc, action, body), .allocator = alloc };
+    }
     if (std.mem.eql(u8, action, "commit") or std.mem.eql(u8, action, "commit_all")) {
         // commit_all = VS Code smartCommit ohne Staged Changes: erst alles stagen
         if (std.mem.eql(u8, action, "commit_all")) switch (runGitCapture(alloc, repo, &.{ "add", "-A" })) {
@@ -993,4 +1018,27 @@ test "taskGitAction push: Publish mit -u origin, danach Push; ohne Remote Fehler
     const remote_log = try runGit(alloc, remote, &.{ "log", "-1", "--format=%s", "main" });
     defer alloc.free(remote_log);
     try std.testing.expectEqualStrings("zweiter", std.mem.trimRight(u8, remote_log, "\n"));
+}
+
+test "taskGitAction commit_diff: gestagter Diff, sonst Arbeitskopie mit untracked Dateien" {
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const repo = try testRepo(alloc, &tmp);
+    defer alloc.free(repo);
+    try tmp.dir.writeFile(.{ .sub_path = "a.txt", .data = "eins\nzwei\ndrei\n" });
+    try tmp.dir.writeFile(.{ .sub_path = "neu.txt", .data = "frei\n" });
+    // nichts gestagt: Diff der Arbeitskopie plus Liste der untracked Dateien
+    var r = try taskGitAction(alloc, try FieldsParam.init(alloc, &.{ "commit_diff", repo }));
+    var body = unframe(r.payload).?.body;
+    try std.testing.expect(std.mem.indexOf(u8, body, "+drei") != null);
+    try std.testing.expect(std.mem.indexOf(u8, body, "Untracked files:\nneu.txt") != null);
+    r.deinit();
+    // a.txt gestagt: nur der gestagte Diff
+    alloc.free(try runGit(alloc, repo, &.{ "add", "a.txt" }));
+    r = try taskGitAction(alloc, try FieldsParam.init(alloc, &.{ "commit_diff", repo }));
+    body = unframe(r.payload).?.body;
+    try std.testing.expect(std.mem.indexOf(u8, body, "+drei") != null);
+    try std.testing.expect(std.mem.indexOf(u8, body, "neu.txt") == null);
+    r.deinit();
 }

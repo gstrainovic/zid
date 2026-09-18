@@ -153,6 +153,46 @@ pub fn parseStatus(alloc: std.mem.Allocator, raw: []const u8) !Status {
     return s;
 }
 
+/// Anweisung für „Generate Commit Message“ (wie VS Code Copilot / Zed: gestagter Diff, sonst
+/// Arbeitskopie, als Text ans Modell; Antwort ist die Nachricht selbst). Owned.
+pub const commit_prompt_head =
+    \\You are an expert at writing Git commit messages.
+    \\Write a commit message for the diff below. Rules:
+    \\- Follow Conventional Commits: `type(scope): summary` (types: feat, fix, refactor, docs, test, chore, perf, style, build, ci).
+    \\- First line at most 72 characters, imperative mood, no trailing period.
+    \\- Then a blank line and a short body (2 to 4 lines) that explains what changed and why. Omit the body if the change is trivial.
+    \\- Reply with the commit message only: no quotes, no code fences, no explanations, no "Commit message:" label.
+    \\
+    \\Diff:
+    \\
+;
+
+pub fn commitPrompt(alloc: std.mem.Allocator, diff: []const u8, max_diff_bytes: usize) ![]u8 {
+    if (diff.len <= max_diff_bytes) return std.mem.concat(alloc, u8, &.{ commit_prompt_head, diff });
+    // an einer UTF-8-Grenze kappen, damit kein halbes Zeichen ins JSON gerät
+    var cut = max_diff_bytes;
+    while (cut > 0 and (diff[cut] & 0xC0) == 0x80) cut -= 1;
+    return std.mem.concat(alloc, u8, &.{ commit_prompt_head, diff[0..cut], "\n[truncated]\n" });
+}
+
+/// Antwort des Modells in die Nachricht: Code-Zäune, Anführungszeichen, ein „Commit message:“-
+/// Label und Leerraum an den Rändern entfernen.
+pub fn cleanGeneratedMessage(text: []const u8) []const u8 {
+    var t = std.mem.trim(u8, text, " \t\r\n");
+    if (std.mem.startsWith(u8, t, "```")) {
+        // Zaun mit optionaler Sprache bis zum Zeilenende
+        const nl = std.mem.indexOfScalar(u8, t, '\n') orelse t.len;
+        t = t[@min(t.len, nl + 1)..];
+    }
+    if (std.mem.endsWith(u8, t, "```")) t = t[0 .. t.len - 3];
+    t = std.mem.trim(u8, t, " \t\r\n");
+    for ([_][]const u8{ "Commit message:", "Commit Message:", "commit message:" }) |label| {
+        if (std.mem.startsWith(u8, t, label)) t = std.mem.trimLeft(u8, t[label.len..], " \t\r\n");
+    }
+    if (t.len >= 2 and t[0] == '"' and t[t.len - 1] == '"') t = t[1 .. t.len - 1];
+    return std.mem.trim(u8, t, " \t\r\n");
+}
+
 /// Buchstabe der Dekoration wie VS Code `Resource.letter`.
 pub fn letter(kind: Kind) u8 {
     return switch (kind) {
@@ -605,4 +645,21 @@ test "parseStatus: Upstream und Vorsprung aus den branch-Zeilen; Knopf Commit / 
     try testing.expectEqualStrings("Publish Branch", v.buttonLabel(&buf));
     try v.apply("# branch.head main\x00# branch.upstream origin/main\x00# branch.ab +0 -0\x00");
     try testing.expectEqual(View.Button.commit, v.actionButton()); // nichts zu tun
+}
+
+test "commitPrompt: Anweisung plus Diff, langer Diff wird gekappt; cleanGeneratedMessage entfernt Zäune und Label" {
+    const p = try commitPrompt(testing.allocator, "diff --git a/a.zig b/a.zig\n+neu\n", 1000);
+    defer testing.allocator.free(p);
+    try testing.expect(std.mem.indexOf(u8, p, "Conventional Commits") != null);
+    try testing.expect(std.mem.endsWith(u8, p, "diff --git a/a.zig b/a.zig\n+neu\n"));
+    const long = try commitPrompt(testing.allocator, "x" ** 500, 100);
+    defer testing.allocator.free(long);
+    try testing.expect(std.mem.indexOf(u8, long, "x" ** 100) != null);
+    try testing.expect(std.mem.indexOf(u8, long, "x" ** 101) == null);
+    try testing.expect(std.mem.indexOf(u8, long, "[truncated]") != null);
+
+    try testing.expectEqualStrings("feat: x\n\nBody", cleanGeneratedMessage("```\nfeat: x\n\nBody\n```\n"));
+    try testing.expectEqualStrings("feat: x", cleanGeneratedMessage("Commit message: \"feat: x\"  \n"));
+    try testing.expectEqualStrings("fix: y", cleanGeneratedMessage("```text\nfix: y```"));
+    try testing.expectEqualStrings("", cleanGeneratedMessage("  \n"));
 }
