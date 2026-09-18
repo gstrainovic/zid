@@ -10,6 +10,7 @@ const syntax = @import("syntax");
 const wio = @import("wio");
 const shortcuts = @import("shortcuts");
 const ctx_menu = @import("context_menu");
+const scrollbar = @import("scrollbar");
 const marp = @import("marp");
 const find_ops = @import("find_ops.zig");
 
@@ -148,17 +149,16 @@ pub const CodeEditor = struct {
     /// View for scrolling
     view: flow_core.View,
 
-    /// Scrollbar-Dragging State
-    scrollbar_dragging: bool = false,
-    scrollbar_drag_start_y: f32 = 0,
-    scrollbar_scroll_offset_at_drag_start: f32 = 0,
+    /// Laufendes Ziehen an der senkrechten bzw. waagrechten Leiste (Modul `scrollbar`)
+    vscroll_drag: ?scrollbar.Drag = null,
+    hscroll_drag: ?scrollbar.Drag = null,
 
-    /// Scrollbar Bounds
-    scrollbar_track_x: f32 = 0,
-    scrollbar_track_y: f32 = 0,
-    scrollbar_thumb_y: f32 = 0,
-    scrollbar_thumb_height: f32 = 0,
-    scrollbar_container_width: f32 = 0,
+    /// Längste Zeile in Spalten (waagrechte Leiste): gecacht, nach einer Änderung wird nur
+    /// der betroffene Bereich neu gemessen (`maxLineWidth`).
+    longest_line_width: usize = 0,
+    longest_line_idx: usize = 0,
+    longest_valid: bool = false,
+    longest_pending: ?LineChange = null,
     /// Sichtbare Reihen des ganzen Buffers mit Word-Wrap, gültig für genau diesen
     /// Root und diese Spaltenzahl (siehe `totalVisualRows`).
     visual_rows_cache: ?VisualRowsCache = null,
@@ -704,6 +704,7 @@ pub const CodeEditor = struct {
 
     pub fn setText(self: *Self, text: []const u8) void {
         std.log.scoped(.editor).info("setText called (len={d})", .{text.len});
+        self.longest_valid = false;
         // Alten Highlighter wegwerfen — setLanguageFromPath setzt danach neu.
         self.destroyHighlighter();
         var eol_mode: flow_core.Buffer.EolMode = .lf;
@@ -756,6 +757,9 @@ pub const CodeEditor = struct {
     fn pushEditForChange(self: *Self, row: usize, col: usize, old_text: []const u8, new_text: []const u8) void {
         self.is_modified = true;
         self.last_edit_ms = self.time_ms;
+        const old_line_count = std.mem.count(u8, old_text, "\n");
+        const new_line_count = std.mem.count(u8, new_text, "\n");
+        self.noteLineChange(row, old_line_count, new_line_count);
         const hl = self.highlighter orelse return;
         const m = self.metrics();
         const line_start = self.buffer.root.line_start_byte(row, m);
@@ -764,10 +768,6 @@ pub const CodeEditor = struct {
         const start_byte = line_start + col_byte;
         const old_end_byte = start_byte + old_text.len;
         const new_end_byte = start_byte + new_text.len;
-
-        // Zeilen/Spalten-Punkte berechnen
-        const old_line_count = std.mem.count(u8, old_text, "\n");
-        const new_line_count = std.mem.count(u8, new_text, "\n");
 
         const old_end_row: u32 = @intCast(row + old_line_count);
         const new_end_row: u32 = @intCast(row + new_line_count);
@@ -1576,6 +1576,7 @@ pub const CodeEditor = struct {
                     return;
                 };
                 std.log.info("Undo: success, meta len={}", .{meta.len});
+                self.longest_valid = false;
                 self.cursor = .{};
                 self.selection_anchor = null;
                 return;
@@ -1583,6 +1584,7 @@ pub const CodeEditor = struct {
             .Redo => {
                 const meta = self.buffer.redo() catch return;
                 _ = meta;
+                self.longest_valid = false;
                 self.cursor = .{};
                 self.selection_anchor = null;
                 return;
@@ -2149,6 +2151,7 @@ pub const CodeEditor = struct {
         }
 
         if (self.handleScrollbarMouseDown(x, y)) return;
+        if (self.handleHScrollbarMouseDown(x, y)) return;
 
         const hit = self.hitFromY(y);
         const line_idx = hit.line;
@@ -2227,8 +2230,12 @@ pub const CodeEditor = struct {
         self.mouse_x = x;
         self.mouse_y = y;
 
-        if (self.scrollbar_dragging) {
-            self.handleScrollbarMouseMove(x, y);
+        if (self.vscroll_drag) |d| {
+            self.view.row = scrollbar.dragOffset(self.vscrollModel(), d, x, y);
+            return;
+        }
+        if (self.hscroll_drag) |d| {
+            if (self.hscrollModel()) |m| self.view.col = scrollbar.dragOffset(m, d, x, y);
             return;
         }
 
@@ -2244,12 +2251,13 @@ pub const CodeEditor = struct {
 
     pub fn handleMouseUp(self: *Self) void {
         self.mouse_down = false;
-        self.scrollbar_dragging = false;
+        self.vscroll_drag = null;
+        self.hscroll_drag = null;
     }
 
     /// Beim Ziehen über den oberen/unteren Rand pro Frame eine Zeile scrollen und den Cursor mitziehen.
     fn autoScrollWhileDragging(self: *Self) void {
-        if (!self.mouse_down or self.scrollbar_dragging) return;
+        if (!self.mouse_down or self.vscroll_drag != null or self.hscroll_drag != null) return;
         const top = self.content_origin_y;
         const bottom = self.content_origin_y + self.height;
         if (self.mouse_y < top) {
@@ -2404,6 +2412,9 @@ pub const CodeEditor = struct {
     /// Ohne Salz meldete Clay bei zwei Panes ~80 `duplicate_id` pro Frame, und `getElementData`
     /// der zweiten Pane bekam die Boxen der ersten. E2E: `element_bounds(_i)` löst den Namen
     /// zuerst global, dann über den aktiven Editor auf (`E2E: elementBounds*`).
+    /// Von einer Änderung betroffene Zeilen: `start..old_end` vorher, `start..new_end` nachher.
+    pub const LineChange = struct { start: usize, old_end: usize, new_end: usize };
+
     pub fn idi(self: *const Self, name: []const u8, index: u32) clay.ElementId {
         return clay.ElementId.IDI(name, index +% self.idSalt());
     }
@@ -2474,45 +2485,10 @@ pub const CodeEditor = struct {
         });
     }
 
-    /// Horizontale Scrollbar unten, wenn eine sichtbare Zeile breiter als der Ausschnitt ist. Klick springt.
-    fn renderHScrollbar(self: *Self, mouse_pressed: bool) void {
-        const cols = if (self.view.cols > 0) self.view.cols else self.visibleColCount();
-        var max_w: usize = 0;
-        const total = self.lineCount();
-        const visible = self.visibleLineCount();
-        var i = self.view.row;
-        while (i < @min(self.view.row + visible + 1, total)) : (i += 1) max_w = @max(max_w, self.lineWidth(i));
-        if (max_w <= cols) return;
-        const id = clay.ElementId.IDI("hscroll", @truncate(@intFromPtr(self)));
-        const data = clay.getElementData(id);
-        const track_w = if (data.found) data.bounding_box.width else self.width;
-        const frac_len = @as(f32, @floatFromInt(cols)) / @as(f32, @floatFromInt(max_w + 4));
-        const thumb_w = @max(30, track_w * frac_len);
-        const max_col = max_w + 4 - cols;
-        const frac_pos = @as(f32, @floatFromInt(@min(self.view.col, max_col))) / @as(f32, @floatFromInt(max_col));
-        const thumb_x = frac_pos * (track_w - thumb_w);
-        if (data.found and mouse_pressed and clay.pointerOver(id)) {
-            const rel = (self.mouse_x - data.bounding_box.x - thumb_w / 2) / @max(1, track_w - thumb_w);
-            self.view.col = @intFromFloat(@max(0, @min(1, rel)) * @as(f32, @floatFromInt(max_col)));
-        }
-        // Gleiche Farben und Stärke wie die vertikale Leiste (renderScrollbar): vorher 8 px
-        // mit Schwarz bei Alpha 60 und Thumb in Gutter-Farbe — auf dunklem Hintergrund
-        // praktisch unsichtbar, die Leiste galt als fehlend.
-        clay.UI()(.{
-            .id = id,
-            .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(self.scrollbar_width) } },
-            .floating = .{ .attach_to = .to_parent, .attach_points = .{ .element = .left_bottom, .parent = .left_bottom }, .offset = .{ .x = self.gutter_width, .y = 0 }, .z_index = 50 },
-            .background_color = .{ 30, 30, 46, 255 },
-        })({
-            if (clay.hovered()) self.desired_cursor = .arrow;
-            clay.UI()(.{
-                .layout = .{ .sizing = .{ .w = .fixed(thumb_w), .h = .grow } },
-                // z_index über der Leiste: mit deckendem Track läge der Thumb sonst darunter
-                .floating = .{ .attach_to = .to_parent, .attach_points = .{ .element = .left_top, .parent = .left_top }, .offset = .{ .x = thumb_x, .y = 0 }, .z_index = 51 },
-                .background_color = .{ 88, 88, 120, 200 },
-                .corner_radius = .all(3),
-            })({});
-        });
+    /// Waagrechte Leiste unten (Modul `scrollbar`); Klick und Ziehen laufen über handleMouseDown/-Move.
+    fn renderHScrollbar(self: *Self) void {
+        const m = self.hscrollModel() orelse return;
+        if (scrollbar.render(m, .{ .track = self.idi("hscroll", 0), .thumb = self.idi("hscroll_thumb", 0) })) self.desired_cursor = .arrow;
     }
 
     /// Wort unter (row, col) im Text suchen: erste Zeile, die wie eine Definition aussieht.
@@ -2870,6 +2846,121 @@ pub const CodeEditor = struct {
             remaining -= n;
         }
         return .{ .line = total - 1, .first_byte = 0 };
+    }
+
+    /// Änderung vormerken (vor dem Buffer-Edit, aus pushEditForChange). Zwei Änderungen
+    /// vor der nächsten Messung: voller Neuaufbau statt Bereichsrechnung.
+    fn noteLineChange(self: *Self, row: usize, old_lines: usize, new_lines: usize) void {
+        if (self.longest_pending != null) {
+            self.longest_valid = false;
+            return;
+        }
+        self.longest_pending = .{ .start = row, .old_end = row + old_lines + 1, .new_end = row + new_lines + 1 };
+    }
+
+    /// Breite der längsten Zeile der Datei in Spalten, Grundlage der waagrechten Leiste.
+    /// Anders als der Ausschnitt bleibt sie beim senkrechten Scrollen stabil.
+    pub fn maxLineWidth(self: *Self) usize {
+        if (!self.longest_valid) {
+            self.longest_pending = null;
+            self.measureLongest(0, self.lineCount());
+            self.longest_valid = true;
+        } else if (self.longest_pending) |p| {
+            self.longest_pending = null;
+            self.applyLineChange(p);
+        }
+        return self.longest_line_width;
+    }
+
+    fn measureLongest(self: *Self, start: usize, end: usize) void {
+        self.longest_line_width = 0;
+        self.longest_line_idx = start;
+        var i = start;
+        while (i < end) : (i += 1) {
+            const w = self.lineWidth(i);
+            if (w > self.longest_line_width) {
+                self.longest_line_width = w;
+                self.longest_line_idx = i;
+            }
+        }
+    }
+
+    /// Nur den geänderten Bereich messen. Lag die bisher längste Zeile davor, bleibt sie;
+    /// lag sie dahinter, rückt ihr Index um die Zeilendifferenz; lag sie im Bereich und
+    /// ist jetzt kürzer, wird die ganze Datei neu gemessen.
+    fn applyLineChange(self: *Self, p: LineChange) void {
+        const total = self.lineCount();
+        const end = @min(p.new_end, total);
+        const prev_width = self.longest_line_width;
+        const prev_idx = self.longest_line_idx;
+        var range_width: usize = 0;
+        var range_idx = p.start;
+        var i = p.start;
+        while (i < end) : (i += 1) {
+            const w = self.lineWidth(i);
+            if (w > range_width) {
+                range_width = w;
+                range_idx = i;
+            }
+        }
+        if (range_width >= prev_width) {
+            self.longest_line_width = range_width;
+            self.longest_line_idx = range_idx;
+        } else if (prev_idx < p.start) {
+            // unverändert
+        } else if (prev_idx >= p.old_end) {
+            self.longest_line_idx = prev_idx + p.new_end - p.old_end;
+        } else {
+            self.measureLongest(0, total);
+        }
+    }
+
+    /// Senkrechte Leiste am rechten Rand: Offset in Zeilen, Inhalt in Reihen (Word-Wrap).
+    fn vscrollModel(self: *Self) scrollbar.Model {
+        return .{
+            .axis = .vertical,
+            .x = self.content_origin_x + self.width - self.scrollbar_width,
+            .y = self.content_origin_y,
+            .len = self.height,
+            .thickness = self.scrollbar_width,
+            .total = self.totalVisualRows(),
+            .visible = self.visibleLineCount(),
+            .offset = self.view.row,
+            .max_offset = self.maxViewRow(),
+        };
+    }
+
+    /// Waagrechte Leiste am unteren Rand über die volle Breite (auch über dem Gutter),
+    /// null wenn alles passt oder Word-Wrap an ist.
+    pub fn hscrollModel(self: *Self) ?scrollbar.Model {
+        if (self.word_wrap) return null;
+        const cols = if (self.view.cols > 0) self.view.cols else self.visibleColCount();
+        const max_w = self.maxLineWidth();
+        if (max_w <= cols) return null;
+        const total = max_w + 4;
+        return .{
+            .axis = .horizontal,
+            .x = self.content_origin_x,
+            .y = self.content_origin_y + self.height - self.scrollbar_width,
+            .len = @max(0, self.width - self.scrollbar_width),
+            .thickness = self.scrollbar_width,
+            .total = total,
+            .visible = cols,
+            .offset = self.view.col,
+            .max_offset = total - cols,
+            .min_thumb = 30,
+        };
+    }
+
+    fn handleHScrollbarMouseDown(self: *Self, x: f32, y: f32) bool {
+        const m = self.hscrollModel() orelse return false;
+        const hit = scrollbar.hitTest(m, x, y);
+        switch (hit) {
+            .none => return false,
+            .thumb => |d| self.hscroll_drag = d,
+            .page_back, .page_forward => self.view.col = scrollbar.pageOffset(m, hit),
+        }
+        return true;
     }
 
     /// Horizontal scrollen (Shift+Mausrad): positiv = nach links wie scrollLines nach oben.
@@ -3240,7 +3331,7 @@ pub const CodeEditor = struct {
             if (self.lineCount() > self.visibleLineCount()) {
                 self.renderScrollbar();
             }
-            if (!self.word_wrap) self.renderHScrollbar(mouse_pressed);
+            self.renderHScrollbar();
             if (self.show_minimap) self.renderMinimap(mouse_pressed);
         });
 
@@ -3408,117 +3499,24 @@ pub const CodeEditor = struct {
         });
     }
 
+    /// Senkrechte Leiste rechts (Modul `scrollbar`).
     fn renderScrollbar(self: *Self) void {
-        const total = self.totalVisualRows();
-        const visible = self.visibleLineCount();
-        const max_offset = self.maxViewRow();
-        if (max_offset == 0) return;
-
-        const track_data = clay.getElementData(self.idi("scrollbar_track", 0));
-        if (track_data.found) {
-            self.scrollbar_track_x = track_data.bounding_box.x;
-            self.scrollbar_track_y = track_data.bounding_box.y;
-        }
-
-        const track_height = self.height;
-        const thumb_ratio: f32 = @as(f32, @floatFromInt(visible)) / @as(f32, @floatFromInt(@max(total, 1)));
-        const thumb_height = @max(20.0, track_height * thumb_ratio);
-        const scroll_frac: f32 = if (max_offset > 0)
-            @as(f32, @floatFromInt(self.view.row)) / @as(f32, @floatFromInt(max_offset))
-        else
-            0.0;
-        const thumb_y = scroll_frac * (track_height - thumb_height);
-
-        self.scrollbar_thumb_y = self.scrollbar_track_y + thumb_y;
-        self.scrollbar_thumb_height = thumb_height;
-
-        const track_color: clay.Color = .{ 30, 30, 46, 255 };
-        const thumb_color: clay.Color = .{ 88, 88, 120, 200 };
-
-        clay.UI()(.{
-            .id = self.idi("scrollbar_track", 0),
-            .floating = .{
-                .attach_to = .to_parent,
-                .attach_points = .{ .element = .right_top, .parent = .right_top },
-                .z_index = 1000,
-            },
-            .layout = .{
-                .sizing = .{ .w = .fixed(self.scrollbar_width), .h = .grow },
-                .direction = .top_to_bottom,
-            },
-            .background_color = track_color,
-        })({
-            if (clay.hovered()) self.desired_cursor = .arrow;
-            clay.UI()(.{
-                .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(thumb_y) } },
-            })({});
-            clay.UI()(.{
-                .id = self.idi("scrollbar_thumb", 0),
-                .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(thumb_height) } },
-                .background_color = thumb_color,
-                .corner_radius = .all(3),
-            })({
-                if (clay.hovered()) self.desired_cursor = .arrow;
-            });
-        });
+        if (scrollbar.render(self.vscrollModel(), .{ .track = self.idi("scrollbar_track", 0), .thumb = self.idi("scrollbar_thumb", 0) })) self.desired_cursor = .arrow;
     }
 
     pub fn isMouseOverScrollbar(self: *Self, x: f32, y: f32) bool {
-        if (self.maxViewRow() == 0) return false;
-
-        if (x < self.scrollbar_track_x) return false;
-        if (x > self.scrollbar_track_x + self.scrollbar_width) return false;
-        if (y < self.scrollbar_track_y) return false;
-        if (y > self.scrollbar_track_y + self.height) return false;
-        return true;
+        return scrollbar.hitTest(self.vscrollModel(), x, y) != .none;
     }
 
     fn handleScrollbarMouseDown(self: *Self, x: f32, y: f32) bool {
-        const visible = self.visibleLineCount();
-        if (self.maxViewRow() == 0) return false;
-
-        if (x < self.scrollbar_track_x) return false;
-        if (x > self.scrollbar_track_x + self.scrollbar_width) return false;
-        if (y < self.scrollbar_track_y) return false;
-        if (y > self.scrollbar_track_y + self.height) return false;
-
-        if (y >= self.scrollbar_thumb_y and y <= self.scrollbar_thumb_y + self.scrollbar_thumb_height) {
-            self.scrollbar_dragging = true;
-            self.scrollbar_drag_start_y = y;
-            self.scrollbar_scroll_offset_at_drag_start = @as(f32, @floatFromInt(self.view.row));
-            return true;
-        }
-
-        if (y < self.scrollbar_thumb_y) {
-            self.scrollLines(@as(i32, @intCast(visible)));
-        } else {
-            self.scrollLines(-@as(i32, @intCast(visible)));
+        const m = self.vscrollModel();
+        const hit = scrollbar.hitTest(m, x, y);
+        switch (hit) {
+            .none => return false,
+            .thumb => |d| self.vscroll_drag = d,
+            .page_back, .page_forward => self.view.row = scrollbar.pageOffset(m, hit),
         }
         return true;
-    }
-
-    fn handleScrollbarMouseMove(self: *Self, _: f32, y: f32) void {
-        const total = self.totalVisualRows();
-        const visible = self.visibleLineCount();
-        const max_offset = self.maxViewRow();
-        if (max_offset == 0) return;
-
-        const track_height = self.height;
-        const thumb_ratio: f32 = @as(f32, @floatFromInt(visible)) / @as(f32, @floatFromInt(@max(total, 1)));
-        const thumb_height = @max(20.0, track_height * thumb_ratio);
-        const scrollable_height = track_height - thumb_height;
-
-        if (scrollable_height <= 0) return;
-
-        const delta_y = y - self.scrollbar_drag_start_y;
-        const scroll_delta_frac = delta_y / scrollable_height;
-        const scroll_delta_lines = scroll_delta_frac * @as(f32, @floatFromInt(max_offset));
-        const scroll_delta_int: i32 = @intFromFloat(@round(scroll_delta_lines));
-
-        var new_offset: isize = @as(isize, @intFromFloat(self.scrollbar_scroll_offset_at_drag_start)) + @as(isize, scroll_delta_int);
-        new_offset = @max(0, @min(new_offset, @as(isize, @intCast(max_offset))));
-
-        self.view.row = @as(usize, @intCast(new_offset));
     }
 
     /// Ausgeblendete Menüeinträge: Markdown Preview nur bei .md, Export to PDF nur
@@ -4259,14 +4257,12 @@ test "Word-Wrap: Mausrad und Leiste kommen bis zur letzten Reihe" {
     try std.testing.expectEqual(@as(usize, 3), t.ed.visualRowsBetween(t.ed.view.row, 2));
 
     // Bildlaufleiste: trotz nur drei Buffer-Zeilen ist sie da, ganz unten steht Zeile 1.
-    t.ed.scrollbar_track_x = 0;
-    t.ed.scrollbar_track_y = 0;
-    try std.testing.expect(t.ed.isMouseOverScrollbar(1, 1));
+    t.ed.content_origin_x = 0;
+    t.ed.content_origin_y = 0;
+    try std.testing.expect(t.ed.isMouseOverScrollbar(t.ed.width - 1, 1));
     t.ed.view.row = 0;
-    t.ed.scrollbar_dragging = true;
-    t.ed.scrollbar_drag_start_y = 0;
-    t.ed.scrollbar_scroll_offset_at_drag_start = 0;
-    t.ed.handleScrollbarMouseMove(0, t.ed.height);
+    t.ed.vscroll_drag = .{ .start = 0, .offset_at_start = 0 };
+    t.ed.handleMouseMove(t.ed.width - 1, t.ed.height);
     try std.testing.expectEqual(@as(usize, 1), t.ed.view.row);
 }
 
@@ -4284,4 +4280,66 @@ test "Eingabefeld-Modus: ohne Gutter zählt die ganze Breite als Text" {
     t.ed.content_origin_y = 0;
     t.ed.handleMouseDown(12 + 2 * 14.4 + 1, 5, .mouse_left);
     try std.testing.expectEqual(@as(usize, 2), t.ed.cursor.col);
+}
+
+test "H-Scrollbar: längste Zeile der Datei zählt, auch außerhalb des Ausschnitts, und folgt Änderungen" {
+    var t = try testEditor(std.testing.allocator, "kurz\n" ++ "x" ** 120 ++ "\nkurz\nkurz\nkurz");
+    defer t.buffer.deinit();
+    defer t.ed.deinit();
+    t.ed.width = 400;
+    t.ed.height = 40;
+    t.ed.view.cols = t.ed.visibleColCount();
+    t.ed.view.row = 2; // lange Zeile liegt über dem Ausschnitt
+    try std.testing.expectEqual(@as(usize, 120), t.ed.maxLineWidth());
+    try std.testing.expect(t.ed.hscrollModel() != null);
+    // Längste Zeile kürzen: Leiste verschwindet
+    t.ed.replaceLineSpan(1, 1, "xy");
+    try std.testing.expectEqual(@as(usize, 4), t.ed.maxLineWidth());
+    try std.testing.expect(t.ed.hscrollModel() == null);
+    // Andere Zeile verlängern
+    t.ed.replaceLineSpan(3, 3, "y" ** 80);
+    try std.testing.expectEqual(@as(usize, 80), t.ed.maxLineWidth());
+    try std.testing.expectEqual(@as(usize, 3), t.ed.longest_line_idx);
+    // Zeile davor einfügen: Index rückt nach, Breite bleibt
+    t.ed.cursor = .{ .row = 0, .col = 0, .target = 0 };
+    t.ed.handleKeyPress(.enter);
+    try std.testing.expectEqual(@as(usize, 80), t.ed.maxLineWidth());
+    try std.testing.expectEqual(@as(usize, 4), t.ed.longest_line_idx);
+    // Undo: voller Neuaufbau
+    t.ed.dispatchAction(.Undo);
+    try std.testing.expectEqual(@as(usize, 80), t.ed.maxLineWidth());
+    try std.testing.expectEqual(@as(usize, 3), t.ed.longest_line_idx);
+}
+
+test "H-Scrollbar: Klick auf den Track blättert, Thumb ziehen scrollt Spalten" {
+    var t = try testEditor(std.testing.allocator, "x" ** 200 ++ "\nkurz");
+    defer t.buffer.deinit();
+    defer t.ed.deinit();
+    t.ed.width = 400;
+    t.ed.height = 200;
+    t.ed.content_origin_x = 0;
+    t.ed.content_origin_y = 0;
+    t.ed.view.cols = t.ed.visibleColCount();
+    const m = t.ed.hscrollModel().?;
+    const g = scrollbar.geometry(m).?;
+    try std.testing.expectEqual(@as(f32, 0), g.thumb_start);
+    try std.testing.expectEqual(@as(f32, 0), m.x); // Leiste beginnt am Editorrand, nicht erst nach dem Gutter
+    // Klick rechts vom Thumb: eine Seite weiter, kein Ziehen, Cursor bleibt
+    t.ed.handleMouseDown(m.x + m.len - 2, m.y + 2, .mouse_left);
+    try std.testing.expectEqual(t.ed.view.cols, t.ed.view.col);
+    try std.testing.expect(t.ed.hscroll_drag == null);
+    try std.testing.expectEqual(@as(usize, 0), t.ed.cursor.col);
+    // Thumb greifen und bis ganz nach rechts ziehen
+    const m2 = t.ed.hscrollModel().?;
+    const g2 = scrollbar.geometry(m2).?;
+    t.ed.handleMouseDown(m2.x + g2.thumb_start + 5, m2.y + 2, .mouse_left);
+    try std.testing.expect(t.ed.hscroll_drag != null);
+    t.ed.handleMouseMove(m2.x + g2.thumb_start + 5 + (m2.len - g2.thumb_len), m2.y + 2);
+    try std.testing.expectEqual(m2.max_offset, t.ed.view.col);
+    t.ed.handleMouseUp();
+    try std.testing.expect(t.ed.hscroll_drag == null);
+    // Klick links vom Thumb: eine Seite zurück
+    const m3 = t.ed.hscrollModel().?;
+    t.ed.handleMouseDown(m3.x + 1, m3.y + 2, .mouse_left);
+    try std.testing.expectEqual(m3.max_offset - t.ed.view.cols, t.ed.view.col);
 }

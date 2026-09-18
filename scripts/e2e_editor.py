@@ -351,7 +351,43 @@ def step_word_wrap():
     check(ed()["visual_rows"] == 1, "lange Zeile belegt wieder eine Reihe")
 
 
-STEPS = [step_autoclose_and_indent, step_comment_move_duplicate, step_goto_replace, step_mouse, step_status_bar, step_panes, step_external_change, step_visuals, step_search_options, step_multicursor, step_word_wrap]
+def step_hscrollbar():
+    print("--- Waagrechte Leiste: längste Zeile zählt, Klick blättert, Thumb ziehen scrollt")
+    if ed()["word_wrap"]:
+        key_alt("z")
+    check(not ed()["word_wrap"], "Word-Wrap ist aus")
+    long_line = " ".join(f"w{i:03d}" for i in range(60))  # 299 Zeichen
+    with open(SRC, "w") as f:
+        f.write(long_line + "\n" + "\n".join(f"zeile {i}" for i in range(80)) + "\n")
+    t0 = time.time()
+    while time.time() - t0 < 5 and "zeile 79" not in text():
+        time.sleep(0.1)
+    check("zeile 79" in text(), "Fixture mit langer erster Zeile und 80 kurzen geladen")
+    rpc("click", [EDITOR_X, EDITOR_Y]); settle()
+    goto_line(60)
+    check(ed()["view_row"] > 0, f"Ausschnitt ist nach unten gescrollt (view_row {ed()['view_row']})")
+    bar = result_json("element_bounds", ["hscroll"])
+    check(bar["found"], "Leiste bleibt sichtbar, obwohl die lange Zeile außerhalb des Ausschnitts liegt")
+    first_row = result_json("element_bounds_i", ["code", ed()["view_row"]])
+    check(bar["x"] < first_row["x"], f"Leiste beginnt vor der Textspalte (x {bar['x']:.0f} < {first_row['x']:.0f}), deckt also den Gutter")
+    thumb = result_json("element_bounds", ["hscroll_thumb"])
+    check(thumb["found"] and thumb["w"] < bar["w"], "Thumb ist schmaler als der Track")
+    shot("e2e_editor_hscrollbar.ppm")
+    # Klick rechts vom Thumb: eine Seite nach rechts
+    rpc("click", [bar["x"] + bar["w"] - 3, bar["y"] + bar["h"] / 2]); settle()
+    cols = ed()["view_cols"]
+    check(ed()["view_col"] == cols, f"Klick auf den Track blättert eine Seite ({ed()['view_col']} == {cols})")
+    # Thumb greifen und nach links ziehen
+    thumb = result_json("element_bounds", ["hscroll_thumb"])
+    gx, gy = thumb["x"] + thumb["w"] / 2, thumb["y"] + thumb["h"] / 2
+    rpc("mouse_down", [gx, gy]); settle()
+    rpc("move_mouse", [gx - 400, gy]); settle()
+    rpc("mouse_up", [gx - 400, gy]); settle()
+    check(ed()["view_col"] == 0, f"Thumb nach links ziehen scrollt zurück (view_col {ed()['view_col']})")
+    check(ed()["row"] == 59, "Klicks auf die Leiste versetzen den Cursor nicht")
+
+
+STEPS = [step_autoclose_and_indent, step_comment_move_duplicate, step_goto_replace, step_mouse, step_status_bar, step_panes, step_external_change, step_visuals, step_search_options, step_multicursor, step_word_wrap, step_hscrollbar]
 
 
 def main():

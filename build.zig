@@ -94,6 +94,14 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     exe_mod.addImport("shortcuts", shortcuts_mod);
+    // Scrollbalken (Geometrie, Klick, Ziehen, Zeichnen): eigenes Modul aus demselben Grund.
+    const scrollbar_mod = b.createModule(.{
+        .root_source_file = b.path("src/ui/scrollbar.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    scrollbar_mod.addImport("clay", clay_dep.module("zclay"));
+    exe_mod.addImport("scrollbar", scrollbar_mod);
     // Umgebungsvariablen plattformübergreifend (std.posix.getenv fehlt unter Windows):
     // eigenes Modul, weil mehrere Test-Roots (explorer_ops, backup, user_state) es brauchen.
     const env_mod = b.createModule(.{
@@ -253,6 +261,7 @@ pub fn build(b: *std.Build) void {
     code_editor_mod.addImport("syntax", syntax_mod);
     code_editor_mod.addImport("shortcuts", shortcuts_mod);
     code_editor_mod.addImport("context_menu", context_menu_mod);
+    code_editor_mod.addImport("scrollbar", scrollbar_mod);
     code_editor_mod.addImport("marp", marp_mod);
 
     // Tests IN code_editor.zig laufen nur, wenn die Datei selbst Test-Root ist:
@@ -500,6 +509,10 @@ pub fn build(b: *std.Build) void {
     const run_shortcuts_tests = b.addRunArtifact(shortcuts_tests);
     run_shortcuts_tests.has_side_effects = true;
 
+    const scrollbar_tests = b.addTest(.{ .root_module = scrollbar_mod });
+    const run_scrollbar_tests = b.addRunArtifact(scrollbar_tests);
+    run_scrollbar_tests.has_side_effects = true;
+
     const context_menu_tests = b.addTest(.{ .root_module = context_menu_mod });
     const run_context_menu_tests = b.addRunArtifact(context_menu_tests);
     run_context_menu_tests.has_side_effects = true;
@@ -713,6 +726,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_wheel_tests.step);
     test_step.dependOn(&run_pdf_nav_tests.step);
     test_step.dependOn(&run_context_menu_tests.step);
+    test_step.dependOn(&run_scrollbar_tests.step);
     test_step.dependOn(&run_find_ops_tests.step);
     test_step.dependOn(&run_wrap_ops_tests.step);
     test_step.dependOn(&run_tab_mru_tests.step);
