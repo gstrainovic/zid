@@ -1151,6 +1151,8 @@ fn uiState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
         try buf.writer.writeAll("null");
     }
     try buf.writer.print(", \"pane_count\": {d}, \"agent_confirm_pending\": {}", .{ countLeaves(ui.root_pane), ui.agent_confirm != null });
+    // Cursorform an der letzten Mausposition (arrow/text/hand/size_ew), wie main.zig sie setzt
+    try buf.writer.print(", \"cursor\": \"{s}\"", .{@tagName(ui.getDesiredCursor())});
     try buf.writer.print(", \"clipboard_text\": {f}, \"explorer_selection_count\": {d}, \"dialog_focused\": {d}", .{
         std.json.fmt(ui.last_clipboard_text orelse "", .{}), ui.file_explorer.selectionCount(), if (ui.active_dialog) |ad| ad.focused else 0,
     });
