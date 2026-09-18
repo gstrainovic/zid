@@ -3073,6 +3073,30 @@ pub const UI = struct {
         }
     }
 
+    /// Clay-ID des Häkchens vor einem aktiven Umschalt-Eintrag (E2E: element_bounds)
+    fn menuCheckId(cmd: shortcuts.Command) []const u8 {
+        switch (cmd) {
+            inline else => |c| return "menu_check_" ++ @tagName(c),
+        }
+    }
+
+    /// Aktueller Zustand eines Umschalt-Befehls (Häkchen im Menü), null für alle anderen.
+    fn toggleState(self: *Self, cmd: shortcuts.Command) ?bool {
+        const ed = self.getActiveEditor();
+        return switch (cmd) {
+            .toggle_autosave => self.autosave,
+            .toggle_explorer => self.show_file_explorer,
+            .toggle_terminal => self.isTerminalActive(),
+            .toggle_theme => self.isLightTheme(),
+            .toggle_hidden_files => self.file_explorer.show_hidden,
+            .toggle_minimap => ed.show_minimap,
+            .toggle_whitespace => ed.show_whitespace,
+            .toggle_indent_guides => ed.show_indent_guides,
+            .toggle_word_wrap => ed.word_wrap,
+            else => null,
+        };
+    }
+
     /// Menüleiste im Header aus shortcuts.menus: Titel nebeneinander, das offene
     /// Menü als Dropdown mit Label links und Kürzel rechts. Bei offenem Menü
     /// wechselt Hover über einen anderen Titel das Menü (wie in Zed/VS Code).
@@ -3136,6 +3160,13 @@ pub const UI = struct {
                     .background_color = if (item_hover) t.primary else .{ 0, 0, 0, 0 },
                     .corner_radius = .all(3),
                 })({
+                    // Feste Spalte für das Häkchen, damit alle Labels bündig stehen
+                    clay.UI()(.{ .layout = .{ .sizing = .{ .w = .fixed(18), .h = .fixed(18) }, .child_alignment = .{ .x = .center, .y = .center } } })({
+                        if (self.toggleState(cmd) == true) {
+                            const svg = @import("components/svg.zig");
+                            svg.Svg(self.frame_arena.allocator(), menuCheckId(cmd), svg.Lucide.check, 18, fg);
+                        }
+                    });
                     clay.text(shortcuts.label(cmd), .{ .font_size = 20, .wrap_mode = .none, .color = fg });
                     clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow } } })({});
                     const sc = shortcuts.shortcutText(cmd);
@@ -3212,6 +3243,14 @@ pub const UI = struct {
                 clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow } } })({});
                 const status = self.statusText(arena);
                 if (status.len > 0) clay.text(status, .{ .font_size = 16, .color = t.subtext, .wrap_mode = .none });
+                // Autosave-Zustand, jederzeit sichtbar (File → Toggle Autosave)
+                clay.UI()(.{
+                    .id = clay.ElementId.ID("status_autosave"),
+                    .layout = .{ .child_gap = 4, .child_alignment = .{ .y = .center } },
+                })({
+                    svg.Svg(arena, "status_autosave_icon", svg.Lucide.save, 16, if (self.autosave) t.success else t.muted);
+                    clay.text(if (self.autosave) "Autosave: on" else "Autosave: off", .{ .font_size = 16, .color = if (self.autosave) t.subtext else t.muted, .wrap_mode = .none });
+                });
             });
 
             // Main Content Area (Sidebar + Editor)
