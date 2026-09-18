@@ -31,7 +31,14 @@ def open_preview(name):
     settle(20)
     tabs = ui_state()["tabs"]
     idx = next(i for i, t in enumerate(tabs) if t["path"].endswith(name))
+    # Der neue Tab liegt rechts außerhalb der Leiste, bis sie ihn hereinscrollt; bei langen
+    # Frames (breite Vorschau) reicht ein fester settle nicht — auf die Bounds warten
+    t0 = time.time()
     b = result_json("tab_bounds", [idx])
+    while not b["found"] and time.time() - t0 < 5:
+        time.sleep(0.1)
+        b = result_json("tab_bounds", [idx])
+    check(b["found"], f"Tab {name} ist in der Leiste sichtbar")
     rpc("right_click", [b["x"] + b["w"] / 2, b["y"] + b["h"] / 2])
     settle(4)
     e = result_json("element_bounds", ["tab_menu_md_preview"])
@@ -249,13 +256,15 @@ def step_selection():
 
 
 def step_wide_code():
-    """Lange Codezeilen ragen über den Viewport, unten erscheint ein waagrechter Balken (Klick
-    rechts davon blättert). Alt+Z (Word Wrap der Editoren) aendert daran nichts, wie in der
-    VS-Code-Vorschau. Fliesstext bricht immer um."""
-    print("--- Lange Codezeilen: waagrechter Bildlauf, Alt+Z ohne Wirkung")
-    # Vorab: eingerueckter Text (Liste, Zitat, verschachtelt) bricht an der eingerueckten Breite
-    # um und ragt nicht ueber den Viewport. Vorher brach er an der vollen Breite und wurde
-    # rechts abgeschnitten (Business-Plan-Listen, 18.09.2026).
+    """Alt+Z (Word Wrap, ein Schalter fuer Editor und Vorschau): aus = kein Umbruch, jeder Absatz
+    eine Zeile, Codezeilen laufen nach rechts hinaus, unten ein waagrechter Balken (Klick rechts
+    davon blaettert); ein = Fliesstext und Code brechen an der Inhaltsbreite um, auch eingerueckt
+    in Listen und Zitaten."""
+    print("--- Word Wrap in der Vorschau: Alt+Z schaltet Umbruch und waagrechten Bildlauf")
+    # Isolierte Umgebung: Word Wrap ist aus. Listen-Datei: ohne Umbruch ragt der Text weit hinaus,
+    # mit Umbruch passt er trotz Einrueckung (vorher brach er an der vollen Breite und wurde
+    # rechts abgeschnitten, Business-Plan-Listen 18.09.2026).
+    check(not result_json("editor_state")["word_wrap"], "Word Wrap ist anfangs aus")
     rel_list = os.path.join("tmp", "e2e_md_list.md")
     with open(os.path.join(ROOT, rel_list), "w", encoding="utf-8") as f:
         f.write("# Listen\n\n" + "".join(f"- **Punkt {i}**: " + "immer weiter " * 30 + "geht.\n" for i in range(4))
@@ -263,7 +272,14 @@ def step_wide_code():
     open_preview(rel_list)
     vp = bounds("md_viewport")
     content = bounds("md_content")
-    check(content["w"] <= vp["w"] + 1, f"Listen und Zitat passen in den Viewport ({content['w']:.0f} <= {vp['w']:.0f})")
+    check(content["w"] > vp["w"] + 500, f"ohne Word Wrap: Absaetze in einer Zeile, Inhalt breit ({content['w']:.0f} > {vp['w']:.0f})")
+    check(bounds("md_hscroll_track")["found"], "ohne Word Wrap: waagrechter Balken")
+    rpc("key_press_alt", ["z", False, False, True]); settle(20)
+    check("word_wrap on" in ui_state().get("toast", ""), f"Toast: {ui_state().get('toast')!r}")
+    content = bounds("md_content")
+    check(content["w"] <= vp["w"] + 1, f"mit Word Wrap: Listen und Zitat passen in den Viewport ({content['w']:.0f} <= {vp['w']:.0f})")
+    check(abs(content["x"] - vp["x"]) < 1, "Bildlauf steht wieder links")
+    shot("e2e_md_preview_list_wrapped.ppm")
     rel = os.path.join("tmp", "e2e_md_wide.md")
     with open(os.path.join(ROOT, rel), "w", encoding="utf-8") as f:
         f.write("# Breit\n\nEin Absatz, der " + "immer weiter " * 40 + "geht.\n\n```zig\n"
@@ -271,12 +287,17 @@ def step_wide_code():
                 + "Noch ein Absatz, damit die Seite auch senkrecht scrollt.\n\n" * 40)
     open_preview(rel)
     vp = bounds("md_viewport")
+    # Word Wrap ist noch ein: auch die 400 Zeichen Code brechen um, alles passt
     content = bounds("md_content")
-    check(content["w"] > vp["w"] + 100, f"Inhalt breiter als der Viewport ({content['w']:.0f} > {vp['w']:.0f})")
-    # Ueberschrift, Absatz, Codeblock (zigdown streut Break-Bloecke ein): der Absatz ist der
-    # hoechste der ersten Bloecke, weil er auf Viewportbreite in viele Zeilen bricht
-    para_h = max(bounds("md_block", i)["h"] for i in range(5))
-    check(para_h > 120, f"Absatz bricht trotzdem um (Hoehe {para_h:.0f})")
+    check(content["w"] <= vp["w"] + 1, f"mit Word Wrap bricht auch Code um ({content['w']:.0f} <= {vp['w']:.0f})")
+    code_h = max(bounds("md_block", i)["h"] for i in range(6))
+    check(code_h > 150, f"Codeblock belegt mehrere Reihen (Hoehe {code_h:.0f})")
+    shot("e2e_md_preview_wrapped.ppm")
+    # Alt+Z aus: Code laeuft hinaus, Absatz wird eine Zeile
+    rpc("key_press_alt", ["z", False, False, True]); settle(20)
+    check("word_wrap off" in ui_state().get("toast", ""), f"Toast: {ui_state().get('toast')!r}")
+    content = bounds("md_content")
+    check(content["w"] > vp["w"] + 100, f"ohne Word Wrap: Inhalt breiter als der Viewport ({content['w']:.0f} > {vp['w']:.0f})")
     track = bounds("md_hscroll_track")
     check(track["y"] + track["h"] <= vp["y"] + vp["h"] + 1 and track["w"] < vp["w"] + 1, "waagrechter Balken unten im Viewport")
     thumb = bounds("md_hscroll_thumb")
@@ -306,12 +327,11 @@ def step_wide_code():
     thumb2 = bounds("md_hscroll_thumb")
     check(thumb2["x"] > thumb["x"] + 100, f"Thumb ist nach rechts gewandert ({thumb['x']:.0f} -> {thumb2['x']:.0f})")
     check(differs(pixel("e2e_md_preview_wide_scrolled.ppm", thumb2["x"] + thumb2["w"] / 2, ty), on_track), "Thumb an neuer Stelle gezeichnet")
-    # Alt+Z schaltet Word Wrap der Editoren, die Vorschau bleibt wie sie ist (VS Code: pre scrollt)
+    # Alt+Z wieder ein: Inhalt passt, Bildlauf steht links
     rpc("key_press_alt", ["z", False, False, True]); settle(20)
     check("word_wrap on" in ui_state().get("toast", ""), f"Toast: {ui_state().get('toast')!r}")
     content = bounds("md_content")
-    check(content["w"] > vp["w"] + 100, f"Codeblock bricht mit Word Wrap nicht um ({content['w']:.0f} > {vp['w']:.0f})")
-    check(bounds("md_hscroll_track")["found"], "waagrechter Balken bleibt")
+    check(content["w"] <= vp["w"] + 1 and abs(content["x"] - vp["x"]) < 1, f"Alt+Z ein: Inhalt passt wieder ({content['w']:.0f})")
     rpc("key_press_alt", ["z", False, False, True]); settle(20)
     check("word_wrap off" in ui_state().get("toast", ""), "Alt+Z schaltet zurueck")
 

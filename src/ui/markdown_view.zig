@@ -96,6 +96,11 @@ pub const MarkdownView = struct {
     content_width: f32 = 0,
     /// Waagrechter Balken wird gezogen (`scrollbar.Drag`)
     hdrag: ?scrollbar.Drag = null,
+    /// „Toggle Word Wrap“ (Alt+Z), in `render` von den Editoren übernommen — ein Schalter für
+    /// Editor und Vorschau, so will es der Projektinhaber (18.09.2026). Ein: Fließtext und
+    /// Codezeilen brechen an der Inhaltsbreite um. Aus: nichts bricht um, jeder Absatz ist eine
+    /// Zeile, der Viewport scrollt waagrecht. Tabellen passen in beiden Fällen in die Breite.
+    wrap: bool = true,
 
     /// Context Menu State
     show_context_menu: bool = false,
@@ -1091,7 +1096,9 @@ pub const MarkdownView = struct {
             self.content_height = content_data.bounding_box.height;
             self.content_width = content_data.bounding_box.width;
         }
-        // Nach schmalerem Fenster nicht im Leeren stehen bleiben
+        // Word Wrap der Editoren gilt auch hier (Alt+Z schaltet alle Editoren, `toggleEditorOption`)
+        self.wrap = ui_ptr.getActiveEditor().word_wrap;
+        // Nach Umbruch oder schmalerem Fenster nicht im Leeren stehen bleiben
         self.scroll_offset_x = std.math.clamp(self.scroll_offset_x, 0, @max(0, self.content_width - self.viewport_width));
 
         clay.UI()(.{
@@ -1222,9 +1229,10 @@ pub const MarkdownView = struct {
         var start: usize = 0;
         var line_idx: usize = 0;
         const code_size = self.font_size - 2;
-        // Codezeilen brechen nie um, wie `pre { overflow: auto }` in der VS-Code-Vorschau: zu
-        // lange Zeilen laufen nach rechts hinaus und der Viewport scrollt waagrecht. Alt+Z
-        // (Word Wrap der Editoren) hat hier keine Wirkung, VS Code kennt dafür auch keinen Schalter.
+        // Mit Word Wrap bricht jede Zeile an der Inhaltsbreite (md_code hat 16 px Padding je
+        // Seite; -4 für Clays Viertelpixel je Highlight-Segment); ohne läuft sie nach rechts
+        // hinaus und der Viewport scrollt waagrecht.
+        const wrap_at: f32 = if (self.wrap) @max(0, (self.availWidth() orelse 0) - 32 - 4) else 0;
 
         clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .top_to_bottom } })({
             while (start < code.len) {
@@ -1240,10 +1248,18 @@ pub const MarkdownView = struct {
                     null;
                 if (tags_opt) |tags| std.sort.insertion(flow_core.highlight.ColorTag, tags, {}, lessThanTag);
 
-                const ctx = self.registerLine(line, false, code_size);
-                clay.UI()(.{ .id = ctx.id, .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .left_to_right, .child_gap = 0 } })({
-                    self.renderCodeRow(line, 0, line.len, tags_opt, code_size, theme, ctx.range);
-                });
+                // Reihen der Zeile: eine, oder mit Word Wrap so viele, wie die Breite verlangt
+                var row_start: usize = 0;
+                while (true) {
+                    const row_end = if (wrap_at > 0) codeRowEnd(line, row_start, wrap_at, @floatFromInt(code_size)) else line.len;
+                    const join: md_select.Join = if (row_start == 0) .hard else .none;
+                    const ctx = self.registerLineJoin(line[row_start..row_end], join, code_size);
+                    clay.UI()(.{ .id = ctx.id, .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .left_to_right, .child_gap = 0 } })({
+                        self.renderCodeRow(line, row_start, row_end, tags_opt, code_size, theme, ctx.range);
+                    });
+                    if (row_end >= line.len) break;
+                    row_start = row_end;
+                }
 
                 start = end + 1;
                 line_idx += 1;
@@ -1251,9 +1267,24 @@ pub const MarkdownView = struct {
         });
     }
 
+    /// Ende der Reihe ab `from`: das längste Präfix, das in `max_width` passt, mindestens ein
+    /// Zeichen. Code bricht an jeder Stelle, nicht nur an Leerzeichen.
+    fn codeRowEnd(line: []const u8, from: usize, max_width: f32, size: f32) usize {
+        if (ui_mod.measureTextWidth(line[from..], size) <= max_width) return line.len;
+        var take: usize = from;
+        var i: usize = from;
+        while (i < line.len) {
+            i += std.unicode.utf8ByteSequenceLength(line[i]) catch 1;
+            if (i > line.len) i = line.len;
+            if (ui_mod.measureTextWidth(line[from..i], size) > max_width) break;
+            take = i;
+        }
+        if (take == from) take = @min(line.len, from + (std.unicode.utf8ByteSequenceLength(line[from]) catch 1));
+        return take;
+    }
+
     /// Eine Reihe `line[row_start..row_end]` mit Highlight-Tags (Offsets der ganzen Zeile);
-    /// die Auswahl (`range`) und `textSel` rechnen relativ zur Reihe. Der Ausschnitt bleibt
-    /// für einen späteren Umbruch von Codezeilen (Reihen mit `Join.none`).
+    /// die Auswahl (`range`) und `textSel` rechnen relativ zur Reihe.
     fn renderCodeRow(self: *Self, line: []const u8, row_start: usize, row_end: usize, tags_opt: ?[]flow_core.highlight.ColorTag, code_size: u16, theme: Theme, range: ?md_select.Range) void {
         const row = line[row_start..row_end];
         if (tags_opt) |tags| {
@@ -1680,7 +1711,9 @@ pub const MarkdownView = struct {
                 const text = std.mem.trim(u8, run.items, " ");
                 if (text.len > 0) clay.text(text, .{ .font_size = base_size, .color = theme.text, .wrap_mode = .words });
             } else {
-                const parts = splitWide(arena, pieces.items, size_f, avail - 2);
+                // Ohne Word Wrap: nichts zerlegen, eine Reihe für den ganzen Lauf (Breite „unendlich“)
+                const limit: f32 = if (self.wrap) avail - 2 else std.math.floatMax(f32);
+                const parts = if (self.wrap) splitWide(arena, pieces.items, size_f, avail - 2) else pieces.items;
                 const items = arena.alloc(word_wrap.Item, parts.len) catch return;
                 for (parts, 0..) |p, i| {
                     // +0.25: Clay schlägt je Textelement ein Viertelpixel auf (`measureText` in
@@ -1688,7 +1721,7 @@ pub const MarkdownView = struct {
                     // eine Zeile aus 40 Wörtern 10 px breiter als berechnet und ragte über den Rand.
                     items[i] = .{ .width = ui_mod.measureTextWidth(p.text, size_f) + 0.25, .is_space = p.is_space };
                 }
-                const lines = word_wrap.wrapLines(arena, items, avail - 2) catch return;
+                const lines = word_wrap.wrapLines(arena, items, limit) catch return;
                 for (lines, 0..) |line, li| {
                     var line_text: std.ArrayListUnmanaged(u8) = .empty;
                     for (parts[line.start..line.end]) |p| line_text.appendSlice(arena, p.text) catch {};

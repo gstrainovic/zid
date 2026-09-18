@@ -249,8 +249,9 @@ pub const UI = struct {
 
     /// UI initialisieren
     /// Obergrenze für Clay-Layout-Elemente pro Frame. Großzügig, weil die
-    /// Markdown-Vorschau nicht virtualisiert: sie legt das ganze Dokument an,
-    /// nicht nur den sichtbaren Ausschnitt.
+    /// Elemente je Frame, zugleich Kapazität von Clays persistenter ID-Hash-Map (die
+    /// gepatchte clay.h verdichtet sie, sonst lief sie voll und neue Elemente verloren
+    /// Bounds und Hover, siehe AGENTS.md „Clay: gepatchte clay.h“).
     const MAX_CLAY_ELEMENTS: i32 = 16384;
 
     /// Clay meldet Layout-Fehler hierher statt sie nur auf den Bildschirm zu
