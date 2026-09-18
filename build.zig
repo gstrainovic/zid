@@ -305,16 +305,16 @@ pub fn build(b: *std.Build) void {
 
     const async_tests = b.addTest(.{ .root_module = scheduler_mod });
 
-    // Git-History: Tab-Pfade, Argumente, Log-/Diff-Parsing (ohne Prozesse, unit-getestet).
-    const git_history_mod = b.createModule(.{
-        .root_source_file = b.path("src/git/git_history.zig"),
+    // Virtualisierte Listen (Timeline, Source Control Graph): Sichtbereich, Scrollen (unit-getestet).
+    const git_list_mod = b.createModule(.{
+        .root_source_file = b.path("src/git/git_list.zig"),
         .target = target,
         .optimize = optimize,
     });
-    exe_mod.addImport("git_history", git_history_mod);
-    const git_history_tests = b.addTest(.{ .root_module = git_history_mod });
-    const run_git_history_tests = b.addRunArtifact(git_history_tests);
-    run_git_history_tests.has_side_effects = true;
+    exe_mod.addImport("git_list", git_list_mod);
+    const git_list_tests = b.addTest(.{ .root_module = git_list_mod });
+    const run_git_list_tests = b.addRunArtifact(git_list_tests);
+    run_git_list_tests.has_side_effects = true;
 
     // Diff-Editor (VS-Code-Stil): Hunks, Ausrichtung, Einklappen (ohne Clay, unit-getestet).
     const git_diff_mod = b.createModule(.{
@@ -368,7 +368,6 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     git_worker_mod.addImport("scheduler", scheduler_mod);
-    git_worker_mod.addImport("git_history", git_history_mod);
     git_worker_mod.addImport("git_diff", git_diff_mod);
     git_worker_mod.addImport("git_timeline", git_timeline_mod);
     git_worker_mod.addImport("git_scm", git_scm_mod);
@@ -705,7 +704,7 @@ pub fn build(b: *std.Build) void {
     const run_git_tests = b.addRunArtifact(git_tests);
     run_git_tests.has_side_effects = true;
     test_step.dependOn(&run_git_tests.step);
-    test_step.dependOn(&run_git_history_tests.step);
+    test_step.dependOn(&run_git_list_tests.step);
     test_step.dependOn(&run_git_diff_tests.step);
     test_step.dependOn(&run_git_timeline_tests.step);
     test_step.dependOn(&run_git_graph_tests.step);

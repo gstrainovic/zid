@@ -120,7 +120,7 @@ def step_hover_expand_diff():
     t0 = time.time()
     d = {}
     while time.time() - t0 < 10:
-        d = result_json("git_history_state")
+        d = result_json("git_diff_state")
         if d.get("view") == "diff" and d.get("loaded"):
             break
         time.sleep(0.05)
@@ -160,7 +160,7 @@ def step_keyboard():
     t0 = time.time()
     d = {}
     while time.time() - t0 < 10:
-        d = result_json("git_history_state")
+        d = result_json("git_diff_state")
         if d.get("view") == "diff" and d.get("loaded"):
             break
         time.sleep(0.05)

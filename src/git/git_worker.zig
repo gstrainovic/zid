@@ -4,7 +4,6 @@
 
 const std = @import("std");
 const scheduler = @import("scheduler");
-const git_history = @import("git_history");
 const git_diff = @import("git_diff");
 const git_timeline = @import("git_timeline");
 const git_scm = @import("git_scm");
@@ -146,76 +145,21 @@ pub fn parseStatusOutput(alloc: std.mem.Allocator, out: []const u8, root: ?[]con
     return buf.toOwnedSlice(alloc);
 }
 
-/// Parameter der History-Tasks. `tab_path` ist der Schlüssel im Ergebnis und bestimmt
-/// über `git_history.parseTarget` Repo oder Datei. Selbst-owned.
-pub const HistoryParams = struct {
-    alloc: std.mem.Allocator,
-    /// Alle Strings liegen in diesem einen Puffer
-    owned: []u8,
-    tab_path: []const u8,
-    show: Show,
-
-    /// Nur `show`: Commit, Pfad der Datei darin und im nächstälteren Commit (leer = ganzer Commit)
-    pub const Show = struct { hash: []const u8 = "", path: []const u8 = "", previous_path: []const u8 = "" };
-
-    pub fn init(alloc: std.mem.Allocator, tab_path: []const u8, show: ?Show) !*HistoryParams {
-        const sh = show orelse Show{};
-        const self = try alloc.create(HistoryParams);
-        errdefer alloc.destroy(self);
-        const owned = try std.mem.concat(alloc, u8, &.{ tab_path, sh.hash, sh.path, sh.previous_path });
-        var rest: []const u8 = owned;
-        self.* = .{
-            .alloc = alloc,
-            .owned = owned,
-            .tab_path = take(&rest, tab_path.len),
-            .show = .{ .hash = take(&rest, sh.hash.len), .path = take(&rest, sh.path.len), .previous_path = take(&rest, sh.previous_path.len) },
-        };
-        return self;
-    }
-
-    fn take(rest: *[]const u8, n: usize) []const u8 {
-        defer rest.* = rest.*[n..];
-        return rest.*[0..n];
-    }
-
-    pub fn deinit(self: *HistoryParams) void {
-        self.alloc.free(self.owned);
-        self.alloc.destroy(self);
-    }
-
-    /// Arbeitsordner: der Repo-Ordner selbst, bei Dateien ihr Ordner.
-    fn cwd(self: *const HistoryParams) []const u8 {
-        const target = git_history.parseTarget(self.tab_path) orelse return ".";
-        return switch (target) {
-            .repo => |p| p,
-            .file => |p| std.fs.path.dirname(p) orelse ".",
-        };
-    }
-};
-
-/// Payload: `<tab_path>\n<git log>` im Format von `git_history.logArgs`.
-/// Fehler (kein Repo, Datei nie committet) → Tag `git_log_error` mit stderr als Text.
-pub fn taskGitLog(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.TaskResult {
-    const params: *HistoryParams = @ptrCast(@alignCast(data.?));
-    defer params.deinit();
-    const target = git_history.parseTarget(params.tab_path) orelse return error.InvalidHistoryPath;
-
-    var args_buf: [16][]const u8 = undefined;
-    return historyResult(alloc, params.tab_path, runGitCapture(alloc, params.cwd(), git_history.logArgs(&args_buf, target)), .git_log, .git_log_error);
+/// Ergebnis der Git-Ansichten (Timeline, Diff-Editor, Graph): `<schlüssel>\n<text>`. Der
+/// Schlüssel ist der Tab-Pfad bzw. die Datei, bei Commit-Anfragen zusätzlich `\x1f<hash>`,
+/// damit ein veraltetes Ergebnis erkannt wird (owned).
+pub fn frame(alloc: std.mem.Allocator, key: []const u8, body: []const u8) ![]u8 {
+    return std.mem.concat(alloc, u8, &.{ key, "\n", body });
 }
 
-/// Payload: `<tab_path>\x1f<hash>\n<git show>`; Fehler → Tag `git_show_error`.
-pub fn taskGitShow(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.TaskResult {
-    const params: *HistoryParams = @ptrCast(@alignCast(data.?));
-    defer params.deinit();
+pub fn unframe(payload: []const u8) ?struct { key: []const u8, body: []const u8 } {
+    const nl = std.mem.indexOfScalar(u8, payload, '\n') orelse return null;
+    return .{ .key = payload[0..nl], .body = payload[nl + 1 ..] };
+}
 
-    var args_buf: [16][]const u8 = undefined;
-    var spec_buf: [2 * std.fs.max_path_bytes + 16]u8 = undefined;
-    const sh = params.show;
-    const args = git_history.showArgs(&args_buf, &spec_buf, sh.hash, sh.path, sh.previous_path);
-    const key = try std.mem.concat(alloc, u8, &.{ params.tab_path, "\x1f", sh.hash });
-    defer alloc.free(key);
-    return historyResult(alloc, key, runGitCapture(alloc, params.cwd(), args), .git_show, .git_show_error);
+pub fn splitKey(key: []const u8) struct { tab_path: []const u8, hash: []const u8 } {
+    const sep = std.mem.indexOfScalar(u8, key, 0x1f) orelse return .{ .tab_path = key, .hash = "" };
+    return .{ .tab_path = key[0..sep], .hash = key[sep + 1 ..] };
 }
 
 /// Ein selbst-owned String als Task-Parameter (Tab-Pfad eines Diff-Tabs).
@@ -257,9 +201,9 @@ pub fn taskGitFileDiff(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.T
             defer alloc.free(hunks);
             const body = try git_diff.encodeContents(alloc, old, new, hunks);
             defer alloc.free(body);
-            return .{ .tag = .git_file_diff, .payload = try git_history.frame(alloc, param.text, body), .allocator = alloc };
+            return .{ .tag = .git_file_diff, .payload = try frame(alloc, param.text, body), .allocator = alloc };
         },
-        .failed => |msg| return historyResult(alloc, param.text, .{ .failed = msg }, .git_file_diff, .git_file_diff_error),
+        .failed => |msg| return framedResult(alloc, param.text, .{ .failed = msg }, .git_file_diff, .git_file_diff_error),
     }
 }
 
@@ -272,7 +216,7 @@ pub fn taskGitTimeline(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.T
 
     const toplevel = switch (runGitCapture(alloc, dir, &.{ "rev-parse", "--show-toplevel" })) {
         .ok => |out| out,
-        .failed => |msg| return historyResult(alloc, param.text, .{ .failed = msg }, .git_timeline, .git_timeline_error),
+        .failed => |msg| return framedResult(alloc, param.text, .{ .failed = msg }, .git_timeline, .git_timeline_error),
     };
     defer alloc.free(toplevel);
 
@@ -288,9 +232,9 @@ pub fn taskGitTimeline(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.T
             defer alloc.free(log_out);
             const body = try std.mem.concat(alloc, u8, &.{ repoRoot(toplevel), "\n", staged, "\x1c", log_out });
             defer alloc.free(body);
-            return .{ .tag = .git_timeline, .payload = try git_history.frame(alloc, param.text, body), .allocator = alloc };
+            return .{ .tag = .git_timeline, .payload = try frame(alloc, param.text, body), .allocator = alloc };
         },
-        .failed => |msg| return historyResult(alloc, param.text, .{ .failed = msg }, .git_timeline, .git_timeline_error),
+        .failed => |msg| return framedResult(alloc, param.text, .{ .failed = msg }, .git_timeline, .git_timeline_error),
     }
 }
 
@@ -365,7 +309,7 @@ pub fn taskGitGraphLog(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.T
 
     const toplevel = switch (runGitCapture(alloc, dir, &.{ "rev-parse", "--show-toplevel" })) {
         .ok => |out| out,
-        .failed => |msg| return historyResult(alloc, key, .{ .failed = msg }, .git_graph_log, .git_graph_log_error),
+        .failed => |msg| return framedResult(alloc, key, .{ .failed = msg }, .git_graph_log, .git_graph_log_error),
     };
     defer alloc.free(toplevel);
     const current = firstLineOrEmpty(alloc, dir, &.{ "symbolic-ref", "-q", "HEAD" });
@@ -388,9 +332,9 @@ pub fn taskGitGraphLog(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.T
                 branch, "\x1f", current, "\x1f", upstream, "\x1f", base, "\x1f", repoRoot(toplevel), "\n", log_out,
             });
             defer alloc.free(body);
-            return .{ .tag = .git_graph_log, .payload = try git_history.frame(alloc, key, body), .allocator = alloc };
+            return .{ .tag = .git_graph_log, .payload = try frame(alloc, key, body), .allocator = alloc };
         },
-        .failed => |msg| return historyResult(alloc, key, .{ .failed = msg }, .git_graph_log, .git_graph_log_error),
+        .failed => |msg| return framedResult(alloc, key, .{ .failed = msg }, .git_graph_log, .git_graph_log_error),
     }
 }
 
@@ -401,7 +345,7 @@ pub fn taskGitCommitChanges(alloc: std.mem.Allocator, data: ?*anyopaque) !schedu
     defer param.deinit();
     var args_buf: [16][]const u8 = undefined;
     const args = git_scm.changesArgs(&args_buf, param.field(2), param.field(3));
-    return historyResult(alloc, param.field(0), runGitCapture(alloc, param.field(1), args), .git_commit_changes, .git_commit_changes_error);
+    return framedResult(alloc, param.field(0), runGitCapture(alloc, param.field(1), args), .git_commit_changes, .git_commit_changes_error);
 }
 
 /// Dateiinhalt über `git show <ref>:<pfad>`; nicht vorhanden → leer (owned).
@@ -416,7 +360,7 @@ fn contentOrEmpty(alloc: std.mem.Allocator, cwd: []const u8, args: ?[]const []co
     };
 }
 
-fn historyResult(alloc: std.mem.Allocator, key: []const u8, run: GitRun, ok_tag: scheduler.ResultTag, err_tag: scheduler.ResultTag) !scheduler.TaskResult {
+fn framedResult(alloc: std.mem.Allocator, key: []const u8, run: GitRun, ok_tag: scheduler.ResultTag, err_tag: scheduler.ResultTag) !scheduler.TaskResult {
     const body, const tag = switch (run) {
         .ok => |out| .{ out, ok_tag },
         .failed => |msg| blk: {
@@ -427,7 +371,7 @@ fn historyResult(alloc: std.mem.Allocator, key: []const u8, run: GitRun, ok_tag:
         },
     };
     defer alloc.free(body);
-    return .{ .tag = tag, .payload = try git_history.frame(alloc, key, body), .allocator = alloc };
+    return .{ .tag = tag, .payload = try frame(alloc, key, body), .allocator = alloc };
 }
 
 /// Payload: Roher unified diff-Text
@@ -593,106 +537,59 @@ test "git status returns branch line" {
     try std.testing.expect(std.mem.indexOf(u8, result.payload, "branch:") != null);
 }
 
-test "taskGitLog: Repo-Log mit Tab-Pfad als Schlüssel, Commits lesbar" {
+test "frame, unframe, splitKey: Schlüssel vor dem ersten Zeilenumbruch, Hash hinter 0x1f" {
     const alloc = std.testing.allocator;
-    const cwd = try std.process.getCwdAlloc(alloc);
-    defer alloc.free(cwd);
-    const tab = try git_history.tabPath(alloc, .{ .repo = cwd });
-    defer alloc.free(tab);
-
-    const result = try taskGitLog(alloc, try HistoryParams.init(alloc, tab, null));
-    defer result.deinit();
-    try std.testing.expect(result.tag == .git_log);
-    const u = git_history.unframe(result.payload).?;
-    try std.testing.expectEqualStrings(tab, u.key);
-    var log_ = try git_history.parseLog(alloc, u.body);
-    defer log_.deinit();
-    try std.testing.expect(log_.commits.len > 1);
-    try std.testing.expectEqual(@as(usize, 40), log_.commits[0].hash.len);
-    try std.testing.expectEqualStrings("", log_.commits[0].path);
-}
-
-test "taskGitLog: Datei-Log liefert Pfad relativ zur Repo-Wurzel" {
-    const alloc = std.testing.allocator;
-    const cwd = try std.process.getCwdAlloc(alloc);
-    defer alloc.free(cwd);
-    const file = try std.fs.path.join(alloc, &.{ cwd, "src", "git", "git_worker.zig" });
-    defer alloc.free(file);
-    const tab = try git_history.tabPath(alloc, .{ .file = file });
-    defer alloc.free(tab);
-
-    const result = try taskGitLog(alloc, try HistoryParams.init(alloc, tab, null));
-    defer result.deinit();
-    var log_ = try git_history.parseLog(alloc, git_history.unframe(result.payload).?.body);
-    defer log_.deinit();
-    try std.testing.expect(log_.commits.len > 0);
-    try std.testing.expectEqualStrings("src/git/git_worker.zig", log_.commits[0].path);
-}
-
-test "taskGitShow: Diff eines Commits, Schlüssel mit Hash, auf Datei begrenzt" {
-    const alloc = std.testing.allocator;
-    const cwd = try std.process.getCwdAlloc(alloc);
-    defer alloc.free(cwd);
-    const file = try std.fs.path.join(alloc, &.{ cwd, "src", "git", "git_worker.zig" });
-    defer alloc.free(file);
-    const tab = try git_history.tabPath(alloc, .{ .file = file });
-    defer alloc.free(tab);
-
-    const log_result = try taskGitLog(alloc, try HistoryParams.init(alloc, tab, null));
-    defer log_result.deinit();
-    var log_ = try git_history.parseLog(alloc, git_history.unframe(log_result.payload).?.body);
-    defer log_.deinit();
-    const c = log_.commits[0];
-
-    const result = try taskGitShow(alloc, try HistoryParams.init(alloc, tab, .{ .hash = c.hash, .path = c.path, .previous_path = c.path }));
-    defer result.deinit();
-    try std.testing.expect(result.tag == .git_show);
-    const u = git_history.unframe(result.payload).?;
-    const k = git_history.splitKey(u.key);
-    try std.testing.expectEqualStrings(tab, k.tab_path);
-    try std.testing.expectEqualStrings(c.hash, k.hash);
-    try std.testing.expect(std.mem.startsWith(u8, u.body, "commit "));
-    try std.testing.expect(std.mem.indexOf(u8, u.body, "diff --git a/src/git/git_worker.zig") != null);
-    // auf die Datei begrenzt: kein Diff anderer Dateien. Zeilenanfänge zählen, nicht Teilstrings:
-    // der Diff dieser Datei enthält den Text "diff --git" selbst (in genau diesem Test).
-    try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, u.body, "\ndiff --git "));
+    const f = try frame(alloc, "git-diff://x\x1fabc", "body\nzwei");
+    defer alloc.free(f);
+    const u = unframe(f).?;
+    try std.testing.expectEqualStrings("git-diff://x\x1fabc", u.key);
+    try std.testing.expectEqualStrings("body\nzwei", u.body);
+    const k = splitKey(u.key);
+    try std.testing.expectEqualStrings("git-diff://x", k.tab_path);
+    try std.testing.expectEqualStrings("abc", k.hash);
+    try std.testing.expect(unframe("ohne umbruch") == null);
+    try std.testing.expectEqualStrings("", splitKey("nur-pfad").hash);
 }
 
 test "taskGitFileDiff: alter und neuer Inhalt plus Hunks einer Datei in einem Commit" {
     const alloc = std.testing.allocator;
     const cwd = try std.process.getCwdAlloc(alloc);
     defer alloc.free(cwd);
-    const file = try std.fs.path.join(alloc, &.{ cwd, "src", "git", "git_history.zig" });
+    // Commits der Datei über die Timeline (git log --follow), wie die Ansicht selbst
+    const file = try std.fs.path.join(alloc, &.{ cwd, "src", "git", "git_scm.zig" });
     defer alloc.free(file);
-    const htab = try git_history.tabPath(alloc, .{ .file = file });
-    defer alloc.free(htab);
-    const log_result = try taskGitLog(alloc, try HistoryParams.init(alloc, htab, null));
+    const log_result = try taskGitTimeline(alloc, try TextParam.init(alloc, file));
     defer log_result.deinit();
-    var log_ = try git_history.parseLog(alloc, git_history.unframe(log_result.payload).?.body);
-    defer log_.deinit();
+    var t = git_timeline.Timeline.init(alloc);
+    defer t.deinit();
+    t.setExpanded(true);
+    t.follow(file);
+    try t.apply(file, true, unframe(log_result.payload).?.body);
+    const items = t.items();
+    try std.testing.expect(items.len > 1);
 
     // jüngster Commit: beide Seiten vorhanden
-    const c = log_.commits[0];
-    const tab = try git_diff.tabPath(alloc, .{ .hash = c.hash, .parent = c.firstParent(), .repo = cwd, .path = c.path, .previous_path = log_.commits[@min(1, log_.commits.len - 1)].path });
+    const c = items[0];
+    const tab = try git_diff.tabPath(alloc, .{ .hash = c.hash, .parent = c.previous_ref, .repo = cwd, .path = c.path, .previous_path = c.previous_path });
     defer alloc.free(tab);
     const result = try taskGitFileDiff(alloc, try TextParam.init(alloc, tab));
     defer result.deinit();
     try std.testing.expect(result.tag == .git_file_diff);
-    const u = git_history.unframe(result.payload).?;
+    const u = unframe(result.payload).?;
     try std.testing.expectEqualStrings(tab, u.key);
     const contents = git_diff.decodeContents(u.body).?;
-    try std.testing.expect(std.mem.indexOf(u8, contents.new, "pub const State") != null);
+    try std.testing.expect(std.mem.indexOf(u8, contents.new, "pub const View") != null);
     const hunks = try git_diff.parseHunks(alloc, contents.hunks);
     defer alloc.free(hunks);
     try std.testing.expect(hunks.len > 0);
 
     // ältester Commit: Datei neu angelegt, alter Inhalt leer, ein Hunk ab Zeile 0
-    const first = log_.commits[log_.commits.len - 1];
-    const tab0 = try git_diff.tabPath(alloc, .{ .hash = first.hash, .parent = first.firstParent(), .repo = cwd, .path = first.path, .previous_path = first.path });
+    const first = items[items.len - 1];
+    const tab0 = try git_diff.tabPath(alloc, .{ .hash = first.hash, .parent = first.previous_ref, .repo = cwd, .path = first.path, .previous_path = first.previous_path });
     defer alloc.free(tab0);
     const r0 = try taskGitFileDiff(alloc, try TextParam.init(alloc, tab0));
     defer r0.deinit();
-    const c0 = git_diff.decodeContents(git_history.unframe(r0.payload).?.body).?;
+    const c0 = git_diff.decodeContents(unframe(r0.payload).?.body).?;
     try std.testing.expectEqual(@as(usize, 0), c0.old.len);
     const h0 = try git_diff.parseHunks(alloc, c0.hunks);
     defer alloc.free(h0);
@@ -709,7 +606,7 @@ test "taskGitTimeline: Repo-Wurzel und Log der Datei, Schlüssel ist der Dateipf
     const result = try taskGitTimeline(alloc, try TextParam.init(alloc, file));
     defer result.deinit();
     try std.testing.expect(result.tag == .git_timeline);
-    const u = git_history.unframe(result.payload).?;
+    const u = unframe(result.payload).?;
     try std.testing.expectEqualStrings(file, u.key);
 
     var t = git_timeline.Timeline.init(alloc);
@@ -719,9 +616,13 @@ test "taskGitTimeline: Repo-Wurzel und Log der Datei, Schlüssel ist der Dateipf
     try t.apply(file, true, u.body);
     try std.testing.expectEqualStrings(cwd, t.repo);
     try std.testing.expect(t.items().len > 1);
-    try std.testing.expectEqualStrings("src/git/git_worker.zig", t.items()[0].path);
-    try std.testing.expect(t.items()[0].timestamp > 1_700_000_000);
-    try std.testing.expect(t.items()[0].stat.files == 1);
+    // Ist die Datei gerade gestagt, steht „Staged Changes“ vorn: ersten Commit-Eintrag prüfen
+    const first = for (t.items()) |it| {
+        if (it.kind == .commit) break it;
+    } else unreachable;
+    try std.testing.expectEqualStrings("src/git/git_worker.zig", first.path);
+    try std.testing.expect(first.timestamp > 1_700_000_000);
+    try std.testing.expect(first.stat.files == 1);
 }
 
 test "taskGitGraphLog und taskGitCommitChanges: eigenes Repo, Filter Auto, Dateien des jüngsten Commits" {
@@ -733,7 +634,7 @@ test "taskGitGraphLog und taskGitCommitChanges: eigenes Repo, Filter Auto, Datei
     const result = try taskGitGraphLog(alloc, try FieldsParam.init(alloc, &.{ "graph\x1f0", cwd, "0", "5" }));
     defer result.deinit();
     try std.testing.expect(result.tag == .git_graph_log);
-    const u = git_history.unframe(result.payload).?;
+    const u = unframe(result.payload).?;
     try std.testing.expectEqualStrings("graph\x1f0", u.key);
 
     var view = git_scm.View.init(alloc);
@@ -750,21 +651,19 @@ test "taskGitGraphLog und taskGitCommitChanges: eigenes Repo, Filter Auto, Datei
     const ch = try taskGitCommitChanges(alloc, ch_param);
     defer ch.deinit();
     try std.testing.expect(ch.tag == .git_commit_changes);
-    const cu = git_history.unframe(ch.payload).?;
+    const cu = unframe(ch.payload).?;
     try std.testing.expectEqualStrings(c.hash, cu.key);
     const changes = try git_scm.parseChanges(alloc, cu.body);
     defer alloc.free(changes);
     try std.testing.expect(changes.len > 0);
 }
 
-test "taskGitLog: Fehler von git kommt als Text im Ergebnis, nicht als Task-Fehler" {
+test "taskGitTimeline: Fehler von git kommt als Text im Ergebnis, nicht als Task-Fehler" {
     const alloc = std.testing.allocator;
-    const tab = try git_history.tabPath(alloc, .{ .repo = "/" });
-    defer alloc.free(tab);
-    const result = try taskGitLog(alloc, try HistoryParams.init(alloc, tab, null));
+    const result = try taskGitTimeline(alloc, try TextParam.init(alloc, "/kein-repo.txt"));
     defer result.deinit();
-    try std.testing.expect(result.tag == .git_log_error);
-    try std.testing.expectEqualStrings(tab, git_history.unframe(result.payload).?.key);
+    try std.testing.expect(result.tag == .git_timeline_error);
+    try std.testing.expectEqualStrings("/kein-repo.txt", unframe(result.payload).?.key);
 }
 
 test "git diff HEAD runs without error" {

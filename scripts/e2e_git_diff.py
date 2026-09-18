@@ -71,7 +71,7 @@ def diff_path(rev, path, previous):
 
 
 def st():
-    return result_json("git_history_state")
+    return result_json("git_diff_state")
 
 
 def wait(cond, what, timeout=10):

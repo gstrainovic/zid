@@ -67,13 +67,13 @@ pub const E2EContext = struct {
     /// Server-Thread darf weder Tabs noch die Handler-Map anfassen.
     pdf_page: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
     pdf_pages: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
-    /// JSON der aktiven Git-History, vom Main-Thread pro Frame geschrieben (`snapshotGitHistory`):
-    /// die Ansicht tauscht Log und Diff aus, der Server-Thread darf sie nicht direkt lesen.
-    git_history_mutex: std.Thread.Mutex = .{},
-    git_history_json: std.ArrayListUnmanaged(u8) = .empty,
-    /// JSON der Timeline im Explorer, ebenso vom Main-Thread gespiegelt (Schutz: git_history_mutex)
+    /// JSON des aktiven Diff-Editors, vom Main-Thread pro Frame geschrieben (`snapshotGitViews`):
+    /// die Ansicht tauscht Inhalte aus, der Server-Thread darf sie nicht direkt lesen.
+    git_views_mutex: std.Thread.Mutex = .{},
+    git_diff_json: std.ArrayListUnmanaged(u8) = .empty,
+    /// JSON der Timeline im Explorer, ebenso vom Main-Thread gespiegelt (Schutz: git_views_mutex)
     timeline_json: std.ArrayListUnmanaged(u8) = .empty,
-    /// JSON von Source Control Graph und aktivem Multi-File-Diff (Schutz: git_history_mutex)
+    /// JSON von Source Control Graph und aktivem Multi-File-Diff (Schutz: git_views_mutex)
     scm_json: std.ArrayListUnmanaged(u8) = .empty,
 
     const Self = @This();
@@ -89,29 +89,29 @@ pub const E2EContext = struct {
 
     pub fn deinit(self: *Self) void {
         self.pending_inputs.deinit(self.allocator);
-        self.git_history_json.deinit(self.allocator);
+        self.git_diff_json.deinit(self.allocator);
         self.timeline_json.deinit(self.allocator);
         self.scm_json.deinit(self.allocator);
     }
 };
 
-/// Main-Thread: Zustand der History-Ansicht des aktiven Tabs als JSON ablegen.
-pub fn snapshotGitHistory(ctx: *E2EContext) void {
+/// Main-Thread: Zustand von Diff-Editor, Timeline und Source Control Graph als JSON ablegen.
+pub fn snapshotGitViews(ctx: *E2EContext) void {
     var out = std.Io.Writer.Allocating.init(ctx.allocator);
     defer out.deinit();
-    writeGitHistoryJson(ctx.ui_system, &out.writer) catch return;
+    writeGitDiffStateJson(ctx.ui_system, &out.writer) catch return;
     var tl = std.Io.Writer.Allocating.init(ctx.allocator);
     defer tl.deinit();
     writeTimelineJson(ctx.ui_system, &tl.writer) catch return;
     var scm = std.Io.Writer.Allocating.init(ctx.allocator);
     defer scm.deinit();
     writeScmJson(ctx.ui_system, &scm.writer) catch return;
-    ctx.git_history_mutex.lock();
+    ctx.git_views_mutex.lock();
     ctx.scm_json.clearRetainingCapacity();
     ctx.scm_json.appendSlice(ctx.allocator, scm.written()) catch {};
-    defer ctx.git_history_mutex.unlock();
-    ctx.git_history_json.clearRetainingCapacity();
-    ctx.git_history_json.appendSlice(ctx.allocator, out.written()) catch {};
+    defer ctx.git_views_mutex.unlock();
+    ctx.git_diff_json.clearRetainingCapacity();
+    ctx.git_diff_json.appendSlice(ctx.allocator, out.written()) catch {};
     ctx.timeline_json.clearRetainingCapacity();
     ctx.timeline_json.appendSlice(ctx.allocator, tl.written()) catch {};
 }
@@ -227,68 +227,26 @@ fn writeScmJson(ui: *ui_mod.UI, w: *std.Io.Writer) !void {
 }
 
 fn scmState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
-    ctx.git_history_mutex.lock();
-    defer ctx.git_history_mutex.unlock();
+    ctx.git_views_mutex.lock();
+    defer ctx.git_views_mutex.unlock();
     if (ctx.scm_json.items.len == 0) return "{\"mode\": \"explorer\"}";
     return dc.arena().dupe(u8, ctx.scm_json.items);
 }
 
 fn timelineState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
-    ctx.git_history_mutex.lock();
-    defer ctx.git_history_mutex.unlock();
+    ctx.git_views_mutex.lock();
+    defer ctx.git_views_mutex.unlock();
     if (ctx.timeline_json.items.len == 0) return "{\"expanded\": false}";
     return dc.arena().dupe(u8, ctx.timeline_json.items);
 }
 
-fn writeGitHistoryJson(ui: *ui_mod.UI, w: *std.Io.Writer) !void {
-    const gh_view = @import("ui/git_history_view.zig");
+/// RPC `git_diff_state`: Diff-Editor des aktiven Tabs, sonst `{"active": false}`.
+fn writeGitDiffStateJson(ui: *ui_mod.UI, w: *std.Io.Writer) !void {
     if (ui.activeGitDiff()) |d| return writeGitDiffJson(d, w);
-    const h = ui.activeGitHistory() orelse return w.writeAll("{\"active\": false}");
-    const s = &h.view.state;
-    const target = s.target();
-    try w.print("{{\"active\": true, \"kind\": \"{s}\", \"target\": ", .{@tagName(target)});
-    try std.json.Stringify.value(target.path(), .{}, w);
-    try w.print(", \"loading_log\": {}, \"loading_diff\": {}, \"error\": ", .{ s.loading_log, s.loading_diff });
-    try std.json.Stringify.value(s.log_error, .{}, w);
-    try w.writeAll(", \"empty_text\": ");
-    try std.json.Stringify.value(if (s.commits().len == 0 and !s.loading_log and s.log_error == null) gh_view.emptyText(target) else "", .{}, w);
-    try w.writeAll(", \"commits\": [");
-    for (s.commits(), 0..) |c, i| {
-        if (i >= 200) break;
-        if (i > 0) try w.writeAll(", ");
-        try w.writeAll("{\"hash\": ");
-        try std.json.Stringify.value(c.hash, .{}, w);
-        try w.writeAll(", \"subject\": ");
-        try std.json.Stringify.value(c.subject, .{}, w);
-        try w.writeAll(", \"path\": ");
-        try std.json.Stringify.value(c.path, .{}, w);
-        try w.writeAll("}");
-    }
-    try w.writeAll("], \"selected\": ");
-    try std.json.Stringify.value(s.selected, .{}, w);
-    var added: usize = 0;
-    var removed: usize = 0;
-    var files: usize = 0;
-    for (s.diff_lines) |line| switch (line.kind) {
-        .added => added += 1,
-        .removed => removed += 1,
-        .file_header => {
-            if (std.mem.startsWith(u8, @import("git_history").lineText(s.diff_text, line), "diff ")) files += 1;
-        },
-        else => {},
-    };
-    try w.writeAll(", \"diff_hash\": ");
-    try std.json.Stringify.value(s.diff_hash, .{}, w);
-    try w.print(", \"diff_failed\": {}, \"diff_lines\": {d}, \"diff_added\": {d}, \"diff_removed\": {d}, \"diff_files\": {d}, \"diff_head\": ", .{ s.diff_failed, s.diff_lines.len, added, removed, files });
-    try std.json.Stringify.value(s.diff_text[0..@min(s.diff_text.len, 1500)], .{}, w);
-    const list = clay.getElementData(gh_view.GitHistoryView.listId(h.salt)).bounding_box;
-    const diff = clay.getElementData(gh_view.GitHistoryView.diffId(h.salt)).bounding_box;
-    try w.print(
-        \\, "list": {{"x": {d:.1}, "y": {d:.1}, "w": {d:.1}, "h": {d:.1}}}, "diff": {{"x": {d:.1}, "y": {d:.1}, "w": {d:.1}, "h": {d:.1}}}, "row_height": {d:.1}, "list_scroll": {d:.1}, "diff_scroll": {d:.1}, "rendered_diff_rows": {d}}}
-    , .{ list.x, list.y, list.width, list.height, diff.x, diff.y, diff.width, diff.height, gh_view.ROW_HEIGHT, s.list_scroll, s.diff_scroll, h.view.rendered_diff_rows });
+    try w.writeAll("{\"active\": false}");
 }
 
-/// Diff-Editor-Zustand (gleicher Kanal wie git_history_state, `view` unterscheidet).
+/// Diff-Editor-Zustand (`view: "diff"`).
 fn writeGitDiffJson(d: ui_mod.UI.ActiveDiff, w: *std.Io.Writer) !void {
     const gd_view = @import("ui/git_diff_view.zig");
     const s = &d.view.state;
@@ -337,11 +295,11 @@ fn writeGitDiffJson(d: ui_mod.UI.ActiveDiff, w: *std.Io.Writer) !void {
     try w.writeAll("}");
 }
 
-fn gitHistoryState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
-    ctx.git_history_mutex.lock();
-    defer ctx.git_history_mutex.unlock();
-    if (ctx.git_history_json.items.len == 0) return "{\"active\": false}";
-    return dc.arena().dupe(u8, ctx.git_history_json.items);
+fn gitDiffState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
+    ctx.git_views_mutex.lock();
+    defer ctx.git_views_mutex.unlock();
+    if (ctx.git_diff_json.items.len == 0) return "{\"active\": false}";
+    return dc.arena().dupe(u8, ctx.git_diff_json.items);
 }
 
 /// Ereignis anwenden oder (Fenstermodus) für den Main-Thread puffern.
@@ -495,7 +453,7 @@ pub fn createDispatcher(alloc: std.mem.Allocator, ctx: *E2EContext) !*zigjr.RpcD
     try rpc_dispatcher.addWithCtx("folder_picker_state", ctx, folderPickerState);
     try rpc_dispatcher.addWithCtx("slide_state", ctx, slideState);
     try rpc_dispatcher.addWithCtx("pdf_state", ctx, pdfState);
-    try rpc_dispatcher.addWithCtx("git_history_state", ctx, gitHistoryState);
+    try rpc_dispatcher.addWithCtx("git_diff_state", ctx, gitDiffState);
     try rpc_dispatcher.addWithCtx("timeline_state", ctx, timelineState);
     try rpc_dispatcher.addWithCtx("scm_state", ctx, scmState);
     try rpc_dispatcher.addWithCtx("ui_state", ctx, uiState);

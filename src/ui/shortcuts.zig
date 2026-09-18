@@ -115,9 +115,8 @@ pub const Command = enum {
     toggle_whitespace,
     toggle_indent_guides,
     toggle_word_wrap,
-    /// Verlauf des Repos (Tab `git-history://repo:…`)
-    git_history,
-    /// Verlauf der Datei des Tabs bzw. Editors; `_entry` für den markierten Explorer-Eintrag
+    /// Timeline im Explorer auf die Datei des Tabs bzw. Editors stellen; `_entry` für den
+    /// markierten Explorer-Eintrag (VS Code `files.openTimeline`)
     file_history,
     file_history_entry,
     /// Diff-Editor (Tab `git-diff://…`), Namen und Kürzel wie VS Code
@@ -276,7 +275,7 @@ pub const Menu = struct { title: []const u8, items: []const Command };
 pub const menus = [_]Menu{
     .{ .title = "File", .items = &.{ .new_file, .quick_open, .save, .toggle_autosave, .open_folder, .close_tab, .close_all_tabs, .reopen_closed_tab } },
     .{ .title = "Edit", .items = &.{ .undo, .redo, .cut, .copy, .paste, .select_all, .delete_line, .duplicate_line, .move_line_up, .move_line_down, .toggle_comment, .find, .replace, .goto_line, .goto_definition, .select_next_occurrence, .add_cursor_above, .add_cursor_below } },
-    .{ .title = "View", .items = &.{ .toggle_explorer, .focus_explorer, .split_vertical, .split_horizontal, .md_preview, .md_export_pdf, .new_terminal, .toggle_terminal, .toggle_theme, .zoom_in, .zoom_out, .zoom_reset, .toggle_minimap, .toggle_whitespace, .toggle_indent_guides, .toggle_word_wrap, .view_source_control, .git_history } },
+    .{ .title = "View", .items = &.{ .toggle_explorer, .focus_explorer, .split_vertical, .split_horizontal, .md_preview, .md_export_pdf, .new_terminal, .toggle_terminal, .toggle_theme, .zoom_in, .zoom_out, .zoom_reset, .toggle_minimap, .toggle_whitespace, .toggle_indent_guides, .toggle_word_wrap, .view_source_control } },
     .{ .title = "Help", .items = &.{ .command_palette, .show_shortcuts } },
 };
 
@@ -381,7 +380,6 @@ pub fn label(command: Command) []const u8 {
         .toggle_whitespace => "Toggle Render Whitespace",
         .toggle_word_wrap => "Toggle Word Wrap",
         .toggle_indent_guides => "Toggle Indent Guides",
-        .git_history => "Git History",
         .file_history, .file_history_entry => "File History",
         .diff_next_change => "Next Change",
         .diff_prev_change => "Previous Change",
@@ -542,15 +540,14 @@ test "menus: jeder Menüeintrag hat ein Label" {
     }
 }
 
-test "Git History: Repo im View-Menü, Datei-History in Tab-, Editor- und Explorer-Menü" {
+test "Source Control im View-Menü, File History in Tab-, Editor- und Explorer-Menü" {
     const view = for (menus) |m| {
         if (std.mem.eql(u8, m.title, "View")) break m;
     } else unreachable;
-    try testing.expect(std.mem.indexOfScalar(Command, view.items, .git_history) != null);
+    try testing.expect(std.mem.indexOfScalar(Command, view.items, .view_source_control) != null);
     try testing.expect(std.mem.indexOfScalar(Command, &tab_menu_items, .file_history) != null);
     try testing.expect(std.mem.indexOfScalar(Command, &editor_menu_items, .file_history) != null);
     try testing.expect(std.mem.indexOfScalar(Command, &explorer_menu_items, .file_history_entry) != null);
-    try testing.expectEqualStrings("Git History", label(.git_history));
     try testing.expectEqualStrings("File History", label(.file_history));
     try testing.expectEqualStrings("File History", label(.file_history_entry));
 }

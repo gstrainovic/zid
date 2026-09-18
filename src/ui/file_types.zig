@@ -9,8 +9,6 @@ pub const FileKind = enum {
     chat,
     /// Inhalt sieht nicht nach Text aus: der Tab zeigt nur einen Hinweis, kein Buffer wird geladen.
     binary,
-    /// Git-Verlauf eines Repos oder einer Datei (`git-history://…`, siehe git_history.zig)
-    git_history,
     /// Diff-Editor einer Datei in einem Commit (`git-diff://…`, siehe git_diff.zig)
     git_diff,
     /// Multi-File-Diff eines Commits (`git-commit://…`, siehe git_scm.zig)
@@ -19,8 +17,7 @@ pub const FileKind = enum {
 
 /// Dateiart nach Endung (Bild, PDF, sonst Text). Kennt den Inhalt nicht.
 pub fn getFileKind(path: []const u8) FileKind {
-    // Präfix wie git_history.scheme; das Modul steht hier nicht zur Verfügung (eigenes Test-Root)
-    if (std.mem.startsWith(u8, path, "git-history://")) return .git_history;
+    // Präfixe wie git_diff.scheme / git_scm; die Module stehen hier nicht zur Verfügung (eigenes Test-Root)
     if (std.mem.startsWith(u8, path, "git-diff://")) return .git_diff;
     if (std.mem.startsWith(u8, path, "git-commit://")) return .git_commit;
     const ext = std.fs.path.extension(path);
@@ -106,10 +103,9 @@ pub fn formatFileSize(alloc: std.mem.Allocator, bytes: u64) ![]const u8 {
 
 const testing = std.testing;
 
-test "git-history://-Pfade sind History-Tabs, ohne die Platte zu lesen" {
-    try std.testing.expectEqual(FileKind.git_history, getFileKind("git-history://repo:/home/u/p"));
-    try std.testing.expectEqual(FileKind.git_history, detectFileKind("git-history://file:/home/u/p/a.png"));
+test "git-diff:// und git-commit://-Pfade sind Git-Tabs, ohne die Platte zu lesen" {
     try std.testing.expectEqual(FileKind.git_diff, getFileKind("git-diff://abc\x1fdef\x1f/r\x1fa.png\x1fa.png"));
+    try std.testing.expectEqual(FileKind.git_diff, detectFileKind("git-diff://abc\x1fdef\x1f/r\x1fa.png\x1fa.png"));
     try std.testing.expectEqual(FileKind.git_commit, getFileKind("git-commit://abc\x1fdef\x1f/r\x1fBetreff.png"));
 }
 
