@@ -37,6 +37,12 @@ pub const Hover = struct {
     pub fn visible(self: *const Hover, id: u32, now_ms: f32, delay_ms: f32) bool {
         return self.id == id and self.id != 0 and now_ms - self.since_ms >= delay_ms;
     }
+
+    /// Ein Element wird überfahren, der Tooltip steht noch aus: der Frame-Loop darf nicht auf
+    /// das nächste Ereignis warten, sonst erscheint er erst bei der nächsten Mausbewegung.
+    pub fn pending(self: *const Hover, now_ms: f32, delay_ms: f32) bool {
+        return self.id != 0 and now_ms - self.since_ms < delay_ms;
+    }
 };
 
 test "Hover: erst nach der Verzögerung sichtbar, Wechsel und Verlassen setzen zurück" {
@@ -70,4 +76,18 @@ test "Hover: erst nach der Verzögerung sichtbar, Wechsel und Verlassen setzen z
     h.note(8, 5000);
     h.endFrame();
     try testing.expect(!h.visible(8, 5100, 700));
+}
+
+test "Hover.pending: Frames nötig, solange ein Element überfahren wird und der Tooltip noch aussteht" {
+    var h = Hover{};
+    try testing.expect(!h.pending(0, 700)); // nichts überfahren
+    h.beginFrame();
+    h.note(3, 100);
+    h.endFrame();
+    try testing.expect(h.pending(100, 700)); // wartet auf die Verzögerung
+    try testing.expect(h.pending(799, 700));
+    try testing.expect(!h.pending(800, 700)); // sichtbar: keine weiteren Frames nötig
+    h.beginFrame();
+    h.endFrame();
+    try testing.expect(!h.pending(900, 700)); // verlassen
 }

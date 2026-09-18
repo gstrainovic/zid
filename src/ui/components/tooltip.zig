@@ -33,6 +33,11 @@ pub fn currentText() ?[]const u8 {
     return shown;
 }
 
+/// Tooltip steht aus: main.zig rendert weiter, statt auf das nächste Ereignis zu warten.
+pub fn pending() bool {
+    return hover.pending(now_ms, DELAY_MS);
+}
+
 /// Tooltip `label` für das Element `id`, das der Aufrufer selbst zeichnet. Innerhalb oder nach
 /// dessen Block aufrufen; `pointerOver` nutzt das Layout des Vorframes.
 pub fn attach(theme: Theme, id: clay.ElementId, label: []const u8) void {
