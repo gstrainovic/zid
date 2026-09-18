@@ -214,17 +214,20 @@ liegen in `src/ui/mod.zig`, das Virtualisierungsmuster in
   **Keine zweite Balken-Implementierung mehr anlegen** — Explorer und Terminal haben noch
   eigene, die gehören ebenfalls auf `scrollbar.zig` umgestellt, sobald man sie anfasst.
 
-- **Lange Codezeilen: waagrechter Bildlauf oder Word Wrap.** Fließtext und Tabellen brechen
-  immer um, Codeblöcke nicht: `md_content` wächst mit der längsten Codezeile (`grow` wird nie
-  schmaler als das Kind), `md_viewport` verschiebt per `child_offset.x`, und unten liegt der
-  waagrechte Balken aus `scrollbar.zig` (`md_hscroll_track`/`_thumb`, Pixel als Einheiten;
-  Klick blättert, Thumb zieht, Shift+Rad bzw. Touchpad über `UI.handleScrollHorizontal` →
-  `scrollColumns`, 60 px je Schritt). „Toggle Word Wrap“ (Alt+Z) der Editoren gilt auch hier:
-  `render` liest `getActiveEditor().word_wrap` in `wrap_code`, dann bricht `renderCodeBlock`
-  jede Zeile mit `codeRowEnd` an der Inhaltsbreite (an jeder Stelle, nicht nur an
-  Leerzeichen) in Reihen, die mit `Join.none` registriert sind — kopiert fügt
-  `md_select.joinWith` sie ohne Trenner zusammen (weiche Fließtextumbrüche geben ein
-  Leerzeichen). E2E `step_wide_code` in `e2e_md_preview.py`.
+- **Lange Codezeilen: waagrechter Bildlauf, kein Word Wrap — wie VS Code.** Die VS-Code-
+  Vorschau bricht Fließtext immer um, Codeblöcke nie (`pre { overflow: auto }` in
+  `markdown.css`), und `editor.wordWrap`/Alt+Z wirkt dort nicht; einen Umbruch-Schalter für
+  die Vorschau gibt es nicht. Hier genauso: `md_content` wächst mit der längsten Codezeile
+  (`grow` wird nie schmaler als das Kind), `md_viewport` verschiebt per `child_offset.x`, und
+  unten liegt der waagrechte Balken aus `scrollbar.zig` (`md_hscroll_track`/`_thumb`, Pixel
+  als Einheiten; Klick blättert, Thumb zieht, Shift+Rad bzw. Touchpad über
+  `UI.handleScrollHorizontal` → `scrollColumns`, 60 px je Schritt). Abweichung zu VS Code:
+  dort scrollt nur der Codeblock, hier der ganze Inhalt — ein Clip je Block geht nicht, der
+  Renderer schneidet verschachtelte Clips nicht (siehe oben) und Clay hält nur zehn.
+  Eine Kopplung an Alt+Z gab es am 18.09.2026 kurz (`eccc53a`) und ist wieder raus: mit
+  `word_wrap=true` im Nutzerzustand brach die Vorschau dann immer um und der Balken fehlte.
+  `md_select.Join.none` (Reihen ohne Trenner beim Kopieren) und `renderCodeRow` mit
+  Ausschnitt bleiben für einen späteren, eigenen Umbruch von Codezeilen. E2E `step_wide_code`.
 
 - **Umbruch nur an Leerzeichen:** `word_wrap.wrapLines` trennt zwischen Wörtern, nie zwischen
   zwei Stücken ohne Leerzeichen dazwischen — zigdown liefert `code`, Satzzeichen und Wortteile
