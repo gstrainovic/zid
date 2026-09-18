@@ -51,6 +51,16 @@ echo -e "open ./README.md\nget-state\nshutdown" | zig build run -- --interactive
   (Tab-Wechsel, Explorer-Klicks, Tab-Schließen, gepufferte Eingaben, Screenshots), nur
   ohne Fenster-Events, Cursor und Präsentation. Es gibt keinen Grund mehr, für Tests
   `--e2e` mit Fenster zu starten; das stört den User am Desktop.
+- Die UI-Uhr (`ui_time_ms`, Tooltips nach 700 ms, Toasts, Hover) läuft seit 18.09.2026 mit der
+  echten Zeit zwischen zwei Frames (Deckel 250 ms), vorher pauschal 16 ms je Frame. Headless
+  dauert ein Frame mit Layout und RPC ~35 ms, die Uhr lief also halb so schnell und ein Tooltip
+  kam erst nach ~1,5 s; `e2e_scm_changes.py` (1 s Hover) scheiterte deshalb unter Windows,
+  `e2e_timeline.py` flatterte. Tests, die auf Zeit warten, rechnen in Echtzeit. Nebenbefund
+  derselben Umstellung: der Explorer-Tooltip (`fx_tooltip`, unter der Zeile) fing ohne
+  `pointer_capture_mode = .passthrough` den Klick auf die nächste Zeile ab — jedes Hover-Element,
+  das nicht selbst klickbar ist, braucht passthrough (wie `tooltip.attach`, Cursorstriche,
+  Platzhalter). `open_folder` läuft seit 18.09.2026 gepuffert im Main-Thread wie `open_file`:
+  synchron im Server-Thread leerte `loadDirectory` die Knoten unter einem laufenden Render.
 - `explorer_open <path>` simuliert einen Klick im File-Explorer (setzt `file_to_open`),
   `open_file` geht nur über die Tab-Leiste.
 - `get_active_tab` liefert pro Tab `modified` sowie `editor_modified` und `editor_file`

@@ -47,6 +47,10 @@ pub const InputEvent = union(enum) {
     scroll: struct { x: f32, y: f32, lines: i32 },
     /// Datei in der aktiven Tab-Leiste öffnen (Pfad gehört dem Ereignis, `applyInput` gibt ihn frei)
     open_file: []const u8,
+    /// Explorer-Wurzel wechseln (Pfad gehört dem Ereignis). Muss im Main-Thread laufen:
+    /// `loadDirectory` leert `nodes` und `visible_entries`, ein gleichzeitiges Render
+    /// fiel mit „index out of bounds“ in `renderTreeEntry` (flaky in e2e_timeline.py).
+    open_folder: []const u8,
 };
 
 /// E2E Server Context - teilt State mit Main Thread
@@ -400,6 +404,10 @@ fn applyInput(ctx: *E2EContext, ev: InputEvent) void {
             // in main.zig an (pending_switch_path).
             if (tab_bar.active_index) |idx| tab_bar.setActive(idx);
         },
+        .open_folder => |path| {
+            defer ctx.allocator.free(path);
+            ui.file_explorer.loadDirectory(path) catch |err| log.warn("open_folder('{s}'): {s}", .{ path, @errorName(err) });
+        },
         .click => |p| {
             ui.setPointerState(p.x, p.y, true);
             ui.handleMouseMove(p.x, p.y);
@@ -597,12 +605,9 @@ fn handleConnection(ctx: *E2EContext, connection: std.net.Server.Connection) voi
 /// Ordner im File Explorer öffnen
 fn openFolder(ctx: *E2EContext, dc: *zigjr.DispatchCtx, path: []const u8) ![]const u8 {
     log.info("RPC: open_folder('{s}')", .{path});
-
-    ctx.ui_system.file_explorer.loadDirectory(path) catch |err| {
-        const msg = try std.fmt.allocPrint(dc.arena(), "error: {}", .{err});
-        return msg;
-    };
-
+    // Gepuffert wie open_file: der Main-Thread lädt zwischen zwei Frames (siehe InputEvent).
+    const owned = ctx.allocator.dupe(u8, path) catch |err| return try std.fmt.allocPrint(dc.arena(), "error: {}", .{err});
+    dispatchInput(ctx, .{ .open_folder = owned });
     return "ok";
 }
 
