@@ -50,7 +50,8 @@ pub fn taskGitBranch(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.Tas
     };
 }
 
-/// Payload: "branch:<name>\n<code>:<path>\n..."
+/// Payload: "branch:<name>\n<code>:<path>\n..." (Explorer), dann 0x1c und die rohe
+/// porcelain-v2-Ausgabe (NUL-getrennt) für Source Control (`git_changes.parseStatus`).
 ///   Codes: A staged, M modified, ? untracked, C conflict, S submodule
 pub fn taskGitStatus(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.TaskResult {
     const params: *Params = @ptrCast(@alignCast(data.?));
@@ -67,10 +68,64 @@ pub fn taskGitStatus(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.Tas
     defer if (toplevel) |t| alloc.free(t);
     const root = if (toplevel) |t| std.mem.trimEnd(u8, t, "\n\r") else null;
 
+    const explorer = try parseStatusOutput(alloc, out, root);
+    defer alloc.free(explorer);
     return .{
         .tag = .git_status,
-        .payload = try parseStatusOutput(alloc, out, root),
+        .payload = try std.mem.concat(alloc, u8, &.{ explorer, "\x1c", out }),
         .allocator = alloc,
+    };
+}
+
+/// Explorer-Teil und rohe v2-Ausgabe eines `git_status`-Payloads.
+pub fn splitStatusPayload(payload: []const u8) struct { explorer: []const u8, raw: []const u8 } {
+    const sep = std.mem.indexOfScalar(u8, payload, 0x1c) orelse return .{ .explorer = payload, .raw = "" };
+    return .{ .explorer = payload[0..sep], .raw = payload[sep + 1 ..] };
+}
+
+/// Source-Control-Aktion (Felder: Aktion, Repo, dann Pfade bzw. die Commit-Nachricht):
+/// `stage` = `add -A --`, `unstage` = `reset -q HEAD --`, `discard_tracked` = `checkout -q --`,
+/// `discard_untracked` = `clean -f -q --`, `commit` = `commit --quiet --file - --allow-empty-message`
+/// mit der Nachricht über stdin (VS Code git.ts). Payload `<aktion>\n<stderr>`; Fehler von git
+/// kommen als Tag `git_action_error`, nie als Task-Fehler.
+pub fn taskGitAction(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.TaskResult {
+    const param: *FieldsParam = @ptrCast(@alignCast(data.?));
+    defer param.deinit();
+    const action = param.field(0);
+    const repo = param.field(1);
+
+    var argv: std.ArrayListUnmanaged([]const u8) = .empty;
+    defer argv.deinit(alloc);
+    var stdin: ?[]const u8 = null;
+    if (std.mem.eql(u8, action, "commit")) {
+        try argv.appendSlice(alloc, &.{ "commit", "--quiet", "--file", "-", "--allow-empty-message" });
+        stdin = param.field(2);
+    } else {
+        const head: []const []const u8 = if (std.mem.eql(u8, action, "stage"))
+            &.{ "add", "-A", "--" }
+        else if (std.mem.eql(u8, action, "unstage"))
+            &.{ "reset", "-q", "HEAD", "--" }
+        else if (std.mem.eql(u8, action, "discard_tracked"))
+            &.{ "checkout", "-q", "--" }
+        else if (std.mem.eql(u8, action, "discard_untracked"))
+            &.{ "clean", "-f", "-q", "--" }
+        else
+            return error.UnknownGitAction;
+        try argv.appendSlice(alloc, head);
+        var i: usize = 2;
+        while (true) : (i += 1) {
+            const p = param.field(i);
+            if (p.len == 0) break;
+            try argv.append(alloc, p);
+        }
+    }
+    const run = runGitCaptureStdin(alloc, repo, argv.items, stdin);
+    return switch (run) {
+        .ok => |out| blk: {
+            defer alloc.free(out);
+            break :blk .{ .tag = .git_action, .payload = try frame(alloc, action, ""), .allocator = alloc };
+        },
+        .failed => |msg| framedResult(alloc, action, .{ .failed = msg }, .git_action, .git_action_error),
     };
 }
 
@@ -193,8 +248,19 @@ pub fn taskGitFileDiff(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.T
 
     const old = contentOrEmpty(alloc, spec.repo, git_diff.contentArgs(&args_buf, &spec_buf, spec.parent, spec.previous_path));
     defer alloc.free(old);
-    const new = contentOrEmpty(alloc, spec.repo, git_diff.contentArgs(&args_buf, &spec_buf, spec.hash, spec.path));
+    // Arbeitskopie (Source Control „Changes“): Datei von der Platte, fehlt sie (gelöscht) leer
+    const worktree = std.mem.eql(u8, spec.hash, git_diff.worktree_ref);
+    const new = if (worktree) readWorktreeFile(alloc, spec.repo, spec.path) else contentOrEmpty(alloc, spec.repo, git_diff.contentArgs(&args_buf, &spec_buf, spec.hash, spec.path));
     defer alloc.free(new);
+
+    // Untracked: git kennt die Datei nicht, der Hunk-Kopf kommt aus der Zeilenzahl
+    if (worktree and spec.parent.len == 0) {
+        const hunks = try git_diff.syntheticAddHunk(alloc, new);
+        defer alloc.free(hunks);
+        const body = try git_diff.encodeContents(alloc, old, new, hunks);
+        defer alloc.free(body);
+        return .{ .tag = .git_file_diff, .payload = try frame(alloc, param.text, body), .allocator = alloc };
+    }
 
     switch (runGitCapture(alloc, spec.repo, git_diff.hunkArgs(&args_buf, &spec_buf, spec))) {
         .ok => |hunks| {
@@ -349,6 +415,13 @@ pub fn taskGitCommitChanges(alloc: std.mem.Allocator, data: ?*anyopaque) !schedu
 }
 
 /// Dateiinhalt über `git show <ref>:<pfad>`; nicht vorhanden → leer (owned).
+/// Datei der Arbeitskopie (relativ zur Repo-Wurzel), leer wenn sie fehlt oder zu groß ist.
+fn readWorktreeFile(alloc: std.mem.Allocator, repo: []const u8, path: []const u8) []u8 {
+    var dir = std.fs.cwd().openDir(repo, .{}) catch return no_message;
+    defer dir.close();
+    return dir.readFileAlloc(alloc, path, 64 * 1024 * 1024) catch no_message;
+}
+
 fn contentOrEmpty(alloc: std.mem.Allocator, cwd: []const u8, args: ?[]const []const u8) []u8 {
     const a = args orelse return no_message;
     return switch (runGitCapture(alloc, cwd, a)) {
@@ -439,32 +512,50 @@ const GitRun = union(enum) { ok: []u8, failed: []u8 };
 const no_message: []u8 = &.{};
 
 fn runGitCapture(alloc: std.mem.Allocator, cwd: []const u8, args: []const []const u8) GitRun {
-    var argv_buf: [32][]const u8 = undefined;
+    return runGitCaptureStdin(alloc, cwd, args, null);
+}
+
+/// Wie `runGitCapture`, optional mit Text auf stdin (Commit-Nachricht über `--file -`).
+fn runGitCaptureStdin(alloc: std.mem.Allocator, cwd: []const u8, args: []const []const u8, stdin: ?[]const u8) GitRun {
+    var argv_buf: [64][]const u8 = undefined;
     // quotepath=off: Dateinamen mit Umlauten kommen roh statt als "\303\244" (log --name-only)
     const prefix = [_][]const u8{ "git", "-c", "core.quotepath=off" };
+    if (args.len + prefix.len > argv_buf.len) return .{ .failed = alloc.dupe(u8, "too many arguments") catch no_message };
     @memcpy(argv_buf[0..prefix.len], &prefix);
     @memcpy(argv_buf[prefix.len..][0..args.len], args);
     const argv = argv_buf[0 .. args.len + prefix.len];
 
-    const result = std.process.Child.run(.{
-        .allocator = alloc,
-        .argv = argv,
-        .cwd = cwd,
-        .max_output_bytes = 10 * 1024 * 1024,
-    }) catch |err| return .{ .failed = alloc.dupe(u8, @errorName(err)) catch no_message };
+    var child = std.process.Child.init(argv, alloc);
+    child.stdin_behavior = if (stdin != null) .Pipe else .Ignore;
+    child.stdout_behavior = .Pipe;
+    child.stderr_behavior = .Pipe;
+    child.cwd = cwd;
+    child.spawn() catch |err| return .{ .failed = alloc.dupe(u8, @errorName(err)) catch no_message };
+    if (stdin) |text| {
+        if (child.stdin) |f| {
+            f.writeAll(text) catch |err| log.warn("git stdin: {}", .{err});
+            f.close();
+            child.stdin = null;
+        }
+    }
+    var stdout: std.ArrayList(u8) = .empty;
+    defer stdout.deinit(alloc);
+    var stderr: std.ArrayList(u8) = .empty;
+    defer stderr.deinit(alloc);
+    child.collectOutput(alloc, &stdout, &stderr, 10 * 1024 * 1024) catch |err| {
+        _ = child.kill() catch {};
+        return .{ .failed = alloc.dupe(u8, @errorName(err)) catch no_message };
+    };
+    const term = child.wait() catch |err| return .{ .failed = alloc.dupe(u8, @errorName(err)) catch no_message };
 
-    const ok = switch (result.term) {
+    const ok = switch (term) {
         .Exited => |code| code == 0,
         else => false,
     };
-    if (ok) {
-        alloc.free(result.stderr);
-        return .{ .ok = result.stdout };
-    }
-    alloc.free(result.stdout);
-    const owned = alloc.dupe(u8, std.mem.trim(u8, result.stderr, " \t\r\n")) catch no_message;
-    alloc.free(result.stderr);
-    return .{ .failed = owned };
+    if (ok) return .{ .ok = stdout.toOwnedSlice(alloc) catch no_message };
+    // Manche git-Fehler stehen auf stdout (z. B. „nothing to commit“): beides zusammen zeigen
+    const msg = if (stderr.items.len > 0) stderr.items else stdout.items;
+    return .{ .failed = alloc.dupe(u8, std.mem.trim(u8, msg, " \t\r\n")) catch no_message };
 }
 
 /// Liegt `path` in einem Git-Repository? Sucht `.git` aufwärts bis zur Wurzel.
@@ -709,4 +800,135 @@ test "parseStatusOutput: root, branch, geändert, unbekannt, ignoriert (Ordner o
     const no_root = try parseStatusOutput(alloc, "? x\x00", null);
     defer alloc.free(no_root);
     try std.testing.expectEqualStrings("?:x\n", no_root);
+}
+
+/// Fixture-Repo unter tmp: ein Commit mit a.txt (zwei Zeilen). Rückgabe = absoluter Pfad (owned).
+fn testRepo(alloc: std.mem.Allocator, tmp: *std.testing.TmpDir) ![]u8 {
+    const path = try tmp.dir.realpathAlloc(alloc, ".");
+    errdefer alloc.free(path);
+    for ([_][]const []const u8{
+        &.{ "init", "-q", "-b", "main" },
+        &.{ "config", "user.email", "t@example.com" },
+        &.{ "config", "user.name", "Test" },
+    }) |args| alloc.free(try runGit(alloc, path, args));
+    try tmp.dir.writeFile(.{ .sub_path = "a.txt", .data = "eins\nzwei\n" });
+    alloc.free(try runGit(alloc, path, &.{ "add", "a.txt" }));
+    alloc.free(try runGit(alloc, path, &.{ "commit", "-q", "-m", "erster" }));
+    return path;
+}
+
+fn statusRaw(alloc: std.mem.Allocator, repo: []const u8) ![]u8 {
+    const r = try taskGitStatus(alloc, try Params.init(alloc, repo, ""));
+    defer r.deinit();
+    const sep = std.mem.indexOfScalar(u8, r.payload, 0x1c) orelse return error.NoRawStatus;
+    return alloc.dupe(u8, r.payload[sep + 1 ..]);
+}
+
+test "taskGitStatus: hinter 0x1c die rohe porcelain-v2-Ausgabe für Source Control" {
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const repo = try testRepo(alloc, &tmp);
+    defer alloc.free(repo);
+    try tmp.dir.writeFile(.{ .sub_path = "a.txt", .data = "eins\nzwei\ndrei\n" });
+    const raw = try statusRaw(alloc, repo);
+    defer alloc.free(raw);
+    try std.testing.expect(std.mem.indexOf(u8, raw, "# branch.head main") != null);
+    try std.testing.expect(std.mem.indexOf(u8, raw, "1 .M ") != null);
+    try std.testing.expect(std.mem.endsWith(u8, raw, "a.txt\x00"));
+}
+
+test "taskGitAction: stage, unstage, discard, commit im Fixture-Repo; Fehler als Text" {
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const repo = try testRepo(alloc, &tmp);
+    defer alloc.free(repo);
+    try tmp.dir.writeFile(.{ .sub_path = "a.txt", .data = "eins\nzwei\ndrei\n" });
+    try tmp.dir.writeFile(.{ .sub_path = "neu.txt", .data = "frei\n" });
+
+    // stage: auch untracked (add -A)
+    var r = try taskGitAction(alloc, try FieldsParam.init(alloc, &.{ "stage", repo, "a.txt", "neu.txt" }));
+    try std.testing.expect(r.tag == .git_action);
+    try std.testing.expectEqualStrings("stage", unframe(r.payload).?.key);
+    r.deinit();
+    var raw = try statusRaw(alloc, repo);
+    try std.testing.expect(std.mem.indexOf(u8, raw, "1 M. ") != null);
+    try std.testing.expect(std.mem.indexOf(u8, raw, "1 A. ") != null);
+    alloc.free(raw);
+
+    // unstage neu.txt: wieder untracked
+    r = try taskGitAction(alloc, try FieldsParam.init(alloc, &.{ "unstage", repo, "neu.txt" }));
+    try std.testing.expect(r.tag == .git_action);
+    r.deinit();
+    raw = try statusRaw(alloc, repo);
+    try std.testing.expect(std.mem.indexOf(u8, raw, "? neu.txt") != null);
+    alloc.free(raw);
+
+    // discard untracked löscht die Datei, discard tracked stellt den Index-Stand her
+    r = try taskGitAction(alloc, try FieldsParam.init(alloc, &.{ "discard_untracked", repo, "neu.txt" }));
+    try std.testing.expect(r.tag == .git_action);
+    r.deinit();
+    try std.testing.expectError(error.FileNotFound, tmp.dir.access("neu.txt", .{}));
+    try tmp.dir.writeFile(.{ .sub_path = "a.txt", .data = "ganz anders\n" });
+    r = try taskGitAction(alloc, try FieldsParam.init(alloc, &.{ "discard_tracked", repo, "a.txt" }));
+    try std.testing.expect(r.tag == .git_action);
+    r.deinit();
+    const back = try tmp.dir.readFileAlloc(alloc, "a.txt", 1024);
+    defer alloc.free(back);
+    try std.testing.expectEqualStrings("eins\nzwei\ndrei\n", back);
+
+    // commit: Nachricht über stdin, mehrzeilig
+    r = try taskGitAction(alloc, try FieldsParam.init(alloc, &.{ "commit", repo, "feat: drei\n\nBody mit Umlaut ä" }));
+    try std.testing.expect(r.tag == .git_action);
+    r.deinit();
+    const log_out = try runGit(alloc, repo, &.{ "log", "-1", "--format=%B" });
+    defer alloc.free(log_out);
+    try std.testing.expectEqualStrings("feat: drei\n\nBody mit Umlaut ä", std.mem.trimRight(u8, log_out, "\n"));
+    raw = try statusRaw(alloc, repo);
+    try std.testing.expect(std.mem.indexOf(u8, raw, "1 ") == null); // sauber
+    alloc.free(raw);
+
+    // commit ohne Änderungen: Fehler als Text, kein Task-Fehler
+    r = try taskGitAction(alloc, try FieldsParam.init(alloc, &.{ "commit", repo, "leer" }));
+    try std.testing.expect(r.tag == .git_action_error);
+    try std.testing.expectEqualStrings("commit", unframe(r.payload).?.key);
+    try std.testing.expect(unframe(r.payload).?.body.len > 0);
+    r.deinit();
+}
+
+test "taskGitFileDiff: Arbeitskopie gegen Index, Untracked gegen leeren Baum" {
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const repo = try testRepo(alloc, &tmp);
+    defer alloc.free(repo);
+    try tmp.dir.writeFile(.{ .sub_path = "a.txt", .data = "eins\nzwei\ndrei\n" });
+    try tmp.dir.writeFile(.{ .sub_path = "neu.txt", .data = "x\ny\n" });
+
+    const tab = try git_diff.tabPath(alloc, .{ .hash = git_diff.worktree_ref, .parent = git_diff.index_ref, .repo = repo, .path = "a.txt", .previous_path = "a.txt" });
+    defer alloc.free(tab);
+    const r = try taskGitFileDiff(alloc, try TextParam.init(alloc, tab));
+    defer r.deinit();
+    try std.testing.expect(r.tag == .git_file_diff);
+    const c = git_diff.decodeContents(unframe(r.payload).?.body).?;
+    try std.testing.expectEqualStrings("eins\nzwei\n", c.old);
+    try std.testing.expectEqualStrings("eins\nzwei\ndrei\n", c.new);
+    const hunks = try git_diff.parseHunks(alloc, c.hunks);
+    defer alloc.free(hunks);
+    try std.testing.expectEqual(@as(usize, 1), hunks.len);
+    try std.testing.expectEqual(@as(u32, 1), hunks[0].new_count);
+
+    const tab2 = try git_diff.tabPath(alloc, .{ .hash = git_diff.worktree_ref, .parent = "", .repo = repo, .path = "neu.txt", .previous_path = "neu.txt" });
+    defer alloc.free(tab2);
+    const r2 = try taskGitFileDiff(alloc, try TextParam.init(alloc, tab2));
+    defer r2.deinit();
+    try std.testing.expect(r2.tag == .git_file_diff);
+    const c2 = git_diff.decodeContents(unframe(r2.payload).?.body).?;
+    try std.testing.expectEqualStrings("", c2.old);
+    try std.testing.expectEqualStrings("x\ny\n", c2.new);
+    const h2 = try git_diff.parseHunks(alloc, c2.hunks);
+    defer alloc.free(h2);
+    try std.testing.expectEqual(@as(u32, 0), h2[0].old_start);
+    try std.testing.expectEqual(@as(u32, 2), h2[0].new_count);
 }
