@@ -114,6 +114,9 @@ pub fn taskGitAction(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.Tas
             &.{ "checkout", "-q", "--" }
         else if (std.mem.eql(u8, action, "discard_untracked"))
             &.{ "clean", "-f", "-q", "--" }
+        else if (std.mem.eql(u8, action, "push"))
+            // Push (Felder = weitere git-Argumente, z. B. `-u origin main` für Publish Branch)
+            &.{ "push", "--quiet" }
         else
             return error.UnknownGitAction;
         try argv.appendSlice(alloc, head);
@@ -956,4 +959,38 @@ test "taskGitAction commit_all: stagt alles und committet (VS Code smartCommit)"
     const log_out = try runGit(alloc, repo, &.{ "log", "-1", "--format=%s" });
     defer alloc.free(log_out);
     try std.testing.expectEqualStrings("alles", std.mem.trimRight(u8, log_out, "\n"));
+}
+
+test "taskGitAction push: Publish mit -u origin, danach Push; ohne Remote Fehler als Text" {
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const repo = try testRepo(alloc, &tmp);
+    defer alloc.free(repo);
+    // ohne Remote: Fehler von git, kein Task-Fehler
+    var r = try taskGitAction(alloc, try FieldsParam.init(alloc, &.{ "push", repo }));
+    try std.testing.expect(r.tag == .git_action_error);
+    r.deinit();
+    // bares Remote daneben, Publish Branch = push -u origin main
+    try tmp.dir.makeDir("remote.git");
+    const remote = try std.fs.path.join(alloc, &.{ repo, "remote.git" });
+    defer alloc.free(remote);
+    alloc.free(try runGit(alloc, remote, &.{ "init", "-q", "--bare" }));
+    alloc.free(try runGit(alloc, repo, &.{ "remote", "add", "origin", remote }));
+    r = try taskGitAction(alloc, try FieldsParam.init(alloc, &.{ "push", repo, "-u", "origin", "main" }));
+    try std.testing.expect(r.tag == .git_action);
+    r.deinit();
+    const raw = try statusRaw(alloc, repo);
+    defer alloc.free(raw);
+    try std.testing.expect(std.mem.indexOf(u8, raw, "# branch.upstream origin/main") != null);
+    try std.testing.expect(std.mem.indexOf(u8, raw, "# branch.ab +0 -0") != null);
+    // neuer Commit, Push ohne Argumente
+    try tmp.dir.writeFile(.{ .sub_path = "a.txt", .data = "neu\n" });
+    alloc.free(try runGit(alloc, repo, &.{ "commit", "-q", "-am", "zweiter" }));
+    r = try taskGitAction(alloc, try FieldsParam.init(alloc, &.{ "push", repo }));
+    try std.testing.expect(r.tag == .git_action);
+    r.deinit();
+    const remote_log = try runGit(alloc, remote, &.{ "log", "-1", "--format=%s", "main" });
+    defer alloc.free(remote_log);
+    try std.testing.expectEqualStrings("zweiter", std.mem.trimRight(u8, remote_log, "\n"));
 }

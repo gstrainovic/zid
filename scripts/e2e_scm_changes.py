@@ -10,6 +10,8 @@ Prüft:
   3. Unstage über die Aktion; Discard mit Rückfrage löscht die untracked Datei
   4. Commit ohne Nachricht: Hinweis; Commit ohne Staged Changes: Rückfrage, Yes stagt alles
      und committet; Graph zeigt den Commit, Feld leer, Liste leer
+  4b. Knopf „Publish Branch“ ohne Upstream (push -u origin main); mehrzeilige Nachricht (Enter =
+     neue Zeile, Feld wächst, ↑/Pos1 bewegen in der Zeile); danach „Push 1↑“, Remote hat den Commit
   5. Tastatur: Tab wechselt Feld → Liste → Graph, ↓/Enter in der Liste, Escape gibt ab
 Aufruf: python3 scripts/e2e_scm_changes.py
 """
@@ -19,7 +21,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from e2e_open_folder import ROOT, rpc, result_json, wait_port, settle, bounds, click_center, check, shot, rmtree  # noqa: E402
 from e2e_shortcuts import key  # noqa: E402
 
-FX = os.path.join(ROOT, "tmp", "e2e_scm_changes")
+BASE = os.path.join(ROOT, "tmp", "e2e_scm_changes")
+FX = os.path.join(BASE, "work")
+REMOTE = os.path.join(BASE, "remote.git")
 XDG = os.path.join(ROOT, "tmp", "xdg")
 XDG_CONFIG = os.path.join(ROOT, "tmp", "xdg-config-scm-changes")
 LOG = os.path.join(ROOT, "tmp", "e2e_scm_changes.log")
@@ -40,7 +44,7 @@ def write(name, text):
 
 
 def setup_fixture():
-    rmtree(FX)
+    rmtree(BASE)
     shutil.rmtree(XDG_CONFIG, ignore_errors=True)
     os.makedirs(FX)
     git("init", "-q", "-b", "main")
@@ -50,9 +54,16 @@ def setup_fixture():
     write("a.txt", "eins\nzwei\n")
     write("b.txt", "weg\n")
     git("add", "a.txt", "b.txt"); git("commit", "-q", "-m", "init")
+    # bares Remote neben dem Repo, ohne Upstream: erst „Publish Branch“, danach „Push“
+    git("init", "-q", "--bare", REMOTE)
+    git("remote", "add", "origin", REMOTE)
     write("a.txt", "eins\nzwei\ndrei\n")
     os.remove(os.path.join(FX, "b.txt"))
     write("c.txt", "frei\n")
+
+
+def remote_git(*args):
+    return subprocess.run(["git", *args], cwd=REMOTE, check=True, capture_output=True, text=True).stdout.strip()
 
 
 def st():
@@ -195,11 +206,46 @@ def step_commit():
     ui = result_json("ui_state")
     check("no changes to commit" in ui.get("toast", ""), f"Toast: {ui.get('toast')!r}")
     shot("e2e_scm_committed.ppm")
+    for _ in range(len("nochmal")):
+        key("backspace")
+    wait(lambda s: s["changes"]["message"] == "", "Backspace leert das Feld")
+
+
+def step_publish_push_multiline():
+    print("--- 4b. Publish Branch, mehrzeilige Nachricht, Push")
+    s = wait(lambda s: s["changes"]["button"] == "Publish Branch" and s["changes"]["upstream"] == "", "sauber ohne Upstream: Knopf „Publish Branch“")
+    click_center("sc_btn_commit_big")
+    wait(lambda s: s["changes"]["upstream"] == "origin/main" and s["changes"]["ahead"] == 0 and s["changes"]["button"] == "Commit" and not s["changes"]["busy"],
+         "Publish: push -u origin main, Upstream gesetzt, Knopf wieder Commit")
+    check(remote_git("log", "-1", "--format=%s", "main") == "feat: drei", "Remote hat den Commit")
+    # neue Änderung, mehrzeilige Nachricht: Enter = neue Zeile, Feld wächst
+    write("a.txt", "eins\nzwei\ndrei\nvier\n")
+    wait(lambda s: len(s["changes"]["groups"]["changes"]) == 1, "Änderung erkannt")
+    click_center("sc_input_box")
+    wait(lambda s: s["changes"]["focus"] == "commit_input", "Klick ins Feld")
+    h1 = bounds("sc_input_box")["h"]
+    rpc("type_text", ["feat: vier"]); key("enter"); rpc("type_text", ["Zweite Zeile"]); key("enter"); rpc("type_text", ["Dritte"]); settle(4)
+    s = wait(lambda s: s["changes"]["message"] == "feat: vier\nZweite Zeile\nDritte" and s["changes"]["lines"] == 3, "drei Zeilen im Feld")
+    h3 = bounds("sc_input_box")["h"]
+    check(h3 > h1 + 30, f"Feld wächst mit den Zeilen ({h1:.0f} → {h3:.0f})")
+    key("up"); key("home"); rpc("type_text", ["> "]); settle(4)
+    wait(lambda s: s["changes"]["message"] == "feat: vier\n> Zweite Zeile\nDritte", "↑ und Pos1 bewegen in der Zeile, Tippen fügt dort ein")
+    key("enter", ctrl=True)
+    wait(lambda s: s["changes"]["dialog"] is not None, "Ctrl+Enter: Rückfrage ohne Staged Changes")
+    key("enter")
+    s = wait(lambda s: s["changes"]["dialog"] is None and s["changes"]["message"] == "" and s["changes"]["button"] == "Push 1↑", "committet: Knopf „Push 1↑“")
+    check(git("log", "-1", "--format=%B").strip() == "feat: vier\n> Zweite Zeile\nDritte", "mehrzeilige Nachricht im Commit")
+    click_center("sc_btn_commit_big")
+    wait(lambda s: s["changes"]["ahead"] == 0 and s["changes"]["button"] == "Commit" and not s["changes"]["busy"], "Push: nichts mehr voraus")
+    check(remote_git("log", "-1", "--format=%B", "main").strip() == "feat: vier\n> Zweite Zeile\nDritte", "Remote hat den Push mit der ganzen Nachricht")
+    ui = result_json("ui_state")
+    check("Pushed to origin/main" in ui.get("toast", ""), f"Toast: {ui.get('toast')!r}")
+    shot("e2e_scm_pushed.ppm")
 
 
 def step_keyboard():
     print("--- 5. Tastatur")
-    write("a.txt", "eins\nzwei\ndrei\nvier\n")
+    write("a.txt", "eins\nzwei\ndrei\nvier\nfünf\n")
     write("d.txt", "neu\n")
     wait(lambda s: len(s["changes"]["groups"]["changes"]) == 2, "Dateiänderung lädt den Status nach")
     key("g", ctrl=True, shift=True)
@@ -236,7 +282,7 @@ def main():
         # open_project wie der Dialog: Explorer, Watcher, Branch und git status folgen dem Repo
         check(rpc("open_project", [FX]) == "ok", "Fixture-Repo als Projektordner")
         settle(20)
-        for step in (step_show, step_stage_and_diffs, step_unstage_discard, step_commit, step_keyboard):
+        for step in (step_show, step_stage_and_diffs, step_unstage_discard, step_commit, step_publish_push_multiline, step_keyboard):
             step()
         print("ALL PASSED")
     finally:

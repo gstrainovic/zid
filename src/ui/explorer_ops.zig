@@ -15,6 +15,9 @@ pub fn EditBuffer(comptime capacity: usize) type {
         len: usize = 0,
         /// Byte-Offset des Cursors (immer auf einer Codepoint-Grenze).
         cursor: usize = 0,
+        /// Gemerkte Spalte für Auf/Ab und der Cursor, bei dem sie gilt
+        goal_col: usize = 0,
+        goal_cursor: usize = std.math.maxInt(usize),
 
         const Self = @This();
 
@@ -84,6 +87,89 @@ pub fn EditBuffer(comptime capacity: usize) type {
 
         pub fn moveEnd(self: *Self) void {
             self.cursor = self.len;
+        }
+
+        // ─── Mehrzeilig (Commit-Nachricht): Zeilen durch '\n' getrennt ───
+
+        /// Byte-Offset des Zeilenanfangs, in dem `pos` liegt.
+        fn lineStartAt(self: *const Self, pos: usize) usize {
+            const s = self.buf[0..self.len];
+            return if (std.mem.lastIndexOfScalar(u8, s[0..pos], '\n')) |i| i + 1 else 0;
+        }
+
+        /// Byte-Offset des Zeilenendes (vor '\n' bzw. Textende).
+        fn lineEndAt(self: *const Self, pos: usize) usize {
+            const s = self.buf[0..self.len];
+            return if (std.mem.indexOfScalarPos(u8, s, pos, '\n')) |i| i else self.len;
+        }
+
+        pub fn lineCount(self: *const Self) usize {
+            return std.mem.count(u8, self.buf[0..self.len], "\n") + 1;
+        }
+
+        /// Zeile 0-basiert, in der der Cursor steht.
+        pub fn cursorLine(self: *const Self) usize {
+            return std.mem.count(u8, self.buf[0..self.cursor], "\n");
+        }
+
+        /// Text der Zeile `index` (ohne '\n'); leer hinter der letzten Zeile.
+        pub fn line(self: *const Self, index: usize) []const u8 {
+            var it = std.mem.splitScalar(u8, self.buf[0..self.len], '\n');
+            var i: usize = 0;
+            while (it.next()) |l| : (i += 1) if (i == index) return l;
+            return "";
+        }
+
+        /// Spalte des Cursors in Codepoints ab Zeilenanfang.
+        fn cursorColumn(self: *const Self) usize {
+            return std.unicode.utf8CountCodepoints(self.buf[self.lineStartAt(self.cursor)..self.cursor]) catch 0;
+        }
+
+        pub fn moveLineHome(self: *Self) void {
+            self.cursor = self.lineStartAt(self.cursor);
+        }
+
+        pub fn moveLineEnd(self: *Self) void {
+            self.cursor = self.lineEndAt(self.cursor);
+        }
+
+        /// Cursor auf Zeile `index`, Spalte `col` (Codepoints), geklemmt an Zeilenende und Textende.
+        pub fn setCursorAtLine(self: *Self, index: usize, col: usize) void {
+            const s = self.buf[0..self.len];
+            var start: usize = 0;
+            var i: usize = 0;
+            while (i < index) : (i += 1) {
+                start = (std.mem.indexOfScalarPos(u8, s, start, '\n') orelse {
+                    self.cursor = self.len;
+                    return;
+                }) + 1;
+            }
+            const end = self.lineEndAt(start);
+            var pos = start;
+            var n: usize = 0;
+            while (pos < end and n < col) : (n += 1) pos = nextBoundary(s, pos);
+            self.cursor = pos;
+        }
+
+        /// Auf/Ab merken sich die Spalte über kurze Zeilen hinweg (wie im Editor): gilt, solange
+        /// der Cursor seit dem letzten Auf/Ab nicht anders bewegt wurde.
+        fn verticalMove(self: *Self, target_line: usize) void {
+            const col = if (self.cursor == self.goal_cursor) self.goal_col else self.cursorColumn();
+            self.setCursorAtLine(target_line, col);
+            self.goal_col = col;
+            self.goal_cursor = self.cursor;
+        }
+
+        pub fn moveUp(self: *Self) void {
+            const l = self.cursorLine();
+            if (l == 0) return;
+            self.verticalMove(l - 1);
+        }
+
+        pub fn moveDown(self: *Self) void {
+            const l = self.cursorLine();
+            if (l + 1 >= self.lineCount()) return;
+            self.verticalMove(l + 1);
         }
 
         pub const Measure = *const fn (text: []const u8, size: f32) f32;
@@ -670,4 +756,35 @@ test "RenameEdit: setCursorAtX setzt den Cursor auf die nächstgelegene Codepoin
     try testing.expectEqualStrings("aü", e.textBeforeCursor());
     e.setCursorAtX(tenPerCodepoint, 22, 99);
     try testing.expectEqualStrings("aüc", e.textBeforeCursor());
+}
+
+test "EditBuffer mehrzeilig: Zeilenanfang/-ende, Auf und Ab halten die Spalte, Zeilenindex" {
+    var e = EditBuffer(64).init("ab\ncdef\n\nxy");
+    // Cursor am Ende (Zeile 3, Spalte 2)
+    try std.testing.expectEqual(@as(usize, 3), e.cursorLine());
+    try std.testing.expectEqual(@as(usize, 4), e.lineCount());
+    e.moveUp(); // leere Zeile: Spalte 0
+    try std.testing.expectEqual(@as(usize, 2), e.cursorLine());
+    try std.testing.expectEqualStrings("ab\ncdef\n", e.textBeforeCursor());
+    e.moveUp(); // Spalte 2 bleibt gemerkt: "cd|ef"
+    try std.testing.expectEqualStrings("ab\ncd", e.textBeforeCursor());
+    e.moveLineEnd();
+    try std.testing.expectEqualStrings("ab\ncdef", e.textBeforeCursor());
+    e.moveLineHome();
+    try std.testing.expectEqualStrings("ab\n", e.textBeforeCursor());
+    e.moveUp();
+    try std.testing.expectEqualStrings("", e.textBeforeCursor());
+    e.moveUp(); // erste Zeile: bleibt
+    try std.testing.expectEqualStrings("", e.textBeforeCursor());
+    e.moveDown();
+    e.moveDown();
+    e.moveDown();
+    e.moveDown(); // letzte Zeile: bleibt
+    try std.testing.expectEqual(@as(usize, 3), e.cursorLine());
+    // Zeile 1 ("cdef") als Slice und Cursor an Zeile/Spalte setzen
+    try std.testing.expectEqualStrings("cdef", e.line(1));
+    e.setCursorAtLine(1, 3);
+    try std.testing.expectEqualStrings("ab\ncde", e.textBeforeCursor());
+    e.setCursorAtLine(9, 0); // hinter der letzten Zeile: Ende
+    try std.testing.expectEqualStrings("ab\ncdef\n\nxy", e.textBeforeCursor());
 }

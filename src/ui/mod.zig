@@ -4067,7 +4067,25 @@ pub const UI = struct {
                 self.showScmDialog("Discard All Changes", q, b);
             },
             .commit => self.scmCommit(),
+            .push => self.scmPush(),
         }
+    }
+
+    /// Push wie VS Code: ohne Upstream „Publish Branch“ (`push -u origin <branch>`), sonst `push`.
+    fn scmPush(self: *Self) void {
+        const sc = &self.scm_changes;
+        if (sc.busy) return;
+        const branch = sc.view.branch();
+        if (branch.len == 0) {
+            self.showToast("Push: no branch", .{});
+            return;
+        }
+        if (sc.view.upstream().len == 0) {
+            self.submitScm("push", &.{ "-u", "origin", branch }, null);
+        } else {
+            self.submitScm("push", &.{}, null);
+        }
+        sc.busy = true;
     }
 
     /// Pfade der Gruppen als eine Liste (owned Slice, Strings gehören dem Status).
@@ -4171,12 +4189,17 @@ pub const UI = struct {
         const u = git_worker.unframe(payload) orelse return;
         const sc = &self.scm_changes;
         const is_commit = std.mem.startsWith(u8, u.key, "commit");
-        if (is_commit) sc.busy = false;
+        const is_push = std.mem.eql(u8, u.key, "push");
+        if (is_commit or is_push) sc.busy = false;
         self.git_status_wanted = true;
         if (!ok) {
             const first = u.body[0 .. std.mem.indexOfScalar(u8, u.body, '\n') orelse u.body.len];
             self.showToast("git {s}: {s}", .{ u.key, first });
             return;
+        }
+        if (is_push) {
+            self.showToast("Pushed to {s}", .{if (sc.view.upstream().len > 0) sc.view.upstream() else "origin"});
+            self.scm_graph.refresh();
         }
         if (is_commit) {
             sc.message.set("");
