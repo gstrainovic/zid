@@ -11,6 +11,7 @@ Prüft:
   4. Klick öffnet den Diff-Editor gegen den vorigen Commit der Datei, Timeline bleibt stehen
   5. Rechtsklick-Menü: Copy Commit ID
   6. Timeline folgt der aktiven Datei; Pin hält sie fest; Datei ohne Commit zeigt den Hinweis
+  6c. „File History“ aus Explorer-, Tab- und Editor-Menü stellt die Timeline angepinnt auf die Datei
   7. Refresh lädt einen neuen Commit; keine Clay-Fehler
 Aufruf: python3 scripts/e2e_timeline.py
 """
@@ -211,6 +212,41 @@ def step_staged():
     write("other.txt", "anders\n")
 
 
+def step_file_history_menus():
+    print("--- 6c. File History aus Explorer-, Tab- und Editor-Menü (VS Code files.openTimeline)")
+    # Explorer-Menü: Datei ist nicht offen; Timeline zeigt sie angepinnt und aufgeklappt
+    explorer_click("other.txt"); settle(6)
+    wait(lambda s: s["file"] == os.path.join(FX, "other.txt"), "other.txt aktiv")
+    before = result_json("get_active_tab")
+    explorer_click("app.zig", right=True)
+    click_center("fx_menu_file_history_entry")
+    s = wait(lambda s: s["file"] == os.path.join(FX, "app.zig") and s["loaded"] and s["pinned"] and s["expanded"],
+             "Explorer-Menü: Timeline zeigt app.zig, angepinnt")
+    check(len(s["items"]) == 4, f"vier Commits über die Umbenennung ({len(s['items'])})")
+    after = result_json("get_active_tab")
+    check(len(after["tabs"]) == len(before["tabs"]) and after["active_index"] == before["active_index"],
+          "kein Tab geöffnet oder gewechselt, other.txt bleibt aktiv")
+    explorer_click("new.txt"); settle(6)
+    check(tl()["file"] == os.path.join(FX, "app.zig"), "Tab-Wechsel: angepinnte Datei bleibt")
+    # Tab-Menü der Datei other.txt
+    explorer_click("other.txt"); settle(6)
+    b = result_json("tab_bounds", [result_json("get_active_tab")["active_index"]])
+    rpc("right_click", [b["x"] + b["w"] / 2, b["y"] + b["h"] / 2]); settle()
+    click_center("tab_menu_file_history")
+    wait(lambda s: s["file"] == os.path.join(FX, "other.txt") and s["loaded"] and s["pinned"], "Tab-Menü: Timeline zeigt other.txt")
+    # Editor-Menü der aktiven Datei new.txt
+    explorer_click("new.txt"); settle(6)
+    rpc("right_click", [700, 400]); settle()
+    click_center("editor_menu_file_history")
+    wait(lambda s: s["file"] == os.path.join(FX, "new.txt") and s["loaded"] and s["pinned"], "Editor-Menü: Timeline zeigt new.txt")
+    # Pin lösen: folgt sofort dem aktiven Tab, ohne Tab-Wechsel
+    explorer_click("other.txt"); settle(6)
+    check(tl()["file"] == os.path.join(FX, "new.txt"), "angepinnt: bleibt bei new.txt")
+    rpc("move_mouse", list(center(tl()["header"]))); settle(6)
+    click_center("tl_btn_pin")
+    wait(lambda s: not s["pinned"] and s["file"] == os.path.join(FX, "other.txt"), "gelöst: folgt sofort other.txt")
+
+
 def step_refresh():
     print("--- 7. Refresh")
     explorer_click("other.txt"); settle(6)
@@ -238,7 +274,7 @@ def main():
         settle(20)
         check(rpc("open_folder", [FX]) == "ok", "Fixture-Repo als Explorer-Root")
         settle(10)
-        for step in (step_expand, step_items, step_hover, step_open_changes, step_menu, step_follow_pin, step_staged, step_refresh):
+        for step in (step_expand, step_items, step_hover, step_open_changes, step_menu, step_follow_pin, step_staged, step_file_history_menus, step_refresh):
             step()
         print("ALL PASSED")
     finally:

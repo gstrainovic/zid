@@ -30,6 +30,8 @@ pub const Action = union(enum) {
     command: struct { cmd: shortcuts.Command, index: usize },
     /// Auf-/Zugeklappt: Zustand merken
     toggled,
+    /// Pin gesetzt oder gelöst: gelöst folgt die Timeline sofort dem aktiven Tab
+    pin_toggled,
 };
 
 pub const TimelineView = struct {
@@ -109,7 +111,7 @@ pub const TimelineView = struct {
         }
         if (box(buttonId("pin"))) |b| if (inside(b, x, y)) {
             self.timeline.togglePin();
-            return .consumed;
+            return .pin_toggled;
         };
         if (box(buttonId("refresh"))) |b| if (inside(b, x, y)) {
             self.timeline.refresh();
