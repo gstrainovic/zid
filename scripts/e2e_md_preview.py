@@ -64,6 +64,28 @@ def step_virtualized():
     check(after[-1] > top_last, f"Scrollen erschliesst weitere Bloecke ({top_last} -> {after[-1]})")
     shot("e2e_md_preview_scrolled.ppm")
 
+    # Rad-Schritt = 60 px, und der sichtbare Inhalt wandert um genau so viel. Vorher ersetzten
+    # Messungen die Schaetzungen der Bloecke ueber der Oberkante und der Inhalt sprang mit.
+    vp = bounds("md_viewport")
+    limit = after[-1] + 60
+
+    def block_ys():
+        return {i: result_json("element_bounds_i", ["md_block", i])["y"] for i in visible_blocks(limit)}
+
+    prev = block_ys()
+    worst, samples = 0.0, 0
+    for _ in range(12):
+        rpc("scroll", [600, 400, -1]); settle(6)
+        cur = block_ys()
+        # element_bounds behaelt verschwundene Bloecke mit alter Lage: lebendig ist, was sich
+        # bewegt hat und im Viewport steht
+        live = [i for i in cur if i in prev and cur[i] != prev[i] and vp["y"] <= cur[i] <= vp["y"] + vp["h"]]
+        for i in live:
+            worst = max(worst, abs((prev[i] - cur[i]) - 60))
+            samples += 1
+        prev = cur
+    check(samples > 0 and worst < 1.5, f"Rad-Schritt bewegt sichtbare Bloecke um 60 px ({samples} Proben, groesste Abweichung {worst:.1f} px)")
+
 
 def step_table_fits():
     """Tabellen bleiben im Fenster: die Spaltenbreiten werden aus dem Inhalt berechnet

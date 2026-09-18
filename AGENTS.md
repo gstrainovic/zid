@@ -167,8 +167,9 @@ liegen in `src/ui/mod.zig`, das Virtualisierungsmuster in
   wie im Browser aus dem Inhalt: `measureCell` liefert je Zelle die Wunschbreite (eine Zeile)
   und die Mindestbreite (breitestes unteilbares Stück), die Tabelle verteilt proportional und
   staucht notfalls die jeweils breiteste Spalte. `relative_width` aus der Trennzeile bleibt
-  ungenutzt, die Zahl der Striche sagt nichts über den Inhalt. Die Tabelle steht in einer
-  `grow`-Hülle (`md_table_row`) und ist selbst `fit` — gemessen wird die Hülle, sonst
+  ungenutzt, die Zahl der Striche sagt nichts über den Inhalt. Die Tabelle steht in zwei
+  `grow`-Hüllen (`md_table_row` mit Frame-Nummer für die E2E, darin `md_table_box` mit je Block
+  stabiler Nummer zum Messen) und ist selbst `fit` — gemessen wird die Hülle, sonst
   schrumpfte die Tabelle Frame für Frame an ihrer eigenen Breite. Die Hüllenbreite ist nach
   oben durch `wrap_width_hint` gedeckelt: `grow` wird nie schmaler als das Kind und hielte
   sonst eine Überbreite aus dem ersten Frame (noch ohne Hint, 800 px) für immer fest.
@@ -180,6 +181,14 @@ liegen in `src/ui/mod.zig`, das Virtualisierungsmuster in
 - **Abfragbare IDs der Vorschau (E2E):** `md_tcell` mit Index Tabelle × 100000 + Zeile × ncol
   + Spalte (Tabellen ab 1), `md_quote`, `md_li`/`md_bullet` und `md_code` mit laufender
   Nummer ab 1. Alle Zähler setzt `resetCounters` zu Beginn jedes Frames zurück.
+  **IDs, an denen die Vorschau im nächsten Frame eine Breite abliest** (`md_run_…` in
+  `flushPieces`, `md_table_box`), tragen dagegen den Block-Index und einen je Block gezählten
+  Lauf (`beginBlock` setzt zurück): frameweite Nummern verrutschten, sobald das virtualisierte
+  Fenster oben einen Block verlor, jeder Lauf las die Breite eines anderen (Listenpunkt,
+  Zitat) und brach einen Frame lang falsch um — die Vorschau zappelte beim Rad-Scrollen.
+  Zweite Ursache für Springen: Blöcke im Vorlauf über der Oberkante wechseln von Schätzung auf
+  Messung, `syncBlockHeights` gleicht das über `scrollbar.anchorShift` im Offset aus.
+  `e2e_md_preview.py` prüft, dass ein Rad-Schritt sichtbare Blöcke um genau 60 px bewegt.
   `e2e_md_preview.py` öffnet jede `libs/zigdown/test/*.md` (Glob), legt je Datei
   `tmp/e2e_md_example_<name>.ppm` ab und prüft Zitatrand, Aufzählungszeichen und
   Codeblock-Hintergrund an Pixeln des Screenshots.
