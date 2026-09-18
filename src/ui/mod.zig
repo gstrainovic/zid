@@ -20,6 +20,7 @@ const tab_mru = @import("tab_mru.zig");
 const lsp_proto = @import("lsp_proto");
 const wio = @import("wio");
 const tab_bar_mod = @import("tab_bar.zig");
+const scrollbar = @import("scrollbar");
 const file_explorer_mod = @import("file_explorer.zig");
 const image_view_mod = @import("image_view.zig");
 const binary_view_mod = @import("binary_view.zig");
@@ -3731,6 +3732,8 @@ pub const UI = struct {
             }
         }
 
+        // Explorer-Balken wird gezogen: Pfeil, auch wenn die Maus dabei über dem Editor steht
+        if (self.file_explorer.scrollbar_drag != null) return .arrow;
         // Markdown-Vorschau: Pfeil über den Balken, I-Beam über dem Text. Vor dem Editor-Test,
         // der hält für die Pane noch die Editor-Bounds und meldete über der Vorschau immer I-Beam.
         if (self.activeMarkdownView()) |v| {
@@ -4387,6 +4390,14 @@ pub const UI = struct {
         const total_rows = term_instance.*.totalRows();
         const line_height: f32 = 24.0;
         const clip_id = clay.ElementId.IDI("terminal_content_clip", @truncate(@intFromPtr(pane)));
+        const outer_id = clay.ElementId.IDI("terminal_outer", @truncate(@intFromPtr(pane)));
+        const outer_data = clay.getElementData(outer_id);
+        if (outer_data.found) {
+            const ob = outer_data.bounding_box;
+            term_instance.scrollbar_track_x = ob.x + ob.width - term_instance.scrollbar_width;
+            term_instance.scrollbar_track_y = ob.y;
+            term_instance.scrollbar_track_len = ob.height;
+        }
         const term_data = clay.getElementData(clip_id);
         if (term_data.found) {
             const bb = term_data.bounding_box;
@@ -4406,7 +4417,7 @@ pub const UI = struct {
         const history_count = if (total_rows > term_instance.rows) total_rows - term_instance.rows else 0;
         const cursor_abs_row = history_count + cursor.y;
         clay.UI()(.{
-            .id = clay.ElementId.IDI("terminal_outer", @truncate(@intFromPtr(pane))),
+            .id = outer_id,
             .layout = .{ .sizing = .grow, .direction = .left_to_right, .padding = .{ .left = 8, .right = 8, .top = 8, .bottom = 8 } },
             .background_color = .{ 30, 30, 30, 255 },
         })({
@@ -4582,24 +4593,12 @@ pub const UI = struct {
                     }
                 });
             });
-            if (total_rows > visible_rows) {
-                const track_id = clay.ElementId.IDI("terminal_scrollbar_track", @truncate(@intFromPtr(pane)));
-                const track_data = clay.getElementData(track_id);
-                if (track_data.found) {
-                    term_instance.scrollbar_track_x = track_data.bounding_box.x;
-                    term_instance.scrollbar_track_y = track_data.bounding_box.y;
-                }
-                const track_height = term_instance.height;
-                const thumb_ratio: f32 = @as(f32, @floatFromInt(visible_rows)) / @as(f32, @floatFromInt(total_rows));
-                const thumb_height = @max(20.0, track_height * thumb_ratio);
-                const max_offset: usize = total_rows - visible_rows;
-                const scroll_frac: f32 = if (max_offset > 0) @as(f32, @floatFromInt(term_instance.view_row)) / @as(f32, @floatFromInt(max_offset)) else 0.0;
-                const thumb_y = scroll_frac * (track_height - thumb_height);
-                term_instance.scrollbar_thumb_y = term_instance.scrollbar_track_y + thumb_y;
-                term_instance.scrollbar_thumb_height = thumb_height;
-                clay.UI()(.{ .id = track_id, .floating = .{ .attach_to = .to_parent, .attach_points = .{ .element = .right_top, .parent = .right_top }, .z_index = 1000 }, .layout = .{ .sizing = .{ .w = .fixed(term_instance.scrollbar_width), .h = .grow }, .direction = .top_to_bottom }, .background_color = .{ 30, 30, 46, 255 } })({
-                    clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(thumb_y) } } })({});
-                    clay.UI()(.{ .id = clay.ElementId.IDI("terminal_scrollbar_thumb", @truncate(@intFromPtr(pane))), .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(thumb_height) } }, .background_color = .{ 88, 88, 120, 200 }, .corner_radius = .all(3) })({});
+            // Balken über die volle Höhe am rechten Rand (Lage aus dem Vorframe). Hover braucht
+            // keine Auswertung: über dem Terminal gilt ohnehin der Pfeil.
+            if (term_instance.scrollModel()) |m| {
+                _ = scrollbar.render(m, .{
+                    .track = clay.ElementId.IDI("terminal_scrollbar_track", @truncate(@intFromPtr(pane))),
+                    .thumb = clay.ElementId.IDI("terminal_scrollbar_thumb", @truncate(@intFromPtr(pane))),
                 });
             }
         });

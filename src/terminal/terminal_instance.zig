@@ -14,6 +14,7 @@ const ConPty = @import("conpty.zig");
 const clay = @import("clay");
 const shortcuts = @import("shortcuts");
 const ctx_menu = @import("context_menu");
+const scrollbar = @import("scrollbar");
 
 const log = std.log.scoped(.terminal_instance);
 
@@ -50,14 +51,14 @@ pub const TerminalInstance = struct {
 
     // --- Scrolling & UI State ---
     view_row: usize = 0,
-    scrollbar_dragging: bool = false,
-    scrollbar_drag_start_y: f32 = 0,
-    scrollbar_scroll_offset_at_drag_start: f32 = 0,
+    /// Balken aus `scrollbar.zig` in Zeilen. Track rechts am Terminal, Lage aus dem Vorframe
+    /// (`UI.renderTerminalContentInPane`).
     scrollbar_track_x: f32 = 0,
     scrollbar_track_y: f32 = 0,
-    scrollbar_thumb_y: f32 = 0,
-    scrollbar_thumb_height: f32 = 0,
+    scrollbar_track_len: f32 = 0,
     scrollbar_width: f32 = 10,
+    /// Thumb wird gezogen
+    scrollbar_drag: ?scrollbar.Drag = null,
     height: f32 = 400,
     terminal_content_x: f32 = 0,
     terminal_content_y: f32 = 0,
@@ -111,69 +112,47 @@ pub const TerminalInstance = struct {
         }
     }
 
+    /// Senkrechter Balken in Zeilen, null ohne Scrollbedarf.
+    pub fn scrollModel(self: *Self) ?scrollbar.Model {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        return self.scrollModelUnlocked();
+    }
+
+    fn scrollModelUnlocked(self: *Self) ?scrollbar.Model {
+        const total = self.totalRowsUnlocked();
+        const visible = self.visibleLineCount();
+        if (total <= visible or self.scrollbar_track_len <= 0) return null;
+        return .{
+            .axis = .vertical,
+            .x = self.scrollbar_track_x,
+            .y = self.scrollbar_track_y,
+            .len = self.scrollbar_track_len,
+            .thickness = self.scrollbar_width,
+            .total = total,
+            .visible = visible,
+            .offset = self.view_row,
+            .max_offset = total - visible,
+        };
+    }
+
+    /// Klick auf den Balken: Thumb greifen oder eine Seite blättern.
     pub fn handleScrollbarMouseDown(self: *Self, x: f32, y: f32) bool {
         self.mutex.lock();
         defer self.mutex.unlock();
-        
-        const total = self.totalRowsUnlocked();
-        const visible = self.visibleLineCount();
-        if (total <= visible) return false;
-
-        if (x < self.scrollbar_track_x) return false;
-        if (x > self.scrollbar_track_x + self.scrollbar_width) return false;
-        if (y < self.scrollbar_track_y) return false;
-        if (y > self.scrollbar_track_y + self.height) return false;
-
-        if (y >= self.scrollbar_thumb_y and y <= self.scrollbar_thumb_y + self.scrollbar_thumb_height) {
-            self.scrollbar_dragging = true;
-            self.scrollbar_drag_start_y = y;
-            self.scrollbar_scroll_offset_at_drag_start = @as(f32, @floatFromInt(self.view_row));
-            return true;
-        }
-
-        if (y < self.scrollbar_thumb_y) {
-            const amount = visible;
-            self.view_row = if (amount > self.view_row) 0 else self.view_row - amount;
-        } else {
-            const amount = visible;
-            const max_offset = if (total > visible) total - visible else 0;
-            self.view_row = @min(self.view_row + amount, max_offset);
+        const m = self.scrollModelUnlocked() orelse return false;
+        switch (scrollbar.hitTest(m, x, y)) {
+            .none => return false,
+            .thumb => |d| self.scrollbar_drag = d,
+            else => |h| self.view_row = scrollbar.pageOffset(m, h),
         }
         return true;
-    }
-
-    pub fn handleScrollbarMouseMove(self: *Self, x: f32, y: f32) void {
-        _ = x;
-        self.mutex.lock();
-        defer self.mutex.unlock();
-        
-        const total = self.totalRowsUnlocked();
-        const visible = self.visibleLineCount();
-        if (total <= visible) return;
-
-        const track_height = self.height;
-        const thumb_ratio: f32 = @as(f32, @floatFromInt(visible)) / @as(f32, @floatFromInt(total));
-        const thumb_height = @max(20.0, track_height * thumb_ratio);
-        const max_offset: usize = total - visible;
-        const scrollable_height = track_height - thumb_height;
-
-        if (scrollable_height <= 0) return;
-
-        const delta_y = y - self.scrollbar_drag_start_y;
-        const scroll_delta_frac = delta_y / scrollable_height;
-        const scroll_delta_lines = scroll_delta_frac * @as(f32, @floatFromInt(max_offset));
-        const scroll_delta_int: i32 = @intFromFloat(@round(scroll_delta_lines));
-
-        var new_offset: isize = @as(isize, @intFromFloat(self.scrollbar_scroll_offset_at_drag_start)) + @as(isize, scroll_delta_int);
-        new_offset = @max(0, @min(new_offset, @as(isize, @intCast(max_offset))));
-
-        self.view_row = @as(usize, @intCast(new_offset));
     }
 
     pub fn handleMouseUp(self: *Self) void {
         self.mutex.lock();
         defer self.mutex.unlock();
-        self.scrollbar_dragging = false;
+        self.scrollbar_drag = null;
         self.selection_start_pin = null;
     }
 
@@ -225,13 +204,13 @@ pub const TerminalInstance = struct {
     }
 
     pub fn handleMouseMove(self: *Self, x: f32, y: f32, char_w: f32, line_h: f32, term_x: f32, term_y: f32) void {
-        if (self.scrollbar_dragging) {
-            self.handleScrollbarMouseMove(x, y);
-            return;
-        }
-
         self.mutex.lock();
         defer self.mutex.unlock();
+
+        if (self.scrollbar_drag) |d| {
+            if (self.scrollModelUnlocked()) |m| self.view_row = scrollbar.dragOffset(m, d, x, y);
+            return;
+        }
 
         const start_pin = self.selection_start_pin orelse return;
 
