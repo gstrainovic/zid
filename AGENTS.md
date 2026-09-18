@@ -217,20 +217,24 @@ liegen in `src/ui/mod.zig`, das Virtualisierungsmuster in
   `e2e_editor.step_hscrollbar` und `e2e_md_preview.step_wide_code` prüfen Pfeil über Balken
   und I-Beam über Text — bei jedem neuen Balken den Test ergänzen.
 
-- **Lange Codezeilen: waagrechter Bildlauf, kein Word Wrap — wie VS Code.** Die VS-Code-
-  Vorschau bricht Fließtext immer um, Codeblöcke nie (`pre { overflow: auto }` in
-  `markdown.css`), und `editor.wordWrap`/Alt+Z wirkt dort nicht; einen Umbruch-Schalter für
-  die Vorschau gibt es nicht. Hier genauso: `md_content` wächst mit der längsten Codezeile
-  (`grow` wird nie schmaler als das Kind), `md_viewport` verschiebt per `child_offset.x`, und
-  unten liegt der waagrechte Balken aus `scrollbar.zig` (`md_hscroll_track`/`_thumb`, Pixel
-  als Einheiten; Klick blättert, Thumb zieht, Shift+Rad bzw. Touchpad über
-  `UI.handleScrollHorizontal` → `scrollColumns`, 60 px je Schritt). Abweichung zu VS Code:
-  dort scrollt nur der Codeblock, hier der ganze Inhalt — ein Clip je Block geht nicht, der
-  Renderer schneidet verschachtelte Clips nicht (siehe oben) und Clay hält nur zehn.
-  Eine Kopplung an Alt+Z gab es am 18.09.2026 kurz (`eccc53a`) und ist wieder raus: mit
-  `word_wrap=true` im Nutzerzustand brach die Vorschau dann immer um und der Balken fehlte.
-  `md_select.Join.none` (Reihen ohne Trenner beim Kopieren) und `renderCodeRow` mit
-  Ausschnitt bleiben für einen späteren, eigenen Umbruch von Codezeilen. E2E `step_wide_code`.
+- **Word Wrap in der Vorschau: Alt+Z, ein Schalter für Editor und Vorschau — bewusst anders
+  als VS Code.** VS Code bricht in der Vorschau Fließtext immer um, Code nie (`pre { overflow:
+  auto }`), und `editor.wordWrap` wirkt dort nicht. Der Projektinhaber will stattdessen den
+  Editor-Schalter (18.09.2026, nach zwei Fehlversuchen: erst wirkte Alt+Z nur auf Code, dann
+  gar nicht — beide Male sah er am Fließtext „Word Wrap geht nicht“). `render` liest
+  `getActiveEditor().word_wrap` in `MarkdownView.wrap`. **Ein:** `flushPieces` bricht mit
+  `splitWide`/`wrapLines` an `availWidth`, `renderCodeBlock` bricht Codezeilen mit `codeRowEnd`
+  an jeder Stelle in Reihen (`Join.none`, kopiert ohne Trenner). **Aus:** `flushPieces` gibt
+  jedem Lauf eine Reihe (Limit `floatMax`), Codezeilen laufen hinaus, `md_content` wächst mit
+  der längsten Zeile (`grow` wird nie schmaler als das Kind), `md_viewport` verschiebt per
+  `child_offset.x`, unten liegt der waagrechte Balken aus `scrollbar.zig`
+  (`md_hscroll_track`/`_thumb`; Klick blättert, Thumb zieht, Shift+Rad bzw. Touchpad über
+  `UI.handleScrollHorizontal` → `scrollColumns`, 60 px je Schritt). Tabellen passen in beiden
+  Fällen in die Breite. Es scrollt der ganze Inhalt, nicht nur der Block: ein Clip je Block
+  geht nicht, der Renderer schneidet verschachtelte Clips nicht (siehe oben) und Clay hält nur
+  zehn. Der Nutzerzustand (`~/.config/zid/state`, `word_wrap=`) gilt beim Start auch für die
+  Vorschau. E2E `step_wide_code`: aus → breit mit Balken, ein → Listen, Zitat und 400-Zeichen-
+  Code passen; Screenshots `e2e_md_preview_{list_wrapped,wrapped,wide,wide_scrolled}.ppm`.
 
 - **Umbruch nur an Leerzeichen:** `word_wrap.wrapLines` trennt zwischen Wörtern, nie zwischen
   zwei Stücken ohne Leerzeichen dazwischen — zigdown liefert `code`, Satzzeichen und Wortteile
@@ -910,6 +914,22 @@ dem Zugriff geprüft. Ohne den letzten Punkt stürzte zid mit „member access w
 type Clay_ClipElementConfig“ ab, sobald nach einem Diff-Tab ein Multi-File-Diff im selben Pane
 stand. Clays Scroll-Positionen benutzt zid nicht, aber jedes `.clip`-Element legt dort einen
 Eintrag an, und nur `UI.updateScroll` räumt die (10 Einträge große) Liste auf.
+
+Zweiter Patch (`patches/clay-hashmap-compact.patch`, 18.09.2026): **Clays Hash-Map der
+Element-IDs liegt im persistenten Speicher und wurde nie geleert.** Jede je gesehene ID
+(auch anonyme Textstücke: Hash aus Eltern-ID und Kindindex) belegt einen Eintrag, bis die
+Kapazität `maxElementCount` (16384) erreicht ist; danach liefert `Clay__AddHashMapItem` still
+`NULL`, neue Elemente haben keine Bounds (`getElementData` „nicht gefunden“), kein Hover, kein
+Klick. Die Markdown-Vorschau ohne Zeilenumbruch (hunderte Stücke je Reihe, beim Scrollen immer
+andere Reihen-Slots × Kindindizes) füllte die Map in Sekunden; Symptom in der E2E: nach der
+Vorschau hatte ein neuer Tab keine `tab_bounds`, obwohl er sichtbar war. Im Alltag träfe es
+jede lange Sitzung mit vielen Vorschauen oder Chat-Bubbles (je `MarkdownView` neue IDs).
+`Clay__CompactLayoutElementsHashMap` läuft in `Clay_BeginLayout`, sobald die Map zu drei
+Vierteln voll ist: behält Einträge der letzten drei Frames, verdichtet `debugElementData`
+im Gleichschritt (Zeiger je Eintrag) und baut die Buckets neu. Für die E2E heißt das:
+`element_bounds` verschwundener Elemente bleiben nur, solange die Map nicht verdichtet wurde —
+darauf nie bauen (siehe `visible_blocks` in `e2e_md_preview.py`). Bei „Element X nicht im
+Layout“, obwohl X sichtbar ist: zuerst an diese Map denken.
 
 ## Explorer: .gitignore-Einträge
 
