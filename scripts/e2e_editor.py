@@ -373,6 +373,13 @@ def step_hscrollbar():
     thumb = result_json("element_bounds", ["hscroll_thumb"])
     check(thumb["found"] and thumb["w"] < bar["w"], "Thumb ist schmaler als der Track")
     shot("e2e_editor_hscrollbar.ppm")
+    # Cursorform: Pfeil über Thumb und Track, I-Beam über dem Text
+    rpc("move_mouse", [thumb["x"] + thumb["w"] / 2, thumb["y"] + thumb["h"] / 2]); settle()
+    check(ui_state()["cursor"] == "arrow", f"Pfeil über dem Thumb ({ui_state()['cursor']})")
+    rpc("move_mouse", [bar["x"] + bar["w"] - 3, bar["y"] + bar["h"] / 2]); settle()
+    check(ui_state()["cursor"] == "arrow", f"Pfeil über dem Track ({ui_state()['cursor']})")
+    rpc("move_mouse", [first_row["x"] + 40, first_row["y"] + first_row["h"] / 2]); settle()
+    check(ui_state()["cursor"] == "text", f"I-Beam über dem Text ({ui_state()['cursor']})")
     # Klick rechts vom Thumb: eine Seite nach rechts
     rpc("click", [bar["x"] + bar["w"] - 3, bar["y"] + bar["h"] / 2]); settle()
     cols = ed()["view_cols"]

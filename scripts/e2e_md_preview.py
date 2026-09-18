@@ -267,7 +267,8 @@ def step_wide_code():
     rel = os.path.join("tmp", "e2e_md_wide.md")
     with open(os.path.join(ROOT, rel), "w", encoding="utf-8") as f:
         f.write("# Breit\n\nEin Absatz, der " + "immer weiter " * 40 + "geht.\n\n```zig\n"
-                "const sehr_lange_zeile = \"" + "x" * 400 + "\";\nconst kurz = 1;\n```\n")
+                "const sehr_lange_zeile = \"" + "x" * 400 + "\";\nconst kurz = 1;\n```\n\n"
+                + "Noch ein Absatz, damit die Seite auch senkrecht scrollt.\n\n" * 40)
     open_preview(rel)
     vp = bounds("md_viewport")
     content = bounds("md_content")
@@ -280,6 +281,14 @@ def step_wide_code():
     check(track["y"] + track["h"] <= vp["y"] + vp["h"] + 1 and track["w"] < vp["w"] + 1, "waagrechter Balken unten im Viewport")
     thumb = bounds("md_hscroll_thumb")
     check(thumb["w"] < track["w"], f"Thumb kuerzer als der Track ({thumb['w']:.0f} < {track['w']:.0f})")
+    # Cursorform: Pfeil ueber beiden Balken, I-Beam ueber dem Text (zweimal kaputt gewesen)
+    rpc("move_mouse", [thumb["x"] + thumb["w"] / 2, thumb["y"] + thumb["h"] / 2]); settle(4)
+    check(ui_state()["cursor"] == "arrow", f"Pfeil ueber dem waagrechten Thumb ({ui_state()['cursor']})")
+    vtrack = bounds("md_scrollbar_track")
+    rpc("move_mouse", [vtrack["x"] + vtrack["w"] / 2, vtrack["y"] + vtrack["h"] / 2]); settle(4)
+    check(ui_state()["cursor"] == "arrow", f"Pfeil ueber dem senkrechten Balken ({ui_state()['cursor']})")
+    rpc("move_mouse", [vp["x"] + vp["w"] / 2, vp["y"] + 60]); settle(4)
+    check(ui_state()["cursor"] == "text", f"I-Beam ueber dem Text ({ui_state()['cursor']})")
     x0 = bounds("md_content")["x"]
     rpc("click", [track["x"] + track["w"] - 3, track["y"] + track["h"] / 2]); settle(8)
     x1 = bounds("md_content")["x"]

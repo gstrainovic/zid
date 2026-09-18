@@ -212,7 +212,10 @@ liegen in `src/ui/mod.zig`, das Virtualisierungsmuster in
   hatte die Vorschau einen eigenen Balken mit eigener Zieh-Logik und keinen Cursor-Code; der
   Editor-Bounds-Test der Pane meldete über der Vorschau immer I-Beam, auch über den Balken.
   **Keine zweite Balken-Implementierung mehr anlegen** — Explorer und Terminal haben noch
-  eigene, die gehören ebenfalls auf `scrollbar.zig` umgestellt, sobald man sie anfasst.
+  eigene, die gehören ebenfalls auf `scrollbar.zig` umgestellt, sobald man sie anfasst
+  (`todo.md`). `ui_state.cursor` (E2E) liefert die Cursorform an der Mausposition;
+  `e2e_editor.step_hscrollbar` und `e2e_md_preview.step_wide_code` prüfen Pfeil über Balken
+  und I-Beam über Text — bei jedem neuen Balken den Test ergänzen.
 
 - **Lange Codezeilen: waagrechter Bildlauf, kein Word Wrap — wie VS Code.** Die VS-Code-
   Vorschau bricht Fließtext immer um, Codeblöcke nie (`pre { overflow: auto }` in
