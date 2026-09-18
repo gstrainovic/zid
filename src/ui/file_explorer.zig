@@ -1652,11 +1652,12 @@ fn renderTreeEntry(
         // Git-Status Indikator (vorne); Ordner erben den Status ihrer Nachfahren
         const git_code: ?u8 = state.statusFor(node.path) orelse (if (node.is_folder) state.folderStatus(node.path) else null);
         if (git_code) |code| if (code != 'I') {
+            // Farben wie VS Code gitDecoration.*: A (gestagt) grün, M gelb, C Konflikt, ? untracked
             const git_color: [4]f32 = switch (code) {
-                'A' => theme.success,
-                'M' => theme.warning,
-                'C' => theme.danger,
-                '?' => theme.muted,
+                'A' => theme.git_added,
+                'M' => theme.git_modified,
+                'C' => theme.git_conflict,
+                '?' => theme.git_untracked,
                 'S' => theme.muted,
                 else => theme.muted,
             };
