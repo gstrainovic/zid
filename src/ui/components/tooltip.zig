@@ -80,7 +80,9 @@ pub fn iconButton(arena: std.mem.Allocator, theme: Theme, id: clay.ElementId, ic
         .background_color = if (opts.toggled) tint(theme.primary, 60) else if (hovered) tint(theme.text, 30) else .{ 0, 0, 0, 0 },
         .corner_radius = .all(4),
     })({
-        svg.Svg(arena, icon_id, icon, opts.icon_size, theme.text);
+        // Kontur statt Füllung: Häkchen, Pfeile, Pin sind Linienpfade und blieben gefüllt
+        // unsichtbar oder wurden zu Klecksen
+        svg.SvgStroke(arena, icon_id, icon, opts.icon_size, theme.text);
         attach(theme, id, label);
     });
 }

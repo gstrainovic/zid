@@ -338,6 +338,7 @@ pub const ClayRenderer = struct {
                                     bbox.height,
                                     info.viewbox,
                                     .{ r, g, b, a },
+                                    info.stroke_width,
                                 );
                             }
                         } else {

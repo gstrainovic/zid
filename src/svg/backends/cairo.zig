@@ -145,11 +145,12 @@ pub fn rasterizeWithOptions(
         // Stroke only
         renderPolygonsStroke(&points, &polygons, scale, size_i, stroke.width, buffer);
 
-        // R = 0, G = stroke alpha
+        // R = G = stroke alpha: der Atlas-Shader (text_atlas.wgsl) maskiert mit R, ein reiner
+        // Strich-Pfad (Lucide „plus“, „minus“) blieb mit R = 0 unsichtbar.
         for (0..pixel_count) |i| {
             const idx = i * 4;
             buffer[idx + 1] = buffer[idx + 3];
-            buffer[idx + 0] = 0;
+            buffer[idx + 0] = buffer[idx + 3];
             buffer[idx + 2] = 0;
         }
     }
