@@ -3291,14 +3291,21 @@ pub const UI = struct {
                     if (self.file_explorer.is_resizing) {
                         if (!self.is_mouse_down) {
                             self.file_explorer.is_resizing = false;
+                            log.debug("splitter: end width={d:.0}", .{self.file_explorer.width});
                             self.saveUserState();
                         } else {
-                            self.file_explorer.width = self.mouse_x;
-                            if (self.file_explorer.width < 100) self.file_explorer.width = 100;
-                            if (self.file_explorer.width > 600) self.file_explorer.width = 600;
+                            const before = self.file_explorer.width;
+                            self.file_explorer.width = @min(600, @max(100, self.mouse_x));
+                            // Zittern (ZID_DEBUG=1): jede Änderung mit Vorher/Nachher und Maus-X,
+                            // Rückwärtsschritt gegen die Zugrichtung markiert „<<“.
+                            if (self.file_explorer.width != before) {
+                                const dw = self.file_explorer.width - before;
+                                log.debug("splitter: width {d:.0} -> {d:.0} (mouse_x={d:.0}, dw={d:.0}){s}", .{ before, self.file_explorer.width, self.mouse_x, dw, if (dw < 0) " <<" else "" });
+                            }
                         }
                     } else if (clay.pointerOver(splitter_id) and self.mouse_pressed_this_frame) {
                         self.file_explorer.is_resizing = true;
+                        log.debug("splitter: start width={d:.0} mouse_x={d:.0}", .{ self.file_explorer.width, self.mouse_x });
                     }
                 }
 

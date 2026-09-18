@@ -324,8 +324,11 @@ pub const ScmChangesView = struct {
                     .corner_radius = .all(4),
                 })({
                     if (self.message.len == 0) {
-                        var buf: [128]u8 = undefined;
-                        const ph = if (self.generating) "Generating commit message..." else v.placeholder(&buf);
+                        // In der Arena, nicht auf dem Stack: Clay hält den Zeiger bis zum Zeichnen
+                        // nach `render`. Ein Stack-Puffer wurde bis dahin überschrieben (Debug: 0xAA),
+                        // der Shaper meldete InvalidUtf8 und der ganze Frame fiel aus (Zittern).
+                        const buf = arena.alloc(u8, 128) catch @as([]u8, &.{});
+                        const ph = if (self.generating) "Generating commit message..." else v.placeholder(buf);
                         clay.UI()(.{ .floating = .{ .attach_to = .to_parent, .attach_points = .{ .element = .left_top, .parent = .left_top }, .offset = .{ .x = 6, .y = INPUT_PAD }, .pointer_capture_mode = .passthrough }, .layout = .{ .sizing = .{ .w = .fit, .h = .fixed(INPUT_LINE_HEIGHT) }, .child_alignment = .{ .y = .center } } })({
                             clay.text(fitText(arena, ph, width - 60, 16), .{ .font_size = 16, .color = theme.muted, .wrap_mode = .none });
                         });

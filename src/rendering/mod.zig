@@ -443,7 +443,12 @@ pub var g_viewport_height: u32 = 800;
         }
 
         // 1. Clay UI rendern (Rechtecke + Text + Images + SVGs in korrekter Z-Order)
-        clay_rdr.renderClayLayout(render_pass, text_gpu, text_renderer, image_rdr, svg_gpu, svg_atlas, clay_commands) catch return;
+        // Bricht der Durchgang ab, wird der Command-Buffer nie eingereicht; `endFrame` zeigt dann
+        // das alte Bild aus der Swap-Chain (Zittern zwischen zwei Ständen). Deshalb laut melden.
+        clay_rdr.renderClayLayout(render_pass, text_gpu, text_renderer, image_rdr, svg_gpu, svg_atlas, clay_commands) catch |err| {
+            log.warn("renderClayLayout failed: {} ({d} commands) - frame not submitted, stale image presented", .{ err, clay_commands.len });
+            return;
+        };
 
         // 2. Images rendern (über Clay UI - Legacy/Direct Rendering)
         if (image_rdr) |img_renderer| {

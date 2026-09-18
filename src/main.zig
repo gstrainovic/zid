@@ -543,8 +543,16 @@ pub fn main() !void {
                             svg_atlas.setScaleFactor(@as(f32, @floatFromInt(sz.width)) / 1200.0);
                         },
                         .mouse => |pos| {
-                            mouse_x = @floatFromInt(pos.x);
-                            mouse_y = @floatFromInt(pos.y);
+                            const new_x: f32 = @floatFromInt(pos.x);
+                            const new_y: f32 = @floatFromInt(pos.y);
+                            // Splitter-Zittern (ZID_DEBUG=1): Rücksprung der Maus-X gegen die
+                            // Zugrichtung markiert „<<“ — greifbar mit `mouse:` im Log.
+                            if (ui_system.file_explorer.is_resizing) {
+                                const dx = new_x - mouse_x;
+                                log.debug("mouse: x={d:.0} y={d:.0} dx={d:.0}{s}", .{ new_x, new_y, dx, if (dx < 0) " <<" else "" });
+                            }
+                            mouse_x = new_x;
+                            mouse_y = new_y;
                             ui_system.handleMouseMove(mouse_x, mouse_y);
                         },
                         .button_press => |btn| {

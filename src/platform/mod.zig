@@ -52,6 +52,8 @@ pub const Platform = struct {
     event_callback: ?EventCallback = null,
     current_width: u32 = 0,
     current_height: u32 = 0,
+    /// Zuletzt an wio gemeldete Cursorform (siehe `setCursor`)
+    last_cursor: ?wio.Cursor = null,
 
     const Self = @This();
 
@@ -83,7 +85,14 @@ pub const Platform = struct {
 
     /// Mauszeiger-Form ändern
     pub fn setCursor(self: *Self, shape: wio.Cursor) void {
+        // Nur bei Formwechsel an wio: unter Windows ruft wio jedes Mal GetCursorPos+SetCursorPos,
+        // und bei gedrückter Taste erzeugt das ein WM_MOUSEMOVE, das den nächsten Frame weckt.
+        // Der Frame-Loop lief damit beim Ziehen des Splitters ohne Pause (Log: `mouse: … dx=0`
+        // in jedem Frame).
+        if (self.last_cursor == shape) return;
+        self.last_cursor = shape;
         if (self.window) |*win| {
+            log.debug("cursor: {s}", .{@tagName(shape)});
             win.setCursor(shape);
         }
     }

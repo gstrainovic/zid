@@ -218,8 +218,9 @@ pub const TimelineView = struct {
             .border = .{ .width = .{ .right = 1 }, .color = theme.border },
             .clip = .{ .vertical = true, .child_offset = .{ .x = 0, .y = -t.scroll } },
         })({
-            var msg_buf: [300]u8 = undefined;
-            if (t.message(&msg_buf)) |msg| {
+            // Arena statt Stack: Clay liest den Text erst nach `render` (siehe scm_changes_view)
+            const msg_buf = arena.alloc(u8, 300) catch @as([]u8, &.{});
+            if (t.message(msg_buf)) |msg| {
                 // Wie VS Code: gedämpfter Hinweis mit Einzug
                 clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow }, .padding = .{ .left = 22, .right = 12, .top = 10 } } })({
                     clay.text(msg, .{ .font_size = 16, .color = theme.muted, .wrap_mode = .words });
