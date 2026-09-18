@@ -10,6 +10,8 @@ import os, shutil, sys, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from e2e_open_folder import ROOT, rpc, result_json, wait_port, settle, bounds, click_center, check, shot, start_zid, stop_zid  # noqa: E402
 from e2e_shortcuts import key, explorer, explorer_click, explorer_row_center, ui_state, dialog_open  # noqa: E402
+from e2e_pdf_pager import pixel  # noqa: E402
+from e2e_md_preview import differs  # noqa: E402
 
 FX = os.path.join(ROOT, "tmp", "e2e_fx2")
 XDG = os.path.join(ROOT, "tmp", "xdg")
@@ -362,7 +364,66 @@ def step_sidebar_width_persist():
     check(bounds("fx_tooltip")["found"], "Tooltip mit vollem Pfad nach 700 ms")
 
 
-STEPS = [step_focus_and_letters, step_dialog_keyboard_trash, step_navigation, step_create_rename, step_clipboard, step_multi_select, step_context_menu, step_hidden_and_filter, step_drag_drop, step_gitignore, step_sidebar_width_persist]
+def step_scrollbar():
+    print("--- Scrollbalken: Lage am Baum, Blättern, Ziehen, Pfeil-Cursor, gezeichnet")
+    reveal("gamma.txt", ["tmp", "e2e_fx2"])  # tmp/ aufgeklappt: Baum ist viele Seiten lang
+    explorer_click("gamma.txt")
+    key("slash")  # Filterzeile offen, Filter leer: der Baum beginnt tiefer als die Sidebar
+    check(explorer()["filter_active"], "/ öffnet das Filterfeld")
+    vp = explorer()["viewport"]
+    rpc("scroll", [vp["x"] + 60, vp["y"] + vp["h"] / 2, 10000]); settle()
+    check(explorer()["scroll"] == 0, "ganz oben")
+    track = bounds("file_explorer_scrollbar_track")
+    thumb = bounds("file_explorer_scrollbar_thumb")
+    check(abs(track["y"] - vp["y"]) < 1 and abs(track["h"] - vp["h"]) < 1,
+          f"Track deckt genau den Baum ab (Track y={track['y']:.0f} h={track['h']:.0f}, Baum y={vp['y']:.0f} h={vp['h']:.0f})")
+    check(abs(track["x"] + track["w"] - (vp["x"] + vp["w"])) < 1, "Track am rechten Rand des Baums")
+    check(abs(thumb["y"] - track["y"]) < 1 and thumb["h"] < track["h"] / 2, "Thumb oben, kürzer als eine halbe Seite")
+    # Cursorform: Pfeil über Thumb und Track
+    rpc("move_mouse", [thumb["x"] + thumb["w"] / 2, thumb["y"] + thumb["h"] / 2]); settle()
+    check(ui_state()["cursor"] == "arrow", f"Pfeil über dem Thumb ({ui_state()['cursor']})")
+    rpc("move_mouse", [track["x"] + track["w"] / 2, track["y"] + track["h"] - 5]); settle()
+    check(ui_state()["cursor"] == "arrow", f"Pfeil über dem Track ({ui_state()['cursor']})")
+    tx = track["x"] + track["w"] / 2
+    # Klick unten in den Track blättert eine Seite (wie Editor und Vorschau), springt nicht ans Ende
+    def tree_snapshot():
+        ex = explorer()
+        return [(e["path"], e["expanded"], e["cursor"]) for e in ex["entries"]]
+    before = tree_snapshot()
+    rpc("click", [tx, track["y"] + track["h"] - 5]); settle()
+    s1 = explorer()["scroll"]
+    check(abs(s1 - vp["h"]) < 2, f"Klick unter dem Thumb blättert eine Seite ({s1:.0f}, Seite {vp['h']:.0f})")
+    rpc("click", [tx, track["y"] + 3]); settle()
+    check(explorer()["scroll"] == 0, f"Klick über dem Thumb blättert zurück ({explorer()['scroll']:.0f})")
+    check(tree_snapshot() == before, "Klicks auf den Balken treffen keine Zeile darunter (Auswahl, Aufklappen)")
+    # Thumb ziehen: halber freier Track = halber Scrollweg, Rückweg bis ganz oben klemmt auf 0
+    thumb = bounds("file_explorer_scrollbar_thumb")
+    free = track["h"] - thumb["h"]
+    x0, y0 = tx, thumb["y"] + thumb["h"] / 2
+    rpc("mouse_down", [x0, y0]); settle()
+    for i in range(1, 6):
+        rpc("move_mouse", [x0, y0 + free / 2 * i / 5]); settle(3)
+    mid = explorer()["scroll"]
+    # Beim Ziehen über die Vorschau hinaus bleibt der Pfeil (kein I-Beam des Textes darunter)
+    rpc("move_mouse", [700, y0 + free / 2]); settle(3)
+    check(ui_state()["cursor"] == "arrow", f"Pfeil beim Ziehen über der Vorschau ({ui_state()['cursor']})")
+    rpc("move_mouse", [x0, y0 - 200]); settle(3)
+    top = explorer()["scroll"]
+    rpc("mouse_up", [x0, y0 - 200]); settle()
+    rpc("move_mouse", [x0, y0 + 50]); settle()
+    check(explorer()["scroll"] == top == 0, f"Ziehen über den Anfang klemmt auf 0 ({top:.0f})")
+    thumb2 = bounds("file_explorer_scrollbar_thumb")
+    check(mid > vp["h"] and abs(thumb2["y"] - track["y"]) < 1, f"Ziehen scrollt ({mid:.0f}), Thumb wieder oben")
+    # Screenshot zuletzt: er schreibt nach tmp/, der Watcher lädt den Baum neu und scrollt zur
+    # Auswahl (gamma.txt) — mitten im Step verschöbe das die Scrollposition.
+    shot("e2e_explorer_scrollbar.ppm")
+    on_thumb = pixel("e2e_explorer_scrollbar.ppm", tx, thumb2["y"] + thumb2["h"] / 2)
+    on_track = pixel("e2e_explorer_scrollbar.ppm", tx, thumb2["y"] + thumb2["h"] + 40)
+    check(differs(on_thumb, on_track), f"Thumb ist gezeichnet ({on_thumb} neben Track {on_track})")
+    key("escape")
+
+
+STEPS = [step_focus_and_letters, step_dialog_keyboard_trash, step_navigation, step_create_rename, step_clipboard, step_multi_select, step_context_menu, step_hidden_and_filter, step_drag_drop, step_gitignore, step_scrollbar, step_sidebar_width_persist]
 
 
 def main():

@@ -12,6 +12,7 @@ const shortcuts = @import("shortcuts");
 const ctx_menu = @import("context_menu");
 const ui = @import("../ui/mod.zig");
 const line_edit = @import("line_edit.zig");
+const scrollbar = @import("scrollbar");
 const Theme = ui.Theme;
 
 const log = std.log.scoped(.file_explorer);
@@ -181,17 +182,10 @@ pub const FileExplorerState = struct {
     viewport_height: f32 = 0,
     content_height: f32 = 0,
 
-    /// Scrollbar-Dragging State
-    scrollbar_dragging: bool = false,
-    scrollbar_drag_start_y: f32 = 0,
-    scrollbar_scroll_offset_at_drag_start: f32 = 0,
-
-    /// Scrollbar Bounds
-    scrollbar_track_x: f32 = 0,
-    scrollbar_track_y: f32 = 0,
-    scrollbar_thumb_y: f32 = 0,
-    scrollbar_thumb_height: f32 = 0,
+    /// Balken aus `scrollbar.zig` in Pixeln, Track rechts am Baum-Viewport (`scrollModel`)
     scrollbar_width: f32 = 10,
+    /// Thumb wird gezogen (Pfeil-Cursor auch außerhalb der Sidebar, `UI.getDesiredCursor`)
+    scrollbar_drag: ?scrollbar.Drag = null,
 
     const Self = @This();
 
@@ -1241,33 +1235,31 @@ pub const FileExplorerState = struct {
             return self.inSidebar(x);
         }
 
-        if (self.content_height <= self.viewport_height) return false;
-
-        if (x < self.scrollbar_track_x) return false;
-        if (x > self.scrollbar_track_x + self.scrollbar_width) return false;
-        if (y < self.scrollbar_track_y) return false;
-        if (y > self.scrollbar_track_y + self.viewport_height) return false;
-
-        if (y >= self.scrollbar_thumb_y and y <= self.scrollbar_thumb_y + self.scrollbar_thumb_height) {
-            self.scrollbar_dragging = true;
-            self.scrollbar_drag_start_y = y;
-            self.scrollbar_scroll_offset_at_drag_start = self.scroll_offset_y;
-            return true;
+        // Balken: Thumb greifen oder eine Seite blättern
+        const m = self.scrollModel() orelse return false;
+        switch (scrollbar.hitTest(m, x, y)) {
+            .none => return false,
+            .thumb => |d| self.scrollbar_drag = d,
+            else => |h| self.scroll_offset_y = @floatFromInt(scrollbar.pageOffset(m, h)),
         }
-
-        // Jump to position
-        const track_height = self.viewport_height;
-        const total_height = self.content_height;
-        const thumb_height = self.scrollbar_thumb_height;
-        const scrollable_height = track_height - thumb_height;
-
-        if (scrollable_height > 0) {
-            const click_pos_rel = (y - self.scrollbar_track_y) - (thumb_height / 2.0);
-            const scroll_frac = @max(0, @min(1.0, click_pos_rel / scrollable_height));
-            self.scroll_offset_y = scroll_frac * (total_height - track_height);
-        }
-
         return true;
+    }
+
+    /// Senkrechter Balken rechts am Baum-Viewport, in Pixeln; null ohne Scrollbedarf.
+    fn scrollModel(self: *const Self) ?scrollbar.Model {
+        const over = self.content_height - self.viewport_height;
+        if (over <= 0.5 or self.viewport_height <= 0) return null;
+        return .{
+            .axis = .vertical,
+            .x = self.viewport_x + self.viewport_width - self.scrollbar_width,
+            .y = self.viewport_y,
+            .len = self.viewport_height,
+            .thickness = self.scrollbar_width,
+            .total = @intFromFloat(@round(self.content_height)),
+            .visible = @intFromFloat(@round(self.viewport_height)),
+            .offset = @intFromFloat(@round(@max(0, self.scroll_offset_y))),
+            .max_offset = @intFromFloat(@round(over)),
+        };
     }
 
     pub fn handleMouseMove(self: *Self, x: f32, y: f32) void {
@@ -1275,29 +1267,13 @@ pub const FileExplorerState = struct {
         if (self.rename) |*st| line_edit.handleDrag(&st.edit, rename_field, x);
         if (self.creating) |*st| line_edit.handleDrag(&st.edit, create_field, x);
         line_edit.handleDrag(&self.filter, filter_field, x);
-        if (!self.scrollbar_dragging) return;
-        if (self.content_height <= self.viewport_height) return;
-
-        const track_height = self.viewport_height;
-        const total_height = self.content_height;
-        const thumb_height = self.scrollbar_thumb_height;
-        const scrollable_height = track_height - thumb_height;
-
-        if (scrollable_height <= 0) return;
-
-        const delta_y = y - self.scrollbar_drag_start_y;
-        const scroll_delta_frac = delta_y / scrollable_height;
-        const scroll_delta_px = scroll_delta_frac * (total_height - track_height);
-
-        var new_offset = self.scrollbar_scroll_offset_at_drag_start + scroll_delta_px;
-        const max_scroll = total_height - track_height;
-        new_offset = @max(0, @min(new_offset, max_scroll));
-
-        self.scroll_offset_y = new_offset;
+        if (self.scrollbar_drag) |d| if (self.scrollModel()) |m| {
+            self.scroll_offset_y = @floatFromInt(scrollbar.dragOffset(m, d, x, y));
+        };
     }
 
     pub fn handleMouseUp(self: *Self) void {
-        self.scrollbar_dragging = false;
+        self.scrollbar_drag = null;
         if (self.rename) |*st| line_edit.handleRelease(&st.edit);
         if (self.creating) |*st| line_edit.handleRelease(&st.edit);
         line_edit.handleRelease(&self.filter);
@@ -1361,8 +1337,6 @@ pub fn renderFileExplorer(
         state.viewport_x = clip_data.bounding_box.x;
         state.viewport_y = clip_data.bounding_box.y;
         state.viewport_width = clip_data.bounding_box.width;
-        state.scrollbar_track_x = clip_data.bounding_box.x + clip_data.bounding_box.width - state.scrollbar_width;
-        state.scrollbar_track_y = clip_data.bounding_box.y;
     }
     if (content_data.found) {
         state.content_height = content_data.bounding_box.height;
@@ -1389,34 +1363,44 @@ pub fn renderFileExplorer(
         .border = .{ .width = .{ .right = 1, .left = 2 }, .color = if (focused) theme.border_focus else theme.border },
     })({
         if (state.filter_active or state.filter.text().len > 0) renderFilterRow(state, theme);
+        // Hülle ohne Clip um den Baum: der Balken hängt sich an ihre rechte obere Ecke und
+        // beginnt so unter der Filterzeile, nicht an der Sidebar-Oberkante.
         clay.UI()(.{
-            .id = clay.ElementId.ID("file_tree_viewport"),
-            .layout = .{
-                .sizing = .grow,
-            },
-            .clip = .{ .vertical = true, .horizontal = true, .child_offset = .{ .x = 0, .y = -state.scroll_offset_y } },
+            .id = clay.ElementId.ID("file_tree_area"),
+            .layout = .{ .sizing = .grow },
         })({
             clay.UI()(.{
-                .id = clay.ElementId.ID("file_tree_content"),
+                .id = clay.ElementId.ID("file_tree_viewport"),
                 .layout = .{
-                    .sizing = .{ .w = .grow, .h = .fit },
-                    .direction = .top_to_bottom,
-                    .child_gap = 0,
+                    .sizing = .grow,
                 },
+                .clip = .{ .vertical = true, .horizontal = true, .child_offset = .{ .x = 0, .y = -state.scroll_offset_y } },
             })({
-                for (state.visible_entries.items, 0..) |entry, i| {
-                    renderTreeEntry(arena, state, entry, i, theme, effective_press, in_sidebar, mods, mouse);
-                    if (state.creating) |cs| {
-                        if (cs.parent == entry.node_index) renderCreateRow(arena, cs, entry.depth + 1, theme);
+                clay.UI()(.{
+                    .id = clay.ElementId.ID("file_tree_content"),
+                    .layout = .{
+                        .sizing = .{ .w = .grow, .h = .fit },
+                        .direction = .top_to_bottom,
+                        .child_gap = 0,
+                    },
+                })({
+                    for (state.visible_entries.items, 0..) |entry, i| {
+                        renderTreeEntry(arena, state, entry, i, theme, effective_press, in_sidebar, mods, mouse);
+                        if (state.creating) |cs| {
+                            if (cs.parent == entry.node_index) renderCreateRow(arena, cs, entry.depth + 1, theme);
+                        }
                     }
-                }
+                });
             });
-        });
 
-        // Scrollbar
-        if (state.content_height > state.viewport_height) {
-            renderScrollbar(state, theme);
-        }
+            // Hover braucht keine Auswertung: über der Sidebar gilt ohnehin der Pfeil
+            if (state.scrollModel()) |m| {
+                _ = scrollbar.render(m, .{
+                    .track = clay.ElementId.ID("file_explorer_scrollbar_track"),
+                    .thumb = clay.ElementId.ID("file_explorer_scrollbar_thumb"),
+                });
+            }
+        });
     });
 
     if (state.context_menu) |menu| renderContextMenu(menu, theme);
@@ -1468,49 +1452,6 @@ fn ellipsize(arena: std.mem.Allocator, name: []const u8, font_size: f32, max_wid
 /// Kontextmenü (`context_menu_items`, IDs `fx_menu_<command>`) im gemeinsamen Stil.
 fn renderContextMenu(menu: ContextMenu, theme: Theme) void {
     _ = ctx_menu.render("fx_menu", &context_menu_items, menu.x, menu.y, ctx_menu.none, ctx_menu.Colors.fromTheme(theme));
-}
-
-fn renderScrollbar(state: *FileExplorerState, theme: Theme) void {
-    const total = state.content_height;
-    const visible = state.viewport_height;
-    if (total <= visible) return;
-
-    const track_height = visible;
-    const thumb_ratio = visible / total;
-    const thumb_height = @max(20.0, track_height * thumb_ratio);
-    const max_scroll = total - visible;
-    const scroll_frac = if (max_scroll > 0) state.scroll_offset_y / max_scroll else 0;
-    const thumb_y = scroll_frac * (track_height - thumb_height);
-
-    state.scrollbar_thumb_y = state.scrollbar_track_y + thumb_y;
-    state.scrollbar_thumb_height = thumb_height;
-
-    const track_color: clay.Color = .{ 30, 30, 46, 255 };
-    const thumb_color: clay.Color = .{ 88, 88, 120, 200 };
-
-    clay.UI()(.{
-        .id = clay.ElementId.ID("file_explorer_scrollbar_track"),
-        .floating = .{
-            .attach_to = .to_parent,
-            .attach_points = .{ .element = .right_top, .parent = .right_top },
-            .z_index = 1000,
-        },
-        .layout = .{
-            .sizing = .{ .w = .fixed(state.scrollbar_width), .h = .grow },
-            .direction = .top_to_bottom,
-        },
-        .background_color = track_color,
-    })({
-        clay.UI()(.{
-            .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(thumb_y) } },
-        })({});
-        clay.UI()(.{
-            .id = clay.ElementId.ID("file_explorer_scrollbar_thumb"),
-            .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(thumb_height) } },
-            .background_color = if (state.scrollbar_dragging) theme.primary else thumb_color,
-            .corner_radius = .all(3),
-        })({});
-    });
 }
 
 /// Eingabezeile für „neue Datei / neuer Ordner“ unter dem Elternordner

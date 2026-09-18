@@ -522,6 +522,7 @@ pub fn createDispatcher(alloc: std.mem.Allocator, ctx: *E2EContext) !*zigjr.RpcD
     try rpc_dispatcher.addWithCtx("timeline_state", ctx, timelineState);
     try rpc_dispatcher.addWithCtx("scm_state", ctx, scmState);
     try rpc_dispatcher.addWithCtx("ui_state", ctx, uiState);
+    try rpc_dispatcher.addWithCtx("terminal_state", ctx, terminalState);
     try rpc_dispatcher.addWithCtx("editor_lines", ctx, editorLines);
     try rpc_dispatcher.addWithCtx("editor_state", ctx, editorState);
     try rpc_dispatcher.addWithCtx("md_selection", ctx, mdSelection);
@@ -1126,6 +1127,22 @@ fn countLeaves(pane: *const @import("ui/pane.zig").Pane) usize {
 /// UI-Zustand für Tests: Dialog, Header-Menü, Explorer-Fokus, aktiver Tab.
 /// Anders als element_bounds liest das den echten Zustand; Clay behält
 /// Element-Daten verschwundener Elemente noch eine Weile im Hash.
+/// Terminal des aktiven Tabs: Scrollposition in Zeilen und `pane_index`, mit dem der Test die
+/// Elemente des Panes (`terminal_scrollbar_track` …) über `element_bounds_i` findet.
+fn terminalState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
+    const ui = ctx.ui_system;
+    const tb = ui.getActiveTabBar();
+    const tab = tb.getActiveTab() orelse return "null";
+    if (tab.kind != .terminal) return "null";
+    const term = tb.terminal_instances.get(tab.path) orelse return "null";
+    var pane = ui.active_pane;
+    while (pane.data == .split) pane = pane.data.split.children[0];
+    const pane_index: u32 = @truncate(@intFromPtr(pane));
+    return std.fmt.allocPrint(dc.arena(),
+        \\{{"view_row": {d}, "total_rows": {d}, "visible_rows": {d}, "pane_index": {d}}}
+    , .{ term.view_row, term.totalRows(), term.visibleLineCount(), pane_index });
+}
+
 fn uiState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     const ui = ctx.ui_system;
     const tb = ui.getActiveTabBar();

@@ -155,8 +155,12 @@ liegen in `src/ui/mod.zig`, das Virtualisierungsmuster in
   virtualisierten Ansichten scrollen über eigene Offsets. `Model` (Achse, Track, total, visible,
   offset, max_offset) → `geometry`, `hitTest` (Thumb greifen oder Seite blättern), `dragOffset`,
   `render`. Editor senkrecht und waagrecht nutzen es (`vscrollModel`/`hscrollModel`,
-  `vscroll_drag`/`hscroll_drag`); Explorer und Terminal haben noch eigene Kopien, bei der
-  nächsten Änderung dort umziehen. Die waagrechte Editor-Leiste misst die längste Zeile der
+  `vscroll_drag`/`hscroll_drag`). Explorer: `FileExplorerState.scrollModel` in Pixeln, der
+  Balken hängt an der Hülle `file_tree_area` und beginnt so unter der Filterzeile. Terminal:
+  `TerminalInstance.scrollModel` in Zeilen, Track über die volle Höhe von `terminal_outer`
+  (Lage aus dem Vorframe). E2E: `e2e_explorer.step_scrollbar`, `scripts/e2e_terminal.py`
+  (RPC `terminal_state`: `view_row`, `total_rows`, `visible_rows`, `pane_index` für
+  `element_bounds_i("terminal_scrollbar_track", pane_index)`). Die waagrechte Editor-Leiste misst die längste Zeile der
   ganzen Datei (`maxLineWidth`, gecacht, nach einem Edit nur der betroffene Bereich), damit sie
   beim senkrechten Scrollen stabil bleibt, und deckt auch den Gutter ab. E2E: `step_hscrollbar`
   in `scripts/e2e_editor.py`.
@@ -211,11 +215,13 @@ liegen in `src/ui/mod.zig`, das Virtualisierungsmuster in
   `MarkdownView.cursorAt` (Pfeil über Balken und Menü, I-Beam über `md_viewport`). Vorher
   hatte die Vorschau einen eigenen Balken mit eigener Zieh-Logik und keinen Cursor-Code; der
   Editor-Bounds-Test der Pane meldete über der Vorschau immer I-Beam, auch über den Balken.
-  **Keine zweite Balken-Implementierung mehr anlegen** — Explorer und Terminal haben noch
-  eigene, die gehören ebenfalls auf `scrollbar.zig` umgestellt, sobald man sie anfasst
-  (`todo.md`). `ui_state.cursor` (E2E) liefert die Cursorform an der Mausposition;
-  `e2e_editor.step_hscrollbar` und `e2e_md_preview.step_wide_code` prüfen Pfeil über Balken
-  und I-Beam über Text — bei jedem neuen Balken den Test ergänzen.
+  **Keine zweite Balken-Implementierung anlegen**, alle Balken laufen über `scrollbar.zig`.
+  `ui_state.cursor` (E2E) liefert die Cursorform an der Mausposition;
+  `e2e_editor.step_hscrollbar`, `e2e_md_preview.step_wide_code`, `e2e_explorer.step_scrollbar`
+  und `e2e_terminal.py` prüfen Pfeil über Balken (Editor und Vorschau auch I-Beam über Text)
+  — bei jedem neuen Balken den Test ergänzen. Explorer und Terminal werten den Hover nicht aus (dort gilt ohnehin der
+  Pfeil); nur das Ziehen des Explorer-Thumbs hält den Pfeil auch über dem Editor. Zeilen unter
+  einem Balken bekommen keinen Klick: Clay-Floating-Elemente fangen den Zeiger (`capture`).
 
 - **Word Wrap in der Vorschau: Alt+Z, ein Schalter für Editor und Vorschau — bewusst anders
   als VS Code.** VS Code bricht in der Vorschau Fließtext immer um, Code nie (`pre { overflow:
@@ -672,7 +678,10 @@ gepinnt, `models/` hält GGUFs flach und ignoriert (nie committen), `llm-bench/`
 - E2E: `key_press_hold(name, ctrl, shift, alt)` lässt die Modifier gedrückt, `mods_release` löst sie;
   `ui_state.tab_switcher` ist die Position (−1 = zu). `key_press_mods` löst Ctrl nach der Taste,
   deshalb wählt dort jedes Ctrl+Tab sofort.
-- **Leiste** scrollt den aktiven Tab per `scroll_x` in den Sichtbereich (`tab_strip` mit Clip);
+- **Leiste** scrollt den aktiven Tab per `scroll_x` in den Sichtbereich (`tab_strip` mit Clip).
+  Klicks auf Tabs zählen nur innerhalb von `tab_strip`: weggescrollte Tabs liegen mit ihrer
+  Bounding-Box unter „+“, der Sidebar oder rechts außerhalb des Fensters. E2E aktiviert Tabs
+  außerhalb des 1200-px-Fensters per Ctrl+1…9 statt per Klick;
   Namensgleichheit zeigt den Elternordner (`a/mod.zig`), ungespeichert = „• name“. Mittelklick
   schließt, Rechtsklick öffnet das Menü aus `shortcuts.tab_menu_items` (`tab_menu_<command>`,
   gezeichnet über `context_menu.zig`; Markdown Preview nur bei `.md`-Text-Tabs), Kommandos laufen
