@@ -395,8 +395,11 @@ pub const CodeEditor = struct {
                     colcount.* = 4;
                     return 1;
                 }
+                // Ein Codepoint = eine Spalte. Vorher zählte jedes Byte als Spalte: ←/→ liefen in
+                // zwei Schritten durch ein „ü“, Tippen dazwischen zerschnitt die UTF-8-Sequenz.
                 colcount.* = 1;
-                return 1; // ASCII: jedes Zeichen ist 1 Byte und Breite 1
+                const len = std.unicode.utf8ByteSequenceLength(egcs[0]) catch 1;
+                return @min(len, egcs.len);
             }
             /// Breite eines ganzen Chunks: insert_chars addiert sie zur Cursor-Spalte. Vorher
             /// war das pauschal 1, der Cursor stand nach Einfügen/Autoclose eine Spalte zu weit links.
@@ -775,13 +778,14 @@ pub const CodeEditor = struct {
         const old_end_row: u32 = @intCast(row + old_line_count);
         const new_end_row: u32 = @intCast(row + new_line_count);
 
+        // tree-sitter-Punkte sind Byte-Spalten, `col` ist eine Zeichenspalte
         const old_end_col: u32 = if (old_line_count == 0)
-            @intCast(col + old_text.len)
+            @intCast(col_byte + old_text.len)
         else
             @intCast(old_text.len - std.mem.lastIndexOf(u8, old_text, "\n").? - 1);
 
         const new_end_col: u32 = if (new_line_count == 0)
-            @intCast(col + new_text.len)
+            @intCast(col_byte + new_text.len)
         else
             @intCast(new_text.len - std.mem.lastIndexOf(u8, new_text, "\n").? - 1);
 
@@ -840,13 +844,6 @@ pub const CodeEditor = struct {
         if (pos >= text.len) return text.len;
         if ((text[pos] & 0xC0) != 0x80) return pos;
         return prevCharBoundary(text, pos);
-    }
-
-    /// Wie `snapToCharBoundary`, rückt aber vor: hinter die angefangene UTF-8-Sequenz.
-    fn snapToCharBoundaryForward(text: []const u8, pos: usize) usize {
-        var i = @min(pos, text.len);
-        while (i < text.len and (text[i] & 0xC0) == 0x80) i += 1;
-        return i;
     }
 
     fn isWordChar(c: u8) bool {
@@ -2788,26 +2785,19 @@ pub const CodeEditor = struct {
         return @max(10, @as(usize, @intFromFloat(@floor(avail / self.charWidth()))));
     }
 
-    /// `col` ist die Anzeigespalte von `start_byte` (bei zurückgesetztem Anfang kleiner als `view.col`).
-    pub const VisibleSlice = struct { text: []const u8, start_byte: usize, col: usize };
+    pub const VisibleSlice = struct { text: []const u8, start_byte: usize };
 
     /// Sichtbarer Ausschnitt einer Zeile ab `view.col`, höchstens `view.cols + 2` Spalten.
     /// Nur dieser Teil geht an Clay: Riesenzeilen kosten so weder Shaper noch Renderer, und
-    /// Zeilen über 2048 Bytes (Shaper-Grenze) bleiben sichtbar.
-    ///
-    /// Die Metriken zählen jedes Byte als eine Spalte, der Schnitt kann also mitten in einer
-    /// UTF-8-Sequenz liegen (`…Tab 1 \xe2\x80`). Der Shaper meldete das als „invalid UTF-8 text“
-    /// und zeichnete U+FFFD. Deshalb Anfang zur Zeichengrenze zurück (die Spalte wandert mit)
-    /// und Ende bis zur Zeichengrenze vor.
+    /// Zeilen über 2048 Bytes (Shaper-Grenze) bleiben sichtbar. Spalten sind Codepoints
+    /// (`metrics`), der Schnitt liegt also immer auf einer Zeichengrenze.
     pub fn visibleSliceOf(self: *Self, line_idx: usize, line: []const u8) VisibleSlice {
         const m = self.metrics();
         const cols = if (self.view.cols > 0) self.view.cols else self.visibleColCount();
-        const raw_start = @min(self.buffer.root.get_line_width_to_pos(line_idx, self.view.col, m) catch 0, line.len);
-        const raw_end = @min(self.buffer.root.get_line_width_to_pos(line_idx, self.view.col + cols + 2, m) catch line.len, line.len);
-        const start = snapToCharBoundary(line, raw_start);
-        const end = snapToCharBoundaryForward(line, raw_end);
-        if (start >= end) return .{ .text = line[line.len..], .start_byte = line.len, .col = self.view.col };
-        return .{ .text = line[start..end], .start_byte = start, .col = self.view.col -| (raw_start - start) };
+        const start = @min(self.buffer.root.get_line_width_to_pos(line_idx, self.view.col, m) catch 0, line.len);
+        const end = @min(self.buffer.root.get_line_width_to_pos(line_idx, self.view.col + cols + 2, m) catch line.len, line.len);
+        if (start >= end) return .{ .text = line[line.len..], .start_byte = line.len };
+        return .{ .text = line[start..end], .start_byte = start };
     }
 
     /// Wie visibleSliceOf, holt die Zeile selbst (Slice zeigt in line_scratch).
@@ -3290,7 +3280,7 @@ pub const CodeEditor = struct {
                         // Ohne Word-Wrap ein Segment = sichtbarer Ausschnitt; mit Wrap je Segment eine Reihe
                         const one: [1]wrap_ops.Segment = blk: {
                             const vis = self.visibleSliceOf(i, line_text);
-                            break :blk .{.{ .start = vis.start_byte, .end = vis.start_byte + vis.text.len, .col = vis.col }};
+                            break :blk .{.{ .start = vis.start_byte, .end = vis.start_byte + vis.text.len, .col = self.view.col }};
                         };
                         const segs: []const wrap_ops.Segment = if (self.word_wrap) (wrap_ops.segments(arena, line_text, wrap_cols) catch &one) else &one;
                         for (segs, 0..) |seg, k| {
@@ -3359,7 +3349,7 @@ pub const CodeEditor = struct {
     /// `line` ist das sichtbare Stück (ab Byte `offset`, Anzeigespalte `first_col`) der Zeile
     /// `line_idx` mit `full_len` Bytes; `is_last` = letztes Segment (Cursor am Zeilenende, Auswahl bis Zeilenende).
     fn renderLine(self: *Self, arena: std.mem.Allocator, line_idx: usize, line: []const u8, offset: usize, full_len: usize, first_col: usize, is_last: bool) void {
-        const seg: VisibleSlice = .{ .text = line, .start_byte = offset, .col = first_col };
+        const seg: VisibleSlice = .{ .text = line, .start_byte = offset };
         clay.UI()(.{
             .layout = .{ .sizing = .{ .w = .grow, .h = .grow }, .direction = .left_to_right, .child_alignment = .{ .x = .left, .y = .center } },
         })({
@@ -3411,10 +3401,8 @@ pub const CodeEditor = struct {
         const line = vis.text;
         // Auswahl beginnt erst hinter diesem Segment
         if (start_byte > vis.start_byte + line.len or (start_byte == vis.start_byte + line.len and !is_last)) return;
-        // Spalten sind Bytes: Auswahlgrenzen können in einer UTF-8-Sequenz liegen — für die
-        // Messung an die Zeichengrenzen rücken, sonst misst der Shaper ungültigen Text.
-        const start_clamped = snapToCharBoundary(line, @min(start_byte -| vis.start_byte, line.len));
-        const end_clamped = snapToCharBoundaryForward(line, @min(end_byte -| vis.start_byte, line.len));
+        const start_clamped = @min(start_byte -| vis.start_byte, line.len);
+        const end_clamped = @min(end_byte -| vis.start_byte, line.len);
 
         if (start_clamped >= end_clamped and line_idx < range.end.row and is_last) {
             // Selection extends to end of line
@@ -3495,9 +3483,7 @@ pub const CodeEditor = struct {
         if (byte_pos < offset) return;
         const seg_end = offset + seg.text.len;
         if (byte_pos > seg_end or (byte_pos == seg_end and !is_last)) return;
-        // Spalten sind Bytes: ←/→ laufen durch Mehrbyte-Zeichen; die Messstrecke endet an der Zeichengrenze
-        const draw_pos = snapToCharBoundary(line, byte_pos);
-        const text_before_cursor = if (draw_pos > offset) line[offset..draw_pos] else line[0..0];
+        const text_before_cursor = if (byte_pos > offset) line[offset..byte_pos] else line[0..0];
 
         clay.UI()(.{
             .layout = .{ .sizing = .{ .w = .fixed(0), .h = .fixed(@floatFromInt(self.font_size + 16)) } },
@@ -3968,30 +3954,60 @@ test "lange Zeile: Cursor am Ende scrollt die Ansicht horizontal, sichtbarer Aus
     try std.testing.expectEqual(@as(usize, 0), t.ed.view.col);
 }
 
-test "visibleSliceOf: Ausschnitt beginnt und endet nie in einer UTF-8-Sequenz" {
+test "visibleSliceOf: Spalten sind Codepoints, der Ausschnitt zerschneidet keine UTF-8-Sequenz" {
+    // Mit Byte-Spalten endete der Ausschnitt bei 10 Spalten nach Byte 12, mitten im Gedankenstrich
     var t = try testEditor(std.testing.allocator, "> **Tab 1 \xe2\x80\x93 Positive Befunde (erf\xc3\xbcllt)**");
     defer t.buffer.deinit();
     defer t.ed.deinit();
-    t.ed.width = 0; // visibleColCount = 10 → Schnitt bei Byte 12, mitten im Gedankenstrich
+    t.ed.width = 0; // visibleColCount = 10 → 12 Spalten sichtbar
     t.ed.ensureCursorVisible();
     try std.testing.expectEqual(@as(usize, 10), t.ed.view.cols);
     const head = t.ed.visibleSlice(0);
-    try std.testing.expectEqualStrings("> **Tab 1 \xe2\x80\x93", head.text);
+    try std.testing.expectEqualStrings("> **Tab 1 \xe2\x80\x93 ", head.text);
     try std.testing.expectEqual(@as(usize, 0), head.start_byte);
-    try std.testing.expectEqual(@as(usize, 0), head.col);
 
-    // Spalte 11 = zweites Byte des Gedankenstrichs: Anfang rückt auf Byte 10, Spalte wandert mit
+    // Spalte 11 = das Leerzeichen hinter dem Gedankenstrich (Byte 13)
     t.ed.view.col = 11;
     const mid = t.ed.visibleSlice(0);
-    try std.testing.expect(std.unicode.utf8ValidateSlice(mid.text));
-    try std.testing.expectEqual(@as(usize, 10), mid.start_byte);
-    try std.testing.expectEqual(@as(usize, 10), mid.col);
-    try std.testing.expect(std.mem.startsWith(u8, mid.text, "\xe2\x80\x93 Positive"));
+    try std.testing.expectEqual(@as(usize, 13), mid.start_byte);
+    try std.testing.expectEqualStrings(" Positive Be", mid.text);
 
     // Am Zeilenende bleibt der Ausschnitt leer statt zu überlaufen
     t.ed.view.col = 200;
     const tail = t.ed.visibleSlice(0);
     try std.testing.expectEqual(@as(usize, 0), tail.text.len);
+}
+
+test "Cursor läuft in einem Schritt über ein Mehrbyte-Zeichen, Tippen und Löschen bleiben gültiges UTF-8" {
+    var t = try testEditor(std.testing.allocator, "a\xc3\xbcb \xe2\x82\xac");
+    defer t.buffer.deinit();
+    defer t.ed.deinit();
+    const m = t.ed.metrics();
+    try std.testing.expectEqual(@as(usize, 5), t.ed.lineWidth(0)); // a ü b ␠ € — 8 Bytes, 5 Spalten
+
+    t.ed.cursor.move_right(t.ed.buffer.root, m) catch {};
+    t.ed.cursor.move_right(t.ed.buffer.root, m) catch {};
+    try std.testing.expectEqual(@as(usize, 2), t.ed.cursor.col); // hinter dem ü
+    t.ed.handleChar('x');
+    try std.testing.expectEqualStrings("a\xc3\xbcxb \xe2\x82\xac", t.ed.getLine(0));
+    try std.testing.expectEqual(@as(usize, 3), t.ed.cursor.col);
+
+    t.ed.handleKeyPress(.backspace);
+    t.ed.handleKeyPress(.backspace);
+    try std.testing.expectEqualStrings("ab \xe2\x82\xac", t.ed.getLine(0));
+    try std.testing.expectEqual(@as(usize, 1), t.ed.cursor.col);
+
+    // Delete am Zeilenanfang der Restzeile: „b“, dann Leerzeichen, dann das dreibyteige €
+    t.ed.handleKeyPress(.delete);
+    t.ed.handleKeyPress(.delete);
+    t.ed.handleKeyPress(.delete);
+    try std.testing.expectEqualStrings("a", t.ed.getLine(0));
+
+    // Ctrl+F sucht in denselben Spalten: Treffer hinter dem Umlaut landet auf der richtigen Spalte
+    t.ed.setText("\xc3\xa4\xc3\xb6 foo");
+    t.ed.findText("foo");
+    try std.testing.expectEqual(@as(usize, 3), t.ed.selectionRange().?.begin.col);
+    try std.testing.expectEqual(@as(usize, 6), t.ed.cursor.col);
 }
 
 fn editorText(ed: *CodeEditor) ![]u8 {

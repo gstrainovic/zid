@@ -69,20 +69,24 @@ test "tagsForLine performance" {
     try testing.expect(avg < 10_000_000); // 10ms in ns
 }
 
-// tree-sitter liest den Rope über `get_from_pos` (Byte-Metriken); die Tag-Grenzen müssen
-// auf Zeichengrenzen liegen — sonst schneidet der Editor beim Zeichnen UTF-8-Sequenzen auf.
-test "markdown tags end on codepoint boundaries" {
+// tree-sitter liest den Rope chunk-weise (1 KiB) und meldet die Fortsetzung als Byte-Spalte;
+// mit Codepoint-Metriken (wie im Editor) muss `reparseFromBuffer` das trotzdem byteweise
+// bedienen, sonst verschieben sich hinter dem ersten Chunk einer langen Umlaut-Zeile alle Tags.
+test "markdown tags stay on codepoint boundaries with codepoint metrics and long lines" {
     const allocator = testing.allocator;
-    const content =
-        "# Titel\n\n## Positive Befunde\n\n> **Tab 1 \xe2\x80\x93 Positive Befunde (erf\xc3\xbcllt)**\n\n### E01\n\n" ++
-        "- **Aspekt / Teil-Feststellung bzw. Teil-Empfehlung:** Zustellung als Reset-Link \xe2\x87\x92 gepr\xc3\xbcft.\n";
+    var content: std.ArrayListUnmanaged(u8) = .empty;
+    defer content.deinit(allocator);
+    try content.appendSlice(allocator, "# Titel\n\n- ");
+    var i: usize = 0;
+    while (i < 700) : (i += 1) try content.appendSlice(allocator, "\xc3\xbc"); // 1400 Bytes, 700 Spalten
+    try content.appendSlice(allocator, " Ende\n\n## Positive Befunde\n\n> **Tab 1 \xe2\x80\x93 Positive Befunde (erf\xc3\xbcllt)**\n");
 
     var buffer = try flow_core.Buffer.create(allocator);
     defer buffer.deinit();
     var eol_mode: flow_core.Buffer.EolMode = .lf;
     var utf8_sanitized: bool = false;
-    const root = try buffer.load_from_string(content, &eol_mode, &utf8_sanitized);
-    const metrics = createTestMetrics();
+    const root = try buffer.load_from_string(content.items, &eol_mode, &utf8_sanitized);
+    const metrics = createCodepointMetrics();
 
     var highlighter = try flow_core.highlight.SyntaxHighlighter.create(allocator, "markdown");
     defer highlighter.destroy();
@@ -105,6 +109,51 @@ test "markdown tags end on codepoint boundaries" {
             }
         }
     }
+    // Überschrift hinter der langen Zeile: „##“ und der Titeltext an den richtigen Bytes
+    const heading = try highlighter.tagsForLine(4, "## Positive Befunde".len, allocator);
+    try testing.expectEqual(@as(usize, 2), heading.len);
+    try testing.expectEqual(@as(usize, 0), heading[0].start);
+    try testing.expectEqual(@as(usize, 2), heading[0].end);
+    try testing.expectEqual(@as(usize, 3), heading[1].start);
+    try testing.expectEqual(@as(usize, 19), heading[1].end);
+}
+
+/// Metriken wie `CodeEditor.metrics`: ein Codepoint = eine Spalte, Tab = 4.
+fn createCodepointMetrics() flow_core.Buffer.Metrics {
+    const Ctx = struct {
+        fn egc_length(_: flow_core.Buffer.Metrics, egcs: []const u8, colcount: *usize, _: usize) usize {
+            if (egcs.len == 0) return 0;
+            if (egcs[0] == '\n') {
+                colcount.* = 1;
+                return 1;
+            }
+            if (egcs[0] == '\t') {
+                colcount.* = 4;
+                return 1;
+            }
+            colcount.* = 1;
+            const len = std.unicode.utf8ByteSequenceLength(egcs[0]) catch 1;
+            return @min(len, egcs.len);
+        }
+        fn egc_chunk_width(_: flow_core.Buffer.Metrics, chunk_: []const u8, _: usize) usize {
+            var w: usize = 0;
+            for (chunk_) |b| {
+                if ((b & 0xC0) == 0x80) continue;
+                w += if (b == '\t') 4 else 1;
+            }
+            return w;
+        }
+        fn egc_last(_: flow_core.Buffer.Metrics, egcs: []const u8) []const u8 {
+            return egcs;
+        }
+    };
+    return .{
+        .ctx = undefined,
+        .egc_length = Ctx.egc_length,
+        .egc_chunk_width = Ctx.egc_chunk_width,
+        .egc_last = Ctx.egc_last,
+        .tab_width = 4,
+    };
 }
 
 /// Generiere eine Testdatei mit Zig-Code
