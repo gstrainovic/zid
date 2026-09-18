@@ -434,6 +434,66 @@ pub const View = struct {
         self.rebuildRows() catch {};
     }
 
+    /// Tastatur: Auswahl um `delta` Zeilen verschieben, an die Liste geklemmt; ohne Auswahl
+    /// beginnt sie oben. Rückgabe = neue Auswahl (null bei leerer Liste).
+    pub fn moveSelection(self: *View, delta: isize) ?usize {
+        const count = self.rows.items.len;
+        if (count == 0) {
+            self.selected = null;
+            return null;
+        }
+        const cur: isize = if (self.selected) |s| @intCast(@min(s, count - 1)) else if (delta > 0) -1 else 0;
+        const moved = std.math.clamp(cur + delta, 0, @as(isize, @intCast(count - 1)));
+        self.selected = @intCast(moved);
+        return self.selected;
+    }
+
+    pub const Activate = union(enum) { none, toggled, open_diff: ViewRow, load_more };
+
+    /// Enter/Leertaste auf der gewählten Zeile: Commit auf-/zuklappen, Datei öffnen, Seite laden.
+    pub fn activateSelected(self: *View) Activate {
+        const i = self.selected orelse return .none;
+        if (i >= self.rows.items.len) return .none;
+        const row = self.rows.items[i];
+        switch (row.kind) {
+            .commit => {
+                self.toggleExpanded(row.commit);
+                return .toggled;
+            },
+            .change => return .{ .open_diff = row },
+            .load_more => {
+                _ = self.loadMore();
+                return .load_more;
+            },
+        }
+    }
+
+    /// ←: Datei-Zeile springt zu ihrem Commit; aufgeklappter Commit klappt zu.
+    pub fn collapseSelected(self: *View) ?usize {
+        const i = self.selected orelse return null;
+        if (i >= self.rows.items.len) return null;
+        const row = self.rows.items[i];
+        switch (row.kind) {
+            .change => {
+                for (self.rows.items[0..i], 0..) |r, k| {
+                    if (r.kind == .commit and r.commit == row.commit) self.selected = k;
+                }
+                if (self.isExpanded(row.commit)) self.toggleExpanded(row.commit);
+            },
+            .commit => if (self.isExpanded(row.commit)) self.toggleExpanded(row.commit),
+            .load_more => {},
+        }
+        return self.selected;
+    }
+
+    /// →: zugeklappter Commit klappt auf.
+    pub fn expandSelected(self: *View) void {
+        const i = self.selected orelse return;
+        if (i >= self.rows.items.len) return;
+        const row = self.rows.items[i];
+        if (row.kind == .commit and !self.isExpanded(row.commit)) self.toggleExpanded(row.commit);
+    }
+
     pub fn isExpanded(self: *const View, commit_index: usize) bool {
         const e = self.expansions.get(self.list.items[commit_index].hash) orelse return false;
         return e.expanded;
@@ -634,4 +694,35 @@ test "Commit-Tab-Pfad: Commit, Eltern, Repo, Betreff hin und zurück" {
 fn contains(args: []const []const u8, arg: []const u8) bool {
     for (args) |a| if (std.mem.eql(u8, a, arg)) return true;
     return false;
+}
+
+test "View: Tastatur wählt Zeilen, Enter klappt Commits auf und öffnet Dateien" {
+    var v = View.init(testing.allocator);
+    defer v.deinit();
+    try testing.expect(v.moveSelection(1) == null); // leer: nichts zu wählen
+    _ = v.takeLogRequest();
+    try v.applyLog(true, "main\x1frefs/heads/main\x1frefs/remotes/origin/main\x1f\x1f/r\n" ++ sample, 2);
+    // Ohne Auswahl beginnt ↓ oben, ↑ bleibt oben, End springt ans Ende (Load More), Home nach oben
+    try testing.expectEqual(@as(?usize, 0), v.moveSelection(1));
+    try testing.expectEqual(@as(?usize, 0), v.moveSelection(-1));
+    try testing.expectEqual(@as(?usize, 2), v.moveSelection(1000));
+    try testing.expectEqual(@as(?usize, 0), v.moveSelection(-1000));
+    // Enter auf dem Commit klappt auf (fordert die Dateien an)
+    try testing.expectEqual(View.Activate.toggled, v.activateSelected());
+    try testing.expectEqualStrings("aaaa", v.takeChangesRequest().?);
+    try v.applyChanges("aaaa", true, "M\tsrc/a.zig\nA\tb.txt\n");
+    // ↓ auf die erste Datei, Enter öffnet den Diff
+    try testing.expectEqual(@as(?usize, 1), v.moveSelection(1));
+    const act = v.activateSelected();
+    try testing.expectEqual(RowKind.change, act.open_diff.kind);
+    try testing.expectEqualStrings("src/a.zig", v.changeOf(act.open_diff).?.path);
+    // ← springt zum Commit der Datei und klappt ihn zu, → klappt wieder auf
+    try testing.expectEqual(@as(?usize, 0), v.collapseSelected());
+    try testing.expectEqual(@as(usize, 3), v.rows.items.len);
+    v.expandSelected();
+    try testing.expectEqual(@as(usize, 5), v.rows.items.len);
+    // Enter auf Load More fordert die nächste Seite an
+    _ = v.moveSelection(1000);
+    try testing.expectEqual(View.Activate.load_more, v.activateSelected());
+    try testing.expectEqual(@as(usize, 2), v.takeLogRequest().?);
 }

@@ -101,6 +101,39 @@ pub const ScmGraphView = struct {
         self.hover_row = null;
     }
 
+    pub const Key = enum { up, down, page_up, page_down, home, end, enter, left, right, reload };
+
+    /// Tastatur mit Fokus in der Sidebar: Pfeile/Bild/Pos1/Ende wählen Zeilen, Enter klappt
+    /// Commits auf bzw. öffnet die Datei, ←/→ klappen zu/auf, F5 lädt neu.
+    pub fn handleKey(self: *Self, key: Key) Action {
+        const v = &self.view;
+        const vp = if (box(bodyId())) |b| b.height else 0;
+        const page: isize = @max(1, @as(isize, @intFromFloat(vp / ROW_HEIGHT)) - 1);
+        const count: isize = @intCast(v.rows.items.len);
+        var action: Action = .consumed;
+        switch (key) {
+            .up => _ = v.moveSelection(-1),
+            .down => _ = v.moveSelection(1),
+            .page_up => _ = v.moveSelection(-page),
+            .page_down => _ = v.moveSelection(page),
+            .home => _ = v.moveSelection(-count),
+            .end => _ = v.moveSelection(count),
+            .left => _ = v.collapseSelected(),
+            .right => v.expandSelected(),
+            .enter => switch (v.activateSelected()) {
+                .open_diff => |row| action = .{ .open_diff = row },
+                else => {},
+            },
+            .reload => self.refresh(),
+        }
+        self.hover_row = null;
+        self.menu = null;
+        if (v.selected) |i| if (vp > 0) {
+            v.scroll = git_history.clampScroll(git_history.scrollToShow(v.scroll, vp, ROW_HEIGHT, i), vp, ROW_HEIGHT, v.rows.items.len);
+        };
+        return action;
+    }
+
     pub fn handleMouseDown(self: *Self, x: f32, y: f32, right: bool) Action {
         if (self.menu) |m| {
             self.menu = null;

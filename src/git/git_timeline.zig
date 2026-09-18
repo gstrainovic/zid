@@ -326,6 +326,20 @@ pub const Timeline = struct {
         if (expanded and self.file != null and !self.loaded and !self.loading) self.want_load = true;
     }
 
+    /// Tastatur: Auswahl um `delta` Eintr채ge verschieben, an die Liste geklemmt; ohne Auswahl
+    /// beginnt sie oben. R체ckgabe = neue Auswahl (null bei leerer Liste).
+    pub fn moveSelection(self: *Timeline, delta: isize) ?usize {
+        const count = self.items().len;
+        if (count == 0) {
+            self.selected = null;
+            return null;
+        }
+        const cur: isize = if (self.selected) |s| @intCast(@min(s, count - 1)) else if (delta > 0) -1 else 0;
+        const moved = std.math.clamp(cur + delta, 0, @as(isize, @intCast(count - 1)));
+        self.selected = @intCast(moved);
+        return self.selected;
+    }
+
     pub fn togglePin(self: *Timeline) void {
         self.pinned = !self.pinned;
     }
@@ -633,4 +647,19 @@ test "Timeline: show zeigt eine Datei aus dem Explorer, klappt auf, pinnt und l�
     // Gleiche Datei noch einmal: l채dt neu wie Refresh
     t.show("/r/andere.zig");
     try testing.expect(t.takeRequest());
+}
+
+test "Timeline: Tastatur w채hlt Eintr채ge, geklemmt an die Liste" {
+    var t = Timeline.init(testing.allocator);
+    defer t.deinit();
+    try testing.expect(t.moveSelection(1) == null);
+    t.setExpanded(true);
+    t.follow("/r/b.txt");
+    _ = t.takeRequest();
+    try t.apply("/r/b.txt", true, "/r\n" ++ sample_log);
+    try testing.expectEqual(@as(?usize, 0), t.moveSelection(1));
+    try testing.expectEqual(@as(?usize, 1), t.moveSelection(1));
+    try testing.expectEqual(@as(?usize, 1), t.moveSelection(1)); // Ende: bleibt
+    try testing.expectEqual(@as(?usize, 0), t.moveSelection(-100));
+    try testing.expectEqual(@as(?usize, 1), t.moveSelection(100));
 }

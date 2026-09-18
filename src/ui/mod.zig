@@ -160,6 +160,9 @@ pub const UI = struct {
     agent_confirm_answer: ?bool = null,
     /// Letzter Klick war im Explorer: F2/Entf gelten für den markierten Eintrag
     explorer_focused: bool = false,
+    /// Letzter Klick war im Source Control Graph oder in der Timeline: Pfeile/Enter/F5
+    /// gehören der Liste, keine Taste erreicht den Editor. Escape gibt den Fokus zurück.
+    sidebar_focus: enum { none, scm, timeline } = .none,
     /// Zuletzt per setClipboard kopierter Text (owned; für Tests ohne Fenster)
     last_clipboard_text: ?[]u8 = null,
     /// Dauer des letzten Frames (Eingabe bis Ende Layout/Render) und Maximum seit dem letzten Abholen
@@ -727,6 +730,57 @@ pub const UI = struct {
             return;
         }
 
+        // Fokus im Source Control Graph oder in der Timeline: Pfeile/Bild/Pos1/Ende wählen,
+        // Enter öffnet, F5 lädt neu. Keine Taste erreicht den Editor, Escape gibt den Fokus zurück.
+        if (self.show_file_explorer and self.sidebar_focus != .none) {
+            if (key == .escape) {
+                self.sidebar_focus = .none;
+                return;
+            }
+            if (!self.is_ctrl_down and !self.is_alt_down) {
+                switch (self.sidebar_focus) {
+                    .scm => if (self.sidebar_mode == .scm) {
+                        const k: ?scm_graph_view_mod.ScmGraphView.Key = switch (key) {
+                            .up => .up,
+                            .down => .down,
+                            .page_up => .page_up,
+                            .page_down => .page_down,
+                            .home => .home,
+                            .end => .end,
+                            .left => .left,
+                            .right => .right,
+                            .enter, .space => .enter,
+                            .f5 => .reload,
+                            else => null,
+                        };
+                        if (k) |kk| switch (self.scm_graph.handleKey(kk)) {
+                            .open_diff => |row| if (self.scm_graph.view.diffSpec(row)) |spec| self.openGitDiff(spec),
+                            else => {},
+                        };
+                    },
+                    .timeline => if (self.sidebar_mode == .explorer) {
+                        const k: ?timeline_view_mod.TimelineView.Key = switch (key) {
+                            .up => .up,
+                            .down => .down,
+                            .page_up => .page_up,
+                            .page_down => .page_down,
+                            .home => .home,
+                            .end => .end,
+                            .enter, .space => .enter,
+                            .f5 => .reload,
+                            else => null,
+                        };
+                        if (k) |kk| switch (self.timeline_view.handleKey(kk)) {
+                            .open_changes => |i| self.openTimelineChanges(i),
+                            else => {},
+                        };
+                    },
+                    .none => {},
+                }
+            }
+            return;
+        }
+
         // Git-History: Pfeile/Bild/Pos1/Ende wählen Commits, F5 lädt neu. Keine Taste erreicht
         // den Editor dahinter (dessen Buffer ist nicht sichtbar).
         if (self.isGitHistoryTabActive()) {
@@ -890,6 +944,7 @@ pub const UI = struct {
             return;
         }
         if (self.show_file_explorer and self.explorer_focused) return; // Buchstaben sind Explorer-Kürzel
+        if (self.show_file_explorer and self.sidebar_focus != .none) return; // Fokus in Graph/Timeline
         // kein Text in den unsichtbaren Editor hinter History- und Diff-Tabs
         if (self.activeTabKind() == .git_history or self.activeTabKind() == .git_diff or self.activeTabKind() == .git_commit) return;
 
@@ -1026,6 +1081,7 @@ pub const UI = struct {
         // Source Control Graph in der Sidebar
         if (self.show_file_explorer and self.sidebar_mode == .scm and (self.scm_graph.menu != null or self.inSidebarBox(x, y))) {
             self.explorer_focused = false;
+            self.sidebar_focus = if (self.inSidebarBox(x, y)) .scm else .none;
             switch (self.scm_graph.handleMouseDown(x, y, button == .mouse_right)) {
                 .none, .consumed => {},
                 .open_diff => |row| if (self.scm_graph.view.diffSpec(row)) |spec| self.openGitDiff(spec),
@@ -1042,6 +1098,7 @@ pub const UI = struct {
         // Timeline unter dem Explorer: offenes Menü, Kopf und Einträge vor dem Baum
         if (self.show_file_explorer and self.sidebar_mode == .explorer and (self.timeline_view.menu != null or self.timeline_view.contains(x, y))) {
             self.explorer_focused = false;
+            self.sidebar_focus = if (self.timeline_view.contains(x, y)) .timeline else .none;
             switch (self.timeline_view.handleMouseDown(x, y, button == .mouse_right)) {
                 .none => {},
                 .consumed => return,
@@ -1067,6 +1124,7 @@ pub const UI = struct {
 
         // Tastatur-Fokus folgt dem Klick: Explorer-Kürzel (F2/Entf) nur nach Klick im Explorer
         self.explorer_focused = self.show_file_explorer and self.sidebar_mode == .explorer and self.file_explorer.inSidebar(x);
+        self.sidebar_focus = .none;
 
         if (self.show_file_explorer and self.sidebar_mode == .explorer) {
             if (self.file_explorer.handleMouseDown(x, y, button)) {
@@ -1581,7 +1639,10 @@ pub const UI = struct {
             .open_tab_picker => self.openTabPicker(),
             .toggle_explorer => {
                 self.show_file_explorer = !self.show_file_explorer;
-                if (!self.show_file_explorer) self.explorer_focused = false;
+                if (!self.show_file_explorer) {
+                    self.explorer_focused = false;
+                    self.sidebar_focus = .none;
+                }
             },
             .new_terminal => self.getActiveTabBar().openTerminal(),
             // Editor-Commands: dieselben Actions wie die Tastenkürzel im Editor-Keymap
@@ -1650,6 +1711,7 @@ pub const UI = struct {
             .filter_explorer => {
                 self.show_file_explorer = true;
                 self.explorer_focused = true;
+                self.sidebar_focus = .none;
                 self.file_explorer.startFilter();
             },
             .close_other_tabs => if (self.tabTarget()) |t| self.closeTabsWhere(t.pane, t.index, false, false),
@@ -1691,6 +1753,7 @@ pub const UI = struct {
                 self.show_file_explorer = true;
                 self.sidebar_mode = .explorer; // wie VS Code Ctrl+Shift+E: zurück zum Explorer
                 self.explorer_focused = true;
+                self.sidebar_focus = .none;
                 if (self.file_explorer.selected_index == null and self.file_explorer.visible_entries.items.len > 0) self.file_explorer.selectEntry(0);
             },
             .toggle_terminal => self.toggleTerminal(),
@@ -1744,6 +1807,7 @@ pub const UI = struct {
                 self.show_file_explorer = true;
                 self.sidebar_mode = .scm;
                 self.explorer_focused = false;
+                self.sidebar_focus = .scm; // wie VS Code Ctrl+Shift+G: Tasten gehen an den Graph
             },
             .graph_open_changes => if (self.scm_cmd_commit) |c| self.openCommitChanges(c),
             .graph_copy_commit_hash => if (self.graphCommit()) |c| self.setClipboard(c.hash),
@@ -1778,6 +1842,8 @@ pub const UI = struct {
         const tab_path = git_scm.commitTabPath(self.allocator, spec) catch return;
         if (self.pending_tab_switch) |old| self.allocator.free(old);
         self.pending_tab_switch = tab_path;
+        self.explorer_focused = false;
+        self.sidebar_focus = .none;
     }
 
     fn gitCommitFor(self: *Self, tab_path: []const u8) ?*git_commit_view_mod.GitCommitView {
@@ -1988,6 +2054,7 @@ pub const UI = struct {
         if (self.pending_tab_switch) |old| self.allocator.free(old);
         self.pending_tab_switch = tab_path;
         self.explorer_focused = false;
+        self.sidebar_focus = .none;
     }
 
     fn driveGitDiffs(self: *Self) void {
@@ -2528,6 +2595,7 @@ pub const UI = struct {
         if (best) |p| {
             self.active_pane = p;
             self.explorer_focused = false;
+            self.sidebar_focus = .none;
         }
     }
 

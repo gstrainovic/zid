@@ -10,6 +10,7 @@ Prüft:
   3. Hover zeigt nach 700 ms die Commit-Details
   4. Klick öffnet den Diff-Editor gegen den vorigen Commit der Datei, Timeline bleibt stehen
   5. Rechtsklick-Menü: Copy Commit ID
+  5b. Tastatur nach Klick in die Timeline: ↓/End/Home wählen, Enter öffnet den Diff
   6. Timeline folgt der aktiven Datei; Pin hält sie fest; Datei ohne Commit zeigt den Hinweis
   6c. „File History“ aus Explorer-, Tab- und Editor-Menü stellt die Timeline angepinnt auf die Datei
   7. Refresh lädt einen neuen Commit; keine Clay-Fehler
@@ -19,7 +20,7 @@ import os, shutil, subprocess, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from e2e_open_folder import ROOT, rpc, result_json, wait_port, settle, bounds, click_center, check, shot, rmtree  # noqa: E402
-from e2e_shortcuts import explorer_click  # noqa: E402
+from e2e_shortcuts import key, explorer_click  # noqa: E402
 
 FX = os.path.join(ROOT, "tmp", "e2e_timeline")
 XDG = os.path.join(ROOT, "tmp", "xdg")
@@ -167,6 +168,41 @@ def step_menu():
     check(ui["clipboard_text"] == s["items"][0]["hash"], "Copy Commit ID legt den Hash in die Zwischenablage")
 
 
+def step_keyboard():
+    print("--- 5b. Tastatur in der Timeline")
+    explorer_click("app.zig"); settle(6)
+    s = wait(lambda s: s["file"] == os.path.join(FX, "app.zig") and s["loaded"] and len(s["items"]) == 4, "app.zig mit vier Einträgen")
+    # Klick auf Refresh im Kopf gibt der Timeline den Tastaturfokus
+    rpc("move_mouse", list(center(s["header"]))); settle(6)
+    click_center("tl_btn_refresh")
+    wait(lambda s: s["loaded"], "Refresh geladen")
+    key("home")
+    wait(lambda s: s["selected"] == 0, "Home wählt den ersten Eintrag")
+    key("end")
+    wait(lambda s: s["selected"] == 3, "End wählt den letzten")
+    key("home")
+    wait(lambda s: s["selected"] == 0, "Home wieder den ersten")
+    key("down"); key("down")
+    s = wait(lambda s: s["selected"] == 2, "↓↓ auf den dritten Eintrag")
+    key("x")  # Buchstabe erreicht den Editor nicht
+    key("enter")
+    t0 = time.time()
+    d = {}
+    while time.time() - t0 < 10:
+        d = result_json("git_history_state")
+        if d.get("view") == "diff" and d.get("loaded"):
+            break
+        time.sleep(0.05)
+    check(d.get("title", "").startswith("lib.zig ("), f"Enter öffnet den Diff-Editor des Eintrags: {d.get('title')}")
+    key("down")
+    settle(4)
+    check(tl()["selected"] == 2, "Diff-Tab hat den Fokus: ↓ bewegt die Timeline nicht")
+    key("e", ctrl=True, shift=True)  # Explorer-Fokus, nicht Timeline
+    key("down")
+    settle(4)
+    check(tl()["selected"] == 2, "Explorer-Fokus: ↓ bewegt die Timeline nicht")
+
+
 def step_follow_pin():
     print("--- 6. Folgen, Pin, Datei ohne Commit")
     explorer_click("other.txt"); settle(6)
@@ -274,7 +310,7 @@ def main():
         settle(20)
         check(rpc("open_folder", [FX]) == "ok", "Fixture-Repo als Explorer-Root")
         settle(10)
-        for step in (step_expand, step_items, step_hover, step_open_changes, step_menu, step_follow_pin, step_staged, step_file_history_menus, step_refresh):
+        for step in (step_expand, step_items, step_hover, step_open_changes, step_menu, step_keyboard, step_follow_pin, step_staged, step_file_history_menus, step_refresh):
             step()
         print("ALL PASSED")
     finally:
