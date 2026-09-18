@@ -877,8 +877,7 @@ pub const FileExplorerState = struct {
             switch (key) {
                 .enter, .kp_enter => self.commitCreate(),
                 .escape => self.creating = null,
-                .backspace => st.edit.backspace(),
-                else => {},
+                else => editKey(&st.edit, key),
             }
             return;
         }
@@ -886,7 +885,19 @@ pub const FileExplorerState = struct {
         switch (key) {
             .enter, .kp_enter => self.commitRename(),
             .escape => self.rename = null,
-            .backspace => st.edit.backspace(),
+            else => editKey(&st.edit, key),
+        }
+    }
+
+    /// Cursor- und Löschtasten im Inline-Editierfeld (Umbenennen, Anlegen).
+    fn editKey(edit: *explorer_ops.RenameEdit, key: wio.Button) void {
+        switch (key) {
+            .backspace => edit.backspace(),
+            .delete => edit.delete(),
+            .left => edit.moveLeft(),
+            .right => edit.moveRight(),
+            .home => edit.moveHome(),
+            .end => edit.moveEnd(),
             else => {},
         }
     }
@@ -1525,7 +1536,7 @@ fn renderCreateRow(arena: std.mem.Allocator, cs: CreateState, depth: u32, theme:
             .border = .{ .width = .all(1), .color = theme.border_focus },
             .corner_radius = .all(3),
         })({
-            const shown = std.fmt.allocPrint(arena, "{s}|", .{cs.edit.text()}) catch cs.edit.text();
+            const shown = std.fmt.allocPrint(arena, "{s}|{s}", .{ cs.edit.textBeforeCursor(), cs.edit.textAfterCursor() }) catch cs.edit.text();
             clay.text(shown, .{ .font_size = 22, .color = theme.text, .wrap_mode = .none });
         });
     });
@@ -1680,7 +1691,7 @@ fn renderTreeEntry(
         // Dateiname oder Umbenennen-Feld
         const renaming = if (state.rename) |st| st.node_index == entry.node_index else false;
         if (renaming) {
-            const edit_text = state.rename.?.edit.text();
+            const edit = &state.rename.?.edit;
             clay.UI()(.{
                 .id = clay.ElementId.ID("fx_rename_box"),
                 .layout = .{
@@ -1692,7 +1703,7 @@ fn renderTreeEntry(
                 .border = .{ .width = .all(1), .color = theme.border_focus },
                 .corner_radius = .all(3),
             })({
-                const shown = std.fmt.allocPrint(arena, "{s}|", .{edit_text}) catch edit_text;
+                const shown = std.fmt.allocPrint(arena, "{s}|{s}", .{ edit.textBeforeCursor(), edit.textAfterCursor() }) catch edit.text();
                 clay.text(shown, .{ .font_size = 22, .color = theme.text });
             });
         } else {
