@@ -132,7 +132,7 @@ def step_open_changes():
     d = None
     t0 = time.time()
     while time.time() - t0 < 10:
-        d = result_json("git_history_state")
+        d = result_json("git_diff_state")
         if d.get("view") == "diff" and d.get("loaded"):
             break
         time.sleep(0.05)
@@ -144,7 +144,7 @@ def step_open_changes():
     rpc("click", list(row_center(s, 2))); settle(6)
     t0 = time.time()
     while time.time() - t0 < 10:
-        d = result_json("git_history_state")
+        d = result_json("git_diff_state")
         if d.get("view") == "diff" and d.get("loaded") and d.get("title", "").startswith("lib.zig"):
             break
         time.sleep(0.05)
@@ -189,7 +189,7 @@ def step_keyboard():
     t0 = time.time()
     d = {}
     while time.time() - t0 < 10:
-        d = result_json("git_history_state")
+        d = result_json("git_diff_state")
         if d.get("view") == "diff" and d.get("loaded"):
             break
         time.sleep(0.05)
@@ -236,7 +236,7 @@ def step_staged():
     t0 = time.time()
     d = {}
     while time.time() - t0 < 10:
-        d = result_json("git_history_state")
+        d = result_json("git_diff_state")
         if d.get("view") == "diff" and d.get("loaded") and d.get("title") == "other.txt (Index)":
             break
         time.sleep(0.05)

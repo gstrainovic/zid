@@ -481,8 +481,6 @@ pub fn main() !void {
                     switch (result.tag) {
                         .git_branch => ui_system.updateBranch(result.payload),
                         .git_status => ui_system.updateGitStatus(result.payload),
-                        .git_log, .git_log_error => ui_system.handleGitLog(result.tag == .git_log, result.payload),
-                        .git_show, .git_show_error => ui_system.handleGitShow(result.tag == .git_show, result.payload),
                         .git_file_diff, .git_file_diff_error => ui_system.handleGitFileDiff(result.tag == .git_file_diff, result.payload),
                         .git_timeline, .git_timeline_error => ui_system.handleGitTimeline(result.tag == .git_timeline, result.payload),
                         .git_graph_log, .git_graph_log_error => ui_system.handleGitGraphLog(result.tag == .git_graph_log, result.payload),
@@ -657,7 +655,7 @@ pub fn main() !void {
                 }
                 c.pdf_page.store(page, .seq_cst);
                 c.pdf_pages.store(pages, .seq_cst);
-                e2e_server.snapshotGitHistory(c);
+                e2e_server.snapshotGitViews(c);
             }
 
             var state_dirty: bool = false;
@@ -796,9 +794,9 @@ pub fn main() !void {
                         // Path cleanup happens below at the common pending_switch_path free.
                         state_dirty = true;
                         wio.cancelWait();
-                    } else if (kind == .binary or kind == .git_history or kind == .git_diff or kind == .git_commit) {
+                    } else if (kind == .binary or kind == .git_diff or kind == .git_commit) {
                         // Binärdatei: kein Buffer, der Tab zeigt nur den Hinweis (binary_view.zig).
-                        // Git-History: die Ansicht legt renderPane an und lädt selbst (UI.driveGitHistories).
+                        // Diff- und Commit-Tabs: die Ansicht legt renderPane an und lädt selbst.
                         state_dirty = true;
                         wio.cancelWait();
                     } else if (kind == .text) {

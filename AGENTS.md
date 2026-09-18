@@ -663,25 +663,18 @@ MuPDFs Story-Engine. Folienvorschau in `MarkdownView` (`deck`-Feld), Command
   `helper`. Hinweis: der RPC `open_folder` lädt nur den Explorer neu, `current_directory` bleibt das
   Startverzeichnis; zls bekommt im E2E deshalb das Projekt als Root.
 
-## Git-History (Repo und Datei)
+## Git-Ansichten: gemeinsame Bausteine
 
-- **Aufruf:** View → Git History bzw. Palette (Repo des Explorer-Roots), „File History“ im Tab-,
-  Editor- und Explorer-Kontextmenü (`file_history`, `file_history_entry`). Tab-Art `git_history`,
-  Pfad `git-history://repo:<ordner>` bzw. `git-history://file:<datei>`; ein offener Tab wird
-  aktiviert und neu geladen. Bewusst ein Tab, keine Sidebar-Timeline wie in VS Code.
-- **Aufbau:** `src/git/git_history.zig` (Modul `git_history`, unit-getestet: Tab-Pfade, git-Argumente,
-  Log-/Diff-Parsing, `State` mit Auswahl, Anfragen und verworfenen veralteten Diffs),
-  `git_worker.taskGitLog`/`taskGitShow` (Payload `<schlüssel>\n<ausgabe>`, Fehler als Tags
-  `git_log_error`/`git_show_error` mit stderr), Ansicht `src/ui/git_history_view.zig`.
-  `UI.driveGitHistories` reicht Anfragen pro Frame an den Scheduler, `handleGitLog`/`handleGitShow`
-  nehmen die Ergebnisse an. Schließen des letzten Tabs gibt die Ansicht frei.
-- **Datei-Verlauf:** `git log --follow --name-only` liefert den Pfad je Commit; `git show` bekommt
-  `:(top)<pfad>` und bei Umbenennung zusätzlich den Pfad des nächstälteren Commits, sonst zeigt git
-  die umbenannte Datei als komplett neu. Alle git-Aufrufe laufen mit `core.quotepath=off`.
-- Liste (zweizeilig) und Diff haben feste Zeilenhöhen und sind virtualisiert; IDs sind je Pane gesalzen.
-  Tasten ↑↓/PgUp/PgDn/Home/End/F5, keine Taste und kein Zeichen erreicht den Editor dahinter.
-- E2E `python3 scripts/e2e_git_history.py` (eigenes Fixture-Repo unter `tmp/`), RPC `git_history_state`
-  (JSON vom Main-Thread pro Frame gespiegelt, `snapshotGitHistory`).
+- Repo-Verlauf zeigt der Source Control Graph, Datei-Verlauf die Timeline im Explorer; es gibt
+  keinen eigenen History-Tab.
+- `git_worker.frame`/`unframe`/`splitKey`: Worker-Ergebnisse als `<schlüssel>\n<text>`, bei
+  Commit-Anfragen `\x1f<hash>` im Schlüssel, damit veraltete Antworten erkannt werden. Fehler von
+  git kommen als `*_error`-Tag mit stderr als Text, nie als Task-Fehler (`framedResult`).
+- `src/git/git_list.zig` (Modul `git_list`, unit-getestet): `visibleRange`, `scrollToShow`,
+  `clampScroll` für virtualisierte Listen mit fester Zeilenhöhe (Timeline, Graph).
+- Alle git-Aufrufe laufen mit `core.quotepath=off`.
+- E2E: RPC `git_diff_state` liefert den Diff-Editor des aktiven Tabs (`view: "diff"`), JSON vom
+  Main-Thread pro Frame gespiegelt (`snapshotGitViews`, mit `timeline_state` und `scm_state`).
 
 ## Diff-Editor im VS-Code-Stil (Tab `git-diff://…`)
 
@@ -691,7 +684,6 @@ MuPDFs Story-Engine. Folienvorschau in `MarkdownView` (`deck`-Feld), Command
   `resolveTimelineOpenDiffCommand`: `name (eltern) ↔ name (commit)`, Wurzel-Commit gegen den leeren
   Baum `4b825dc`. Kürzel wie VS Code: Alt+F5 / Shift+Alt+F5 (`diff_next_change`/`diff_prev_change`),
   Umschalter „Toggle Collapse Unchanged Regions“ und „Toggle Inline View“ in der Werkzeugleiste.
-- Läuft parallel zur einfachen Git-History (`git_history_view.zig`), die bleibt bestehen.
 - Aufbau: `src/git/git_diff.zig` (Modul `git_diff`, unit-getestet: Tab-Pfad mit 0x1f-Feldern
   Commit/Eltern/Repo/Pfad/alter Pfad, Hunks aus `git show -U0 -M`, Ausrichtung je Layout,
   `collapse`, `innerChange`, `columnSlice`, `DiffState`), Worker `taskGitFileDiff` (alter Inhalt
@@ -701,7 +693,7 @@ MuPDFs Story-Engine. Folienvorschau in `MarkdownView` (`deck`-Feld), Command
   `.percent(0.5)`: feste Breiten aus dem Vorframe zogen im neuen Pane den Container auf 1200 px.
 - Tab-Pfade enthalten 0x1f: RPC-JSON immer über `std.json.Stringify` schreiben (`ui_state.tabs`).
 - E2E `python3 scripts/e2e_git_diff.py` (öffnet den Tab per `open_file` mit gebautem Pfad), Zustand
-  über `git_history_state` mit `view: "diff"`.
+  über `git_diff_state`.
 
 ## Timeline im Explorer (VS-Code-Stil)
 

@@ -8,7 +8,7 @@ const clay = @import("clay");
 const ui = @import("mod.zig");
 const Theme = ui.Theme;
 const git_timeline = @import("git_timeline");
-const git_history = @import("git_history");
+const git_list = @import("git_list");
 const shortcuts = @import("shortcuts");
 const ctx_menu = @import("context_menu");
 const svg = @import("components/svg.zig");
@@ -127,7 +127,7 @@ pub const TimelineView = struct {
         self.hover_index = null;
         self.menu = null;
         if (t.selected) |i| if (vp > 0) {
-            t.scroll = git_history.clampScroll(git_history.scrollToShow(t.scroll, vp, ROW_HEIGHT, i), vp, ROW_HEIGHT, t.items().len);
+            t.scroll = git_list.clampScroll(git_list.scrollToShow(t.scroll, vp, ROW_HEIGHT, i), vp, ROW_HEIGHT, t.items().len);
         };
         return action;
     }
@@ -169,7 +169,7 @@ pub const TimelineView = struct {
     pub fn scrollLines(self: *Self, delta: i32) void {
         const vp = if (box(bodyId())) |b| b.height else 0;
         const t = &self.timeline;
-        t.scroll = git_history.clampScroll(t.scroll - @as(f32, @floatFromInt(delta * 3)) * ROW_HEIGHT, vp, ROW_HEIGHT, t.items().len);
+        t.scroll = git_list.clampScroll(t.scroll - @as(f32, @floatFromInt(delta * 3)) * ROW_HEIGHT, vp, ROW_HEIGHT, t.items().len);
         self.hover_index = null;
     }
 
@@ -207,8 +207,8 @@ pub const TimelineView = struct {
         const labels = git_timeline.relativeLabels(arena, items, now) catch &.{};
         self.last_labels = labels;
         const vp = if (box(bodyId())) |b| b.height else 0;
-        t.scroll = git_history.clampScroll(t.scroll, vp, ROW_HEIGHT, items.len);
-        const range = git_history.visibleRange(t.scroll, if (vp > 0) vp else 400, ROW_HEIGHT, items.len, 5);
+        t.scroll = git_list.clampScroll(t.scroll, vp, ROW_HEIGHT, items.len);
+        const range = git_list.visibleRange(t.scroll, if (vp > 0) vp else 400, ROW_HEIGHT, items.len, 5);
 
         clay.UI()(.{
             .id = bodyId(),

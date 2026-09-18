@@ -11,7 +11,7 @@ const Theme = ui.Theme;
 const git_scm = @import("git_scm");
 const git_graph = @import("git_graph");
 const git_timeline = @import("git_timeline");
-const git_history = @import("git_history");
+const git_list = @import("git_list");
 const shortcuts = @import("shortcuts");
 const ctx_menu = @import("context_menu");
 const svg = @import("components/svg.zig");
@@ -97,7 +97,7 @@ pub const ScmGraphView = struct {
     pub fn scrollLines(self: *Self, delta: i32) void {
         const vp = if (box(bodyId())) |b| b.height else 0;
         const v = &self.view;
-        v.scroll = git_history.clampScroll(v.scroll - @as(f32, @floatFromInt(delta * 3)) * ROW_HEIGHT, vp, ROW_HEIGHT, v.rows.items.len);
+        v.scroll = git_list.clampScroll(v.scroll - @as(f32, @floatFromInt(delta * 3)) * ROW_HEIGHT, vp, ROW_HEIGHT, v.rows.items.len);
         self.hover_row = null;
     }
 
@@ -129,7 +129,7 @@ pub const ScmGraphView = struct {
         self.hover_row = null;
         self.menu = null;
         if (v.selected) |i| if (vp > 0) {
-            v.scroll = git_history.clampScroll(git_history.scrollToShow(v.scroll, vp, ROW_HEIGHT, i), vp, ROW_HEIGHT, v.rows.items.len);
+            v.scroll = git_list.clampScroll(git_list.scrollToShow(v.scroll, vp, ROW_HEIGHT, i), vp, ROW_HEIGHT, v.rows.items.len);
         };
         return action;
     }
@@ -198,8 +198,8 @@ pub const ScmGraphView = struct {
 
             const vp = if (box(bodyId())) |b| b.height else 0;
             const count = v.rows.items.len;
-            v.scroll = git_history.clampScroll(v.scroll, vp, ROW_HEIGHT, count);
-            const range = git_history.visibleRange(v.scroll, if (vp > 0) vp else 600, ROW_HEIGHT, count, 5);
+            v.scroll = git_list.clampScroll(v.scroll, vp, ROW_HEIGHT, count);
+            const range = git_list.visibleRange(v.scroll, if (vp > 0) vp else 600, ROW_HEIGHT, count, 5);
             clay.UI()(.{
                 .id = bodyId(),
                 .layout = .{ .sizing = .grow, .direction = .top_to_bottom },

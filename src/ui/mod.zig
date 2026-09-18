@@ -25,8 +25,6 @@ const image_view_mod = @import("image_view.zig");
 const binary_view_mod = @import("binary_view.zig");
 const file_types = @import("file_types.zig");
 const markdown_view_mod = @import("markdown_view.zig");
-const git_history_view = @import("git_history_view.zig");
-const git_history = @import("git_history");
 const git_worker = @import("git_worker");
 const git_diff_view = @import("git_diff_view.zig");
 const git_diff = @import("git_diff");
@@ -207,8 +205,6 @@ pub const UI = struct {
     open_images: std.StringHashMap(*anyopaque),
     open_pdfs: std.StringHashMap(*anyopaque),
     open_markdown_views: std.StringHashMap(*markdown_view_mod.MarkdownView),
-    /// Git-History-Tabs je Tab-Pfad (`git-history://…`); Schlüssel gehört der Ansicht
-    git_histories: std.StringHashMapUnmanaged(*git_history_view.GitHistoryView) = .empty,
     /// Diff-Editor-Tabs je Tab-Pfad (`git-diff://…`); Schlüssel gehört der Ansicht
     git_diffs: std.StringHashMapUnmanaged(*git_diff_view.GitDiffView) = .empty,
     pending_md_preview: ?[]const u8,
@@ -470,9 +466,6 @@ pub const UI = struct {
         }
         self.open_markdown_views.deinit();
 
-        var gh_iter = self.git_histories.valueIterator();
-        while (gh_iter.next()) |v| v.*.destroy();
-        self.git_histories.deinit(self.allocator);
         var gd_iter = self.git_diffs.valueIterator();
         while (gd_iter.next()) |v| v.*.destroy();
         self.git_diffs.deinit(self.allocator);
@@ -781,26 +774,6 @@ pub const UI = struct {
             return;
         }
 
-        // Git-History: Pfeile/Bild/Pos1/Ende wählen Commits, F5 lädt neu. Keine Taste erreicht
-        // den Editor dahinter (dessen Buffer ist nicht sichtbar).
-        if (self.isGitHistoryTabActive()) {
-            const h = self.activeGitHistory() orelse return; // Ansicht entsteht beim ersten Zeichnen
-            if (!self.is_ctrl_down and !self.is_alt_down) {
-                const k: ?git_history_view.GitHistoryView.Key = switch (key) {
-                    .up => .up,
-                    .down => .down,
-                    .page_up => .page_up,
-                    .page_down => .page_down,
-                    .home => .home,
-                    .end => .end,
-                    .f5 => .reload,
-                    else => null,
-                };
-                if (k) |kk| h.view.handleKey(kk, h.salt);
-            }
-            return;
-        }
-
         // Diff-Editor: Pfeile/Bild/Pos1/Ende scrollen (Alt+F5 läuft über die Kürzel-Tabelle)
         if (self.activeTabKind() == .git_diff) {
             const d = self.activeGitDiff() orelse return;
@@ -946,7 +919,7 @@ pub const UI = struct {
         if (self.show_file_explorer and self.explorer_focused) return; // Buchstaben sind Explorer-Kürzel
         if (self.show_file_explorer and self.sidebar_focus != .none) return; // Fokus in Graph/Timeline
         // kein Text in den unsichtbaren Editor hinter History- und Diff-Tabs
-        if (self.activeTabKind() == .git_history or self.activeTabKind() == .git_diff or self.activeTabKind() == .git_commit) return;
+        if (self.activeTabKind() == .git_diff or self.activeTabKind() == .git_commit) return;
 
         // Forward to chat tab if active
         if (self.isChatTabActive()) {
@@ -1168,11 +1141,6 @@ pub const UI = struct {
             } else if (tab.kind == .chat) {
                 self.ai_chat.handleMouseDown(x, y, button);
                 return;
-            } else if (tab.kind == .git_history) {
-                if (self.activeGitHistory()) |h| {
-                    if (button == .mouse_left) _ = h.view.handleMouseDown(x, y, h.salt);
-                }
-                return;
             } else if (tab.kind == .git_diff) {
                 if (self.activeGitDiff()) |d| {
                     if (button == .mouse_left) _ = d.view.handleMouseDown(x, y, d.salt);
@@ -1336,9 +1304,6 @@ pub const UI = struct {
                     v.scrollLines(delta);
                 }
                 return;
-            } else if (tab.kind == .git_history) {
-                if (self.activeGitHistory()) |h| h.view.scrollLines(delta, self.mouse_x, self.mouse_y, h.salt);
-                return;
             } else if (tab.kind == .git_diff) {
                 if (self.activeGitDiff()) |d| d.view.scrollLines(delta, false);
                 return;
@@ -1354,7 +1319,6 @@ pub const UI = struct {
     pub fn update(self: *Self, delta_ms: f32) void {
         self.ensureEditorHooks();
         self.applyLspGoto();
-        self.driveGitHistories();
         self.driveGitDiffs();
         self.timeline_view.update(delta_ms);
         // „File History“ aus dem Editor-Menü: vor dem Layout, nie im Render-Pfad
@@ -1779,7 +1743,6 @@ pub const UI = struct {
             .toggle_whitespace => self.toggleEditorOption(.whitespace),
             .toggle_word_wrap => self.toggleEditorOption(.word_wrap),
             .toggle_indent_guides => self.toggleEditorOption(.indent_guides),
-            .git_history => self.openRepoHistory(),
             .file_history => if (self.tab_cmd_target) |t|
                 self.openFileHistory(t.pane.data.leaf.tab_bar.tabs.items[t.index].path)
             else
@@ -1925,8 +1888,8 @@ pub const UI = struct {
 
     /// Ergebnis einer Graph-Seite; Schlüssel `graph<generation>\x1f<skip>`, veraltete verworfen.
     pub fn handleGitGraphLog(self: *Self, ok: bool, payload: []const u8) void {
-        const u = git_history.unframe(payload) orelse return;
-        const k = git_history.splitKey(u.key);
+        const u = git_worker.unframe(payload) orelse return;
+        const k = git_worker.splitKey(u.key);
         var buf: [32]u8 = undefined;
         const current = std.fmt.bufPrint(&buf, graph_key ++ "{d}", .{self.scm_graph.generation}) catch return;
         if (!std.mem.eql(u8, k.tab_path, current)) return;
@@ -1935,12 +1898,12 @@ pub const UI = struct {
 
     /// Dateien eines Commits: für den Graphen (`graph<gen>\x1f<hash>`) oder einen Multi-File-Diff-Tab.
     pub fn handleGitCommitChanges(self: *Self, ok: bool, payload: []const u8) void {
-        const u = git_history.unframe(payload) orelse return;
+        const u = git_worker.unframe(payload) orelse return;
         if (self.git_commits.get(u.key)) |cv| {
             cv.applyChanges(ok, u.body) catch |err| log.warn("commit changes: {}", .{err});
             return;
         }
-        const k = git_history.splitKey(u.key);
+        const k = git_worker.splitKey(u.key);
         var buf: [32]u8 = undefined;
         const current = std.fmt.bufPrint(&buf, graph_key ++ "{d}", .{self.scm_graph.generation}) catch return;
         if (!std.mem.eql(u8, k.tab_path, current)) return;
@@ -2019,7 +1982,7 @@ pub const UI = struct {
 
     /// Ergebnis von `taskGitTimeline` (ok = Tag `git_timeline`).
     pub fn handleGitTimeline(self: *Self, ok: bool, payload: []const u8) void {
-        const u = git_history.unframe(payload) orelse return;
+        const u = git_worker.unframe(payload) orelse return;
         self.timeline_view.timeline.apply(u.key, ok, u.body) catch |err| log.warn("timeline: {}", .{err});
     }
 
@@ -2075,7 +2038,7 @@ pub const UI = struct {
 
     /// Ergebnis von `taskGitFileDiff` (ok = Tag `git_file_diff`).
     pub fn handleGitFileDiff(self: *Self, ok: bool, payload: []const u8) void {
-        const u = git_history.unframe(payload) orelse return;
+        const u = git_worker.unframe(payload) orelse return;
         if (self.git_diffs.get(u.key)) |v| {
             v.apply(ok, u.body) catch |err| log.warn("git diff: {}", .{err});
             return;
@@ -2098,25 +2061,10 @@ pub const UI = struct {
         kv.value.destroy();
     }
 
-    // ───────────────────────── Git-History ─────────────────────────
+    // ───────────────────────── File History (Timeline) ─────────────────────────
 
-    /// Verlauf des Repos, in dem der Explorer-Root liegt (wie Ctrl+P der Explorer-Root).
-    fn openRepoHistory(self: *Self) void {
-        const root = if (self.file_explorer.nodes.items.len > 0) self.file_explorer.nodes.items[0].path else (self.current_directory orelse ".");
-        const abs = std.fs.cwd().realpathAlloc(self.allocator, root) catch |err| {
-            self.showToast("Git History: {s}", .{@errorName(err)});
-            return;
-        };
-        defer self.allocator.free(abs);
-        if (!git_worker.isInsideRepo(abs)) {
-            self.showToast("Not a git repository: {s}", .{std.fs.path.basename(abs)});
-            return;
-        }
-        self.openHistoryTab(.{ .repo = abs });
-    }
-
-    /// Verlauf einer Datei (`git log --follow`). Ordner und Dateien außerhalb eines Repos
-    /// bekommen einen Hinweis statt eines leeren Tabs.
+    /// „File History“: Timeline auf die Datei stellen. Ordner und Dateien außerhalb eines
+    /// Repos bekommen einen Hinweis.
     fn openFileHistory(self: *Self, path: []const u8) void {
         if (path.len == 0) return;
         const abs = std.fs.cwd().realpathAlloc(self.allocator, path) catch |err| {
@@ -2140,103 +2088,8 @@ pub const UI = struct {
         self.saveUserState();
     }
 
-    /// Tab öffnen bzw. aktivieren; main.zig öffnet `pending_tab_switch` im nächsten Frame.
-    fn openHistoryTab(self: *Self, target: git_history.Target) void {
-        const tab_path = git_history.tabPath(self.allocator, target) catch return;
-        // Schon offen: beim Aktivieren neu laden (wie VS Code die Timeline aktualisiert)
-        if (self.git_histories.get(tab_path)) |v| v.state.reload();
-        if (self.pending_tab_switch) |old| self.allocator.free(old);
-        self.pending_tab_switch = tab_path;
-        // Tasten gehören danach der Commit-Liste, auch wenn der Aufruf aus dem Explorer kam
-        self.explorer_focused = false;
-    }
-
-    /// Ansicht zum Tab-Pfad, beim ersten Zeichnen angelegt.
-    fn gitHistoryFor(self: *Self, tab_path: []const u8) ?*git_history_view.GitHistoryView {
-        if (self.git_histories.get(tab_path)) |v| return v;
-        const v = git_history_view.GitHistoryView.create(self.allocator, tab_path) catch return null;
-        self.git_histories.put(self.allocator, v.state.tab_path, v) catch {
-            v.destroy();
-            return null;
-        };
-        return v;
-    }
-
-    fn isGitHistoryTabActive(self: *Self) bool {
-        const tab = self.getActiveTabBar().getActiveTab() orelse return false;
-        return tab.kind == .git_history;
-    }
-
-    pub const ActiveHistory = struct { view: *git_history_view.GitHistoryView, salt: u32 };
-
-    /// History-Ansicht des aktiven Tabs im aktiven Pane (Salz = Pane, wie beim Zeichnen).
-    pub fn activeGitHistory(self: *Self) ?ActiveHistory {
-        const tab = self.getActiveTabBar().getActiveTab() orelse return null;
-        if (tab.kind != .git_history) return null;
-        const v = self.git_histories.get(tab.path) orelse return null;
-        return .{ .view = v, .salt = paneSalt(self.active_pane) };
-    }
-
     fn paneSalt(pane: *pane_mod.Pane) u32 {
         return @truncate(@intFromPtr(pane));
-    }
-
-    /// Anfragen aller History-Ansichten an den Scheduler geben (pro Frame aus `update`).
-    fn driveGitHistories(self: *Self) void {
-        const sched = self.scheduler orelse return;
-        var it = self.git_histories.valueIterator();
-        while (it.next()) |vp| {
-            const s = &vp.*.state;
-            while (s.takeRequest()) |req| {
-                const show: ?git_worker.HistoryParams.Show = if (req == .show) blk: {
-                    const c = s.selectedCommit().?;
-                    break :blk .{ .hash = c.hash, .path = c.path, .previous_path = s.previousPath(s.selected.?) };
-                } else null;
-                const params = git_worker.HistoryParams.init(self.allocator, s.tab_path, show) catch return;
-                const func: *const fn (std.mem.Allocator, ?*anyopaque) anyerror!@import("scheduler").TaskResult = switch (req) {
-                    .log => git_worker.taskGitLog,
-                    .show => git_worker.taskGitShow,
-                };
-                if (!sched.submit(.{ .func = func, .data = params })) {
-                    params.deinit();
-                    // Queue voll: im nächsten Frame erneut versuchen
-                    switch (req) {
-                        .log => s.want_log = true,
-                        .show => s.want_show = true,
-                    }
-                    return;
-                }
-            }
-        }
-    }
-
-    /// Ergebnis von `taskGitLog` (ok = Tag `git_log`, sonst `git_log_error`).
-    pub fn handleGitLog(self: *Self, ok: bool, payload: []const u8) void {
-        const u = git_history.unframe(payload) orelse return;
-        const v = self.git_histories.get(u.key) orelse return; // Tab inzwischen geschlossen
-        v.state.applyLog(ok, u.body) catch |err| log.warn("git history: {}", .{err});
-    }
-
-    /// Ergebnis von `taskGitShow`; veraltete Hashes verwirft `State.applyShow`.
-    pub fn handleGitShow(self: *Self, ok: bool, payload: []const u8) void {
-        const u = git_history.unframe(payload) orelse return;
-        const k = git_history.splitKey(u.key);
-        const v = self.git_histories.get(k.tab_path) orelse return;
-        v.state.applyShow(k.hash, ok, u.body) catch |err| log.warn("git history: {}", .{err});
-    }
-
-    /// Nach dem Schließen eines Tabs: Ansicht freigeben, wenn kein Pane den Pfad mehr zeigt.
-    fn dropUnusedGitHistory(self: *Self, tab_path: []const u8) void {
-        var buf: [32]*pane_mod.Pane = undefined;
-        var n: usize = 0;
-        collectLeaves(self.root_pane, &buf, &n);
-        for (buf[0..n]) |p| {
-            for (p.data.leaf.tab_bar.tabs.items) |tab| {
-                if (std.mem.eql(u8, tab.path, tab_path)) return;
-            }
-        }
-        const kv = self.git_histories.fetchRemove(tab_path) orelse return;
-        kv.value.destroy();
     }
 
     pub const EditorOption = enum { minimap, whitespace, indent_guides, word_wrap };
@@ -3058,12 +2911,11 @@ pub const UI = struct {
                             } else |_| {}
                         }
                         // Pfad vor closeTab kopieren (gibt ihn frei); die Ansicht erst danach prüfen
-                        const view_path: ?[]u8 = if (closing.kind == .git_history or closing.kind == .git_diff or closing.kind == .git_commit) self.allocator.dupe(u8, closing.path) catch null else null;
+                        const view_path: ?[]u8 = if (closing.kind == .git_diff or closing.kind == .git_commit) self.allocator.dupe(u8, closing.path) catch null else null;
                         const closing_kind = closing.kind;
                         defer if (view_path) |p| self.allocator.free(p);
                         leaf.tab_bar.closeTab(req.index);
                         if (view_path) |p| switch (closing_kind) {
-                            .git_history => self.dropUnusedGitHistory(p),
                             .git_diff => self.dropUnusedGitDiff(p),
                             .git_commit => self.dropUnusedGitCommit(p),
                             else => {},
@@ -3563,11 +3415,6 @@ pub const UI = struct {
                                 special_active = true;
                             } else if (tab.kind == .binary) {
                                 binary_view_mod.render(allocator, tab.path, t);
-                                special_active = true;
-                            } else if (tab.kind == .git_history) {
-                                if (self.gitHistoryFor(tab.path)) |v| {
-                                    v.render(allocator, t, paneSalt(pane), self.mouse_x, self.mouse_y);
-                                }
                                 special_active = true;
                             } else if (tab.kind == .git_commit) {
                                 if (self.gitCommitFor(tab.path)) |v| {

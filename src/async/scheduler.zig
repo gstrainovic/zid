@@ -12,12 +12,6 @@ pub const ResultTag = enum {
     git_status,
     git_diff,
     git_branch,
-    /// Payload `<tab_path>\n<git log>` (git_worker.taskGitLog)
-    git_log,
-    git_log_error,
-    /// Payload `<tab_path>\x1f<hash>\n<git show>` (git_worker.taskGitShow)
-    git_show,
-    git_show_error,
     /// Payload `<tab_path>\n` + git_diff.encodeContents (git_worker.taskGitFileDiff)
     git_file_diff,
     git_file_diff_error,
