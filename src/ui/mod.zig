@@ -3730,6 +3730,12 @@ pub const UI = struct {
             }
         }
 
+        // Markdown-Vorschau: Pfeil über den Balken, I-Beam über dem Text. Vor dem Editor-Test,
+        // der hält für die Pane noch die Editor-Bounds und meldete über der Vorschau immer I-Beam.
+        if (self.activeMarkdownView()) |v| {
+            if (v.cursorAt(self.mouse_x, self.mouse_y)) |c| return c;
+        }
+
         // Mit Mausposition + Bounds prüfen ob wir über einem Editor sind
         if (self.isMouseOverEditor()) {
             return .text;

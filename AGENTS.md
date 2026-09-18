@@ -193,6 +193,27 @@ liegen in `src/ui/mod.zig`, das Virtualisierungsmuster in
   `tmp/e2e_md_example_<name>.ppm` ab und prüft Zitatrand, Aufzählungszeichen und
   Codeblock-Hintergrund an Pixeln des Screenshots.
 
+- **Umbruchbreite = Hint minus Einrückung, plus Clays Viertelpixel.** `MarkdownView.indent`
+  summiert die Einrückungen um den gezeichneten Block (Liste 24 px plus Punkt und Abstand,
+  Zitat 16 px, Alert 32 px); `availWidth` zieht sie vom `wrap_width_hint` ab, und `flushPieces`,
+  `renderTable`, `renderCodeBlock` brechen daran um. Vorher brach Text in Listen an der vollen
+  Breite, ragte um die Einrückung über den Rand und wurde vom Viewport stumm abgeschnitten
+  (Business-Plan-Listen, 18.09.2026). Zweiter Anteil: Clay schlägt je Textelement 0.25 px auf
+  (`measureText` in mod.zig), jedes Wort ist ein eigenes Element — `flushPieces` rechnet den
+  Zuschlag wie `measureCell` mit, sonst ist eine Zeile aus 40 Wörtern 10 px zu breit.
+  Symptom für beides: `md_content` breiter als `md_viewport` ohne breiten Code. Bei Verdacht
+  die Datei in Zeilenbereiche schneiden und je Scheibe headless die Breite messen (Probe im
+  Stil von `e2e_md_preview.step_wide_code`), statt am Fenster zu raten.
+
+- **Balken der Vorschau** kommen beide aus `scrollbar.zig` (`vModel`/`hModel`, Pixel als
+  Einheiten, `md_scrollbar_*`/`md_hscroll_*`): Klick blättert, Thumb zieht (`vdrag`/`hdrag`),
+  `render` meldet Hover → `scrollbar_hovered`, und `UI.getDesiredCursor` fragt zuerst
+  `MarkdownView.cursorAt` (Pfeil über Balken und Menü, I-Beam über `md_viewport`). Vorher
+  hatte die Vorschau einen eigenen Balken mit eigener Zieh-Logik und keinen Cursor-Code; der
+  Editor-Bounds-Test der Pane meldete über der Vorschau immer I-Beam, auch über den Balken.
+  **Keine zweite Balken-Implementierung mehr anlegen** — Explorer und Terminal haben noch
+  eigene, die gehören ebenfalls auf `scrollbar.zig` umgestellt, sobald man sie anfasst.
+
 - **Lange Codezeilen: waagrechter Bildlauf oder Word Wrap.** Fließtext und Tabellen brechen
   immer um, Codeblöcke nicht: `md_content` wächst mit der längsten Codezeile (`grow` wird nie
   schmaler als das Kind), `md_viewport` verschiebt per `child_offset.x`, und unten liegt der

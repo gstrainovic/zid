@@ -253,6 +253,17 @@ def step_wide_code():
     waagrechter Balken (Klick rechts davon blättert), Alt+Z bricht die Zeilen um und der
     Inhalt passt wieder. Fliesstext bricht in beiden Faellen um."""
     print("--- Lange Codezeilen: waagrechter Bildlauf, Alt+Z bricht um")
+    # Vorab: eingerueckter Text (Liste, Zitat, verschachtelt) bricht an der eingerueckten Breite
+    # um und ragt nicht ueber den Viewport. Vorher brach er an der vollen Breite und wurde
+    # rechts abgeschnitten (Business-Plan-Listen, 18.09.2026).
+    rel_list = os.path.join("tmp", "e2e_md_list.md")
+    with open(os.path.join(ROOT, rel_list), "w", encoding="utf-8") as f:
+        f.write("# Listen\n\n" + "".join(f"- **Punkt {i}**: " + "immer weiter " * 30 + "geht.\n" for i in range(4))
+                + "\n> " + "Zitat das lange " * 30 + "\n\n- aussen\n  - innen " + "verschachtelt " * 30 + "\n")
+    open_preview(rel_list)
+    vp = bounds("md_viewport")
+    content = bounds("md_content")
+    check(content["w"] <= vp["w"] + 1, f"Listen und Zitat passen in den Viewport ({content['w']:.0f} <= {vp['w']:.0f})")
     rel = os.path.join("tmp", "e2e_md_wide.md")
     with open(os.path.join(ROOT, rel), "w", encoding="utf-8") as f:
         f.write("# Breit\n\nEin Absatz, der " + "immer weiter " * 40 + "geht.\n\n```zig\n"
