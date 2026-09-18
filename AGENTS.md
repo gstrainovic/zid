@@ -932,6 +932,22 @@ Eintrag an, und nur `UI.updateScroll` räumt die (10 Einträge große) Liste auf
   Bilder per Drag & Drop in einen Ordner verschoben, Absturz beim nächsten Zeichnen).
 - Kein `clay.text(&.{byte}, …)`: Zeiger auf ein Stack-Temporary, beim Zeichnen längst
   überschrieben. Statische Literale nehmen (Git-Status-Buchstaben in `renderTreeEntry`).
+- Dasselbe für `var buf: [N]u8 = undefined` in einer `render`-Funktion mit `bufPrint` → `clay.text`:
+  der Puffer gehört in die Frame-Arena (`arena.alloc(u8, N)`) oder das Ergebnis wird `arena.dupe`d.
+  Symptom im Fenster (Debug-Build): der Text besteht aus 0xAA-Bytes (Zigs `undefined`-Muster,
+  ein späterer Stack-Frame hat den Puffer neu initialisiert), im Log `warning(shaper): invalid
+  UTF-8 text … hex=aaaa…`, gezeichnet als lauter U+FFFD. Vor dem 18.09.2026 fiel dadurch der ganze
+  Frame aus (`renderClayLayout` brach ab, `endFrame` präsentierte trotzdem das alte Bild aus der
+  Swap-Chain): Source Control „zitterte“ beim Verbreitern des Explorers zwischen zwei Ständen,
+  weil `fitText` den Platzhalter des Commit-Felds erst ab ~360 px ungekürzt (= Stack-Zeiger)
+  durchreichte. Headless zeigt das nicht (kein GPU-Text; der memfd-Probe prüft nur Mapping, nicht
+  Inhalt). Seitdem dekodiert `SimpleShaper.shape` verlustbehaftet und `renderClayLayout`-Fehler
+  werden als `warning(rendering)` gemeldet.
+- `Platform.setCursor` meldet nur Formwechsel an wio: unter Windows macht wio je Aufruf
+  `GetCursorPos`+`SetCursorPos`, und bei gedrückter Maustaste erzeugt das ein `WM_MOUSEMOVE`, das
+  den nächsten Frame weckt — beim Splitter-Ziehen lief der Loop ohne Pause (`ZID_DEBUG=1`:
+  `mouse: … dx=0` in jedem Frame). Die Debug-Zeilen `mouse:` (main.zig, nur beim Ziehen),
+  `splitter:` (Breite vorher/nachher) und `cursor:` (Formwechsel) bleiben für solche Diagnosen.
 - **Werkzeug:** Headless fasst jeden Text-Command per `pwrite` in ein memfd an
   (`src/debug/text_probe.zig`; `/dev/null` liest den Puffer nicht, EFAULT bleibt aus). Zeigt ein
   Command auf unmapped Speicher, panict der Loop mit Command-Index, Bounding-Box und dem

@@ -37,6 +37,40 @@ pub const Shaper = struct {
 
 /// A basic fallback shaper that maps characters 1:1 to glyphs
 /// without any complex text layout features (no ligatures/kerning).
+/// Gemeldete ungültige Strings (Obergrenze, sonst eine Zeile pro Frame).
+var invalid_reports: u32 = 0;
+
+/// Nächsten Codepoint ab `i.*` lesen und `i.*` weiterrücken; ein ungültiges Byte oder eine
+/// abgeschnittene Sequenz ergibt U+FFFD und rückt genau ein Byte weiter.
+pub fn decodeLossy(text: []const u8, i: *usize) u21 {
+    const len = std.unicode.utf8ByteSequenceLength(text[i.*]) catch {
+        i.* += 1;
+        return 0xFFFD;
+    };
+    if (i.* + len > text.len) {
+        i.* += 1;
+        return 0xFFFD;
+    }
+    const cp = std.unicode.utf8Decode(text[i.* .. i.* + len]) catch {
+        i.* += 1;
+        return 0xFFFD;
+    };
+    i.* += len;
+    return cp;
+}
+
+test "decodeLossy: gültige Sequenzen, kaputtes Byte und abgeschnittene Sequenz" {
+    var i: usize = 0;
+    const t = "a\xc3\xa4\xff\xe2\x82";
+    try std.testing.expectEqual(@as(u21, 'a'), decodeLossy(t, &i));
+    try std.testing.expectEqual(@as(u21, 0xE4), decodeLossy(t, &i));
+    try std.testing.expectEqual(@as(u21, 0xFFFD), decodeLossy(t, &i));
+    try std.testing.expectEqual(@as(usize, 4), i);
+    try std.testing.expectEqual(@as(u21, 0xFFFD), decodeLossy(t, &i));
+    try std.testing.expectEqual(@as(u21, 0xFFFD), decodeLossy(t, &i));
+    try std.testing.expectEqual(t.len, i);
+}
+
 pub const SimpleShaper = struct {
     allocator: std.mem.Allocator,
 
@@ -52,13 +86,20 @@ pub const SimpleShaper = struct {
         errdefer glyphs.deinit(allocator);
 
         var total_width: f32 = 0;
-        var i: usize = 0;
-        var utf8 = std.unicode.Utf8View.init(text) catch return error.InvalidUtf8;
-        var iter = utf8.iterator();
+        if (std.unicode.utf8ValidateSlice(text) == false and invalid_reports < 5) {
+            // Ein ungültiger String liess bisher den ganzen Frame scheitern (Swap-Chain zeigte
+            // das alte Bild von zwei Frames zuvor: Zittern). Jetzt wird er verlustbehaftet
+            // gezeichnet (U+FFFD je kaputtem Byte); wer ihn liefert, steht hier als Hex.
+            invalid_reports += 1;
+            const n = @min(text.len, 48);
+            std.log.scoped(.shaper).warn("invalid UTF-8 text ({d} bytes): \"{f}\" hex={x}", .{ text.len, std.zig.fmtString(text[0..n]), text[0..n] });
+            if (@import("builtin").mode == .Debug) std.debug.dumpCurrentStackTrace(null);
+        }
 
-        while (iter.nextCodepoint()) |cp| {
-            const seq_len: usize = std.unicode.utf8CodepointSequenceLength(cp) catch 0;
-            const cluster = iter.i - seq_len;
+        var i: usize = 0;
+        while (i < text.len) {
+            const cluster = i;
+            const cp = decodeLossy(text, &i);
             const glyph_id = face.glyphIndex(cp);
             const metrics = face.glyphMetrics(glyph_id);
 
@@ -73,7 +114,6 @@ pub const SimpleShaper = struct {
                 .is_color = false,
             });
             total_width += metrics.advance_x;
-            i += 1;
         }
 
         return ShapedRun{
