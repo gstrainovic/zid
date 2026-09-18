@@ -235,8 +235,9 @@ pub const SvgRendererGPU = struct {
         height: f32,
         viewbox: f32,
         color: [4]f32,
+        stroke_width: ?f32,
     ) !void {
-        // SVG aus Atlas holen oder rasterisieren
+        // SVG aus Atlas holen oder rasterisieren; mit stroke_width als Kontur statt Füllung
         // SvgKey.init braucht logical_size. Wir nehmen max(width, height)
         const logical_size = @max(width, height);
         
@@ -244,8 +245,8 @@ pub const SvgRendererGPU = struct {
             path_data,
             viewbox,
             logical_size,
-            true, // has_fill
-            null, // stroke_width
+            stroke_width == null, // has_fill
+            stroke_width,
         ) catch |err| {
             if (err == error.RasterizationDeferred) return; // Später rendern
             return err;

@@ -52,6 +52,9 @@ pub const SvgRenderInfo = struct {
     viewbox: f32 = 24.0,
     /// Tint color (RGBA, 0-255 range) — applied to alpha mask in GPU shader
     color: [4]f32 = .{ 1.0, 1.0, 1.0, 1.0 },
+    /// Strichbreite in viewbox-Einheiten (Lucide: 2): Pfad wird als Kontur gezeichnet statt
+    /// gefüllt. null = Füllung; damit bleiben reine Linienpfade wie „plus“ unsichtbar.
+    stroke_width: ?f32 = null,
 
     pub const MAGIC: u64 = 0x5356475F49434F4E; // "SVG_ICON"
 };

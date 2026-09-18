@@ -187,7 +187,7 @@ pub const ScmGraphView = struct {
                 clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow } } })({});
                 if (header_hover) {
                     // Filter „Auto“ (VS Code History Item Ref Picker) und Refresh
-                    svg.Svg(arena, "sg_icon_branch", svg.Lucide.git_branch, 14, theme.subtext);
+                    svg.SvgStroke(arena, "sg_icon_branch", svg.Lucide.git_branch, 14, theme.subtext);
                     clay.text("Auto", .{ .font_size = 14, .color = theme.subtext, .wrap_mode = .none });
                     tooltip.iconButton(arena, theme, clay.ElementId.ID("sg_btn_refresh"), "sg_icon_refresh", svg.Lucide.refresh_cw, "Refresh", .{});
                 }
@@ -254,7 +254,7 @@ pub const ScmGraphView = struct {
                     if (hovered) {
                         const oc_id = clay.ElementId.IDI("sg_open_changes", @intCast(i));
                         clay.UI()(.{ .id = oc_id, .layout = .{ .sizing = .{ .w = .fixed(24), .h = .fixed(24) }, .child_alignment = .{ .x = .center, .y = .center } } })({
-                            svg.Svg(arena, std.fmt.allocPrint(arena, "sg_icon_changes_{d}", .{i}) catch "sg_icon_changes", svg.Lucide.git_compare, 16, fg);
+                            svg.SvgStroke(arena, std.fmt.allocPrint(arena, "sg_icon_changes_{d}", .{i}) catch "sg_icon_changes", svg.Lucide.git_compare, 16, fg);
                             tooltip.attach(theme, oc_id, "Open Changes");
                         });
                     }

@@ -429,7 +429,7 @@ pub const ScmChangesView = struct {
                 })({
                     const kind = v.actionButton();
                     var label_buf: [64]u8 = undefined;
-                    svg.Svg(arena, "sc_icon_commit", if (kind == .commit) svg.Lucide.check else svg.Lucide.upload, 16, theme.text_on_primary);
+                    svg.SvgStroke(arena, "sc_icon_commit", if (kind == .commit) svg.Lucide.check else svg.Lucide.upload, 16, theme.text_on_primary);
                     const label: []const u8 = if (self.busy) (if (kind == .commit) "Committing..." else "Pushing...") else v.buttonLabel(&label_buf);
                     clay.text(arena.dupe(u8, label) catch "", .{ .font_size = 15, .color = theme.text_on_primary, .wrap_mode = .none });
                 });
@@ -517,7 +517,8 @@ pub const ScmChangesView = struct {
         for (actions) |k| {
             const id = actionId(i, k);
             clay.UI()(.{ .id = id, .layout = .{ .sizing = .{ .w = .fixed(ACTION_SIZE), .h = .fixed(ACTION_SIZE) }, .child_alignment = .{ .x = .center, .y = .center } } })({
-                svg.Svg(arena, std.fmt.allocPrint(arena, "sc_aicon_{d}_{d}", .{ i, @intFromEnum(k) }) catch "sc_aicon", actionIcon(k), 16, fg);
+                // Als Kontur: „plus“/„minus“ sind reine Linien und blieben gefüllt unsichtbar
+                svg.SvgStroke(arena, std.fmt.allocPrint(arena, "sc_aicon_{d}_{d}", .{ i, @intFromEnum(k) }) catch "sc_aicon", actionIcon(k), 16, fg);
                 tooltip.attach(theme, id, actionLabel(k));
             });
         }

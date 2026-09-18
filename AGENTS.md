@@ -130,6 +130,13 @@ echo -e "open ./README.md\nget-state\nshutdown" | zig build run -- --interactive
   `tmp/e2e_dialog.ppm`. RPCs dafür: `element_bounds(id)`, `element_bounds_i(id, index)`
   (Clay-Bounding-Box für Klicks auf beliebige Elemente), `folder_picker_state`,
   `get_state.root`, `key_press` kennt zusätzlich `o`, `up`, `down`.
+- **Lucide-Icons sind Strichpfade.** `svg.Svg` füllt den Pfad (Explorer-Chevrons und
+  Datei-Icons so gewollt); reine Linienpfade wie `plus`, `minus`, `check`, Pfeile bleiben
+  gefüllt aber unsichtbar, Bögen (`undo_2`, `refresh_cw`) werden zu Klecksen. Dafür
+  `svg.SvgStroke` (Strichbreite 2 auf viewbox 24, `SvgRenderInfo.stroke_width`, Atlas-Key
+  unterscheidet Füllung/Strich). `tooltip.iconButton`, die SCM-Zeilenaktionen, der Commit-Knopf
+  und die Graph-Kopfzeile zeichnen seit 18.09.2026 als Kontur. Der Rasterizer schreibt im
+  Strich-Modus den Alpha auch nach R, weil `text_atlas.wgsl` mit R maskiert.
 - Headless-Screenshots: der SVG-Atlas rasterisiert max. 4 neue Icons pro Render-Durchgang;
   neue Icons erscheinen daher erst im zweiten Screenshot (das Skript rendert zweimal).
 - Logs: `logFn` schreibt per `writerStreaming`; mit `File.writer()` wurde eine umgeleitete
