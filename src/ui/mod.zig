@@ -4017,6 +4017,19 @@ pub const UI = struct {
         self.scm_changes.view.apply(parts.raw) catch |err| log.warn("scm changes: {}", .{err});
     }
 
+    /// main.zig: weiter rendern statt auf ein Ereignis zu warten, solange ein Hover-Tooltip
+    /// (Icon-Knopf, Explorer-Pfad, Timeline- oder Graph-Commit) noch auf seine 700 ms wartet.
+    pub fn wantsFrameSoon(self: *Self) bool {
+        if (tooltip.pending()) return true;
+        const fx = &self.file_explorer;
+        if (fx.hover_index != null and fx.now_ms - fx.hover_since_ms <= 700) return true;
+        const tl = &self.timeline_view;
+        if (tl.hover_index != null and tl.now_ms - tl.hover_since_ms <= 700) return true;
+        const sg = &self.scm_graph;
+        if (sg.hover_row != null and sg.now_ms - sg.hover_since_ms <= 700) return true;
+        return false;
+    }
+
     /// main.zig: Status nach einer Source-Control-Aktion neu laden (über den Debounce).
     pub fn takeGitStatusRequest(self: *Self) bool {
         const v = self.git_status_wanted;

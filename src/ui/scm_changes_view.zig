@@ -453,7 +453,7 @@ pub const ScmChangesView = struct {
         for (actions) |k| {
             const id = actionId(i, k);
             clay.UI()(.{ .id = id, .layout = .{ .sizing = .{ .w = .fixed(ACTION_SIZE), .h = .fixed(ACTION_SIZE) }, .child_alignment = .{ .x = .center, .y = .center } } })({
-                svg.Svg(arena, std.fmt.allocPrint(arena, "sc_aicon_{d}_{d}", .{ i, @intFromEnum(k) }) catch "sc_aicon", actionIcon(k), 15, fg);
+                svg.Svg(arena, std.fmt.allocPrint(arena, "sc_aicon_{d}_{d}", .{ i, @intFromEnum(k) }) catch "sc_aicon", actionIcon(k), 16, fg);
                 tooltip.attach(theme, id, actionLabel(k));
             });
         }
