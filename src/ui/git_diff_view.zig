@@ -10,6 +10,7 @@ const ui = @import("mod.zig");
 const Theme = ui.Theme;
 const git_diff = @import("git_diff");
 const svg = @import("components/svg.zig");
+const tooltip = @import("components/tooltip.zig");
 
 const TOOLBAR_HEIGHT: f32 = 34;
 const OVERSCAN: usize = 10;
@@ -182,6 +183,10 @@ pub const GitDiffView = struct {
     // ─── Zeichnen ───
 
     pub fn render(self: *Self, arena: std.mem.Allocator, theme: Theme, salt: u32, font_size: u16, mouse_x: f32, mouse_y: f32) void {
+        // Mausposition braucht die Werkzeugleiste nicht mehr (Tooltip-Knöpfe nutzen pointerOver);
+        // Signatur bleibt wie bei den anderen Ansichten (git_commit_view ruft sie je Abschnitt).
+        _ = mouse_x;
+        _ = mouse_y;
         const s = &self.state;
         const fs: f32 = @floatFromInt(font_size);
         self.row_height = @ceil(fs * 1.45);
@@ -195,7 +200,7 @@ pub const GitDiffView = struct {
             .layout = .{ .sizing = .grow, .direction = .top_to_bottom },
             .background_color = theme.bg,
         })({
-            self.renderToolbar(arena, theme, salt, layout, mouse_x, mouse_y);
+            self.renderToolbar(arena, theme, salt, layout);
             clay.UI()(.{
                 .id = bodyId(salt),
                 .layout = .{ .sizing = .grow, .direction = .top_to_bottom },
@@ -212,7 +217,7 @@ pub const GitDiffView = struct {
         });
     }
 
-    fn renderToolbar(self: *Self, arena: std.mem.Allocator, theme: Theme, salt: u32, layout: git_diff.Layout, mouse_x: f32, mouse_y: f32) void {
+    fn renderToolbar(self: *Self, arena: std.mem.Allocator, theme: Theme, salt: u32, layout: git_diff.Layout) void {
         const s = &self.state;
         const st = s.stats();
         clay.UI()(.{
@@ -233,10 +238,10 @@ pub const GitDiffView = struct {
             }
             clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow } } })({});
             // Reihenfolge wie VS Codes Editor-Titelleiste: Previous, Next, Collapse, Inline
-            iconButton(arena, theme, "prev", salt, svg.Lucide.arrow_up, false, mouse_x, mouse_y);
-            iconButton(arena, theme, "next", salt, svg.Lucide.arrow_down, false, mouse_x, mouse_y);
-            iconButton(arena, theme, "collapse", salt, svg.Lucide.map, s.collapse_unchanged, mouse_x, mouse_y);
-            iconButton(arena, theme, "inline", salt, if (layout == .side_by_side) svg.Lucide.rows_2 else svg.Lucide.columns_2, false, mouse_x, mouse_y);
+            iconButton(arena, theme, "prev", salt, svg.Lucide.arrow_up, "Previous Change (Shift+Alt+F5)", false);
+            iconButton(arena, theme, "next", salt, svg.Lucide.arrow_down, "Next Change (Alt+F5)", false);
+            iconButton(arena, theme, "collapse", salt, svg.Lucide.map, "Toggle Collapse Unchanged Regions", s.collapse_unchanged);
+            iconButton(arena, theme, "inline", salt, if (layout == .side_by_side) svg.Lucide.rows_2 else svg.Lucide.columns_2, if (layout == .side_by_side) "Switch to Inline View" else "Switch to Side by Side View", false);
         });
     }
 
@@ -393,17 +398,9 @@ pub const GitDiffView = struct {
     }
 };
 
-fn iconButton(arena: std.mem.Allocator, theme: Theme, comptime name: []const u8, salt: u32, icon: []const u8, toggled: bool, mouse_x: f32, mouse_y: f32) void {
-    const id = GitDiffView.buttonId(name, salt);
-    const hovered = if (GitDiffView.box(id)) |b| GitDiffView.inside(b, mouse_x, mouse_y) else false;
-    clay.UI()(.{
-        .id = id,
-        .layout = .{ .sizing = .{ .w = .fixed(28), .h = .fixed(28) }, .child_alignment = .{ .x = .center, .y = .center } },
-        .background_color = if (toggled) tint(theme.primary, 60) else if (hovered) tint(theme.text, 30) else .{ 0, 0, 0, 0 },
-        .corner_radius = .all(4),
-    })({
-        svg.Svg(arena, std.fmt.allocPrint(arena, "gd_icon_" ++ name ++ "_{d}", .{salt}) catch "gd_icon", icon, 16, theme.text);
-    });
+fn iconButton(arena: std.mem.Allocator, theme: Theme, comptime name: []const u8, salt: u32, icon: []const u8, label: []const u8, toggled: bool) void {
+    const icon_id = std.fmt.allocPrint(arena, "gd_icon_" ++ name ++ "_{d}", .{salt}) catch "gd_icon";
+    tooltip.iconButton(arena, theme, GitDiffView.buttonId(name, salt), icon_id, icon, label, .{ .size = 28, .toggled = toggled });
 }
 
 fn lineNumber(c: GitDiffView.RowCtx, number: usize) void {

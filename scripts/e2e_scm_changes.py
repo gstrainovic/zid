@@ -132,12 +132,26 @@ def step_show():
     check([r["kind"] for r in c["rows"]] == ["group", "entry", "entry", "entry"], "Zeilen: Kopf Changes + drei Einträge")
     check(bounds("sc_input_box")["h"] > 20, "Eingabefeld im Layout")
     shot("e2e_scm_changes.ppm")
+    # Tooltip nach 700 ms über der Kopf-Aktion
+    h = c["header"]
+    rpc("move_mouse", [h["x"] + h["w"] / 2, h["y"] + h["h"] / 2]); settle(6)
+    b = bounds("sc_btn_refresh")
+    rpc("move_mouse", [b["x"] + b["w"] / 2, b["y"] + b["h"] / 2]); settle(4)
+    check(result_json("ui_state")["tooltip"] is None, "sofort noch kein Tooltip")
+    time.sleep(1.0); settle(4)
+    check(result_json("ui_state")["tooltip"] == "Refresh", f"Tooltip „Refresh“: {result_json('ui_state')['tooltip']!r}")
+    shot("e2e_scm_tooltip.ppm")
 
 
 def step_stage_and_diffs():
     print("--- 2. Stage über Hover-Aktion, Diffs")
     c = ch()
-    hover_action(c, row_index(c, "a.txt"), ACT_STAGE)
+    i = row_index(c, "a.txt")
+    rpc("move_mouse", list(row_center(c, i))); settle(6)
+    b = bounds("sc_act", i * 8 + ACT_STAGE)
+    rpc("move_mouse", [b["x"] + b["w"] / 2, b["y"] + b["h"] / 2]); time.sleep(1.0); settle(4)
+    check(result_json("ui_state")["tooltip"] == "Stage Changes", f"Tooltip der Zeilen-Aktion: {result_json('ui_state')['tooltip']!r}")
+    hover_action(c, i, ACT_STAGE)
     s = wait(lambda s: [e["path"] for e in s["changes"]["groups"]["staged"]] == ["a.txt"] and len(s["changes"]["groups"]["changes"]) == 2,
              "a.txt gestagt: Staged Changes mit a.txt, Changes mit zwei")
     c = s["changes"]

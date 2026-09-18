@@ -15,6 +15,7 @@ const git_list = @import("git_list");
 const shortcuts = @import("shortcuts");
 const ctx_menu = @import("context_menu");
 const svg = @import("components/svg.zig");
+const tooltip = @import("components/tooltip.zig");
 const git_commit_view = @import("git_commit_view.zig");
 
 pub const HEADER_HEIGHT: f32 = 30;
@@ -188,11 +189,7 @@ pub const ScmGraphView = struct {
                     // Filter „Auto“ (VS Code History Item Ref Picker) und Refresh
                     svg.Svg(arena, "sg_icon_branch", svg.Lucide.git_branch, 14, theme.subtext);
                     clay.text("Auto", .{ .font_size = 14, .color = theme.subtext, .wrap_mode = .none });
-                    const id = clay.ElementId.ID("sg_btn_refresh");
-                    const hovered = if (box(id)) |b| inside(b, mouse_x, mouse_y) else false;
-                    clay.UI()(.{ .id = id, .layout = .{ .sizing = .{ .w = .fixed(24), .h = .fixed(24) }, .child_alignment = .{ .x = .center, .y = .center } }, .background_color = if (hovered) tint(theme.text, 30) else .{ 0, 0, 0, 0 }, .corner_radius = .all(4) })({
-                        svg.Svg(arena, "sg_icon_refresh", svg.Lucide.refresh_cw, 16, theme.text);
-                    });
+                    tooltip.iconButton(arena, theme, clay.ElementId.ID("sg_btn_refresh"), "sg_icon_refresh", svg.Lucide.refresh_cw, "Refresh", .{});
                 }
             });
 
@@ -255,8 +252,10 @@ pub const ScmGraphView = struct {
                     clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow } } })({});
                     renderBadges(arena, theme, i, c, v.filter);
                     if (hovered) {
-                        clay.UI()(.{ .id = clay.ElementId.IDI("sg_open_changes", @intCast(i)), .layout = .{ .sizing = .{ .w = .fixed(24), .h = .fixed(24) }, .child_alignment = .{ .x = .center, .y = .center } } })({
+                        const oc_id = clay.ElementId.IDI("sg_open_changes", @intCast(i));
+                        clay.UI()(.{ .id = oc_id, .layout = .{ .sizing = .{ .w = .fixed(24), .h = .fixed(24) }, .child_alignment = .{ .x = .center, .y = .center } } })({
                             svg.Svg(arena, std.fmt.allocPrint(arena, "sg_icon_changes_{d}", .{i}) catch "sg_icon_changes", svg.Lucide.git_compare, 16, fg);
+                            tooltip.attach(theme, oc_id, "Open Changes");
                         });
                     }
                     if (hovered and self.now_ms - self.hover_since_ms > HOVER_DELAY_MS) renderHover(arena, theme, i, c, v.filter);

@@ -14,6 +14,7 @@ const git_list = @import("git_list");
 const line_edit = @import("line_edit.zig");
 const explorer_ops = @import("explorer_ops.zig");
 const svg = @import("components/svg.zig");
+const tooltip = @import("components/tooltip.zig");
 
 pub const HEADER_HEIGHT: f32 = 30;
 pub const ROW_HEIGHT: f32 = 26;
@@ -290,13 +291,14 @@ pub const ScmChangesView = struct {
                 .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(HEADER_HEIGHT) }, .direction = .left_to_right, .child_alignment = .{ .y = .center }, .child_gap = 6, .padding = .{ .left = 8, .right = 6 } },
             })({
                 svg.Svg(arena, "sc_chevron", svg.Lucide.chevron_down, 16, theme.subtext);
-                const actions_w: f32 = if (header_hover) 2 * 24 + 6 else 0;
+                // drei Knöpfe à 24 px plus Abstände; sonst ragen sie über die Sidebar hinaus
+                const actions_w: f32 = if (header_hover) 3 * 24 + 3 * 6 else 0;
                 clay.text(fitText(arena, "SOURCE CONTROL", width - 16 - actions_w - 26, 14), .{ .font_size = 14, .color = theme.subtext, .wrap_mode = .none });
                 clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow } } })({});
                 if (header_hover) {
-                    headerButton(arena, theme, "sc_btn_commit", svg.Lucide.check, mouse_x, mouse_y);
-                    headerButton(arena, theme, "sc_btn_push", svg.Lucide.upload, mouse_x, mouse_y);
-                    headerButton(arena, theme, "sc_btn_refresh", svg.Lucide.refresh_cw, mouse_x, mouse_y);
+                    tooltip.iconButton(arena, theme, clay.ElementId.ID("sc_btn_commit"), "sc_btn_commit_icon", svg.Lucide.check, "Commit", .{});
+                    tooltip.iconButton(arena, theme, clay.ElementId.ID("sc_btn_push"), "sc_btn_push_icon", svg.Lucide.upload, "Push", .{});
+                    tooltip.iconButton(arena, theme, clay.ElementId.ID("sc_btn_refresh"), "sc_btn_refresh_icon", svg.Lucide.refresh_cw, "Refresh", .{});
                 }
             });
 
@@ -448,12 +450,26 @@ pub const ScmChangesView = struct {
 
     fn renderActions(self: *Self, arena: std.mem.Allocator, theme: Theme, i: usize, actions: []const RowAction, fg: clay.Color) void {
         _ = self;
-        _ = theme;
         for (actions) |k| {
-            clay.UI()(.{ .id = actionId(i, k), .layout = .{ .sizing = .{ .w = .fixed(ACTION_SIZE), .h = .fixed(ACTION_SIZE) }, .child_alignment = .{ .x = .center, .y = .center } } })({
+            const id = actionId(i, k);
+            clay.UI()(.{ .id = id, .layout = .{ .sizing = .{ .w = .fixed(ACTION_SIZE), .h = .fixed(ACTION_SIZE) }, .child_alignment = .{ .x = .center, .y = .center } } })({
                 svg.Svg(arena, std.fmt.allocPrint(arena, "sc_aicon_{d}_{d}", .{ i, @intFromEnum(k) }) catch "sc_aicon", actionIcon(k), 15, fg);
+                tooltip.attach(theme, id, actionLabel(k));
             });
         }
+    }
+
+    /// Beschriftungen wie VS Code package.json (`git.stage`, `git.unstage`, `git.clean`, …).
+    fn actionLabel(k: RowAction) []const u8 {
+        return switch (k) {
+            .open_file => "Open File",
+            .stage => "Stage Changes",
+            .unstage => "Unstage Changes",
+            .discard => "Discard Changes",
+            .stage_all => "Stage All Changes",
+            .unstage_all => "Unstage All Changes",
+            .discard_all => "Discard All Changes",
+        };
     }
 };
 
@@ -467,15 +483,6 @@ pub fn statusColor(theme: Theme, c: git_changes.Color) clay.Color {
         .ignored => theme.git_ignored,
         .conflict => theme.git_conflict,
     };
-}
-
-fn headerButton(arena: std.mem.Allocator, theme: Theme, comptime id_name: []const u8, icon: []const u8, mouse_x: f32, mouse_y: f32) void {
-    const id = clay.ElementId.ID(id_name);
-    const d = clay.getElementData(id);
-    const hovered = d.found and mouse_x >= d.bounding_box.x and mouse_x < d.bounding_box.x + d.bounding_box.width and mouse_y >= d.bounding_box.y and mouse_y < d.bounding_box.y + d.bounding_box.height;
-    clay.UI()(.{ .id = id, .layout = .{ .sizing = .{ .w = .fixed(24), .h = .fixed(24) }, .child_alignment = .{ .x = .center, .y = .center } }, .background_color = if (hovered) tint(theme.text, 30) else .{ 0, 0, 0, 0 }, .corner_radius = .all(4) })({
-        svg.Svg(arena, id_name ++ "_icon", icon, 16, theme.text);
-    });
 }
 
 fn mix(a: clay.Color, b: clay.Color, t: f32) clay.Color {
