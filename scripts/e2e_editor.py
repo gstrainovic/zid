@@ -9,6 +9,7 @@ import os, shutil, subprocess, sys, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from e2e_open_folder import ROOT, rpc, result_json, wait_port, settle, bounds, click_center, check, shot  # noqa: E402
 from e2e_shortcuts import key, explorer, explorer_click, ui_state, dialog_open  # noqa: E402
+from e2e_pdf_pager import pixel  # noqa: E402
 
 FX = os.path.join(ROOT, "tmp", "e2e_editor")
 SRC = os.path.join(FX, "demo.zig")
@@ -373,6 +374,13 @@ def step_hscrollbar():
     thumb = result_json("element_bounds", ["hscroll_thumb"])
     check(thumb["found"] and thumb["w"] < bar["w"], "Thumb ist schmaler als der Track")
     shot("e2e_editor_hscrollbar.ppm")
+    # Screenshot: Thumb heller als der Track, Track anders als der Editor darüber
+    ty = bar["y"] + bar["h"] / 2
+    on_thumb = pixel("e2e_editor_hscrollbar.ppm", thumb["x"] + thumb["w"] / 2, ty)
+    on_track = pixel("e2e_editor_hscrollbar.ppm", bar["x"] + bar["w"] - 20, ty)
+    above = pixel("e2e_editor_hscrollbar.ppm", bar["x"] + bar["w"] - 20, bar["y"] - 12)
+    check(any(abs(a - b) > 12 for a, b in zip(on_thumb, on_track)), f"Thumb ist gezeichnet ({on_thumb} neben Track {on_track})")
+    check(any(abs(a - b) > 12 for a, b in zip(on_track, above)), f"Track ist gezeichnet ({on_track} gegen Editor {above})")
     # Cursorform: Pfeil über Thumb und Track, I-Beam über dem Text
     rpc("move_mouse", [thumb["x"] + thumb["w"] / 2, thumb["y"] + thumb["h"] / 2]); settle()
     check(ui_state()["cursor"] == "arrow", f"Pfeil über dem Thumb ({ui_state()['cursor']})")
