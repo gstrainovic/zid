@@ -199,6 +199,10 @@ liegen in `src/ui/mod.zig`, das Virtualisierungsmuster in
   Scope (global / editor / explorer), Label, Anzeige-Text und die Menüstruktur File/Edit/View/Help.
   Unit-Tests prüfen Eindeutigkeit und Labels. Neue Kürzel nur dort eintragen, dann erscheinen sie
   automatisch in Menüleiste, Kontextmenüs und Help → Keyboard Shortcuts (F1).
+- **Umschalt-Befehle zeigen ihren Zustand:** `toggleState(cmd)` in `src/ui/mod.zig` liefert für
+  jeden `toggle_*`-Befehl den aktuellen Wert; das Dropdown zeichnet davor ein Häkchen
+  (Clay-ID `menu_check_<command>`, E2E über `element_bounds`). Neuer Toggle: dort eintragen.
+  Autosave steht zusätzlich als Feld `status_autosave` in der Statusleiste.
 - **Ein Kontextmenü für alles:** `src/ui/context_menu.zig` (Modul `context_menu`, eigenes Modul wie
   `shortcuts`, weil code_editor.zig ein eigenes Test-Root ist) zeichnet Tab-Kopf, Editor-Text,
   Markdown-Vorschau, Terminal und Explorer im selben Theme-Stil (`Colors.fromTheme`, Zeile 30 px,

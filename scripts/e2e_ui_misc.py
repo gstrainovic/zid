@@ -73,6 +73,12 @@ def step_autosave_toast():
     check(os.path.isdir(backup_dir) and any(n.startswith("note.txt.") for n in os.listdir(backup_dir)), "Sicherung der alten Version liegt im Backup-Ordner")
     palette("toggle autosave")
     check(ui_state()["autosave"] and "Autosave on" in ui_state()["toast"], "Autosave eingeschaltet")
+    # Zustand sichtbar: Häkchen im File-Menü und Feld in der Statusleiste
+    click_center("menu_file"); settle()
+    check(bounds("menu_check_toggle_autosave")["found"], "File-Menü zeigt ein Häkchen vor Toggle Autosave")
+    shot("e2e_autosave_menu_check.ppm")
+    key("escape"); settle()
+    check(bounds("status_autosave")["found"], "Statusleiste zeigt das Autosave-Feld")
     rpc("click", [700, 300]); settle()
     rpc("type_text", ["Y"]); settle()
     t0 = time.time()
