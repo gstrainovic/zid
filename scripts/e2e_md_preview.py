@@ -248,6 +248,43 @@ def step_selection():
     check(md_selection()["text"] is None, "Einfacher Klick markiert nichts")
 
 
+def step_wide_code():
+    """Lange Codezeilen: ohne Word Wrap ragt der Inhalt über den Viewport, unten erscheint ein
+    waagrechter Balken (Klick rechts davon blättert), Alt+Z bricht die Zeilen um und der
+    Inhalt passt wieder. Fliesstext bricht in beiden Faellen um."""
+    print("--- Lange Codezeilen: waagrechter Bildlauf, Alt+Z bricht um")
+    rel = os.path.join("tmp", "e2e_md_wide.md")
+    with open(os.path.join(ROOT, rel), "w", encoding="utf-8") as f:
+        f.write("# Breit\n\nEin Absatz, der " + "immer weiter " * 40 + "geht.\n\n```zig\n"
+                "const sehr_lange_zeile = \"" + "x" * 400 + "\";\nconst kurz = 1;\n```\n")
+    open_preview(rel)
+    vp = bounds("md_viewport")
+    content = bounds("md_content")
+    check(content["w"] > vp["w"] + 100, f"Inhalt breiter als der Viewport ({content['w']:.0f} > {vp['w']:.0f})")
+    # Ueberschrift, Absatz, Codeblock (zigdown streut Break-Bloecke ein): der Absatz ist der
+    # hoechste der ersten Bloecke, weil er auf Viewportbreite in viele Zeilen bricht
+    para_h = max(bounds("md_block", i)["h"] for i in range(5))
+    check(para_h > 120, f"Absatz bricht trotzdem um (Hoehe {para_h:.0f})")
+    track = bounds("md_hscroll_track")
+    check(track["y"] + track["h"] <= vp["y"] + vp["h"] + 1 and track["w"] < vp["w"] + 1, "waagrechter Balken unten im Viewport")
+    thumb = bounds("md_hscroll_thumb")
+    check(thumb["w"] < track["w"], f"Thumb kuerzer als der Track ({thumb['w']:.0f} < {track['w']:.0f})")
+    x0 = bounds("md_content")["x"]
+    rpc("click", [track["x"] + track["w"] - 3, track["y"] + track["h"] / 2]); settle(8)
+    x1 = bounds("md_content")["x"]
+    check(x1 < x0 - 100, f"Klick rechts vom Thumb blaettert nach rechts ({x0:.0f} -> {x1:.0f})")
+    shot("e2e_md_preview_wide.ppm")
+    # Alt+Z: Word Wrap fuer alle Editoren, die Vorschau uebernimmt es fuer Codebloecke
+    rpc("key_press_alt", ["z", False, False, True]); settle(20)
+    check("word_wrap on" in ui_state().get("toast", ""), f"Toast: {ui_state().get('toast')!r}")
+    content = bounds("md_content")
+    check(content["w"] <= vp["w"] + 1, f"mit Word Wrap passt der Inhalt ({content['w']:.0f} <= {vp['w']:.0f})")
+    check(abs(content["x"] - vp["x"]) < 1, "Bildlauf steht wieder links")
+    shot("e2e_md_preview_wrapped.ppm")
+    rpc("key_press_alt", ["z", False, False, True]); settle(20)
+    check("word_wrap off" in ui_state().get("toast", ""), "Alt+Z schaltet zurueck")
+
+
 def step_no_clay_errors():
     print("--- Clay meldet keine Fehler")
     time.sleep(0.5)
@@ -269,6 +306,7 @@ def main():
         step_table_cells()
         step_all_examples(proc)
         step_selection()
+        step_wide_code()
         step_no_clay_errors()
         print("ALL PASSED")
     finally:

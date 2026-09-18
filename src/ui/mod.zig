@@ -1325,6 +1325,10 @@ pub const UI = struct {
                 if (self.activeGitDiff()) |d| d.view.scrollLines(delta, true);
                 return;
             }
+            if (tab.kind == .markdown_preview) {
+                if (self.open_markdown_views.get(tab.path)) |v| v.scrollColumns(delta);
+                return;
+            }
             if (tab.kind != .text) return;
         }
         self.getActiveEditor().scrollColumns(delta);

@@ -85,6 +85,19 @@ pub const MarkdownView = struct {
     viewport_height: f32 = 0,
     content_height: f32 = 0,
 
+    /// Waagrechter Bildlauf: nur Codeblöcke ragen über den Rand (Fließtext und Tabellen
+    /// brechen immer um). `content_width` ist die gemessene Breite von `md_content`, die mit
+    /// der längsten Codezeile wächst; der Balken erscheint, sobald sie den Viewport übersteigt.
+    scroll_offset_x: f32 = 0,
+    viewport_x: f32 = 0,
+    viewport_width: f32 = 0,
+    content_width: f32 = 0,
+    /// Waagrechter Balken wird gezogen (`scrollbar.Drag`)
+    hdrag: ?scrollbar.Drag = null,
+    /// „Toggle Word Wrap“ (Alt+Z) der Editoren, in `render` übernommen: Codezeilen brechen an
+    /// der Inhaltsbreite um statt nach rechts hinauszulaufen.
+    wrap_code: bool = false,
+
     /// Context Menu State
     show_context_menu: bool = false,
     context_menu_x: f32 = 0,
@@ -127,7 +140,7 @@ pub const MarkdownView = struct {
     const Self = @This();
 
     const FrameLine = struct { block: u32, line: u32, size: f32 };
-    const LineText = struct { text: []u8, soft: bool };
+    const LineText = struct { text: []u8, join: md_select.Join };
     const LineCtx = struct { id: clay.ElementId, range: ?md_select.Range };
 
     fn lineKey(block: u32, line: u32) u64 {
@@ -215,6 +228,34 @@ pub const MarkdownView = struct {
         }
     }
 
+    /// Shift+Rad bzw. Touchpad waagrecht: 60 px je Schritt, positiv = nach links (wie
+    /// `CodeEditor.scrollColumns`).
+    pub fn scrollColumns(self: *Self, delta: i32) void {
+        if (self.deck != null) return;
+        const max_x = @max(0, self.content_width - self.viewport_width);
+        self.scroll_offset_x = std.math.clamp(self.scroll_offset_x - @as(f32, @floatFromInt(delta)) * 60.0, 0, max_x);
+    }
+
+    /// Modell des waagrechten Balkens (Pixel als Einheiten), null wenn nichts überragt.
+    fn hModel(self: *const Self) ?scrollbar.Model {
+        if (self.deck != null) return null;
+        const over = self.content_width - self.viewport_width;
+        if (over <= 0.5 or self.viewport_width <= 0) return null;
+        // rechts bleibt der senkrechte Balken frei
+        const len = if (self.content_height > self.viewport_height) self.viewport_width - self.scrollbar_width else self.viewport_width;
+        return .{
+            .axis = .horizontal,
+            .x = self.viewport_x,
+            .y = self.scrollbar_track_y + self.viewport_height - self.scrollbar_width,
+            .len = @max(len, 1),
+            .thickness = self.scrollbar_width,
+            .total = @intFromFloat(@round(self.content_width)),
+            .visible = @intFromFloat(@round(self.viewport_width)),
+            .offset = @intFromFloat(@round(@max(0, self.scroll_offset_x))),
+            .max_offset = @intFromFloat(@round(over)),
+        };
+    }
+
     pub fn handleMouseDown(self: *Self, x: f32, y: f32) bool {
         if (self.show_context_menu) {
             self.show_context_menu = false;
@@ -243,6 +284,17 @@ pub const MarkdownView = struct {
         }
 
         // Scrollbalken zuerst, jeder andere Klick gilt dem Text (Auswahl).
+        if (self.hModel()) |m| switch (scrollbar.hitTest(m, x, y)) {
+            .none => {},
+            .thumb => |d| {
+                self.hdrag = d;
+                return true;
+            },
+            else => |h| {
+                self.scroll_offset_x = @floatFromInt(scrollbar.pageOffset(m, h));
+                return true;
+            },
+        };
         const on_scrollbar = self.content_height > self.viewport_height and
             x >= self.scrollbar_track_x and x <= self.scrollbar_track_x + self.scrollbar_width and
             y >= self.scrollbar_track_y and y <= self.scrollbar_track_y + self.viewport_height;
@@ -310,11 +362,15 @@ pub const MarkdownView = struct {
 
     pub fn handleMouseUp(self: *Self) void {
         self.scrollbar_dragging = false;
+        self.hdrag = null;
         self.selecting = false;
     }
 
     pub fn handleMouseMove(self: *Self, x: f32, y: f32) void {
         self.handleScrollbarMouseMove(x, y);
+        if (self.hdrag) |d| if (self.hModel()) |m| {
+            self.scroll_offset_x = @floatFromInt(scrollbar.dragOffset(m, d, x, y));
+        };
         if (self.selecting) {
             if (self.hitLine(x, y)) |p| self.sel_head = p;
         }
@@ -384,7 +440,7 @@ pub const MarkdownView = struct {
                 const to: usize = if (block == sp.end.block and line == sp.end.line) @min(@as(usize, sp.end.offset), lt.text.len) else lt.text.len;
                 if (prev_block) |pb| {
                     trimTrailingSpaces(&out);
-                    out.appendSlice(alloc, md_select.joinWith(pb, block, lt.soft)) catch {};
+                    out.appendSlice(alloc, md_select.joinWith(pb, block, lt.join)) catch {};
                 }
                 out.appendSlice(alloc, lt.text[from..@max(from, to)]) catch {};
                 // Absätze enden auf ein Leerzeichen-Stück; das gehört nicht in die Zwischenablage.
@@ -466,6 +522,10 @@ pub const MarkdownView = struct {
     /// Merkt eine auswählbare Zeile (Text im Cache, Geometrie-Index für den nächsten Frame)
     /// und liefert die Clay-ID der Reihe samt ausgewähltem Bereich.
     fn registerLine(self: *Self, text: []const u8, soft: bool, size: u16) LineCtx {
+        return self.registerLineJoin(text, if (soft) .space else .hard, size);
+    }
+
+    fn registerLineJoin(self: *Self, text: []const u8, join: md_select.Join, size: u16) LineCtx {
         const block = self.cur_block;
         const line = self.block_line_counter;
         self.block_line_counter += 1;
@@ -473,9 +533,9 @@ pub const MarkdownView = struct {
         self.frame_lines.append(self.allocator, .{ .block = block, .line = line, .size = @floatFromInt(size) }) catch {};
         const id = self.idi("md_line", idx);
         const gop = self.line_texts.getOrPut(self.allocator, lineKey(block, line)) catch return .{ .id = id, .range = null };
-        if (!gop.found_existing or !std.mem.eql(u8, gop.value_ptr.text, text) or gop.value_ptr.soft != soft) {
+        if (!gop.found_existing or !std.mem.eql(u8, gop.value_ptr.text, text) or gop.value_ptr.join != join) {
             if (gop.found_existing) self.allocator.free(gop.value_ptr.text);
-            gop.value_ptr.* = .{ .text = self.allocator.dupe(u8, text) catch "", .soft = soft };
+            gop.value_ptr.* = .{ .text = self.allocator.dupe(u8, text) catch "", .join = join };
         }
         const range = if (self.span()) |sp| md_select.lineRange(sp, block, line) else null;
         return .{ .id = id, .range = range };
@@ -1021,6 +1081,8 @@ pub const MarkdownView = struct {
         const content_data = clay.getElementData(self.idi("md_content", 0));
         if (clip_data.found) {
             self.viewport_height = clip_data.bounding_box.height;
+            self.viewport_x = clip_data.bounding_box.x;
+            self.viewport_width = clip_data.bounding_box.width;
             self.scrollbar_track_x = clip_data.bounding_box.x + clip_data.bounding_box.width;
             self.scrollbar_track_y = clip_data.bounding_box.y;
             // md_content hat 24px Padding je Seite
@@ -1028,7 +1090,12 @@ pub const MarkdownView = struct {
         }
         if (content_data.found) {
             self.content_height = content_data.bounding_box.height;
+            self.content_width = content_data.bounding_box.width;
         }
+        // Word Wrap der Editoren gilt auch für Codeblöcke der Vorschau (Alt+Z, ein Schalter für alle)
+        self.wrap_code = ui_ptr.getActiveEditor().word_wrap;
+        // Nach Umbruch oder schmalerem Fenster nicht im Leeren stehen bleiben
+        self.scroll_offset_x = std.math.clamp(self.scroll_offset_x, 0, @max(0, self.content_width - self.viewport_width));
 
         clay.UI()(.{
             .id = self.idi("markdown_view_root", 0),
@@ -1042,7 +1109,7 @@ pub const MarkdownView = struct {
             clay.UI()(.{
                 .id = self.idi("md_viewport", 0),
                 .layout = .{ .sizing = .grow },
-                .clip = .{ .vertical = true, .horizontal = true, .child_offset = .{ .x = 0, .y = -self.scroll_offset_y } },
+                .clip = .{ .vertical = true, .horizontal = true, .child_offset = .{ .x = -self.scroll_offset_x, .y = -self.scroll_offset_y } },
             })({
                 clay.UI()(.{
                     .id = self.idi("md_content", 0),
@@ -1062,6 +1129,10 @@ pub const MarkdownView = struct {
             // Scrollbar
             if (self.content_height > self.viewport_height) {
                 self.renderScrollbar();
+            }
+            // Waagrechter Balken unten, nur wenn Code über den Rand ragt
+            if (self.hModel()) |m| {
+                _ = scrollbar.render(m, .{ .track = self.idi("md_hscroll_track", 0), .thumb = self.idi("md_hscroll_thumb", 0) });
             }
         });
 
@@ -1195,6 +1266,10 @@ pub const MarkdownView = struct {
         // Split code into lines manually
         var start: usize = 0;
         var line_idx: usize = 0;
+        const code_size = self.font_size - 2;
+        // Mit Word Wrap bricht jede Zeile an der Inhaltsbreite (md_code hat 16 px Padding je
+        // Seite); ohne läuft sie nach rechts hinaus und der Viewport scrollt waagrecht.
+        const wrap_at: f32 = if (self.wrap_code) @max(0, (self.wrap_width_hint orelse 0) - 32) else 0;
 
         clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .top_to_bottom } })({
             while (start < code.len) {
@@ -1203,42 +1278,67 @@ pub const MarkdownView = struct {
                 const end = start + end_offset;
                 if (end > code.len) break;
                 const line = code[start..end];
-                const line_len = line.len;
 
                 const tags_opt: ?[]flow_core.highlight.ColorTag = if (hl) |highlighter|
-                    (highlighter.tagsForLine(line_idx, line_len, arena) catch null)
+                    (highlighter.tagsForLine(line_idx, line.len, arena) catch null)
                 else
                     null;
+                if (tags_opt) |tags| std.sort.insertion(flow_core.highlight.ColorTag, tags, {}, lessThanTag);
 
-                const code_size = self.font_size - 2;
-                const ctx = self.registerLine(line, false, code_size);
-                clay.UI()(.{ .id = ctx.id, .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .left_to_right, .child_gap = 0 } })({
-                    if (tags_opt) |tags| {
-                        std.sort.insertion(flow_core.highlight.ColorTag, tags, {}, lessThanTag);
-                        var pos: usize = 0;
-                        for (tags) |tag| {
-                            if (tag.end > line_len) continue;
-                            if (tag.start >= tag.end) continue;
-                            const actual_start = @max(tag.start, pos);
-                            if (actual_start >= tag.end) continue;
-                            if (actual_start > pos) {
-                                self.textSel(line[pos..actual_start], @intCast(pos), code_size, theme.text, ctx.range);
-                            }
-                            self.textSel(line[actual_start..tag.end], @intCast(actual_start), code_size, colorFromTag(tag.fg), ctx.range);
-                            pos = tag.end;
-                        }
-                        if (pos < line_len) {
-                            self.textSel(line[pos..], @intCast(pos), code_size, theme.text, ctx.range);
-                        }
-                    } else {
-                        self.textSel(line, 0, code_size, theme.text, ctx.range);
-                    }
-                });
+                // Reihen der Zeile: eine, oder mit Word Wrap so viele, wie die Breite verlangt
+                var row_start: usize = 0;
+                while (true) {
+                    const row_end = if (wrap_at > 0) codeRowEnd(line, row_start, wrap_at, @floatFromInt(code_size)) else line.len;
+                    const join: md_select.Join = if (row_start == 0) .hard else .none;
+                    const ctx = self.registerLineJoin(line[row_start..row_end], join, code_size);
+                    clay.UI()(.{ .id = ctx.id, .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .left_to_right, .child_gap = 0 } })({
+                        self.renderCodeRow(line, row_start, row_end, tags_opt, code_size, theme, ctx.range);
+                    });
+                    if (row_end >= line.len) break;
+                    row_start = row_end;
+                }
 
                 start = end + 1;
                 line_idx += 1;
             }
         });
+    }
+
+    /// Ende der Reihe ab `from`: das längste Präfix, das in `max_width` passt, mindestens ein
+    /// Zeichen. Code bricht an jeder Stelle, nicht nur an Leerzeichen.
+    fn codeRowEnd(line: []const u8, from: usize, max_width: f32, size: f32) usize {
+        if (ui_mod.measureTextWidth(line[from..], size) <= max_width) return line.len;
+        var take: usize = from;
+        var i: usize = from;
+        while (i < line.len) {
+            i += std.unicode.utf8ByteSequenceLength(line[i]) catch 1;
+            if (i > line.len) i = line.len;
+            if (ui_mod.measureTextWidth(line[from..i], size) > max_width) break;
+            take = i;
+        }
+        if (take == from) take = @min(line.len, from + (std.unicode.utf8ByteSequenceLength(line[from]) catch 1));
+        return take;
+    }
+
+    /// Eine Reihe `line[row_start..row_end]` mit Highlight-Tags (Offsets der ganzen Zeile);
+    /// die Auswahl (`range`) und `textSel` rechnen relativ zur Reihe.
+    fn renderCodeRow(self: *Self, line: []const u8, row_start: usize, row_end: usize, tags_opt: ?[]flow_core.highlight.ColorTag, code_size: u16, theme: Theme, range: ?md_select.Range) void {
+        const row = line[row_start..row_end];
+        if (tags_opt) |tags| {
+            var pos: usize = row_start;
+            for (tags) |tag| {
+                if (tag.end > line.len or tag.start >= tag.end) continue;
+                const s = @max(@max(tag.start, pos), row_start);
+                const e = @min(tag.end, row_end);
+                if (s >= e) continue;
+                if (s > pos) self.textSel(line[pos..s], @intCast(pos - row_start), code_size, theme.text, range);
+                self.textSel(line[s..e], @intCast(s - row_start), code_size, colorFromTag(tag.fg), range);
+                pos = e;
+            }
+            if (pos < row_end) self.textSel(line[pos..row_end], @intCast(pos - row_start), code_size, theme.text, range);
+        } else {
+            self.textSel(row, 0, code_size, theme.text, range);
+        }
     }
 
     fn renderBlock(self: *Self, block: *Block, arena: std.mem.Allocator, theme: Theme, ui_ptr: *ui_mod.UI) void {
@@ -1388,10 +1488,10 @@ pub const MarkdownView = struct {
     /// `relative_width` aus der Trennzeile (`|---|-----|`) bleibt ungenutzt — die Zahl der
     /// Striche sagt nichts über den Inhalt, und Browser werten sie ebenso wenig aus.
     ///
-    /// Anders als der Browser bricht die Tabelle nie über den Rand: es gibt keinen
-    /// waagerechten Scrollbalken in der Vorschau, überstehende Spalten wären verloren.
-    /// Notfalls werden deshalb auch die Mindestbreiten anteilig gestaucht; zu lange Wörter
-    /// schneidet dann die Zelle ab.
+    /// Anders als der Browser bricht die Tabelle nie über den Rand: der waagrechte Bildlauf
+    /// der Vorschau ist für Codeblöcke gedacht, eine Tabelle soll wie im Browser in die
+    /// Breite passen. Notfalls werden deshalb auch die Mindestbreiten anteilig gestaucht; zu
+    /// lange Wörter schneidet dann die Zelle ab.
     fn renderTable(self: *Self, container: *const zigdown.Container, arena: std.mem.Allocator, theme: Theme, ui_ptr: *ui_mod.UI) void {
         const cells = container.children.items;
         const ncol = container.content.Table.ncol;
@@ -1573,7 +1673,7 @@ pub const MarkdownView = struct {
 
     /// Stücke, die für sich allein breiter sind als die Zeile, in passende Teile zerlegen.
     /// Betrifft lange Pfade und URLs ohne Leerzeichen: sonst ragen sie aus ihrer Spalte
-    /// oder aus dem Fenster, und die Vorschau hat keinen waagerechten Scrollbalken.
+    /// oder aus dem Fenster; Fließtext soll nie waagrecht scrollen, nur Codeblöcke.
     /// Getrennt wird an UTF-8-Grenzen, nicht mitten in einem Zeichen.
     fn splitWide(arena: std.mem.Allocator, pieces: []const Piece, size: f32, max_width: f32) []const Piece {
         if (max_width <= 0) return pieces;

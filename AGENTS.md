@@ -174,8 +174,8 @@ liegen in `src/ui/mod.zig`, das Virtualisierungsmuster in
   oben durch `wrap_width_hint` gedeckelt: `grow` wird nie schmaler als das Kind und hielte
   sonst eine Überbreite aus dem ersten Frame (noch ohne Hint, 800 px) für immer fest.
   **Kein `clip` je Zelle:** Clay hält nur zehn Clip-Container, eine Tabelle sprengt das sofort
-  („out of bounds array access"). Zu lange Wörter zerlegt stattdessen `splitWide`, weil die
-  Vorschau keinen waagerechten Scrollbalken hat. Fixture: `libs/zigdown/test/table.md`,
+  („out of bounds array access"). Zu lange Wörter zerlegt stattdessen `splitWide`; Fließtext und
+  Tabellen scrollen nie waagrecht, nur Codeblöcke (siehe unten). Fixture: `libs/zigdown/test/table.md`,
   geprüft in `scripts/e2e_md_preview.py`. Spaltenausrichtung (`alignment`) wird nicht umgesetzt.
 
 - **Abfragbare IDs der Vorschau (E2E):** `md_tcell` mit Index Tabelle × 100000 + Zeile × ncol
@@ -192,6 +192,18 @@ liegen in `src/ui/mod.zig`, das Virtualisierungsmuster in
   `e2e_md_preview.py` öffnet jede `libs/zigdown/test/*.md` (Glob), legt je Datei
   `tmp/e2e_md_example_<name>.ppm` ab und prüft Zitatrand, Aufzählungszeichen und
   Codeblock-Hintergrund an Pixeln des Screenshots.
+
+- **Lange Codezeilen: waagrechter Bildlauf oder Word Wrap.** Fließtext und Tabellen brechen
+  immer um, Codeblöcke nicht: `md_content` wächst mit der längsten Codezeile (`grow` wird nie
+  schmaler als das Kind), `md_viewport` verschiebt per `child_offset.x`, und unten liegt der
+  waagrechte Balken aus `scrollbar.zig` (`md_hscroll_track`/`_thumb`, Pixel als Einheiten;
+  Klick blättert, Thumb zieht, Shift+Rad bzw. Touchpad über `UI.handleScrollHorizontal` →
+  `scrollColumns`, 60 px je Schritt). „Toggle Word Wrap“ (Alt+Z) der Editoren gilt auch hier:
+  `render` liest `getActiveEditor().word_wrap` in `wrap_code`, dann bricht `renderCodeBlock`
+  jede Zeile mit `codeRowEnd` an der Inhaltsbreite (an jeder Stelle, nicht nur an
+  Leerzeichen) in Reihen, die mit `Join.none` registriert sind — kopiert fügt
+  `md_select.joinWith` sie ohne Trenner zusammen (weiche Fließtextumbrüche geben ein
+  Leerzeichen). E2E `step_wide_code` in `e2e_md_preview.py`.
 
 - **Umbruch nur an Leerzeichen:** `word_wrap.wrapLines` trennt zwischen Wörtern, nie zwischen
   zwei Stücken ohne Leerzeichen dazwischen — zigdown liefert `code`, Satzzeichen und Wortteile

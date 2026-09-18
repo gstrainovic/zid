@@ -124,11 +124,21 @@ pub fn intersect(range: Range, piece_start: u32, piece_len: u32) ?Range {
     return .{ .start = a - piece_start, .end = b - piece_start };
 }
 
-/// Trenner zwischen zwei kopierten Zeilen: weicher Umbruch → Leerzeichen, harte Zeile im
-/// selben Block → Zeilenumbruch, neuer Block → Leerzeile (wie ein Browser Absätze kopiert).
-pub fn joinWith(prev_block: u32, next_block: u32, next_soft: bool) []const u8 {
+/// Wie eine gezeichnete Reihe an die vorige anschließt: `hard` = eigene Zeile, `space` =
+/// weicher Umbruch im Fließtext (an einem Leerzeichen gebrochen), `none` = umgebrochene
+/// Codezeile (mitten im Text gebrochen, beim Kopieren ohne Trenner zusammensetzen).
+pub const Join = enum { hard, space, none };
+
+/// Trenner zwischen zwei kopierten Zeilen: weicher Umbruch → Leerzeichen, umgebrochener Code →
+/// nichts, harte Zeile im selben Block → Zeilenumbruch, neuer Block → Leerzeile (wie ein Browser
+/// Absätze kopiert).
+pub fn joinWith(prev_block: u32, next_block: u32, next_join: Join) []const u8 {
     if (prev_block != next_block) return "\n\n";
-    return if (next_soft) " " else "\n";
+    return switch (next_join) {
+        .space => " ",
+        .none => "",
+        .hard => "\n",
+    };
 }
 
 // ---------------------------------------------------------------------------
@@ -192,7 +202,8 @@ test "intersect: Stück ganz, teilweise oder gar nicht in der Auswahl" {
 }
 
 test "joinWith: weich = Leerzeichen, hart = Umbruch, Blockwechsel = Leerzeile" {
-    try testing.expectEqualStrings(" ", joinWith(2, 2, true));
-    try testing.expectEqualStrings("\n", joinWith(2, 2, false));
-    try testing.expectEqualStrings("\n\n", joinWith(2, 3, true));
+    try testing.expectEqualStrings(" ", joinWith(2, 2, .space));
+    try testing.expectEqualStrings("\n", joinWith(2, 2, .hard));
+    try testing.expectEqualStrings("", joinWith(2, 2, .none));
+    try testing.expectEqualStrings("\n\n", joinWith(2, 3, .space));
 }
