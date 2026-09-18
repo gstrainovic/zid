@@ -101,6 +101,37 @@ pub const TimelineView = struct {
         }
     }
 
+    pub const Key = enum { up, down, page_up, page_down, home, end, enter, reload };
+
+    /// Tastatur mit Fokus in der Timeline: Pfeile/Bild/Pos1/Ende wählen Einträge, Enter öffnet
+    /// den Diff wie ein Klick, F5 lädt neu.
+    pub fn handleKey(self: *Self, key: Key) Action {
+        const t = &self.timeline;
+        if (!t.expanded) return .none;
+        const vp = if (box(bodyId())) |b| b.height else 0;
+        const page: isize = @max(1, @as(isize, @intFromFloat(vp / ROW_HEIGHT)) - 1);
+        const count: isize = @intCast(t.items().len);
+        var action: Action = .consumed;
+        switch (key) {
+            .up => _ = t.moveSelection(-1),
+            .down => _ = t.moveSelection(1),
+            .page_up => _ = t.moveSelection(-page),
+            .page_down => _ = t.moveSelection(page),
+            .home => _ = t.moveSelection(-count),
+            .end => _ = t.moveSelection(count),
+            .enter => if (t.selected) |i| {
+                action = .{ .open_changes = i };
+            },
+            .reload => t.refresh(),
+        }
+        self.hover_index = null;
+        self.menu = null;
+        if (t.selected) |i| if (vp > 0) {
+            t.scroll = git_history.clampScroll(git_history.scrollToShow(t.scroll, vp, ROW_HEIGHT, i), vp, ROW_HEIGHT, t.items().len);
+        };
+        return action;
+    }
+
     pub fn handleMouseDown(self: *Self, x: f32, y: f32, right: bool) Action {
         if (self.menu) |m| {
             self.menu = null;

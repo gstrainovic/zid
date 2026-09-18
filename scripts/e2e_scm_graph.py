@@ -8,6 +8,7 @@ Prüft:
   1. Ctrl+Shift+G zeigt den Graphen, Filter Auto (main + origin/main), HEAD-Ring, Merge mit zwei Bahnen
   2. Hover mit Details; Klick klappt Commit auf und zeigt Dateien mit Status
   3. Klick auf Datei öffnet den Diff-Editor gegen den ersten Elternteil
+  3b. Tastatur: Home/End/↓ wählen, ←/→/Enter klappen, Enter auf Datei öffnet den Diff, Escape gibt ab
   4. Kontextmenü „Open Changes“ öffnet den Multi-File-Diff „kurz - betreff“, eingeklappte
      unveränderte Bereiche, Abschnitt klappbar, „Collapse All Diffs“
   5. Timeline „Open Commit“ öffnet denselben Multi-File-Diff-Typ
@@ -127,6 +128,57 @@ def step_hover_expand_diff():
           f"Datei-Klick öffnet Diff-Editor: {d.get('title')} +{d.get('added')}")
 
 
+def step_keyboard():
+    print("--- 3b. Tastatur im Graphen")
+    key("g", ctrl=True, shift=True)
+    s = wait(lambda s: s["mode"] == "scm" and len(s["commits"]) >= 50, "Ctrl+Shift+G: Graph mit Tastaturfokus")
+    key("home")
+    wait(lambda s: s["selected"] == 0, "Home wählt die erste Zeile")
+    key("end")
+    # letzte Zeile ist „Load More“: sichtbar → pageOnScroll lädt die zweite Seite nach
+    s = wait(lambda s: s["scroll"] > 0 and not s["has_more"] and len(s["commits"]) == 60, "End scrollt ans Ende und lädt die zweite Seite")
+    key("end")
+    s = wait(lambda s: s["selected"] == len(s["rows"]) - 1, "End wählt die letzte Zeile")
+    key("home")
+    wait(lambda s: s["selected"] == 0 and s["scroll"] == 0, "Home scrollt zurück nach oben")
+    idx = next(i for i, x in enumerate(s["commits"]) if x["subject"] == "Merge feature")
+    # Merge ist aus Schritt 2 aufgeklappt: ← klappt zu, → klappt auf
+    for _ in range(idx):
+        key("down")
+    s = wait(lambda s: s["selected"] == idx and s["rows"][idx]["kind"] == "commit", f"↓ bis zum Merge (Zeile {idx})")
+    key("left")
+    s = wait(lambda s: not s["commits"][idx]["expanded"], "← klappt den Merge zu")
+    key("right")
+    s = wait(lambda s: s["commits"][idx]["expanded"] and s["rows"][idx + 1]["kind"] == "change", "→ klappt ihn wieder auf")
+    key("enter")
+    wait(lambda s: not s["commits"][idx]["expanded"], "Enter auf dem Commit klappt zu")
+    key("enter")
+    wait(lambda s: s["commits"][idx]["expanded"], "Enter klappt wieder auf")
+    key("down")
+    wait(lambda s: s["selected"] == idx + 1 and s["rows"][idx + 1]["path"] == "b.txt", "↓ auf die Datei b.txt")
+    key("enter")
+    t0 = time.time()
+    d = {}
+    while time.time() - t0 < 10:
+        d = result_json("git_history_state")
+        if d.get("view") == "diff" and d.get("loaded"):
+            break
+        time.sleep(0.05)
+    check(d.get("title", "").startswith("b.txt ("), f"Enter auf der Datei öffnet den Diff-Editor: {d.get('title')}")
+    # Diff-Tab hat den Fokus: ↓ erreicht den Graphen nicht mehr
+    key("down")
+    settle(4)
+    check(st()["selected"] == idx + 1, "nach dem Öffnen gehen die Tasten nicht mehr an den Graphen")
+    # Klick in den Graphen holt den Fokus zurück; ein Buchstabe erreicht den Editor nicht
+    s = st()
+    rpc("click", list(row_center(s, idx))); settle(4)
+    key("x")
+    key("escape")
+    key("down")
+    settle(4)
+    check(st()["selected"] == idx, "Escape gibt den Fokus ab: ↓ bewegt die Auswahl nicht")
+
+
 def step_open_changes():
     print("--- 4. Open Changes → Multi-File-Diff")
     s = st()
@@ -210,7 +262,7 @@ def main():
         settle(20)
         check(rpc("open_folder", [FX]) == "ok", "Fixture-Repo als Explorer-Root")
         settle(10)
-        for step in (step_graph, step_hover_expand_diff, step_open_changes, step_timeline_open_commit, step_load_more_refresh):
+        for step in (step_graph, step_hover_expand_diff, step_keyboard, step_open_changes, step_timeline_open_commit, step_load_more_refresh):
             step()
         print("ALL PASSED")
     finally:

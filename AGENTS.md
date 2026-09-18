@@ -723,6 +723,8 @@ MuPDFs Story-Engine. Folienvorschau in `MarkdownView` (`deck`-Feld), Command
   ohne Tab zu öffnen (`Timeline.show`). Aus dem Editor-Menü läuft das über `pending_file_history`
   in `update()`, nie im Render-Pfad: `show` gibt den Log frei, auf den Clay-Texte des Frames zeigen.
   Pin lösen folgt sofort dem aktiven Tab (`resetTimelineFollow`).
+- Tastatur nach Klick in Kopf oder Liste (`sidebar_focus = .timeline`): ↑↓/PgUp/PgDn/Home/End
+  wählen, Enter öffnet den Diff wie ein Klick, F5 lädt neu, Escape gibt den Fokus ab.
 - E2E `python3 scripts/e2e_timeline.py` (Fixture-Repo mit festen Commit-Zeiten), RPC `timeline_state`.
 
 ## Source Control Graph und Multi-File-Diff (VS-Code-Stil)
@@ -733,6 +735,11 @@ MuPDFs Story-Engine. Folienvorschau in `MarkdownView` (`deck`-Feld), Command
   Diff-Editor, Rechtsklick `graph_menu_items`, Inline-Aktion und Menü „Open Changes“ öffnen den
   Multi-File-Diff (`git-commit://…`, Titel „kurz - betreff“ wie `git.viewCommit`). Am Listenende
   lädt die nächste Seite automatisch (`scm.graph.pageOnScroll`, 50 je Seite).
+- **Tastatur:** Klick in die Sidebar oder Ctrl+Shift+G setzt `UI.sidebar_focus = .scm`; dann wählen
+  ↑↓/PgUp/PgDn/Home/End Zeilen (`View.moveSelection`), Enter/Leertaste klappt Commits auf bzw.
+  öffnet die Datei im Diff-Editor (`activateSelected`), ←/→ klappen zu/auf, F5 lädt neu. Keine
+  Taste und kein Zeichen erreicht den Editor; Escape, Klick anderswo, Tab-Öffnen oder Pane-Wechsel
+  geben den Fokus ab. Gleiches Modell für die Timeline (`.timeline`, `Timeline.moveSelection`).
 - Quellen: `scmHistory.ts` (Bahnen und Zeichnen, 1:1 portiert in `src/git/git_graph.zig`),
   `scmHistoryViewPane.ts` (Zeilen, Badges `scm.graph.badges = filter`), `historyProvider.ts`
   (Referenzen, Filter Auto = Branch + Upstream + Basis), `git.ts` (`--topo-order --decorate=full
