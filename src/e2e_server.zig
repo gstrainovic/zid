@@ -241,7 +241,7 @@ fn writeScmChangesJson(ui: *ui_mod.UI, w: *std.Io.Writer) !void {
     try w.print(", \"focus\": \"{s}\", \"busy\": {}, \"generating\": {}, \"upstream\": ", .{ @tagName(ui.sidebar_focus), ui.scm_changes.busy, ui.scm_changes.generating });
     try std.json.Stringify.value(v.upstream(), .{}, w);
     var label_buf: [64]u8 = undefined;
-    try w.print(", \"ahead\": {d}, \"button\": ", .{v.ahead()});
+    try w.print(", \"ahead\": {d}, \"behind\": {d}, \"button\": ", .{ v.ahead(), v.behind() });
     try std.json.Stringify.value(v.buttonLabel(&label_buf), .{}, w);
     try w.print(", \"lines\": {d}, \"message\": ", .{ui.scm_changes.message.lineCount()});
     try std.json.Stringify.value(ui.scm_changes.message.text(), .{}, w);

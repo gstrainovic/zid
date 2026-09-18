@@ -51,8 +51,8 @@ pub const Action = union(enum) {
     unstage_all,
     discard_all,
     commit,
-    /// Publish Branch (ohne Upstream) bzw. Push
-    push,
+    /// Publish Branch (ohne Upstream) bzw. Sync Changes (pull, dann push) wie VS Code git.sync
+    sync,
     refresh,
     /// Sparkle im Feld: Commit-Nachricht vom Modell (VS Code Copilot / Zed)
     generate_message,
@@ -64,7 +64,7 @@ pub const ScmChangesView = struct {
     hover_row: ?usize = null,
     /// Hinweis unter dem Feld (VS Code inputValidation), z. B. bei leerer Nachricht
     validation: ?[]const u8 = null,
-    /// Commit oder Push läuft: Knopf und Kopf-Aktion gesperrt
+    /// Commit, Publish oder Sync läuft: Knopf und Kopf-Aktion gesperrt
     busy: bool = false,
     /// Erste sichtbare Zeile des Eingabefelds, wenn es mehr als INPUT_MAX_LINES Zeilen hat
     input_first_line: usize = 0,
@@ -199,11 +199,11 @@ pub const ScmChangesView = struct {
         if (!self.contains(x, y)) return .none;
         if (right) return .consumed;
         if (box(clay.ElementId.ID("sc_btn_refresh"))) |b| if (inside(b, x, y)) return .refresh;
-        if (box(clay.ElementId.ID("sc_btn_push"))) |b| if (inside(b, x, y)) return .push;
+        if (box(clay.ElementId.ID("sc_btn_sync"))) |b| if (inside(b, x, y)) return .sync;
         if (box(clay.ElementId.ID("sc_btn_generate"))) |b| if (inside(b, x, y)) return .generate_message;
         if (box(clay.ElementId.ID("sc_btn_commit"))) |b| if (inside(b, x, y)) return .commit;
         if (box(clay.ElementId.ID("sc_btn_commit_big"))) |b| if (inside(b, x, y)) {
-            return if (self.view.actionButton() == .commit) .commit else .push;
+            return if (self.view.actionButton() == .commit) .commit else .sync;
         };
         if (box(inputId())) |b| if (inside(b, x, y)) {
             // Zeile aus y, Spalte aus x; Shift markiert bis hierher, Ziehen beginnt
@@ -334,7 +334,9 @@ pub const ScmChangesView = struct {
                 clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow } } })({});
                 if (header_hover) {
                     tooltip.iconButton(arena, theme, clay.ElementId.ID("sc_btn_commit"), "sc_btn_commit_icon", svg.Lucide.check, "Commit", .{});
-                    tooltip.iconButton(arena, theme, clay.ElementId.ID("sc_btn_push"), "sc_btn_push_icon", svg.Lucide.upload, "Push", .{});
+                    // VS Code hat hier nur Commit, Refresh und „…“; Sync steht dort im Menü und
+                    // in der Statusleiste. Ohne Menü bleibt der Knopf hier, ohne Upstream = Publish.
+                    tooltip.iconButton(arena, theme, clay.ElementId.ID("sc_btn_sync"), "sc_btn_sync_icon", if (self.busy) svg.Lucide.loader_circle else svg.Lucide.refresh_ccw, if (self.view.upstream().len == 0) "Publish Branch" else "Sync Changes", .{});
                     tooltip.iconButton(arena, theme, clay.ElementId.ID("sc_btn_refresh"), "sc_btn_refresh_icon", svg.Lucide.refresh_cw, "Refresh", .{});
                 }
             });
@@ -429,8 +431,17 @@ pub const ScmChangesView = struct {
                 })({
                     const kind = v.actionButton();
                     var label_buf: [64]u8 = undefined;
-                    svg.SvgStroke(arena, "sc_icon_commit", if (kind == .commit) svg.Lucide.check else svg.Lucide.upload, 16, theme.text_on_primary);
-                    const label: []const u8 = if (self.busy) (if (kind == .commit) "Committing..." else "Pushing...") else v.buttonLabel(&label_buf);
+                    const icon = if (self.busy) svg.Lucide.loader_circle else switch (kind) {
+                        .commit => svg.Lucide.check,
+                        .publish => svg.Lucide.cloud_upload,
+                        .sync => svg.Lucide.refresh_ccw,
+                    };
+                    svg.SvgStroke(arena, "sc_icon_commit", icon, 16, theme.text_on_primary);
+                    const label: []const u8 = if (self.busy) switch (kind) {
+                        .commit => "Committing...",
+                        .publish => "Publishing...",
+                        .sync => "Syncing...",
+                    } else v.buttonLabel(&label_buf);
                     clay.text(arena.dupe(u8, label) catch "", .{ .font_size = 15, .color = theme.text_on_primary, .wrap_mode = .none });
                 });
             });

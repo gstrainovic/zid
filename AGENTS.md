@@ -780,13 +780,17 @@ MuPDFs Story-Engine. Folienvorschau in `MarkdownView` (`deck`-Feld), Command
 
 ### Changes-Bereich mit Commit (über dem Graphen)
 
-- Kopf „SOURCE CONTROL“ (Commit, Push, Refresh beim Überfahren), mehrzeiliges Eingabefeld
+- Kopf „SOURCE CONTROL“ (Commit, Sync Changes bzw. Publish Branch, Refresh beim Überfahren;
+  VS Code hat statt Sync ein „…“-Menü mit Pull/Push/Fetch/Sync), mehrzeiliges Eingabefeld
   (`EditBuffer` mit Zeilenfunktionen `moveUp/moveDown/moveLineHome/moveLineEnd/setCursorAtLine`,
   Enter = neue Zeile, Ctrl+Enter = Commit, wächst bis `INPUT_MAX_LINES` = 6 wie
   `scm.inputMaxLineCount`, danach scrollt es zur Cursorzeile; Platzhalter `Message (Ctrl+Enter to
   commit on "<branch>")`), großer Knopf wie `scm.showActionButton`: „Commit“ solange Änderungen da
-  sind, sauber ohne Upstream „Publish Branch“ (`push -u origin <branch>`), sauber und voraus
-  „Push N↑“ (`push`; Upstream/Vorsprung aus `# branch.upstream` und `# branch.ab`), Gruppen „Merge
+  sind, sauber ohne Upstream „Publish Branch“ (`push -u origin <branch>`), sauber und voraus oder
+  zurück „Sync Changes M↓ N↑“ (Zähler nur wenn > 0, wie `actionButton.ts`; Aktion `sync` = `pull`,
+  dann `push`, VS Code `git.sync`; Upstream/Vorsprung/Rückstand aus `# branch.upstream` und
+  `# branch.ab`). Kein `git.rebaseWhenSync`, kein Autofetch: `behind` ist erst nach einem Fetch
+  bekannt. Einzelne Push-/Pull-Knöpfe gibt es wie in VS Code nicht. Gruppen „Merge
   Changes“ (nur bei Konflikten), „Staged Changes“ (nur wenn nicht leer), „Changes“ (immer,
   untracked darin = `git.untrackedChanges: mixed`). Zeile: Name, Ordner gedimmt, rechts Buchstabe
   in `theme.git_*` (VS Code `gitDecoration.*`), gelöscht durchgestrichen. Aktionen nur beim
@@ -802,9 +806,11 @@ MuPDFs Story-Engine. Folienvorschau in `MarkdownView` (`deck`-Feld), Command
   `unstage` = `reset -q HEAD --`, `discard_tracked` = `checkout -q --`, `discard_untracked` =
   `clean -f -q --`, `commit` = `commit --quiet --file - --allow-empty-message` (Nachricht über
   stdin, `runGitCaptureStdin`), `commit_all` = vorher `add -A` (VS Code smartCommit), `push` =
-  `push --quiet` plus weitere Felder als Argumente. Fehler kommen
+  `push --quiet` plus weitere Felder als Argumente (Publish Branch), `sync` = `pull --quiet`,
+  bei Erfolg `push --quiet` (scheitert der Pull, etwa Konflikt oder divergiert ohne
+  `pull.rebase`, kommt gits Meldung und kein Push). Fehler kommen
   als `git_action_error` mit stderr → Toast. Ergebnis setzt `git_status_wanted`, main.zig lädt
-  den Status über den Debounce; nach Commit auch Graph und Timeline.
+  den Status über den Debounce; nach Commit und Sync auch Graph und Timeline.
 - **Generate Commit Message** (Sparkle rechts oben im Feld, wie VS Code Copilot / Zed): Worker-
   Aktion `commit_diff` liefert den gestagten Diff, sonst Arbeitskopie plus untracked Dateien;
   `git_changes.commitPrompt` (Conventional Commits, 72 Zeichen, Body, nur die Nachricht; Diff auf
@@ -833,7 +839,7 @@ MuPDFs Story-Engine. Folienvorschau in `MarkdownView` (`deck`-Feld), Command
   `beginFrame`/`endFrame` rahmen `renderExample` ein. Zustand ist modulweit, der Text muss den
   Frame überleben (Literal oder Frame-Arena).
 - Beschriftungen wie VS Code: Timeline (Pin the Current Timeline / Unpin …, Refresh), Graph
-  (Refresh, Open Changes), Changes (Commit, Push, Refresh, Open File, Stage/Unstage/Discard
+  (Refresh, Open Changes), Changes (Commit, Sync Changes / Publish Branch, Refresh, Open File, Stage/Unstage/Discard
   Changes, Stage/Unstage/Discard All Changes), Diff-Editor (Previous/Next Change, Toggle Collapse
   Unchanged Regions, Switch to Inline/Side by Side View), Multi-File-Diff (Collapse/Expand All
   Diffs), Ordner-Dialog (Parent Folder), Statusleiste (Current Git Branch, Toggle Autosave).

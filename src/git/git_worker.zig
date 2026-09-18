@@ -86,8 +86,10 @@ pub fn splitStatusPayload(payload: []const u8) struct { explorer: []const u8, ra
 /// Source-Control-Aktion (Felder: Aktion, Repo, dann Pfade bzw. die Commit-Nachricht):
 /// `stage` = `add -A --`, `unstage` = `reset -q HEAD --`, `discard_tracked` = `checkout -q --`,
 /// `discard_untracked` = `clean -f -q --`, `commit` = `commit --quiet --file - --allow-empty-message`
-/// mit der Nachricht über stdin (VS Code git.ts). Payload `<aktion>\n<stderr>`; Fehler von git
-/// kommen als Tag `git_action_error`, nie als Task-Fehler.
+/// mit der Nachricht über stdin (VS Code git.ts), `push` = `push --quiet` plus Felder als
+/// Argumente (Publish Branch), `sync` = `pull --quiet`, dann `push --quiet` (VS Code git.sync).
+/// Payload `<aktion>\n<stderr>`; Fehler von git kommen als Tag `git_action_error`, nie als
+/// Task-Fehler.
 pub fn taskGitAction(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.TaskResult {
     const param: *FieldsParam = @ptrCast(@alignCast(data.?));
     defer param.deinit();
@@ -122,7 +124,15 @@ pub fn taskGitAction(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.Tas
         defer alloc.free(body);
         return .{ .tag = .git_action, .payload = try frame(alloc, action, body), .allocator = alloc };
     }
-    if (std.mem.eql(u8, action, "commit") or std.mem.eql(u8, action, "commit_all")) {
+    if (std.mem.eql(u8, action, "sync")) {
+        // Sync wie VS Code `git.sync` (repository.ts `sync`): erst pull, dann push. Scheitert der
+        // Pull (Konflikt, divergiert ohne pull.rebase), bleibt es beim Fehler, kein Push.
+        switch (runGitCapture(alloc, repo, &.{ "pull", "--quiet" })) {
+            .ok => |out| alloc.free(out),
+            .failed => |msg| return framedResult(alloc, action, .{ .failed = msg }, .git_action, .git_action_error),
+        }
+        try argv.appendSlice(alloc, &.{ "push", "--quiet" });
+    } else if (std.mem.eql(u8, action, "commit") or std.mem.eql(u8, action, "commit_all")) {
         // commit_all = VS Code smartCommit ohne Staged Changes: erst alles stagen
         if (std.mem.eql(u8, action, "commit_all")) switch (runGitCapture(alloc, repo, &.{ "add", "-A" })) {
             .ok => |out| alloc.free(out),
@@ -140,7 +150,7 @@ pub fn taskGitAction(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.Tas
         else if (std.mem.eql(u8, action, "discard_untracked"))
             &.{ "clean", "-f", "-q", "--" }
         else if (std.mem.eql(u8, action, "push"))
-            // Push (Felder = weitere git-Argumente, z. B. `-u origin main` für Publish Branch)
+            // Push (Felder = weitere git-Argumente, `-u origin main` für Publish Branch)
             &.{ "push", "--quiet" }
         else
             return error.UnknownGitAction;
@@ -1018,6 +1028,69 @@ test "taskGitAction push: Publish mit -u origin, danach Push; ohne Remote Fehler
     const remote_log = try runGit(alloc, remote, &.{ "log", "-1", "--format=%s", "main" });
     defer alloc.free(remote_log);
     try std.testing.expectEqualStrings("zweiter", std.mem.trimRight(u8, remote_log, "\n"));
+}
+
+test "taskGitAction sync: pull holt fremden Commit, push bringt eigenen hoch; Konflikt bleibt Fehler ohne Push" {
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const repo = try testRepo(alloc, &tmp);
+    defer alloc.free(repo);
+    // bares Remote, Publish, dann ein zweiter Klon, der dort voranschreitet
+    try tmp.dir.makeDir("remote.git");
+    const remote = try std.fs.path.join(alloc, &.{ repo, "remote.git" });
+    defer alloc.free(remote);
+    // -b main: sonst zeigt HEAD des bare Repos auf master und der Klon hat keinen Branch
+    alloc.free(try runGit(alloc, remote, &.{ "init", "-q", "--bare", "-b", "main" }));
+    alloc.free(try runGit(alloc, repo, &.{ "remote", "add", "origin", remote }));
+    alloc.free(try runGit(alloc, repo, &.{ "config", "pull.rebase", "false" }));
+    var r = try taskGitAction(alloc, try FieldsParam.init(alloc, &.{ "push", repo, "-u", "origin", "main" }));
+    try std.testing.expect(r.tag == .git_action);
+    r.deinit();
+    const other = try std.fs.path.join(alloc, &.{ repo, "other" });
+    defer alloc.free(other);
+    alloc.free(try runGit(alloc, repo, &.{ "clone", "-q", remote, other }));
+    for ([_][]const []const u8{
+        &.{ "config", "user.email", "o@example.com" },
+        &.{ "config", "user.name", "Other" },
+    }) |args| alloc.free(try runGit(alloc, other, args));
+    try tmp.dir.writeFile(.{ .sub_path = "other/b.txt", .data = "fremd\n" });
+    alloc.free(try runGit(alloc, other, &.{ "add", "b.txt" }));
+    alloc.free(try runGit(alloc, other, &.{ "commit", "-q", "-m", "fremd" }));
+    alloc.free(try runGit(alloc, other, &.{ "push", "-q", "origin", "main" }));
+    // eigener Commit daneben: 1 voraus, nach fetch 1 zurück
+    try tmp.dir.writeFile(.{ .sub_path = "c.txt", .data = "eigen\n" });
+    alloc.free(try runGit(alloc, repo, &.{ "add", "c.txt" }));
+    alloc.free(try runGit(alloc, repo, &.{ "commit", "-q", "-m", "eigen" }));
+    alloc.free(try runGit(alloc, repo, &.{ "fetch", "-q" }));
+    const before = try statusRaw(alloc, repo);
+    defer alloc.free(before);
+    try std.testing.expect(std.mem.indexOf(u8, before, "# branch.ab +1 -1") != null);
+    r = try taskGitAction(alloc, try FieldsParam.init(alloc, &.{ "sync", repo }));
+    try std.testing.expect(r.tag == .git_action);
+    r.deinit();
+    const after = try statusRaw(alloc, repo);
+    defer alloc.free(after);
+    try std.testing.expect(std.mem.indexOf(u8, after, "# branch.ab +0 -0") != null);
+    try std.testing.expect(tmp.dir.access("b.txt", .{}) != error.FileNotFound); // fremder Commit da
+    const remote_log = try runGit(alloc, remote, &.{ "log", "--format=%s", "main" });
+    defer alloc.free(remote_log);
+    try std.testing.expect(std.mem.indexOf(u8, remote_log, "eigen") != null); // eigener oben
+    // Konflikt: beide ändern a.txt → pull scheitert, Remote bleibt ohne den eigenen Commit
+    alloc.free(try runGit(alloc, other, &.{ "pull", "-q" })); // fast-forward auf „eigen“
+    try tmp.dir.writeFile(.{ .sub_path = "other/a.txt", .data = "andere\n" });
+    alloc.free(try runGit(alloc, other, &.{ "commit", "-q", "-am", "konflikt fremd" }));
+    alloc.free(try runGit(alloc, other, &.{ "push", "-q", "origin", "main" }));
+    try tmp.dir.writeFile(.{ .sub_path = "a.txt", .data = "meine\n" });
+    alloc.free(try runGit(alloc, repo, &.{ "commit", "-q", "-am", "konflikt eigen" }));
+    r = try taskGitAction(alloc, try FieldsParam.init(alloc, &.{ "sync", repo }));
+    try std.testing.expect(r.tag == .git_action_error);
+    try std.testing.expect(std.mem.startsWith(u8, r.payload, "sync\n"));
+    r.deinit();
+    const remote_log2 = try runGit(alloc, remote, &.{ "log", "--format=%s", "main" });
+    defer alloc.free(remote_log2);
+    try std.testing.expect(std.mem.indexOf(u8, remote_log2, "konflikt eigen") == null);
+    alloc.free(try runGit(alloc, repo, &.{ "merge", "--abort" }));
 }
 
 test "taskGitAction commit_diff: gestagter Diff, sonst Arbeitskopie mit untracked Dateien" {
