@@ -249,10 +249,10 @@ def step_selection():
 
 
 def step_wide_code():
-    """Lange Codezeilen: ohne Word Wrap ragt der Inhalt über den Viewport, unten erscheint ein
-    waagrechter Balken (Klick rechts davon blättert), Alt+Z bricht die Zeilen um und der
-    Inhalt passt wieder. Fliesstext bricht in beiden Faellen um."""
-    print("--- Lange Codezeilen: waagrechter Bildlauf, Alt+Z bricht um")
+    """Lange Codezeilen ragen über den Viewport, unten erscheint ein waagrechter Balken (Klick
+    rechts davon blättert). Alt+Z (Word Wrap der Editoren) aendert daran nichts, wie in der
+    VS-Code-Vorschau. Fliesstext bricht immer um."""
+    print("--- Lange Codezeilen: waagrechter Bildlauf, Alt+Z ohne Wirkung")
     # Vorab: eingerueckter Text (Liste, Zitat, verschachtelt) bricht an der eingerueckten Breite
     # um und ragt nicht ueber den Viewport. Vorher brach er an der vollen Breite und wurde
     # rechts abgeschnitten (Business-Plan-Listen, 18.09.2026).
@@ -285,13 +285,12 @@ def step_wide_code():
     x1 = bounds("md_content")["x"]
     check(x1 < x0 - 100, f"Klick rechts vom Thumb blaettert nach rechts ({x0:.0f} -> {x1:.0f})")
     shot("e2e_md_preview_wide.ppm")
-    # Alt+Z: Word Wrap fuer alle Editoren, die Vorschau uebernimmt es fuer Codebloecke
+    # Alt+Z schaltet Word Wrap der Editoren, die Vorschau bleibt wie sie ist (VS Code: pre scrollt)
     rpc("key_press_alt", ["z", False, False, True]); settle(20)
     check("word_wrap on" in ui_state().get("toast", ""), f"Toast: {ui_state().get('toast')!r}")
     content = bounds("md_content")
-    check(content["w"] <= vp["w"] + 1, f"mit Word Wrap passt der Inhalt ({content['w']:.0f} <= {vp['w']:.0f})")
-    check(abs(content["x"] - vp["x"]) < 1, "Bildlauf steht wieder links")
-    shot("e2e_md_preview_wrapped.ppm")
+    check(content["w"] > vp["w"] + 100, f"Codeblock bricht mit Word Wrap nicht um ({content['w']:.0f} > {vp['w']:.0f})")
+    check(bounds("md_hscroll_track")["found"], "waagrechter Balken bleibt")
     rpc("key_press_alt", ["z", False, False, True]); settle(20)
     check("word_wrap off" in ui_state().get("toast", ""), "Alt+Z schaltet zurueck")
 

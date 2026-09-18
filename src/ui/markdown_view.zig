@@ -96,9 +96,6 @@ pub const MarkdownView = struct {
     content_width: f32 = 0,
     /// Waagrechter Balken wird gezogen (`scrollbar.Drag`)
     hdrag: ?scrollbar.Drag = null,
-    /// „Toggle Word Wrap“ (Alt+Z) der Editoren, in `render` übernommen: Codezeilen brechen an
-    /// der Inhaltsbreite um statt nach rechts hinauszulaufen.
-    wrap_code: bool = false,
 
     /// Context Menu State
     show_context_menu: bool = false,
@@ -1094,9 +1091,7 @@ pub const MarkdownView = struct {
             self.content_height = content_data.bounding_box.height;
             self.content_width = content_data.bounding_box.width;
         }
-        // Word Wrap der Editoren gilt auch für Codeblöcke der Vorschau (Alt+Z, ein Schalter für alle)
-        self.wrap_code = ui_ptr.getActiveEditor().word_wrap;
-        // Nach Umbruch oder schmalerem Fenster nicht im Leeren stehen bleiben
+        // Nach schmalerem Fenster nicht im Leeren stehen bleiben
         self.scroll_offset_x = std.math.clamp(self.scroll_offset_x, 0, @max(0, self.content_width - self.viewport_width));
 
         clay.UI()(.{
@@ -1227,10 +1222,9 @@ pub const MarkdownView = struct {
         var start: usize = 0;
         var line_idx: usize = 0;
         const code_size = self.font_size - 2;
-        // Mit Word Wrap bricht jede Zeile an der Inhaltsbreite (md_code hat 16 px Padding je
-        // Seite); ohne läuft sie nach rechts hinaus und der Viewport scrollt waagrecht.
-        // -4: je Highlight-Segment schlägt Clay 0.25 px auf, eine Reihe hat selten mehr als 16
-        const wrap_at: f32 = if (self.wrap_code) @max(0, (self.availWidth() orelse 0) - 32 - 4) else 0;
+        // Codezeilen brechen nie um, wie `pre { overflow: auto }` in der VS-Code-Vorschau: zu
+        // lange Zeilen laufen nach rechts hinaus und der Viewport scrollt waagrecht. Alt+Z
+        // (Word Wrap der Editoren) hat hier keine Wirkung, VS Code kennt dafür auch keinen Schalter.
 
         clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .top_to_bottom } })({
             while (start < code.len) {
@@ -1246,18 +1240,10 @@ pub const MarkdownView = struct {
                     null;
                 if (tags_opt) |tags| std.sort.insertion(flow_core.highlight.ColorTag, tags, {}, lessThanTag);
 
-                // Reihen der Zeile: eine, oder mit Word Wrap so viele, wie die Breite verlangt
-                var row_start: usize = 0;
-                while (true) {
-                    const row_end = if (wrap_at > 0) codeRowEnd(line, row_start, wrap_at, @floatFromInt(code_size)) else line.len;
-                    const join: md_select.Join = if (row_start == 0) .hard else .none;
-                    const ctx = self.registerLineJoin(line[row_start..row_end], join, code_size);
-                    clay.UI()(.{ .id = ctx.id, .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .left_to_right, .child_gap = 0 } })({
-                        self.renderCodeRow(line, row_start, row_end, tags_opt, code_size, theme, ctx.range);
-                    });
-                    if (row_end >= line.len) break;
-                    row_start = row_end;
-                }
+                const ctx = self.registerLine(line, false, code_size);
+                clay.UI()(.{ .id = ctx.id, .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .left_to_right, .child_gap = 0 } })({
+                    self.renderCodeRow(line, 0, line.len, tags_opt, code_size, theme, ctx.range);
+                });
 
                 start = end + 1;
                 line_idx += 1;
@@ -1265,24 +1251,9 @@ pub const MarkdownView = struct {
         });
     }
 
-    /// Ende der Reihe ab `from`: das längste Präfix, das in `max_width` passt, mindestens ein
-    /// Zeichen. Code bricht an jeder Stelle, nicht nur an Leerzeichen.
-    fn codeRowEnd(line: []const u8, from: usize, max_width: f32, size: f32) usize {
-        if (ui_mod.measureTextWidth(line[from..], size) <= max_width) return line.len;
-        var take: usize = from;
-        var i: usize = from;
-        while (i < line.len) {
-            i += std.unicode.utf8ByteSequenceLength(line[i]) catch 1;
-            if (i > line.len) i = line.len;
-            if (ui_mod.measureTextWidth(line[from..i], size) > max_width) break;
-            take = i;
-        }
-        if (take == from) take = @min(line.len, from + (std.unicode.utf8ByteSequenceLength(line[from]) catch 1));
-        return take;
-    }
-
     /// Eine Reihe `line[row_start..row_end]` mit Highlight-Tags (Offsets der ganzen Zeile);
-    /// die Auswahl (`range`) und `textSel` rechnen relativ zur Reihe.
+    /// die Auswahl (`range`) und `textSel` rechnen relativ zur Reihe. Der Ausschnitt bleibt
+    /// für einen späteren Umbruch von Codezeilen (Reihen mit `Join.none`).
     fn renderCodeRow(self: *Self, line: []const u8, row_start: usize, row_end: usize, tags_opt: ?[]flow_core.highlight.ColorTag, code_size: u16, theme: Theme, range: ?md_select.Range) void {
         const row = line[row_start..row_end];
         if (tags_opt) |tags| {
