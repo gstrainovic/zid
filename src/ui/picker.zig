@@ -10,6 +10,10 @@ const shortcuts = @import("shortcuts");
 const explorer_ops = @import("explorer_ops.zig");
 const path_display = @import("path_display.zig");
 const ui_mod = @import("mod.zig");
+const line_edit = @import("line_edit.zig");
+
+/// Suchzeile (Textelement-ID, Schriftgröße)
+const query_field: line_edit.Config = .{ .id = "pk_query", .font_size = 20 };
 const Theme = @import("theme.zig").Theme;
 
 const log = std.log.scoped(.picker);
@@ -377,8 +381,9 @@ pub const Picker = struct {
         switch (key) {
             .escape => self.close(),
             .enter, .kp_enter => self.choose(self.selected),
-            .backspace => {
-                self.edit.backspace();
+            // Backspace/Entf ändern die Suche, Links/Rechts nur den Cursor;
+            // Pos1/Ende springen in der Trefferliste (unten)
+            .backspace, .delete, .left, .right => if (line_edit.handleKey(&self.edit, key) == .edited) {
                 self.selected = 0;
                 self.filter();
             },
@@ -424,7 +429,8 @@ pub const Picker = struct {
     }
 
     /// Klick: Zeile wählt, außerhalb des Kastens schließt.
-    pub fn handleMouseDown(self: *Self) void {
+    pub fn handleMouseDown(self: *Self, x: f32) void {
+        if (line_edit.handleClick(&self.edit, query_field, x)) return;
         for (0..self.matches.items.len) |i| {
             if (clay.pointerOver(rowId(i))) {
                 self.choose(i);
@@ -482,8 +488,7 @@ pub const Picker = struct {
                         .files => "",
                     };
                     if (prefix.len > 0) clay.text(prefix, .{ .font_size = 20, .color = t.muted });
-                    const shown = std.fmt.allocPrint(arena, "{s}|", .{self.query()}) catch self.query();
-                    clay.text(shown, .{ .font_size = 20, .color = t.text, .wrap_mode = .none });
+                    line_edit.render(&self.edit, query_field, t.text, true, t);
                 });
                 clay.UI()(.{
                     .id = clay.ElementId.ID("pk_list"),
