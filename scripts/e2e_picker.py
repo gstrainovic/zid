@@ -41,6 +41,14 @@ def step_quick_open():
         time.sleep(0.05)
     settle(5)
     check(picker()["matches"] == 0, "keine Treffer bei Unsinn")
+    # Cursor in der Suchzeile: Links + Entf löscht hinter dem Cursor, Klick an den Anfang + Tippen fügt vorne ein
+    key("left"); key("delete")
+    check(picker()["query"] == "qqqqqqqqq", f"Links + Entf löscht ein Zeichen hinter dem Cursor: {picker()['query']}")
+    b = bounds("pk_query")
+    rpc("click", [b["x"] + 1, b["y"] + b["h"] / 2]); settle()
+    check(picker()["open"], "Klick in die Suchzeile schließt den Picker nicht")
+    rpc("type_text", ["a"]); settle(5)
+    check(picker()["query"] == "aqqqqqqqqq", f"Klick an den Anfang + Tippen fügt vorne ein: {picker()['query']}")
     key("escape")
     check(not picker()["open"], "Escape schließt")
 

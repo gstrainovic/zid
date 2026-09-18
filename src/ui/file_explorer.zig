@@ -11,7 +11,7 @@ const explorer_ops = @import("explorer_ops.zig");
 const shortcuts = @import("shortcuts");
 const ctx_menu = @import("context_menu");
 const ui = @import("../ui/mod.zig");
-const edit_caret = @import("edit_caret.zig");
+const line_edit = @import("line_edit.zig");
 const Theme = ui.Theme;
 
 const log = std.log.scoped(.file_explorer);
@@ -32,12 +32,10 @@ pub const context_menu_items = shortcuts.explorer_menu_items;
 const context_menu_height: f32 = ctx_menu.height(context_menu_items.len);
 
 /// Laufendes Inline-Umbenennen
-/// Schrift und linker Innenabstand der Inline-Editierfelder (Umbenennen, Anlegen)
-const edit_font_size: f32 = 22;
-const edit_pad_left: f32 = 6;
-/// Dasselbe für das Filterfeld
-const filter_font_size: f32 = 18;
-const filter_pad_left: f32 = 6;
+/// Einzeilige Editierfelder des Explorers (Textelement-ID, Schriftgröße)
+const rename_field: line_edit.Config = .{ .id = "fx_rename_text", .font_size = 22 };
+const create_field: line_edit.Config = .{ .id = "fx_create_text", .font_size = 22 };
+const filter_field: line_edit.Config = .{ .id = "fx_filter_text", .font_size = 18 };
 
 pub const RenameState = struct { node_index: u32, edit: explorer_ops.RenameEdit };
 
@@ -872,7 +870,7 @@ pub const FileExplorerState = struct {
                     self.filter_active = false;
                     _ = self.handleNavKey(key, false);
                 },
-                else => if (edit_caret.handleKey(&self.filter, key)) self.rebuildVisible(),
+                else => if (line_edit.handleKey(&self.filter, key) == .edited) self.rebuildVisible(),
             }
             return;
         }
@@ -881,7 +879,7 @@ pub const FileExplorerState = struct {
             switch (key) {
                 .enter, .kp_enter => self.commitCreate(),
                 .escape => self.creating = null,
-                else => _ = edit_caret.handleKey(&st.edit, key),
+                else => _ = line_edit.handleKey(&st.edit, key),
             }
             return;
         }
@@ -889,7 +887,7 @@ pub const FileExplorerState = struct {
         switch (key) {
             .enter, .kp_enter => self.commitRename(),
             .escape => self.rename = null,
-            else => _ = edit_caret.handleKey(&st.edit, key),
+            else => _ = line_edit.handleKey(&st.edit, key),
         }
     }
 
@@ -1224,10 +1222,10 @@ pub const FileExplorerState = struct {
         }
         // Laufendes Umbenennen/Anlegen: Klick ins Feld setzt den Cursor, jeder andere bricht ab
         if (button == .mouse_left) {
-            if (self.rename) |*st| if (edit_caret.handleClick(&st.edit, "fx_rename_box", x, edit_font_size, edit_pad_left)) return true;
-            if (self.creating) |*st| if (edit_caret.handleClick(&st.edit, "fx_create_box", x, edit_font_size, edit_pad_left)) return true;
+            if (self.rename) |*st| if (line_edit.handleClick(&st.edit, rename_field, x)) return true;
+            if (self.creating) |*st| if (line_edit.handleClick(&st.edit, create_field, x)) return true;
             // Klick ins Filterfeld: Cursor setzen und Eingabe (wieder) aktivieren
-            if (edit_caret.handleClick(&self.filter, "fx_filter_box", x, filter_font_size, filter_pad_left)) {
+            if (line_edit.handleClick(&self.filter, filter_field, x)) {
                 self.rename = null;
                 self.creating = null;
                 self.filter_active = true;
@@ -1437,8 +1435,7 @@ fn renderFilterRow(state: *FileExplorerState, theme: Theme) void {
             .border = .{ .width = .all(1), .color = if (state.filter_active) theme.border_focus else theme.border },
             .corner_radius = .all(3),
         })({
-            clay.text(state.filter.text(), .{ .font_size = filter_font_size, .color = theme.text, .wrap_mode = .none });
-            if (state.filter_active) edit_caret.render("fx_filter_caret", state.filter.textBeforeCursor(), filter_font_size, filter_pad_left, theme);
+            line_edit.render(&state.filter, filter_field, theme.text, state.filter_active, theme);
         });
     });
 }
@@ -1535,8 +1532,7 @@ fn renderCreateRow(arena: std.mem.Allocator, cs: CreateState, depth: u32, theme:
             .border = .{ .width = .all(1), .color = theme.border_focus },
             .corner_radius = .all(3),
         })({
-            clay.text(cs.edit.text(), .{ .font_size = edit_font_size, .color = theme.text, .wrap_mode = .none });
-            edit_caret.render("fx_create_caret", cs.edit.textBeforeCursor(), edit_font_size, edit_pad_left, theme);
+            line_edit.render(&cs.edit, create_field, theme.text, true, theme);
         });
     });
 }
@@ -1702,8 +1698,7 @@ fn renderTreeEntry(
                 .border = .{ .width = .all(1), .color = theme.border_focus },
                 .corner_radius = .all(3),
             })({
-                clay.text(edit.text(), .{ .font_size = edit_font_size, .color = theme.text, .wrap_mode = .none });
-                edit_caret.render("fx_rename_caret", edit.textBeforeCursor(), edit_font_size, edit_pad_left, theme);
+                line_edit.render(edit, rename_field, theme.text, true, theme);
             });
         } else {
             // Verfügbare Breite: Sidebar minus Einrückung, Chevron, Icon, Git-Marker, Abstände, Scrollbar

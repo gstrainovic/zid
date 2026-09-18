@@ -131,19 +131,19 @@ pub const Picker = struct {
         try self.navigate(copy);
     }
 
-    pub fn insertCodepoint(self: *Self, cp: u21) void {
+    /// Jede Änderung der Eingabe räumt die Fehlermeldung des letzten confirm.
+    pub fn clearError(self: *Self) void {
         self.error_msg = null;
+    }
+
+    pub fn insertCodepoint(self: *Self, cp: u21) void {
+        self.clearError();
         self.edit.insertCodepoint(cp);
     }
 
     pub fn backspace(self: *Self) void {
-        self.error_msg = null;
+        self.clearError();
         self.edit.backspace();
-    }
-
-    pub fn delete(self: *Self) void {
-        self.error_msg = null;
-        self.edit.delete();
     }
 
     /// Eingabe auflösen. Erfolg: kanonischer Pfad (owned). Fehler: null und
@@ -321,16 +321,4 @@ test "Picker: up an der Wurzel bleibt stehen" {
     try p.start(fs_root);
     try p.up();
     try testing.expectEqualStrings(fs_root, p.dir.?);
-}
-
-test "Picker: delete löscht hinter dem Cursor und räumt die Fehlermeldung" {
-    const a = testing.allocator;
-    var p = Picker.init(a);
-    defer p.deinit();
-    p.edit.set("/ab");
-    p.error_msg = "kaputt";
-    p.edit.moveHome();
-    p.delete();
-    try testing.expect(p.error_msg == null);
-    try testing.expectEqualStrings("ab", p.edit.text());
 }

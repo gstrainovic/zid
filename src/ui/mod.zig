@@ -968,7 +968,7 @@ pub const UI = struct {
         }
         // Ordner-Dialog ist modal: alle Klicks gehören ihm
         if (self.picker.visible) {
-            if (button == .mouse_left) self.picker.handleMouseDown();
+            if (button == .mouse_left) self.picker.handleMouseDown(x);
             return;
         }
         if (self.folder_picker.visible) {

@@ -8,11 +8,10 @@ const wio = @import("wio");
 const folder_ops = @import("folder_ops.zig");
 const Theme = @import("theme.zig").Theme;
 const svg = @import("components/svg.zig");
-const edit_caret = @import("edit_caret.zig");
+const line_edit = @import("line_edit.zig");
 
-/// Schrift und linker Innenabstand des Pfadfelds
-const input_font_size: f32 = 20;
-const input_pad_left: f32 = 10;
+/// Pfadfeld (Textelement-ID, Schriftgröße)
+const path_field: line_edit.Config = .{ .id = "fp_input_text", .font_size = 20 };
 
 const log = std.log.scoped(.folder_picker);
 
@@ -69,9 +68,7 @@ pub const FolderPicker = struct {
         switch (key) {
             .enter, .kp_enter => self.confirm(),
             .escape => self.close(),
-            .backspace => self.model.backspace(),
-            .delete => self.model.delete(),
-            else => _ = edit_caret.handleKey(&self.model.edit, key),
+            else => if (line_edit.handleKey(&self.model.edit, key) == .edited) self.model.clearError(),
         }
     }
 
@@ -88,7 +85,7 @@ pub const FolderPicker = struct {
 
     /// Klick im Dialog auswerten (Hover-Zustand des letzten Layouts, `x` in Fensterkoordinaten).
     pub fn handleMouseDown(self: *Self, x: f32) void {
-        if (edit_caret.handleClick(&self.model.edit, "fp_input", x, input_font_size, input_pad_left)) return;
+        if (line_edit.handleClick(&self.model.edit, path_field, x)) return;
         if (clay.pointerOver(clay.ElementId.ID("fp_cancel"))) return self.close();
         if (clay.pointerOver(clay.ElementId.ID("fp_open"))) return self.confirm();
         if (clay.pointerOver(clay.ElementId.ID("fp_up"))) {
@@ -173,8 +170,7 @@ pub const FolderPicker = struct {
                         .border = .{ .width = .all(1), .color = t.border_focus },
                         .corner_radius = .all(4),
                     })({
-                        clay.text(self.model.edit.text(), .{ .font_size = input_font_size, .color = t.text, .wrap_mode = .none });
-                        edit_caret.render("fp_caret", self.model.edit.textBeforeCursor(), input_font_size, input_pad_left, t);
+                        line_edit.render(&self.model.edit, path_field, t.text, true, t);
                     });
                 });
 
