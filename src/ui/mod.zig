@@ -4133,7 +4133,7 @@ pub const UI = struct {
                 self.showScmDialog("Discard All Changes", q, b);
             },
             .commit => self.scmCommit(),
-            .push => self.scmPush(),
+            .sync => self.scmSync(),
             .generate_message => self.scmGenerateMessage(),
         }
     }
@@ -4196,19 +4196,20 @@ pub const UI = struct {
         self.sidebar_focus = .commit_input;
     }
 
-    /// Push wie VS Code: ohne Upstream „Publish Branch“ (`push -u origin <branch>`), sonst `push`.
-    fn scmPush(self: *Self) void {
+    /// Wie VS Code: ohne Upstream „Publish Branch“ (`push -u origin <branch>`), sonst `git.sync`
+    /// (`pull`, dann `push`).
+    fn scmSync(self: *Self) void {
         const sc = &self.scm_changes;
         if (sc.busy) return;
         const branch = sc.view.branch();
         if (branch.len == 0) {
-            self.showToast("Push: no branch", .{});
+            self.showToast("Sync: no branch", .{});
             return;
         }
         if (sc.view.upstream().len == 0) {
             self.submitScm("push", &.{ "-u", "origin", branch }, null);
         } else {
-            self.submitScm("push", &.{}, null);
+            self.submitScm("sync", &.{}, null);
         }
         sc.busy = true;
     }
@@ -4320,7 +4321,8 @@ pub const UI = struct {
         }
         const is_commit = std.mem.startsWith(u8, u.key, "commit");
         const is_push = std.mem.eql(u8, u.key, "push");
-        if (is_commit or is_push) sc.busy = false;
+        const is_sync = std.mem.eql(u8, u.key, "sync");
+        if (is_commit or is_push or is_sync) sc.busy = false;
         self.git_status_wanted = true;
         if (!ok) {
             const first = u.body[0 .. std.mem.indexOfScalar(u8, u.body, '\n') orelse u.body.len];
@@ -4328,8 +4330,13 @@ pub const UI = struct {
             return;
         }
         if (is_push) {
-            self.showToast("Pushed to {s}", .{if (sc.view.upstream().len > 0) sc.view.upstream() else "origin"});
+            self.showToast("Published branch to origin", .{});
             self.scm_graph.refresh();
+        }
+        if (is_sync) {
+            self.showToast("Synced with {s}", .{sc.view.upstream()});
+            self.scm_graph.refresh();
+            self.timeline_view.timeline.refresh();
         }
         if (is_commit) {
             sc.message.set("");

@@ -11,7 +11,7 @@ Prüft:
   4. Commit ohne Nachricht: Hinweis; Commit ohne Staged Changes: Rückfrage, Yes stagt alles
      und committet; Graph zeigt den Commit, Feld leer, Liste leer
   4b. Knopf „Publish Branch“ ohne Upstream (push -u origin main); mehrzeilige Nachricht (Enter =
-     neue Zeile, Feld wächst, ↑/Pos1 bewegen in der Zeile); danach „Push 1↑“, Remote hat den Commit
+     neue Zeile, Feld wächst, ↑/Pos1 bewegen in der Zeile); danach „Sync Changes 1↑“, Remote hat den Commit
   5. Tastatur: Tab wechselt Feld → Liste → Graph, ↓/Enter in der Liste, Escape gibt ab
 Aufruf: python3 scripts/e2e_scm_changes.py
 """
@@ -54,7 +54,7 @@ def setup_fixture():
     write("a.txt", "eins\nzwei\n")
     write("b.txt", "weg\n")
     git("add", "a.txt", "b.txt"); git("commit", "-q", "-m", "init")
-    # bares Remote neben dem Repo, ohne Upstream: erst „Publish Branch“, danach „Push“
+    # bares Remote neben dem Repo, ohne Upstream: erst „Publish Branch“, danach „Sync Changes“
     git("init", "-q", "--bare", REMOTE)
     git("remote", "add", "origin", REMOTE)
     write("a.txt", "eins\nzwei\ndrei\n")
@@ -234,7 +234,7 @@ def step_commit():
 
 
 def step_publish_push_multiline():
-    print("--- 4b. Publish Branch, mehrzeilige Nachricht, Push")
+    print("--- 4b. Publish Branch, mehrzeilige Nachricht, Sync Changes")
     s = wait(lambda s: s["changes"]["button"] == "Publish Branch" and s["changes"]["upstream"] == "", "sauber ohne Upstream: Knopf „Publish Branch“")
     click_center("sc_btn_commit_big")
     wait(lambda s: s["changes"]["upstream"] == "origin/main" and s["changes"]["ahead"] == 0 and s["changes"]["button"] == "Commit" and not s["changes"]["busy"],
@@ -255,13 +255,13 @@ def step_publish_push_multiline():
     key("enter", ctrl=True)
     wait(lambda s: s["changes"]["dialog"] is not None, "Ctrl+Enter: Rückfrage ohne Staged Changes")
     key("enter")
-    s = wait(lambda s: s["changes"]["dialog"] is None and s["changes"]["message"] == "" and s["changes"]["button"] == "Push 1↑", "committet: Knopf „Push 1↑“")
+    s = wait(lambda s: s["changes"]["dialog"] is None and s["changes"]["message"] == "" and s["changes"]["button"] == "Sync Changes 1↑", "committet: Knopf „Sync Changes 1↑“")
     check(git("log", "-1", "--format=%B").strip() == "feat: vier\n> Zweite Zeile\nDritte", "mehrzeilige Nachricht im Commit")
     click_center("sc_btn_commit_big")
-    wait(lambda s: s["changes"]["ahead"] == 0 and s["changes"]["button"] == "Commit" and not s["changes"]["busy"], "Push: nichts mehr voraus")
+    wait(lambda s: s["changes"]["ahead"] == 0 and s["changes"]["button"] == "Commit" and not s["changes"]["busy"], "Sync: nichts mehr voraus")
     check(remote_git("log", "-1", "--format=%B", "main").strip() == "feat: vier\n> Zweite Zeile\nDritte", "Remote hat den Push mit der ganzen Nachricht")
     ui = result_json("ui_state")
-    check("Pushed to origin/main" in ui.get("toast", ""), f"Toast: {ui.get('toast')!r}")
+    check("Synced with origin/main" in ui.get("toast", ""), f"Toast: {ui.get('toast')!r}")
     shot("e2e_scm_pushed.ppm")
 
 

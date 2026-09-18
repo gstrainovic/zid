@@ -363,23 +363,36 @@ pub const View = struct {
         return s.ahead;
     }
 
-    /// Großer Knopf unter dem Feld wie VS Code `scm.showActionButton`: Commit, solange etwas zu
-    /// committen ist; sauber und ohne Upstream „Publish Branch“; sauber und voraus „Push“.
-    pub const Button = enum { commit, publish, push };
+    pub fn behind(self: *const View) u32 {
+        const s = &(self.status orelse return 0);
+        return s.behind;
+    }
+
+    /// Großer Knopf unter dem Feld wie VS Code `scm.showActionButton` (`actionButton.ts`): Commit,
+    /// solange etwas zu committen ist; sauber und ohne Upstream „Publish Branch“; sauber und
+    /// voraus oder zurück „Sync Changes“ (= pull, dann push).
+    pub const Button = enum { commit, publish, sync };
 
     pub fn actionButton(self: *const View) Button {
         const s = &(self.status orelse return .commit);
         if (!self.isClean() or s.branch.len == 0) return .commit;
         if (s.upstream.len == 0) return .publish;
-        if (s.ahead > 0) return .push;
+        if (s.ahead > 0 or s.behind > 0) return .sync;
         return .commit;
     }
 
+    /// Beschriftung wie VS Code: `Sync Changes 1↓ 2↑`, Zähler nur wenn > 0, zurück vor voraus.
     pub fn buttonLabel(self: *const View, buf: []u8) []const u8 {
         return switch (self.actionButton()) {
             .commit => "Commit",
             .publish => "Publish Branch",
-            .push => std.fmt.bufPrint(buf, "Push {d}\u{2191}", .{self.ahead()}) catch "Push",
+            .sync => blk: {
+                var w: std.Io.Writer = .fixed(buf);
+                w.writeAll("Sync Changes") catch break :blk "Sync Changes";
+                if (self.behind() > 0) w.print(" {d}\u{2193}", .{self.behind()}) catch break :blk "Sync Changes";
+                if (self.ahead() > 0) w.print(" {d}\u{2191}", .{self.ahead()}) catch break :blk "Sync Changes";
+                break :blk w.buffered();
+            },
         };
     }
 
@@ -623,7 +636,7 @@ test "Kopf-Aktionen: Pfade einer Gruppe, Platzhalter mit Branch" {
     try testing.expectEqualStrings("Are you sure you want to DELETE the following untracked file: 'c.txt'?", try v.discardQuestion(&buf, v.rows.items[5]));
 }
 
-test "parseStatus: Upstream und Vorsprung aus den branch-Zeilen; Knopf Commit / Publish / Push" {
+test "parseStatus: Upstream und Vorsprung aus den branch-Zeilen; Knopf Commit / Publish / Sync" {
     var s = try parseStatus(testing.allocator, "# branch.oid abc\x00# branch.head main\x00# branch.upstream origin/main\x00# branch.ab +2 -1\x00");
     defer s.deinit();
     try testing.expectEqualStrings("origin/main", s.upstream);
@@ -634,9 +647,14 @@ test "parseStatus: Upstream und Vorsprung aus den branch-Zeilen; Knopf Commit / 
     defer v.deinit();
     try testing.expectEqual(View.Button.commit, v.actionButton()); // ohne Status
     try v.apply("# branch.head main\x00# branch.upstream origin/main\x00# branch.ab +2 -1\x00");
-    try testing.expectEqual(View.Button.push, v.actionButton()); // sauber, 2 voraus
+    try testing.expectEqual(View.Button.sync, v.actionButton()); // sauber, 2 voraus, 1 zurück
     var buf: [64]u8 = undefined;
-    try testing.expectEqualStrings("Push 2\u{2191}", v.buttonLabel(&buf));
+    try testing.expectEqualStrings("Sync Changes 1\u{2193} 2\u{2191}", v.buttonLabel(&buf));
+    try v.apply("# branch.head main\x00# branch.upstream origin/main\x00# branch.ab +0 -3\x00");
+    try testing.expectEqual(View.Button.sync, v.actionButton()); // nur zurück: auch Sync
+    try testing.expectEqualStrings("Sync Changes 3\u{2193}", v.buttonLabel(&buf));
+    try v.apply("# branch.head main\x00# branch.upstream origin/main\x00# branch.ab +1 -0\x00");
+    try testing.expectEqualStrings("Sync Changes 1\u{2191}", v.buttonLabel(&buf));
     try v.apply("# branch.head main\x00# branch.upstream origin/main\x00# branch.ab +2 -1\x001 .M N... 100644 100644 100644 h h a.zig\x00");
     try testing.expectEqual(View.Button.commit, v.actionButton()); // Änderungen: Commit zuerst
     try testing.expectEqualStrings("Commit", v.buttonLabel(&buf));
