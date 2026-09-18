@@ -223,6 +223,57 @@ fn writeScmJson(ui: *ui_mod.UI, w: *std.Io.Writer) !void {
         }
         try w.writeAll("]}");
     } else try w.writeAll("null");
+    try writeScmChangesJson(ui, w);
+    try w.writeAll("}");
+}
+
+/// `"changes": {…}` im scm_state: Branch, Fokus, Eingabe, Gruppen mit Einträgen, Zeilen, Auswahl, Bounds.
+fn writeScmChangesJson(ui: *ui_mod.UI, w: *std.Io.Writer) !void {
+    const sc = @import("ui/scm_changes_view.zig");
+    const git_changes = @import("git_changes");
+    const v = &ui.scm_changes.view;
+    try w.writeAll(", \"changes\": {\"branch\": ");
+    try std.json.Stringify.value(v.branch(), .{}, w);
+    try w.print(", \"focus\": \"{s}\", \"busy\": {}, \"message\": ", .{ @tagName(ui.sidebar_focus), ui.scm_changes.busy });
+    try std.json.Stringify.value(ui.scm_changes.message.text(), .{}, w);
+    try w.writeAll(", \"validation\": ");
+    try std.json.Stringify.value(ui.scm_changes.validation, .{}, w);
+    try w.writeAll(", \"groups\": {");
+    inline for ([_]git_changes.Group{ .merge, .staged, .changes }, 0..) |g, gi| {
+        if (gi > 0) try w.writeAll(", ");
+        try w.print("\"{s}\": [", .{@tagName(g)});
+        if (v.status) |*s| for (s.entries(g), 0..) |e, i| {
+            if (i > 0) try w.writeAll(", ");
+            try w.writeAll("{\"path\": ");
+            try std.json.Stringify.value(e.path, .{}, w);
+            try w.print(", \"kind\": \"{s}\", \"letter\": \"{c}\", \"color\": \"{s}\", \"strike\": {}}}", .{ @tagName(e.kind), git_changes.letter(e.kind), @tagName(git_changes.color(e.kind)), git_changes.strikeThrough(e.kind) });
+        };
+        try w.writeAll("]");
+    }
+    try w.writeAll("}, \"rows\": [");
+    for (v.rows.items, 0..) |r, i| {
+        if (i > 0) try w.writeAll(", ");
+        try w.print("{{\"kind\": \"{s}\", \"group\": \"{s}\", \"path\": ", .{ @tagName(r.kind), @tagName(r.group) });
+        try std.json.Stringify.value(if (v.entry(r)) |e| e.path else "", .{}, w);
+        try w.writeAll("}");
+    }
+    try w.writeAll("], \"selected\": ");
+    try std.json.Stringify.value(v.selected, .{}, w);
+    const header = clay.getElementData(sc.ScmChangesView.headerId()).bounding_box;
+    const body = clay.getElementData(sc.ScmChangesView.bodyId()).bounding_box;
+    const input = clay.getElementData(sc.ScmChangesView.inputId()).bounding_box;
+    try w.print(", \"header\": {{\"x\": {d:.1}, \"y\": {d:.1}, \"w\": {d:.1}, \"h\": {d:.1}}}, \"body\": {{\"x\": {d:.1}, \"y\": {d:.1}, \"w\": {d:.1}, \"h\": {d:.1}}}, \"input\": {{\"x\": {d:.1}, \"y\": {d:.1}, \"w\": {d:.1}, \"h\": {d:.1}}}, \"row_height\": {d:.1}, \"scroll\": {d:.1}, \"dialog\": ", .{
+        header.x, header.y, header.width, header.height, body.x, body.y, body.width, body.height, input.x, input.y, input.width, input.height, sc.ROW_HEIGHT, v.scroll,
+    });
+    if (ui.active_dialog) |d| {
+        try w.writeAll("{\"title\": ");
+        try std.json.Stringify.value(d.dialog.title, .{}, w);
+        try w.writeAll(", \"message\": ");
+        try std.json.Stringify.value(d.dialog.message, .{}, w);
+        try w.writeAll(", \"button\": ");
+        try std.json.Stringify.value(d.dialog.actions[0].label, .{}, w);
+        try w.writeAll("}");
+    } else try w.writeAll("null");
     try w.writeAll("}");
 }
 
@@ -420,6 +471,7 @@ pub fn createDispatcher(alloc: std.mem.Allocator, ctx: *E2EContext) !*zigjr.RpcD
     rpc_dispatcher.* = try zigjr.RpcDispatcher.init(alloc);
 
     try rpc_dispatcher.addWithCtx("open_folder", ctx, openFolder);
+    try rpc_dispatcher.addWithCtx("open_project", ctx, openProject);
     try rpc_dispatcher.addWithCtx("open_file", ctx, openFile);
     try rpc_dispatcher.addWithCtx("tab_bounds", ctx, tabBounds);
     try rpc_dispatcher.addWithCtx("picker_state", ctx, pickerState);
@@ -546,6 +598,17 @@ fn openFolder(ctx: *E2EContext, dc: *zigjr.DispatchCtx, path: []const u8) ![]con
         return msg;
     };
 
+    return "ok";
+}
+
+/// Projektordner wechseln wie über den Dialog: main.zig holt den Pfad per takePendingOpenFolder
+/// und lädt Explorer, Watcher, Branch und git status neu (`open_folder` lädt nur den Explorer).
+fn openProject(ctx: *E2EContext, dc: *zigjr.DispatchCtx, path: []const u8) ![]const u8 {
+    log.info("RPC: open_project('{s}')", .{path});
+    const ui = ctx.ui_system;
+    const owned = ui.allocator.dupe(u8, path) catch |err| return try std.fmt.allocPrint(dc.arena(), "error: {}", .{err});
+    if (ui.pending_open_folder) |old| ui.allocator.free(old);
+    ui.pending_open_folder = owned;
     return "ok";
 }
 

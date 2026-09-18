@@ -97,7 +97,12 @@ pub fn taskGitAction(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.Tas
     var argv: std.ArrayListUnmanaged([]const u8) = .empty;
     defer argv.deinit(alloc);
     var stdin: ?[]const u8 = null;
-    if (std.mem.eql(u8, action, "commit")) {
+    if (std.mem.eql(u8, action, "commit") or std.mem.eql(u8, action, "commit_all")) {
+        // commit_all = VS Code smartCommit ohne Staged Changes: erst alles stagen
+        if (std.mem.eql(u8, action, "commit_all")) switch (runGitCapture(alloc, repo, &.{ "add", "-A" })) {
+            .ok => |out| alloc.free(out),
+            .failed => |msg| return framedResult(alloc, action, .{ .failed = msg }, .git_action, .git_action_error),
+        };
         try argv.appendSlice(alloc, &.{ "commit", "--quiet", "--file", "-", "--allow-empty-message" });
         stdin = param.field(2);
     } else {
@@ -931,4 +936,24 @@ test "taskGitFileDiff: Arbeitskopie gegen Index, Untracked gegen leeren Baum" {
     defer alloc.free(h2);
     try std.testing.expectEqual(@as(u32, 0), h2[0].old_start);
     try std.testing.expectEqual(@as(u32, 2), h2[0].new_count);
+}
+
+test "taskGitAction commit_all: stagt alles und committet (VS Code smartCommit)" {
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const repo = try testRepo(alloc, &tmp);
+    defer alloc.free(repo);
+    try tmp.dir.writeFile(.{ .sub_path = "a.txt", .data = "anders\n" });
+    try tmp.dir.writeFile(.{ .sub_path = "neu.txt", .data = "frei\n" });
+    const r = try taskGitAction(alloc, try FieldsParam.init(alloc, &.{ "commit_all", repo, "alles" }));
+    defer r.deinit();
+    try std.testing.expect(r.tag == .git_action);
+    try std.testing.expectEqualStrings("commit_all", unframe(r.payload).?.key);
+    const raw = try statusRaw(alloc, repo);
+    defer alloc.free(raw);
+    try std.testing.expect(std.mem.indexOf(u8, raw, "1 ") == null and std.mem.indexOf(u8, raw, "? ") == null);
+    const log_out = try runGit(alloc, repo, &.{ "log", "-1", "--format=%s" });
+    defer alloc.free(log_out);
+    try std.testing.expectEqualStrings("alles", std.mem.trimRight(u8, log_out, "\n"));
 }
