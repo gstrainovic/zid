@@ -32,6 +32,7 @@ const timeline_view_mod = @import("timeline_view.zig");
 const scm_graph_view_mod = @import("scm_graph_view.zig");
 const scm_changes_view_mod = @import("scm_changes_view.zig");
 const tooltip = @import("components/tooltip.zig");
+const line_edit_mod = @import("line_edit.zig");
 const git_changes = @import("git_changes");
 const git_commit_view_mod = @import("git_commit_view.zig");
 const git_scm = @import("git_scm");
@@ -600,11 +601,11 @@ pub const UI = struct {
     pub fn handleKeyPress(self: *Self, key: @import("wio").Button) void {
         // Offener Ordner-Dialog ist modal
         if (self.folder_picker.visible) {
-            self.folder_picker.handleKey(key);
+            self.folder_picker.handleKey(key, self.editMods(), self.editClipboard());
             return;
         }
         if (self.picker.visible) {
-            self.picker.handleKey(key);
+            self.picker.handleKey(key, self.editMods(), self.editClipboard());
             return;
         }
         if (self.shortcuts_dialog_open) {
@@ -697,7 +698,7 @@ pub const UI = struct {
         // Explorer-Scope nur mit Fokus im Explorer und markiertem Eintrag
         // Inline-Umbenennen/Anlegen im Explorer fängt alle Tasten ab
         if (self.show_file_explorer and self.file_explorer.isEditing()) {
-            self.file_explorer.handleRenameKey(key);
+            self.file_explorer.handleRenameKey(key, self.editMods(), self.editClipboard());
             return;
         }
         const explorer_has_focus = self.show_file_explorer and self.explorer_focused;
@@ -754,7 +755,7 @@ pub const UI = struct {
                     self.sidebar_focus = .changes;
                     return;
                 }
-                if (!self.is_alt_down) self.runScmAction(self.scm_changes.handleInputKey(key, self.is_ctrl_down));
+                if (!self.is_alt_down) self.runScmAction(self.scm_changes.handleInputKey(key, self.editMods(), self.editClipboard()));
                 return;
             }
             if (!self.is_ctrl_down and !self.is_alt_down) {
@@ -1051,11 +1052,11 @@ pub const UI = struct {
         }
         // Ordner-Dialog ist modal: alle Klicks gehören ihm
         if (self.picker.visible) {
-            if (button == .mouse_left) self.picker.handleMouseDown(x);
+            if (button == .mouse_left) self.picker.handleMouseDown(x, self.is_shift_down);
             return;
         }
         if (self.folder_picker.visible) {
-            if (button == .mouse_left) self.folder_picker.handleMouseDown(x);
+            if (button == .mouse_left) self.folder_picker.handleMouseDown(x, self.is_shift_down);
             return;
         }
         // Header-Menü: offen → Eintrag ausführen oder schließen; Klick auf "File" → öffnen
@@ -1112,7 +1113,7 @@ pub const UI = struct {
             self.sidebar_focus = if (self.inSidebarBox(x, y)) .scm else .none;
             // Changes-Bereich über dem Graphen: Eingabefeld, Gruppen, Zeilen, Aktionen
             if (self.scm_graph.menu == null and self.scm_changes.contains(x, y)) {
-                const act = self.scm_changes.handleMouseDown(x, y, button == .mouse_right);
+                const act = self.scm_changes.handleMouseDown(x, y, button == .mouse_right, self.is_shift_down);
                 self.sidebar_focus = if (act == .focus_input) .commit_input else .changes;
                 self.runScmAction(act);
                 return;
@@ -1162,7 +1163,7 @@ pub const UI = struct {
         self.sidebar_focus = .none;
 
         if (self.show_file_explorer and self.sidebar_mode == .explorer) {
-            if (self.file_explorer.handleMouseDown(x, y, button)) {
+            if (self.file_explorer.handleMouseDown(x, y, button, self.is_shift_down)) {
                 if (self.file_explorer.takePendingCommand()) |cmd| self.executeCommand(cmd);
                 return;
             }
@@ -1246,6 +1247,10 @@ pub const UI = struct {
         self.mouse_x = x;
         self.mouse_y = y;
 
+        // Modale Dialoge: Auswahl in Such- bzw. Pfadzeile ziehen
+        if (self.picker.visible) return self.picker.handleMouseMove(x);
+        if (self.folder_picker.visible) return self.folder_picker.handleMouseMove(x);
+
         if (self.show_file_explorer) {
             switch (self.sidebar_mode) {
                 .explorer => {
@@ -1283,6 +1288,10 @@ pub const UI = struct {
 
     pub fn handleMouseUp(self: *Self) void {
         self.is_mouse_down = false;
+        // Ziehen der Auswahl in den Editierfeldern beenden
+        self.picker.handleMouseUp();
+        self.folder_picker.handleMouseUp();
+        self.scm_changes.handleMouseUp();
 
         if (self.show_file_explorer) {
             self.file_explorer.handleMouseUp();
@@ -2760,6 +2769,35 @@ pub const UI = struct {
         if (self.window) |win| win.setClipboardText(text);
         if (self.last_clipboard_text) |old| self.allocator.free(old);
         self.last_clipboard_text = self.allocator.dupe(u8, text) catch null;
+    }
+
+    /// Inhalt der Zwischenablage als Kopie (Fenster; headless der zuletzt gesetzte Text,
+    /// damit Ausschneiden/Einfügen in den Feldern per RPC prüfbar ist). Aufrufer gibt frei.
+    pub fn getClipboard(self: *Self, allocator: std.mem.Allocator) ?[]u8 {
+        if (self.window) |win| return win.getClipboardText(allocator);
+        const t = self.last_clipboard_text orelse return null;
+        return allocator.dupe(u8, t) catch null;
+    }
+
+    /// Gehaltene Modifier für die Editierfelder (line_edit).
+    pub fn editMods(self: *const Self) line_edit_mod.Mods {
+        return .{ .ctrl = self.is_ctrl_down, .shift = self.is_shift_down };
+    }
+
+    /// Zwischenablage-Schnittstelle der Editierfelder (Ctrl+C/X/V in Umbenennen, Filter,
+    /// Picker, Ordner-Dialog, Commit-Nachricht).
+    pub fn editClipboard(self: *Self) line_edit_mod.Clipboard {
+        return .{ .ctx = @ptrCast(self), .allocator = self.allocator, .copyFn = clipCopy, .pasteFn = clipPaste };
+    }
+
+    fn clipCopy(ctx: *anyopaque, text: []const u8) void {
+        const self: *Self = @ptrCast(@alignCast(ctx));
+        self.setClipboard(text);
+    }
+
+    fn clipPaste(ctx: *anyopaque, allocator: std.mem.Allocator) ?[]u8 {
+        const self: *Self = @ptrCast(@alignCast(ctx));
+        return self.getClipboard(allocator);
     }
 
     /// Aktiven Tab schließen wie über das × in der Tab-Leiste: geänderte Tabs
