@@ -3507,8 +3507,11 @@ pub const CodeEditor = struct {
         if (scrollbar.render(self.vscrollModel(), .{ .track = self.idi("scrollbar_track", 0), .thumb = self.idi("scrollbar_thumb", 0) })) self.desired_cursor = .arrow;
     }
 
+    /// Senkrechte oder waagrechte Leiste unter (x, y): dort Pfeil statt I-Beam.
     pub fn isMouseOverScrollbar(self: *Self, x: f32, y: f32) bool {
-        return scrollbar.hitTest(self.vscrollModel(), x, y) != .none;
+        if (scrollbar.hitTest(self.vscrollModel(), x, y) != .none) return true;
+        const h = self.hscrollModel() orelse return false;
+        return scrollbar.hitTest(h, x, y) != .none;
     }
 
     fn handleScrollbarMouseDown(self: *Self, x: f32, y: f32) bool {
@@ -4364,4 +4367,23 @@ test "setBuffer: Auswahl und Zusatz-Cursor der alten Datei bleiben nicht hängen
     try std.testing.expect(!t.ed.hasSelection());
     try std.testing.expect(t.ed.selection_anchor == null);
     try std.testing.expectEqual(@as(usize, 0), t.ed.extra_cursors.items.len);
+}
+
+test "isMouseOverScrollbar: auch die waagrechte Leiste zählt (Mauszeiger wird Pfeil, kein I-Beam)" {
+    var t = try testEditor(std.testing.allocator, "x" ** 200 ++ "\nkurz");
+    defer t.buffer.deinit();
+    defer t.ed.deinit();
+    t.ed.width = 400;
+    t.ed.height = 200;
+    t.ed.content_origin_x = 0;
+    t.ed.content_origin_y = 0;
+    t.ed.view.cols = t.ed.visibleColCount();
+    const h = t.ed.hscrollModel().?;
+    try std.testing.expect(t.ed.isMouseOverScrollbar(h.x + 10, h.y + h.thickness / 2));
+    try std.testing.expect(t.ed.isMouseOverScrollbar(h.x + h.len - 2, h.y + 1));
+    // Text darüber bleibt Editor
+    try std.testing.expect(!t.ed.isMouseOverScrollbar(h.x + 10, h.y - 20));
+    // Ohne Scrollbedarf (Word-Wrap) keine waagrechte Leiste
+    t.ed.word_wrap = true;
+    try std.testing.expect(!t.ed.isMouseOverScrollbar(h.x + 10, h.y + 1));
 }
