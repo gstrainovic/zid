@@ -1723,6 +1723,9 @@ fn renderTreeEntry(
                 .attach_points = .{ .element = .left_top, .parent = .left_bottom },
                 .offset = .{ .x = 24, .y = 2 },
                 .z_index = 1500,
+                // Der Tooltip liegt über der nächsten Zeile; ohne passthrough fing er den
+                // Klick darauf ab (Zeile galt nicht als überfahren, nichts wurde geöffnet).
+                .pointer_capture_mode = .passthrough,
             },
             .layout = .{ .padding = .{ .left = 8, .right = 8, .top = 4, .bottom = 4 } },
             .background_color = theme.overlay,

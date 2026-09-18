@@ -465,10 +465,16 @@ pub fn main() !void {
 
         // Headless und Fenster teilen sich diesen Loop. Headless hat keine Plattform:
         // keine Fenster-Events, kein Cursor, keine Präsentation, Polling statt wio.wait.
+        var last_frame_ns = std.time.nanoTimestamp();
         while ((headless_mode or plat.isRunning()) and (e2e_ctx == null or !e2e_ctx.?.shutdown_flag.load(.seq_cst))) {
             if (e2e_ctx) |*c| e2e_server.drainInputs(c);
-            const delta_time_ms: f32 = 16.0;
             const frame_t0 = std.time.nanoTimestamp();
+            // Echte Zeit seit dem letzten Frame, nicht pauschal 16 ms: Frames dauern mit
+            // Layout und RPC länger, und die UI-Uhr (Tooltips nach 700 ms, Toasts, Hover)
+            // lief sonst auf halber Geschwindigkeit — headless erschien ein Tooltip erst
+            // nach ~1,5 s. Deckel gegen Sprünge nach langem wio.wait (Animationen).
+            const delta_time_ms: f32 = @min(250.0, @as(f32, @floatFromInt(frame_t0 - last_frame_ns)) / 1_000_000.0);
+            last_frame_ns = frame_t0;
 
             if (!headless_mode) wio.update();
 
