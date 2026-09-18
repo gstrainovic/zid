@@ -1536,10 +1536,29 @@ fn renderCreateRow(arena: std.mem.Allocator, cs: CreateState, depth: u32, theme:
             .border = .{ .width = .all(1), .color = theme.border_focus },
             .corner_radius = .all(3),
         })({
-            const shown = std.fmt.allocPrint(arena, "{s}|{s}", .{ cs.edit.textBeforeCursor(), cs.edit.textAfterCursor() }) catch cs.edit.text();
-            clay.text(shown, .{ .font_size = 22, .color = theme.text, .wrap_mode = .none });
+            clay.text(cs.edit.text(), .{ .font_size = 22, .color = theme.text, .wrap_mode = .none });
+            renderEditCaret("fx_create_caret", cs.edit.textBeforeCursor(), 22, 6, theme);
         });
     });
+}
+
+/// Schmaler Cursorstrich im Inline-Editierfeld, wie im Editor: eigenes Rechteck
+/// an der gemessenen Textbreite statt eines eingefügten "|"-Zeichens, damit
+/// sich der Text hinter dem Cursor nicht verschiebt.
+fn renderEditCaret(comptime id: []const u8, before: []const u8, font_size: f32, pad_left: f32, theme: Theme) void {
+    const x = pad_left + ui.measureTextWidth(before, font_size);
+    clay.UI()(.{
+        .id = clay.ElementId.ID(id),
+        .floating = .{
+            .attach_to = .to_parent,
+            .attach_points = .{ .element = .left_center, .parent = .left_center },
+            .offset = .{ .x = x, .y = 0 },
+            .z_index = 10,
+            .pointer_capture_mode = .passthrough,
+        },
+        .layout = .{ .sizing = .{ .w = .fixed(2), .h = .fixed(font_size) } },
+        .background_color = theme.text,
+    })({});
 }
 
 /// Einzelnen Tree-Eintrag rendern
@@ -1703,8 +1722,8 @@ fn renderTreeEntry(
                 .border = .{ .width = .all(1), .color = theme.border_focus },
                 .corner_radius = .all(3),
             })({
-                const shown = std.fmt.allocPrint(arena, "{s}|{s}", .{ edit.textBeforeCursor(), edit.textAfterCursor() }) catch edit.text();
-                clay.text(shown, .{ .font_size = 22, .color = theme.text });
+                clay.text(edit.text(), .{ .font_size = 22, .color = theme.text, .wrap_mode = .none });
+                renderEditCaret("fx_rename_caret", edit.textBeforeCursor(), 22, 6, theme);
             });
         } else {
             // Verfügbare Breite: Sidebar minus Einrückung, Chevron, Icon, Git-Marker, Abstände, Scrollbar
