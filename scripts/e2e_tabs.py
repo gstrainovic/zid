@@ -122,7 +122,9 @@ def step_recent_switch_and_picker():
     check(active_name() == "one.txt", "Enter wechselt zu one.txt")
     # Für die nächsten Schritte: two/three/four bleiben offen, four.txt aktiv
     rpc("middle_click", [*tab_center("one.txt")]); settle(5)
-    rpc("click", [*tab_center("four.txt")]); settle()
+    # four.txt liegt rechts außerhalb des Fensters (Streifen scrollt nur zum aktiven Tab): Ctrl+4
+    check(tab_names().index("four.txt") == 3, "four.txt ist der vierte Tab")
+    key("4", ctrl=True); settle()
     check(active_name() == "four.txt", "four.txt aktiv")
 
 
@@ -206,6 +208,15 @@ def step_scroll_active_into_view():
     strip = bounds("tab_strip") if False else None
     b = tab_bounds(result_json("get_active_tab")["active_index"])
     check(b["found"] and b["x"] >= 250 and b["x"] + b["w"] <= 1200, f"aktiver Tab liegt im Fenster (x={b['x']:.0f}, w={b['w']:.0f})")
+    # Links weggescrollte Tabs liegen unsichtbar unter „+“ und dem Explorer: ihre Bounding-Box
+    # zählt dort nicht, ein Klick auf „+“ wechselt keinen Tab.
+    active = result_json("get_active_tab")["active_index"]
+    x = 270  # „+“ (Sidebar 250 + Innenabstand 4, Knopf 32 breit)
+    hidden = [i for i in range(len(tab_names())) if (lambda t: t["x"] <= x < t["x"] + t["w"])(tab_bounds(i))]
+    check(hidden and hidden[0] != active, f"ein weggescrollter Tab liegt unter „+“ (Tab {hidden})")
+    rpc("click", [x, b["y"] + b["h"] / 2]); settle(10)
+    check(result_json("get_active_tab")["active_index"] == active, "Klick auf „+“ wechselt nicht zum verdeckten Tab")
+    rpc("click", [x, b["y"] + b["h"] / 2]); settle(10)  # Neu-Menü wieder zu
     key("1", ctrl=True); settle(10)
     b = tab_bounds(0)
     check(b["found"] and b["x"] >= 250, f"nach Ctrl+1 ist Tab 1 sichtbar (x={b['x']:.0f})")
