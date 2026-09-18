@@ -30,6 +30,8 @@ const git_diff_view = @import("git_diff_view.zig");
 const git_diff = @import("git_diff");
 const timeline_view_mod = @import("timeline_view.zig");
 const scm_graph_view_mod = @import("scm_graph_view.zig");
+const scm_changes_view_mod = @import("scm_changes_view.zig");
+const git_changes = @import("git_changes");
 const git_commit_view_mod = @import("git_commit_view.zig");
 const git_scm = @import("git_scm");
 const pane_mod = @import("pane.zig");
@@ -123,6 +125,17 @@ pub const UI = struct {
     scm_graph: scm_graph_view_mod.ScmGraphView,
     /// Commit, auf den sich das Graph-Kontextmenü bezieht
     scm_cmd_commit: ?usize = null,
+    /// Source Control „Changes“ über dem Graphen: Eingabefeld, Gruppen, Aktionen
+    scm_changes: scm_changes_view_mod.ScmChangesView,
+    /// Repo-Wurzel aus dem letzten git status (`root:` im Explorer-Teil), owned
+    scm_repo_root: ?[]u8 = null,
+    /// Nach einer Aktion: main.zig lädt den Status neu (`takeGitStatusRequest`)
+    git_status_wanted: bool = false,
+    /// Was der offene Rückfrage-Dialog bei „Ja“ ausführt
+    scm_pending: ?union(enum) { discard: git_changes.Row, discard_all, commit_all } = null,
+    /// Knopftext und Aktionen des Rückfrage-Dialogs (der Dialog hält nur Slices)
+    scm_dialog_button: ?[]u8 = null,
+    scm_dialog_actions: [2]dialog_mod.DialogAction = undefined,
     /// Multi-File-Diff-Tabs je Tab-Pfad (`git-commit://…`)
     git_commits: std.StringHashMapUnmanaged(*git_commit_view_mod.GitCommitView) = .empty,
     show_file_explorer: bool,
@@ -160,7 +173,7 @@ pub const UI = struct {
     explorer_focused: bool = false,
     /// Letzter Klick war im Source Control Graph oder in der Timeline: Pfeile/Enter/F5
     /// gehören der Liste, keine Taste erreicht den Editor. Escape gibt den Fokus zurück.
-    sidebar_focus: enum { none, scm, timeline } = .none,
+    sidebar_focus: enum { none, scm, timeline, changes, commit_input } = .none,
     /// Zuletzt per setClipboard kopierter Text (owned; für Tests ohne Fenster)
     last_clipboard_text: ?[]u8 = null,
     /// Dauer des letzten Frames (Eingabe bis Ende Layout/Render) und Maximum seit dem letzten Abholen
@@ -361,6 +374,7 @@ pub const UI = struct {
             .file_explorer = file_explorer,
             .timeline_view = timeline_view_mod.TimelineView.init(allocator),
             .scm_graph = scm_graph_view_mod.ScmGraphView.init(allocator),
+            .scm_changes = scm_changes_view_mod.ScmChangesView.init(allocator),
             .show_file_explorer = true,
             .ai_chat = ai_chat,
             .show_ai_chat = false,
@@ -420,6 +434,9 @@ pub const UI = struct {
         self.timeline_view.deinit();
         if (self.timeline_follow_key) |k| self.allocator.free(k);
         self.scm_graph.deinit();
+        self.scm_changes.deinit();
+        if (self.scm_repo_root) |r| self.allocator.free(r);
+        if (self.scm_dialog_button) |b| self.allocator.free(b);
         var gc_iter = self.git_commits.valueIterator();
         while (gc_iter.next()) |v| v.*.destroy();
         self.git_commits.deinit(self.allocator);
@@ -730,9 +747,42 @@ pub const UI = struct {
                 self.sidebar_focus = .none;
                 return;
             }
+            // Commit-Eingabefeld: Ctrl+Enter committet, Tab wechselt in die Liste, Rest ist Text
+            if (self.sidebar_focus == .commit_input and self.sidebar_mode == .scm) {
+                if (key == .tab) {
+                    self.sidebar_focus = .changes;
+                    return;
+                }
+                if (!self.is_alt_down) self.runScmAction(self.scm_changes.handleInputKey(key, self.is_ctrl_down));
+                return;
+            }
             if (!self.is_ctrl_down and !self.is_alt_down) {
                 switch (self.sidebar_focus) {
+                    .changes => if (self.sidebar_mode == .scm) {
+                        if (key == .tab) {
+                            self.sidebar_focus = .scm; // Reihenfolge wie VS Code: Feld → Changes → Graph
+                            return;
+                        }
+                        const k: ?scm_changes_view_mod.ScmChangesView.Key = switch (key) {
+                            .up => .up,
+                            .down => .down,
+                            .page_up => .page_up,
+                            .page_down => .page_down,
+                            .home => .home,
+                            .end => .end,
+                            .enter, .space => .enter,
+                            .delete => .delete,
+                            .f5 => .reload,
+                            else => null,
+                        };
+                        if (k) |kk| self.runScmAction(self.scm_changes.handleKey(kk));
+                    },
+                    .commit_input => {},
                     .scm => if (self.sidebar_mode == .scm) {
+                        if (key == .tab) {
+                            self.sidebar_focus = .commit_input;
+                            return;
+                        }
                         const k: ?scm_graph_view_mod.ScmGraphView.Key = switch (key) {
                             .up => .up,
                             .down => .down,
@@ -917,7 +967,11 @@ pub const UI = struct {
             return;
         }
         if (self.show_file_explorer and self.explorer_focused) return; // Buchstaben sind Explorer-Kürzel
-        if (self.show_file_explorer and self.sidebar_focus != .none) return; // Fokus in Graph/Timeline
+        if (self.show_file_explorer and self.sidebar_focus == .commit_input and self.sidebar_mode == .scm) {
+            self.scm_changes.handleInputChar(char_code);
+            return;
+        }
+        if (self.show_file_explorer and self.sidebar_focus != .none) return; // Fokus in Graph/Timeline/Changes
         // kein Text in den unsichtbaren Editor hinter History- und Diff-Tabs
         if (self.activeTabKind() == .git_diff or self.activeTabKind() == .git_commit) return;
 
@@ -1055,6 +1109,13 @@ pub const UI = struct {
         if (self.show_file_explorer and self.sidebar_mode == .scm and (self.scm_graph.menu != null or self.inSidebarBox(x, y))) {
             self.explorer_focused = false;
             self.sidebar_focus = if (self.inSidebarBox(x, y)) .scm else .none;
+            // Changes-Bereich über dem Graphen: Eingabefeld, Gruppen, Zeilen, Aktionen
+            if (self.scm_graph.menu == null and self.scm_changes.contains(x, y)) {
+                const act = self.scm_changes.handleMouseDown(x, y, button == .mouse_right);
+                self.sidebar_focus = if (act == .focus_input) .commit_input else .changes;
+                self.runScmAction(act);
+                return;
+            }
             switch (self.scm_graph.handleMouseDown(x, y, button == .mouse_right)) {
                 .none, .consumed => {},
                 .open_diff => |row| if (self.scm_graph.view.diffSpec(row)) |spec| self.openGitDiff(spec),
@@ -1190,7 +1251,10 @@ pub const UI = struct {
                     self.file_explorer.handleMouseMove(x, y);
                     self.timeline_view.handleMouseMove(x, y);
                 },
-                .scm => self.scm_graph.handleMouseMove(x, y),
+                .scm => {
+                    self.scm_changes.handleMouseMove(x, y);
+                    self.scm_graph.handleMouseMove(x, y);
+                },
             }
         }
 
@@ -1277,7 +1341,7 @@ pub const UI = struct {
             return;
         }
         if (self.show_file_explorer and self.sidebar_mode == .scm and self.inSidebarBox(self.mouse_x, self.mouse_y)) {
-            self.scm_graph.scrollLines(delta);
+            if (self.scm_changes.inBody(self.mouse_x, self.mouse_y)) self.scm_changes.scrollLines(delta) else self.scm_graph.scrollLines(delta);
             return;
         }
         if (self.show_file_explorer and self.timeline_view.contains(self.mouse_x, self.mouse_y)) {
@@ -1770,7 +1834,7 @@ pub const UI = struct {
                 self.show_file_explorer = true;
                 self.sidebar_mode = .scm;
                 self.explorer_focused = false;
-                self.sidebar_focus = .scm; // wie VS Code Ctrl+Shift+G: Tasten gehen an den Graph
+                self.sidebar_focus = .commit_input; // wie VS Code Ctrl+Shift+G: Fokus im Eingabefeld
             },
             .graph_open_changes => if (self.scm_cmd_commit) |c| self.openCommitChanges(c),
             .graph_copy_commit_hash => if (self.graphCommit()) |c| self.setClipboard(c.hash),
@@ -3251,7 +3315,10 @@ pub const UI = struct {
                                 );
                                 self.timeline_view.render(self.frame_arena.allocator(), t, self.file_explorer.width, self.mouse_x, self.mouse_y);
                             },
-                            .scm => self.scm_graph.render(self.frame_arena.allocator(), t, self.file_explorer.width, self.mouse_x, self.mouse_y),
+                            .scm => {
+                                self.scm_changes.render(self.frame_arena.allocator(), t, self.file_explorer.width, self.mouse_x, self.mouse_y, self.sidebar_focus == .commit_input);
+                                self.scm_graph.render(self.frame_arena.allocator(), t, self.file_explorer.width, self.mouse_x, self.mouse_y);
+                            },
                         }
                     });
                     // Deferred Toggle ausführen (nach Rendering, vor endLayout)
@@ -3930,7 +3997,193 @@ pub const UI = struct {
     /// Git-Status aus git_status TaskResult an den File Explorer weitergeben
     pub fn updateGitStatus(self: *Self, payload: []const u8) void {
         const repo_root = self.current_directory orelse return;
-        self.file_explorer.updateGitStatus(payload, repo_root);
+        const parts = git_worker.splitStatusPayload(payload);
+        self.file_explorer.updateGitStatus(parts.explorer, repo_root);
+        // Repo-Wurzel für Source-Control-Aktionen (Pfade im Status sind relativ dazu)
+        if (self.scm_repo_root) |r| self.allocator.free(r);
+        self.scm_repo_root = null;
+        if (std.mem.startsWith(u8, parts.explorer, "root:")) {
+            const end = std.mem.indexOfScalar(u8, parts.explorer, '\n') orelse parts.explorer.len;
+            self.scm_repo_root = self.allocator.dupe(u8, parts.explorer["root:".len..end]) catch null;
+        }
+        self.scm_changes.view.apply(parts.raw) catch |err| log.warn("scm changes: {}", .{err});
+    }
+
+    /// main.zig: Status nach einer Source-Control-Aktion neu laden (über den Debounce).
+    pub fn takeGitStatusRequest(self: *Self) bool {
+        const v = self.git_status_wanted;
+        self.git_status_wanted = false;
+        return v;
+    }
+
+    // ───────────────────────── Source Control: Changes ─────────────────────────
+
+    fn scmRepo(self: *Self) ?[]const u8 {
+        return self.scm_repo_root orelse self.current_directory;
+    }
+
+    /// Aktion des Changes-Bereichs ausführen (Klick oder Taste).
+    fn runScmAction(self: *Self, action: scm_changes_view_mod.Action) void {
+        const sc = &self.scm_changes;
+        switch (action) {
+            .none, .consumed => {},
+            .focus_input => self.sidebar_focus = .commit_input,
+            .refresh => self.git_status_wanted = true,
+            .open_diff => |row| if (self.scmRepo()) |repo| {
+                if (sc.view.diffSpec(row, repo)) |spec| self.openGitDiff(spec);
+            },
+            .open_file => |row| if (self.scmRepo()) |repo| {
+                const e = sc.view.entry(row) orelse return;
+                const abs = std.fs.path.join(self.allocator, &.{ repo, e.path }) catch return;
+                defer self.allocator.free(abs);
+                self.getActiveTabBar().openFile(abs) catch |err| log.warn("open '{s}': {}", .{ abs, err });
+            },
+            .stage => |row| if (sc.view.entry(row)) |e| self.submitScm("stage", &.{e.path}, null),
+            .unstage => |row| if (sc.view.entry(row)) |e| self.submitScm("unstage", &.{e.path}, null),
+            .stage_all => {
+                const paths = self.scmGroupPaths(&.{ .changes, .merge }) orelse return;
+                defer self.allocator.free(paths);
+                if (paths.len > 0) self.submitScm("stage", paths, null);
+            },
+            .unstage_all => {
+                const paths = self.scmGroupPaths(&.{.staged}) orelse return;
+                defer self.allocator.free(paths);
+                if (paths.len > 0) self.submitScm("unstage", paths, null);
+            },
+            .discard => |row| {
+                var buf: [512]u8 = undefined;
+                const q = sc.view.discardQuestion(&buf, row) catch return;
+                self.scm_pending = .{ .discard = row };
+                self.showScmDialog("Discard Changes", q, sc.view.discardButton(row));
+            },
+            .discard_all => {
+                const n = sc.view.count(.changes) + sc.view.count(.merge);
+                if (n == 0) return;
+                var buf: [256]u8 = undefined;
+                var btn: [64]u8 = undefined;
+                const q = std.fmt.bufPrint(&buf, "Are you sure you want to discard ALL changes in {d} files?\nThis is IRREVERSIBLE!\nYour current working set will be FOREVER LOST if you proceed.", .{n}) catch return;
+                const b = std.fmt.bufPrint(&btn, "Discard All {d} Files", .{n}) catch "Discard All";
+                self.scm_pending = .discard_all;
+                self.showScmDialog("Discard All Changes", q, b);
+            },
+            .commit => self.scmCommit(),
+        }
+    }
+
+    /// Pfade der Gruppen als eine Liste (owned Slice, Strings gehören dem Status).
+    fn scmGroupPaths(self: *Self, groups: []const git_changes.Group) ?[]const []const u8 {
+        var out: std.ArrayListUnmanaged([]const u8) = .empty;
+        for (groups) |g| {
+            const paths = self.scm_changes.view.groupPaths(self.allocator, g) catch return null;
+            defer self.allocator.free(paths);
+            out.appendSlice(self.allocator, paths) catch return null;
+        }
+        return out.toOwnedSlice(self.allocator) catch null;
+    }
+
+    /// Commit wie VS Code `smartCommit`: leere Nachricht → Hinweis; ohne Staged Changes → Rückfrage
+    /// „stage all and commit“; ohne jede Änderung → Hinweis.
+    fn scmCommit(self: *Self) void {
+        const sc = &self.scm_changes;
+        if (sc.busy) return;
+        if (sc.message.len == 0) {
+            sc.validation = "Please provide a commit message";
+            self.sidebar_focus = .commit_input;
+            return;
+        }
+        if (sc.view.count(.staged) > 0) {
+            self.submitScm("commit", &.{}, sc.message.text());
+        } else if (sc.view.count(.changes) + sc.view.count(.merge) > 0) {
+            self.scm_pending = .commit_all;
+            self.showScmDialog("Commit", "There are no staged changes to commit.\n\nWould you like to stage all your changes and commit them directly?", "Yes");
+        } else {
+            self.showToast("There are no changes to commit.", .{});
+        }
+    }
+
+    fn showScmDialog(self: *Self, title: []const u8, msg: []const u8, button: []const u8) void {
+        const duped = self.allocator.dupe(u8, msg) catch return;
+        const btn = self.allocator.dupe(u8, button) catch {
+            self.allocator.free(duped);
+            return;
+        };
+        // Knopftext und Aktionen leben bis zum nächsten Dialog (der Dialog hält nur Slices)
+        if (self.scm_dialog_button) |b| self.allocator.free(b);
+        self.scm_dialog_button = btn;
+        self.scm_dialog_actions = .{ .{ .label = btn, .result = .yes }, .{ .label = "Cancel", .result = .cancel } };
+        self.active_dialog = .{
+            .dialog = .{ .title = title, .message = duped, .actions = &self.scm_dialog_actions },
+            .callback = handleScmDialog,
+            .message_needs_free = true,
+        };
+    }
+
+    fn handleScmDialog(ui: *UI, res: dialog_mod.DialogResult, _: usize, _: ?*anyopaque) void {
+        const pending = ui.scm_pending orelse return;
+        ui.scm_pending = null;
+        if (res != .yes) return;
+        const sc = &ui.scm_changes;
+        switch (pending) {
+            .discard => |row| if (sc.view.entry(row)) |e| {
+                const untracked = e.kind == .untracked or e.kind == .intent_to_add;
+                ui.submitScm(if (untracked) "discard_untracked" else "discard_tracked", &.{e.path}, null);
+            },
+            .discard_all => {
+                // tracked und untracked getrennt (checkout bzw. clean), wie VS Code cleanAll
+                var tracked: std.ArrayListUnmanaged([]const u8) = .empty;
+                defer tracked.deinit(ui.allocator);
+                var untracked: std.ArrayListUnmanaged([]const u8) = .empty;
+                defer untracked.deinit(ui.allocator);
+                for ([_]git_changes.Group{ .changes, .merge }) |g| {
+                    const s = &(sc.view.status orelse continue);
+                    for (s.entries(g)) |e| {
+                        if (e.kind == .untracked or e.kind == .intent_to_add) untracked.append(ui.allocator, e.path) catch {} else tracked.append(ui.allocator, e.path) catch {};
+                    }
+                }
+                if (tracked.items.len > 0) ui.submitScm("discard_tracked", tracked.items, null);
+                if (untracked.items.len > 0) ui.submitScm("discard_untracked", untracked.items, null);
+            },
+            .commit_all => ui.submitScm("commit_all", &.{}, sc.message.text()),
+        }
+    }
+
+    /// Worker-Aufruf `taskGitAction`: Felder Aktion, Repo, dann Pfade bzw. die Nachricht.
+    fn submitScm(self: *Self, action: []const u8, paths: []const []const u8, message: ?[]const u8) void {
+        const sched = self.scheduler orelse return;
+        const repo = self.scmRepo() orelse return;
+        var fields: std.ArrayListUnmanaged([]const u8) = .empty;
+        defer fields.deinit(self.allocator);
+        fields.appendSlice(self.allocator, &.{ action, repo }) catch return;
+        if (message) |m| fields.append(self.allocator, m) catch return;
+        fields.appendSlice(self.allocator, paths) catch return;
+        const params = git_worker.FieldsParam.init(self.allocator, fields.items) catch return;
+        if (!sched.submit(.{ .func = git_worker.taskGitAction, .data = params })) {
+            params.deinit();
+            self.showToast("git {s}: worker busy", .{action});
+            return;
+        }
+        if (message != null) self.scm_changes.busy = true;
+    }
+
+    /// Ergebnis von `taskGitAction`: Fehler als Toast, danach Status (und nach Commit Graph
+    /// und Timeline) neu laden.
+    pub fn handleGitAction(self: *Self, ok: bool, payload: []const u8) void {
+        const u = git_worker.unframe(payload) orelse return;
+        const sc = &self.scm_changes;
+        const is_commit = std.mem.startsWith(u8, u.key, "commit");
+        if (is_commit) sc.busy = false;
+        self.git_status_wanted = true;
+        if (!ok) {
+            const first = u.body[0 .. std.mem.indexOfScalar(u8, u.body, '\n') orelse u.body.len];
+            self.showToast("git {s}: {s}", .{ u.key, first });
+            return;
+        }
+        if (is_commit) {
+            sc.message.set("");
+            sc.validation = null;
+            self.scm_graph.refresh();
+            self.timeline_view.timeline.refresh();
+        }
     }
 
     pub fn getActiveTerminal(self: *Self) ?*@import("../terminal/terminal_instance.zig").TerminalInstance {

@@ -750,6 +750,39 @@ MuPDFs Story-Engine. Folienvorschau in `MarkdownView` (`deck`-Feld), Command
 - E2E `python3 scripts/e2e_scm_graph.py` (Fixture mit Remote, Merge, Tag und 55 Commits Vorlauf),
   RPC `scm_state`.
 
+### Changes-Bereich mit Commit (über dem Graphen)
+
+- Kopf „SOURCE CONTROL“ (Commit, Refresh beim Überfahren), einzeiliges Eingabefeld (`line_edit`,
+  Platzhalter `Message (Ctrl+Enter to commit on "<branch>")`), Commit-Knopf, Gruppen „Merge
+  Changes“ (nur bei Konflikten), „Staged Changes“ (nur wenn nicht leer), „Changes“ (immer,
+  untracked darin = `git.untrackedChanges: mixed`). Zeile: Name, Ordner gedimmt, rechts Buchstabe
+  in `theme.git_*` (VS Code `gitDecoration.*`), gelöscht durchgestrichen. Aktionen nur beim
+  Überfahren (Reihenfolge wie `package.json`): Datei öffnen, Stage/Unstage, Discard; Köpfe:
+  Stage All / Unstage All / Discard All. IDs `sc_act` mit Index `zeile * 8 + RowAction`.
+- Daten `src/git/git_changes.zig` (Modul `git_changes`, unit-getestet): Gruppen aus der rohen
+  porcelain-v2-Ausgabe, die `taskGitStatus` hinter 0x1c mitliefert (`splitStatusPayload`), Buchstabe/
+  Farbe/Hover-Text/Durchstreichen wie `Resource` in `repository.ts`, Diff-Spec je Zeile
+  (Staged = HEAD↔Index `index_ref`, Changes = Index↔Arbeitskopie `git_diff.worktree_ref`,
+  Untracked = leerer Baum↔Arbeitskopie mit `syntheticAddHunk`), Auswahl, Discard-Rückfragen.
+  Ansicht `src/ui/scm_changes_view.zig`, Aktionen laufen in `UI.runScmAction`.
+- Worker `taskGitAction` (`FieldsParam`: Aktion, Repo, Pfade bzw. Nachricht): `stage` = `add -A --`,
+  `unstage` = `reset -q HEAD --`, `discard_tracked` = `checkout -q --`, `discard_untracked` =
+  `clean -f -q --`, `commit` = `commit --quiet --file - --allow-empty-message` (Nachricht über
+  stdin, `runGitCaptureStdin`), `commit_all` = vorher `add -A` (VS Code smartCommit). Fehler kommen
+  als `git_action_error` mit stderr → Toast. Ergebnis setzt `git_status_wanted`, main.zig lädt
+  den Status über den Debounce; nach Commit auch Graph und Timeline.
+- Commit-Verhalten wie `smartCommit`: leere Nachricht → Hinweis unter dem Feld; keine Staged
+  Changes → Rückfrage „stage all and commit“; nichts geändert → Toast. Discard fragt immer
+  (Texte und Knöpfe aus `commands.ts`: Discard File / Restore File / Delete File / Discard All n
+  Files). Rückfragen laufen über `active_dialog` mit `scm_pending`.
+- Fokus: Ctrl+Shift+G setzt `sidebar_focus = .commit_input`; Tab wandert Feld → Changes-Liste →
+  Graph → Feld. In der Liste ↑↓/PgUp/PgDn/Home/End, Enter öffnet den Diff bzw. klappt den Kopf,
+  Entf = Discard mit Rückfrage, Escape gibt ab. Buchstaben gehen nur ins Feld.
+- E2E `python3 scripts/e2e_scm_changes.py` (Fixture: geändert, gelöscht, untracked; stage, Diffs,
+  unstage, discard mit Dialog, commit mit Rückfrage, Tastatur), Zustand in `scm_state.changes`.
+  Der RPC `open_project` wechselt den Projektordner wie der Dialog (Explorer, Watcher, Branch,
+  git status), `open_folder` lädt nur den Explorer.
+
 ## Clay: gepatchte clay.h unter libs/clay-zig/vendor
 
 Das Submodul zeigt auf den eigenen Fork `gstrainovic/clay-zig-bindings`, Branch `zid`

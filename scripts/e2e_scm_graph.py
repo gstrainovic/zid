@@ -131,7 +131,8 @@ def step_hover_expand_diff():
 def step_keyboard():
     print("--- 3b. Tastatur im Graphen")
     key("g", ctrl=True, shift=True)
-    s = wait(lambda s: s["mode"] == "scm" and len(s["commits"]) >= 50, "Ctrl+Shift+G: Graph mit Tastaturfokus")
+    s = wait(lambda s: s["mode"] == "scm" and len(s["commits"]) >= 50, "Ctrl+Shift+G: Source Control, Fokus im Eingabefeld")
+    key("tab"); key("tab")  # Feld → Changes → Graph
     key("home")
     wait(lambda s: s["selected"] == 0, "Home wählt die erste Zeile")
     key("end")
