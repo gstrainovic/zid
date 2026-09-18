@@ -133,6 +133,17 @@ Schleifen, Fehlerhandler, Virtualisierung). `UI.MAX_CLAY_ELEMENTS` und `UI.clayE
 liegen in `src/ui/mod.zig`, das Virtualisierungsmuster in
 `MarkdownView.renderDocumentVirtualized`. E2E: `python3 scripts/e2e_md_preview.py`.
 
+- **Scrollbalken kommen aus `src/ui/scrollbar.zig`** (Modul `scrollbar`, eigenes Modul, weil
+  code_editor.zig ein eigenes Test-Root ist). Clay hat keinen Balken, nur Clip-Container; die
+  virtualisierten Ansichten scrollen über eigene Offsets. `Model` (Achse, Track, total, visible,
+  offset, max_offset) → `geometry`, `hitTest` (Thumb greifen oder Seite blättern), `dragOffset`,
+  `render`. Editor senkrecht und waagrecht nutzen es (`vscrollModel`/`hscrollModel`,
+  `vscroll_drag`/`hscroll_drag`); Explorer und Terminal haben noch eigene Kopien, bei der
+  nächsten Änderung dort umziehen. Die waagrechte Editor-Leiste misst die längste Zeile der
+  ganzen Datei (`maxLineWidth`, gecacht, nach einem Edit nur der betroffene Bereich), damit sie
+  beim senkrechten Scrollen stabil bleibt, und deckt auch den Gutter ab. E2E: `step_hscrollbar`
+  in `scripts/e2e_editor.py`.
+
 - **Tabellen in der Vorschau:** zigdown liefert eine Tabelle als Container mit flacher
   Zellliste (je `ncol` Paragraphen eine Zeile, erste Zeile = Kopf). `MarkdownView.renderTable`
   baut daraus das Raster; ohne das lagen alle Zellen untereinander. Die Spaltenbreiten kommen

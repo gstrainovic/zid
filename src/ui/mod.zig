@@ -3578,7 +3578,6 @@ pub const UI = struct {
                     leaf.code_editor.content_origin_x = editor_data.bounding_box.x;
                     leaf.code_editor.height = editor_data.bounding_box.height;
                     leaf.code_editor.width = editor_data.bounding_box.width;
-                    leaf.code_editor.scrollbar_container_width = editor_data.bounding_box.width;
                     // Store bounds for cursor detection
                     leaf.code_editor.editor_bounds_x = editor_data.bounding_box.x;
                     leaf.code_editor.editor_bounds_y = editor_data.bounding_box.y;
