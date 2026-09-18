@@ -407,11 +407,20 @@ gepinnt, `models/` hält GGUFs flach und ignoriert (nie committen), `llm-bench/`
   `exceed_context_size_error` (gemessen: 24 017 Tokens abgelehnt; ein 8014-Token-Prompt
   brauchte auf der P1000 123 s). `agent.zig` macht daraus `error.ContextTooLong`, der Chat zeigt
   einen verständlichen Hinweis. Vorbeugend schickt `submitCompletion` nur das jüngste Stück der
-  Historie, das in `history_budget_chars` (12 000 Zeichen ≈ 3–4 k Tokens; Tools-Schema 6 501 Zeichen
-  und Systemprompt kosten ~2 k Tokens) passt: `src/ai/history.zig` (`keepFrom`, unit-getestet)
-  behält die aktuelle Frage immer und beginnt nie mit einem verwaisten `tool`-Ergebnis. Die
-  Anzeige im Chat bleibt vollständig. `read_file` liefert weiter bis 200 KB; eine so große Datei
-  sprengt das Fenster trotzdem, dann kommt der Hinweis.
+  Historie, das in `history_budget_chars` (12 000 Zeichen) passt: `src/ai/history.zig` (`keepFrom`,
+  unit-getestet) behält die laufende Runde (letzte Frage, Aufrufe, Ergebnisse) immer ganz, auch über
+  dem Budget, und beginnt nie mit einem verwaisten `tool`-Ergebnis. Ein Ergebnis ohne Frage und
+  Aufruf verwirft das Chat-Template, das Modell antwortet dann ohne jeden Kontext („What would you
+  like to do?"). Die Anzeige im Chat bleibt vollständig.
+- **Zu große Werkzeugergebnisse werden erst nach der Ablehnung gekürzt:** `handleError` kürzt bei
+  `ContextTooLong` das größte `tool`-Ergebnis der Runde (`ai_tools.shrinkToolResult`: `content` auf
+  zwei Drittel, höchstens 24 000 Bytes, an einer Zeilengrenze; `truncated`/`file_bytes` nennen die
+  Originalgröße) und sendet neu, bis es passt. Was passt, geht ungekürzt raus; eine feste Grenze in
+  `read_file` hätte Dateien gekappt, die ganz ins Fenster passen. Die Ablehnung kostet kaum Zeit.
+  Messwerte P1000 (`python3 scripts/e2e_ai_read_limits.py`, erste/letzte Zeile aus N Bytes Zig-Code):
+  Grundlast 1 366 Prompt-Token, 4 KB 22 s, 12 KB 51 s, 20 KB 7 511 Token und 87 s, 28/40 KB nach
+  dem Kürzen 80/68 s. Die „letzte Zeile" trifft gemma4-E2B ab 12 KB nicht zuverlässig, bei gleichem
+  Prompt mal ja, mal nein (Temperatur 0.7).
 - **Gemessene Grenzen (Bench `~/projects/bitnet-colibri-bench`, Engine b10524 Commit 9ee9fc0,
   Qwen3-4B-Instruct-2507-Q4_K_M sha256 3605803b982cb64a…):** Ein-Datei-Fix gelingt; Ursachen über
   einen Import hinweg scheitern (Qwen3 bricht gefahrlos ab, Llama-3.2-3B schrieb destruktiv). Der

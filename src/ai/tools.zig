@@ -295,6 +295,56 @@ pub fn summarizeCall(alloc: std.mem.Allocator, call: ToolCall) ![]u8 {
     return out.toOwnedSlice();
 }
 
+/// Anfang von `text` mit höchstens `max` Bytes, endet an einer Zeilengrenze (sonst an einer
+/// UTF-8-Zeichengrenze). Werkzeugergebnisse über dem Kontextfenster lehnt llama-server ab.
+pub fn headForModel(text: []const u8, max: usize) []const u8 {
+    if (text.len <= max) return text;
+    if (std.mem.lastIndexOfScalar(u8, text[0..max], '\n')) |nl| return text[0 .. nl + 1];
+    var end = max;
+    while (end > 0 and (text[end] & 0xC0) == 0x80) end -= 1;
+    return text[0..end];
+}
+
+/// Mehr als ~21 KB Code passen nie ins Fenster (`-c 8192`: 20 KB waren 7 511 Prompt-Token).
+pub const shrink_first_max: usize = 24_000;
+const shrink_min: usize = 1_000;
+
+/// Kürzt das `content`-Feld eines Werkzeugergebnisses (JSON) auf zwei Drittel, höchstens auf
+/// `shrink_first_max`. Nur für den Fall, dass llama-server die Anfrage als zu lang ablehnt: was
+/// passt, geht ungekürzt raus. `file_bytes` und `truncated` nennen die Originalgröße.
+/// null = kein `content` oder zu kurz, um weiter zu kürzen.
+pub fn shrinkToolResult(alloc: std.mem.Allocator, json_text: []const u8) !?[]u8 {
+    var parsed = std.json.parseFromSlice(std.json.Value, alloc, json_text, .{}) catch return null;
+    defer parsed.deinit();
+    if (parsed.value != .object) return null;
+    const obj = parsed.value.object;
+    const content_v = obj.get("content") orelse return null;
+    if (content_v != .string) return null;
+    const content = content_v.string;
+    if (content.len <= shrink_min) return null;
+    const total: usize = if (obj.get("file_bytes")) |fb| (if (fb == .integer and fb.integer > 0) @intCast(fb.integer) else content.len) else content.len;
+    const head = headForModel(content, @min(content.len * 2 / 3, shrink_first_max));
+
+    var note_buf: [96]u8 = undefined;
+    const note = std.fmt.bufPrint(&note_buf, "file has {d} bytes; only the first {d} are shown", .{ total, head.len }) catch "truncated";
+    var out: std.Io.Writer.Allocating = .init(alloc);
+    errdefer out.deinit();
+    var jw: std.json.Stringify = .{ .writer = &out.writer, .options = .{} };
+    try jw.beginObject();
+    if (obj.get("path")) |p| {
+        try jw.objectField("path");
+        try jw.write(p);
+    }
+    try jw.objectField("truncated");
+    try jw.write(note);
+    try jw.objectField("file_bytes");
+    try jw.write(total);
+    try jw.objectField("content");
+    try jw.write(head);
+    try jw.endObject();
+    return try out.toOwnedSlice();
+}
+
 /// Löst `path` relativ zu `root` auf und prüft, dass das Ergebnis innerhalb von
 /// `root` liegt. null = außerhalb (auch über `..` oder absoluten Pfad).
 pub fn resolveInProject(alloc: std.mem.Allocator, root: []const u8, path: []const u8) !?[]u8 {
@@ -392,6 +442,65 @@ test "replaceCountsAsRewrite: kleine Edits frei, halbe Datei oder mehr fragt nac
     try testing.expect(replaceCountsAsRewrite(47, 47));
     try testing.expect(!replaceCountsAsRewrite(0, 0));
     try testing.expect(findTool("replace_text").?.confirm == .if_rewrite);
+}
+
+test "headForModel: kurzer Text bleibt ganz, langer endet an einer Zeilengrenze" {
+    try testing.expectEqualStrings("a\nb\n", headForModel("a\nb\n", 10));
+    try testing.expectEqualStrings("zeile1\nzeile2\n", headForModel("zeile1\nzeile2\nzeile3\n", 16));
+    // Genau passend: nichts abschneiden
+    try testing.expectEqualStrings("abc", headForModel("abc", 3));
+}
+
+test "headForModel: ohne Zeilenumbruch nie mitten in einem UTF-8-Zeichen" {
+    // "ä" = 2 Bytes; bei 2 Bytes Grenze darf nur "a" übrig bleiben
+    try testing.expectEqualStrings("a", headForModel("aäb", 2));
+    try testing.expectEqualStrings("aä", headForModel("aäb", 3));
+}
+
+test "shrinkToolResult: Inhalt schrumpft an Zeilengrenze, Hinweis nennt die Originalgröße" {
+    const a = testing.allocator;
+    const line = "0123456789abcdef\n"; // 17 Bytes
+    const content = line ** 200; // 3400 Bytes
+    const json = try std.fmt.allocPrint(a, "{{\"path\":\"/p/x.zig\",\"content\":\"{s}\"}}", .{"0123456789abcdef\\n" ** 200});
+    defer a.free(json);
+    const out = (try shrinkToolResult(a, json)).?;
+    defer a.free(out);
+    var parsed = try std.json.parseFromSlice(std.json.Value, a, out, .{});
+    defer parsed.deinit();
+    const obj = parsed.value.object;
+    try testing.expectEqualStrings("/p/x.zig", obj.get("path").?.string);
+    const shown = obj.get("content").?.string;
+    try testing.expect(shown.len <= content.len * 2 / 3);
+    try testing.expect(std.mem.endsWith(u8, shown, "\n"));
+    try testing.expect(std.mem.startsWith(u8, content, shown));
+    try testing.expectEqual(@as(i64, 3400), obj.get("file_bytes").?.integer);
+    try testing.expect(std.mem.indexOf(u8, obj.get("truncated").?.string, "3400") != null);
+
+    // Zweite Runde: Originalgröße bleibt, Inhalt schrumpft weiter
+    const out2 = (try shrinkToolResult(a, out)).?;
+    defer a.free(out2);
+    var parsed2 = try std.json.parseFromSlice(std.json.Value, a, out2, .{});
+    defer parsed2.deinit();
+    try testing.expectEqual(@as(i64, 3400), parsed2.value.object.get("file_bytes").?.integer);
+    try testing.expect(parsed2.value.object.get("content").?.string.len < shown.len);
+}
+
+test "shrinkToolResult: große Ergebnisse springen sofort unter die Obergrenze" {
+    const a = testing.allocator;
+    const json = try std.fmt.allocPrint(a, "{{\"path\":\"p\",\"content\":\"{s}\"}}", .{"x234567\\n" ** 10_000}); // 80 000 Bytes
+    defer a.free(json);
+    const out = (try shrinkToolResult(a, json)).?;
+    defer a.free(out);
+    var parsed = try std.json.parseFromSlice(std.json.Value, a, out, .{});
+    defer parsed.deinit();
+    try testing.expect(parsed.value.object.get("content").?.string.len <= shrink_first_max);
+}
+
+test "shrinkToolResult: nichts zu kürzen → null" {
+    const a = testing.allocator;
+    try testing.expect(try shrinkToolResult(a, "{\"ok\":true}") == null);
+    try testing.expect(try shrinkToolResult(a, "{\"path\":\"p\",\"content\":\"kurz\"}") == null);
+    try testing.expect(try shrinkToolResult(a, "kein json") == null);
 }
 
 test "choosePaneForFile: Chat bleibt sichtbar, Editor-Fokus bleibt Editor" {

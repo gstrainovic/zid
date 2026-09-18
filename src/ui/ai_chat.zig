@@ -533,14 +533,45 @@ pub const AIChatState = struct {
     }
 
     pub fn handleError(self: *Self, payload: []const u8) void {
-        log.err("AI task error: {s}", .{payload});
         self.clearStream();
+        if (std.mem.eql(u8, payload, "ContextTooLong") and self.shrinkLargestToolResult()) {
+            self.submitCompletion() catch |err| {
+                log.err("resubmit after shrinking failed: {}", .{err});
+                self.addMessage("assistant", "Error communicating with AI agent.") catch {};
+                self.is_loading = false;
+            };
+            return;
+        }
+        log.err("AI task error: {s}", .{payload});
         const text = if (std.mem.eql(u8, payload, "ContextTooLong"))
             "The request exceeds the model's context window (8192 tokens). Start a new chat or ask about a smaller file."
         else
             "Error communicating with AI agent.";
         self.addMessage("assistant", text) catch {};
         self.is_loading = false;
+    }
+
+    /// Größtes Werkzeugergebnis der laufenden Runde kürzen (ai_tools.shrinkToolResult).
+    /// false = nichts mehr zu kürzen, der Kontextfehler geht an den Benutzer.
+    fn shrinkLargestToolResult(self: *Self) bool {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        var i = self.messages.items.len;
+        var largest: ?usize = null;
+        while (i > 0) {
+            i -= 1;
+            const m = self.messages.items[i];
+            if (std.mem.eql(u8, m.role, "user")) break;
+            if (!std.mem.eql(u8, m.role, "tool")) continue;
+            if (largest == null or m.content.len > self.messages.items[largest.?].content.len) largest = i;
+        }
+        const idx = largest orelse return false;
+        const msg = &self.messages.items[idx];
+        const shrunk = (ai_tools.shrinkToolResult(self.allocator, msg.content) catch null) orelse return false;
+        log.info("context too long: tool result shrunk from {d} to {d} bytes, resending", .{ msg.content.len, shrunk.len });
+        self.allocator.free(msg.content);
+        msg.content = shrunk;
+        return true;
     }
 
     pub fn triggerDownload(self: *Self) !void {

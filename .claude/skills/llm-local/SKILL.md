@@ -95,7 +95,13 @@ an und schließt einen offenen Zaun.
 ```bash
 python3 scripts/e2e_ai_chat.py              # Warmup, erstes Delta, Escape, kurze Antwort
 python3 scripts/e2e_ai_chat.py --only-off   # nur der --ai=off-Pfad
+python3 scripts/e2e_ai_read_limits.py       # read_file 4–40 KB: richtig?, Dauer, Prompt-Token (JSON in tmp/)
+python3 scripts/e2e_ai_read_limits.py 12000:last 12000:last   # einzelne Fälle wiederholen
 ```
+
+Antworten streuen (Temperatur 0.7): Vorher/Nachher nie an einem Lauf entscheiden, sondern
+denselben Fall mehrmals wiederholen und die Prompt-Token vergleichen. Gleiche Token heißen
+gleiche Eingabe, dann ist ein anderer Ausgang Zufall.
 
 RPC `chat_state`: Status, Detail, Titel, loading/initializing/downloading,
 `streaming_len`, alle Nachrichten.
