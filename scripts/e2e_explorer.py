@@ -178,6 +178,24 @@ def step_create_rename():
     key("delete")
     key("enter")
     wait_for(lambda: os.path.exists(os.path.join(FX, "renamed.md")), "Links/Rechts/Entf löschen das Präfix wieder")
+    print("--- Klick ins Umbenennen-Feld setzt den Cursor")
+    explorer_click("renamed.md")
+    key("r")
+    check(explorer()["renaming"], "r startet das Umbenennen")
+    b = bounds("fx_rename_box")
+    # Knapp hinter dem linken Innenrand: Cursor landet am Anfang, Feld bleibt offen
+    rpc("click", [b["x"] + 7, b["y"] + b["h"] / 2]); settle()
+    check(explorer()["renaming"], "Klick ins Feld bricht das Umbenennen nicht ab")
+    rpc("type_text", ["k_"]); settle()
+    key("enter")
+    wait_for(lambda: os.path.exists(os.path.join(FX, "k_renamed.md")), "Klick an den Anfang, Tippen ändert das Präfix")
+    explorer_click("k_renamed.md")
+    key("r")
+    key("home")
+    key("delete")
+    key("delete")
+    key("enter")
+    wait_for(lambda: os.path.exists(os.path.join(FX, "renamed.md")), "Präfix wieder entfernt")
 
 
 def step_clipboard():

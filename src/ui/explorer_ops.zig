@@ -86,6 +86,24 @@ pub fn EditBuffer(comptime capacity: usize) type {
             self.cursor = self.len;
         }
 
+        pub const Measure = *const fn (text: []const u8, size: f32) f32;
+
+        /// Setzt den Cursor auf die Codepoint-Grenze, die `x` (Pixel ab
+        /// Textanfang) am nächsten liegt: links der Zeichenmitte davor, sonst dahinter.
+        pub fn setCursorAtX(self: *Self, measure: Measure, size: f32, x: f32) void {
+            const s = self.buf[0..self.len];
+            var i: usize = 0;
+            var left: f32 = 0;
+            while (i < s.len) {
+                const end = nextBoundary(s, i);
+                const w = measure(s[i..end], size);
+                if (x < left + w / 2) break;
+                left += w;
+                i = end;
+            }
+            self.cursor = i;
+        }
+
         fn removeRange(self: *Self, start: usize, end: usize) void {
             std.mem.copyForwards(u8, self.buf[start .. self.len - (end - start)], self.buf[end..self.len]);
             self.len -= end - start;
@@ -633,4 +651,23 @@ test "RenameEdit: Cursor läuft mit Pfeiltasten, Einfügen und Löschen wirken a
     try testing.expectEqualStrings("Xc", e.textBeforeCursor());
     e.set("neu");
     try testing.expectEqualStrings("neu", e.textBeforeCursor());
+}
+
+fn tenPerCodepoint(text: []const u8, _: f32) f32 {
+    return @floatFromInt(std.unicode.utf8CountCodepoints(text) catch text.len);
+}
+
+test "RenameEdit: setCursorAtX setzt den Cursor auf die nächstgelegene Codepoint-Grenze" {
+    var e = RenameEdit.init("aüc");
+    // Breite je Codepoint = 1: Grenzen bei 0, 1, 2, 3; Mitte entscheidet
+    e.setCursorAtX(tenPerCodepoint, 22, -5);
+    try testing.expectEqualStrings("", e.textBeforeCursor());
+    e.setCursorAtX(tenPerCodepoint, 22, 0.4);
+    try testing.expectEqualStrings("", e.textBeforeCursor());
+    e.setCursorAtX(tenPerCodepoint, 22, 0.6);
+    try testing.expectEqualStrings("a", e.textBeforeCursor());
+    e.setCursorAtX(tenPerCodepoint, 22, 1.7);
+    try testing.expectEqualStrings("aü", e.textBeforeCursor());
+    e.setCursorAtX(tenPerCodepoint, 22, 99);
+    try testing.expectEqualStrings("aüc", e.textBeforeCursor());
 }
