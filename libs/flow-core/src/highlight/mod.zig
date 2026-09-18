@@ -6,6 +6,7 @@
 
 const std = @import("std");
 const syntax = @import("syntax");
+const Buffer = @import("buffer");
 
 pub const ColorTag = struct {
     /// Byte-Offset in Zeilen-Text (Start).
@@ -100,10 +101,40 @@ pub const SyntaxHighlighter = struct {
         self.syn.reset();
     }
 
-    /// Reparse über Rope-Callback — tree-sitter ruft `buffer.get_from_pos`
-    /// chunk-weise auf. Keine Volltext-Materialisierung.
+    /// Reparse über Rope-Callback — tree-sitter liest chunk-weise nach. Keine
+    /// Volltext-Materialisierung.
+    ///
+    /// tree-sitter meldet die Leseposition als (Zeile, **Byte**-Spalte); flow-syntax reicht
+    /// sie an `buffer.get_from_pos` durch, das `col` als Anzeigespalte versteht. Sobald die
+    /// Metriken Codepoints zählen, läse das ab dem zweiten 1-KiB-Chunk einer Zeile mit
+    /// Mehrbyte-Zeichen zu weit rechts. Der Wrapper liest darum byteweise ab der Position.
     pub fn reparseFromBuffer(self: *SyntaxHighlighter, buffer: anytype, metrics: anytype) !void {
-        try self.syn.refresh_from_buffer(buffer, metrics);
+        const ByteReader = struct {
+            root: @TypeOf(buffer),
+
+            pub fn get_from_pos(r: @This(), start: Buffer.Cursor, result_buf: []u8, m: Buffer.Metrics) []const u8 {
+                const Ctx = struct {
+                    skip: usize,
+                    out: []u8,
+                    n: usize = 0,
+                    fn walker(ctx_: *anyopaque, egc: []const u8, _: usize, _: Buffer.Metrics) Buffer.Walker {
+                        const ctx: *@This() = @ptrCast(@alignCast(ctx_));
+                        if (ctx.skip > 0) {
+                            ctx.skip -= @min(egc.len, ctx.skip);
+                            return Buffer.Walker.keep_walking;
+                        }
+                        if (egc.len > ctx.out.len - ctx.n) return Buffer.Walker.stop;
+                        @memcpy(ctx.out[ctx.n..][0..egc.len], egc);
+                        ctx.n += egc.len;
+                        return Buffer.Walker.keep_walking;
+                    }
+                };
+                var ctx: Ctx = .{ .skip = start.col, .out = result_buf };
+                r.root.walk_egc_forward(start.row, Ctx.walker, &ctx, m) catch {};
+                return result_buf[0..ctx.n];
+            }
+        };
+        try self.syn.refresh_from_buffer(ByteReader{ .root = buffer }, metrics);
     }
 
     /// ColorTags für eine Zeile. Byte-Offsets relativ zum Zeilenanfang.
