@@ -12,6 +12,7 @@ const git_scm = @import("git_scm");
 const git_diff = @import("git_diff");
 const git_diff_view = @import("git_diff_view.zig");
 const svg = @import("components/svg.zig");
+const tooltip = @import("components/tooltip.zig");
 
 pub const HEADER_HEIGHT: f32 = 36;
 const TOOLBAR_HEIGHT: f32 = 34;
@@ -181,7 +182,7 @@ pub const GitCommitView = struct {
             .layout = .{ .sizing = .grow, .direction = .top_to_bottom },
             .background_color = theme.bg,
         })({
-            self.renderToolbar(arena, theme, salt, mouse_x, mouse_y);
+            self.renderToolbar(arena, theme, salt);
             clay.UI()(.{
                 .id = bodyId(salt),
                 .layout = .{ .sizing = .grow, .direction = .top_to_bottom },
@@ -198,7 +199,7 @@ pub const GitCommitView = struct {
         });
     }
 
-    fn renderToolbar(self: *Self, arena: std.mem.Allocator, theme: Theme, salt: u32, mouse_x: f32, mouse_y: f32) void {
+    fn renderToolbar(self: *Self, arena: std.mem.Allocator, theme: Theme, salt: u32) void {
         clay.UI()(.{
             .layout = .{
                 .sizing = .{ .w = .grow, .h = .fixed(TOOLBAR_HEIGHT) },
@@ -212,16 +213,8 @@ pub const GitCommitView = struct {
             const n = self.sections.items.len;
             clay.text(std.fmt.allocPrint(arena, "{d} {s} changed", .{ n, if (n == 1) "file" else "files" }) catch "", .{ .font_size = 14, .color = theme.subtext, .wrap_mode = .none });
             clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow } } })({});
-            const id = toggleAllId(salt);
-            const hovered = if (box(id)) |b| inside(b, mouse_x, mouse_y) else false;
-            clay.UI()(.{
-                .id = id,
-                .layout = .{ .sizing = .{ .w = .fixed(28), .h = .fixed(28) }, .child_alignment = .{ .x = .center, .y = .center } },
-                .background_color = if (hovered) tint(theme.text, 30) else .{ 0, 0, 0, 0 },
-                .corner_radius = .all(4),
-            })({
-                svg.Svg(arena, std.fmt.allocPrint(arena, "gc_icon_all_{d}", .{salt}) catch "gc_icon_all", if (self.allCollapsed()) svg.Lucide.unfold_vertical else svg.Lucide.fold_vertical, 16, theme.text);
-            });
+            const all_collapsed = self.allCollapsed();
+            tooltip.iconButton(arena, theme, toggleAllId(salt), std.fmt.allocPrint(arena, "gc_icon_all_{d}", .{salt}) catch "gc_icon_all", if (all_collapsed) svg.Lucide.unfold_vertical else svg.Lucide.fold_vertical, if (all_collapsed) "Expand All Diffs" else "Collapse All Diffs", .{ .size = 28 });
         });
     }
 

@@ -1159,6 +1159,9 @@ fn uiState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
         activePaneIndex(ui), ui.isLightTheme(), ui.getActiveEditor().font_size, ui.autosave, ui.menu_highlight orelse 999, ui.shortcuts_scroll_y,
     });
     try std.json.Stringify.value(ui.lastToast(), .{}, &buf.writer);
+    // Tooltip des letzten Frames (Icon-Schaltflächen nach 700 ms Hover)
+    try buf.writer.writeAll(", \"tooltip\": ");
+    try std.json.Stringify.value(@import("ui/components/tooltip.zig").currentText(), .{}, &buf.writer);
     try buf.writer.writeAll(", \"status_text\": ");
     try std.json.Stringify.value(ui.statusText(dc.arena()), .{}, &buf.writer);
     try buf.writer.writeAll(", \"all_tabs\": [");

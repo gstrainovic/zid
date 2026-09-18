@@ -468,6 +468,17 @@ pub fn build(b: *std.Build) void {
     const run_explorer_ops_tests = b.addRunArtifact(explorer_ops_tests);
     run_explorer_ops_tests.has_side_effects = true;
 
+    // Tooltips: verzögerter Hover je Element (ohne Clay, unit-getestet)
+    const hover_delay_mod = b.createModule(.{
+        .root_source_file = b.path("src/ui/hover_delay.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    exe_mod.addImport("hover_delay", hover_delay_mod);
+    const hover_delay_tests = b.addTest(.{ .root_module = hover_delay_mod });
+    const run_hover_delay_tests = b.addRunArtifact(hover_delay_tests);
+    run_hover_delay_tests.has_side_effects = true;
+
     const folder_ops_mod = b.createModule(.{
         .root_source_file = b.path("src/ui/folder_ops.zig"),
         .target = target,
@@ -731,6 +742,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_ai_worker_tests.step);
 
     test_step.dependOn(&run_explorer_ops_tests.step);
+    test_step.dependOn(&run_hover_delay_tests.step);
     test_step.dependOn(&run_folder_ops_tests.step);
     test_step.dependOn(&run_shortcuts_tests.step);
     test_step.dependOn(&run_wio_keysym_tests.step);

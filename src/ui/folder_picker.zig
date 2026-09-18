@@ -8,6 +8,7 @@ const wio = @import("wio");
 const folder_ops = @import("folder_ops.zig");
 const Theme = @import("theme.zig").Theme;
 const svg = @import("components/svg.zig");
+const tooltip = @import("components/tooltip.zig");
 const line_edit = @import("line_edit.zig");
 
 /// Pfadfeld (Textelement-ID, Schriftgröße)
@@ -156,6 +157,7 @@ pub const FolderPicker = struct {
                         .corner_radius = .all(4),
                     })({
                         svg.Svg(arena, "fp_up_icon", svg.Lucide.arrow_up, 18, t.text);
+                        tooltip.attach(t, up_id, "Parent Folder");
                     });
 
                     clay.UI()(.{

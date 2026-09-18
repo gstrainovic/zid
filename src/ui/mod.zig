@@ -31,6 +31,7 @@ const git_diff = @import("git_diff");
 const timeline_view_mod = @import("timeline_view.zig");
 const scm_graph_view_mod = @import("scm_graph_view.zig");
 const scm_changes_view_mod = @import("scm_changes_view.zig");
+const tooltip = @import("components/tooltip.zig");
 const git_changes = @import("git_changes");
 const git_commit_view_mod = @import("git_commit_view.zig");
 const git_scm = @import("git_scm");
@@ -3194,6 +3195,7 @@ pub const UI = struct {
     pub fn renderExample(self: *Self, image_data: ?*const anyopaque) []clay.RenderCommand {
         self.applyDeferredLayoutActions();
         self.beginLayout();
+        tooltip.beginFrame(self.ui_time_ms);
 
         const t = self.theme;
 
@@ -3252,9 +3254,13 @@ pub const UI = struct {
             })({
                 const svg = @import("components/svg.zig");
                 const arena = self.frame_arena.allocator();
-                svg.Svg(arena, "status_git_icon", svg.Lucide.git_branch, 18, t.success);
                 const branch_text = if (self.git_branch.len > 0) self.git_branch else "—";
-                clay.text(branch_text, .{ .font_size = 18, .color = t.subtext });
+                const branch_id = clay.ElementId.ID("status_branch");
+                clay.UI()(.{ .id = branch_id, .layout = .{ .child_gap = 4, .child_alignment = .{ .y = .center } } })({
+                    svg.Svg(arena, "status_git_icon", svg.Lucide.git_branch, 18, t.success);
+                    clay.text(branch_text, .{ .font_size = 18, .color = t.subtext });
+                    tooltip.attach(t, branch_id, if (self.git_branch.len > 0) "Current Git Branch" else "No Git Repository");
+                });
                 clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow } } })({});
                 const status = self.statusText(arena);
                 if (status.len > 0) clay.text(status, .{ .font_size = 16, .color = t.subtext, .wrap_mode = .none });
@@ -3265,6 +3271,7 @@ pub const UI = struct {
                 })({
                     svg.Svg(arena, "status_autosave_icon", svg.Lucide.save, 16, if (self.autosave) t.success else t.muted);
                     clay.text(if (self.autosave) "Autosave: on" else "Autosave: off", .{ .font_size = 16, .color = if (self.autosave) t.subtext else t.muted, .wrap_mode = .none });
+                    tooltip.attach(t, clay.ElementId.ID("status_autosave"), "Toggle Autosave (File menu)");
                 });
             });
 
@@ -3359,6 +3366,7 @@ pub const UI = struct {
             ad.key_result = null;
         }
 
+        tooltip.endFrame();
         const commands = self.endLayout();
         // Nachlauf (Split, Tab-Schließen, leere Panes) läuft NICHT hier: die Commands zeigen
         // noch auf Tab-Namen und Panes, siehe applyDeferredLayoutActions.

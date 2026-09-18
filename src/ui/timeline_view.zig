@@ -12,6 +12,7 @@ const git_list = @import("git_list");
 const shortcuts = @import("shortcuts");
 const ctx_menu = @import("context_menu");
 const svg = @import("components/svg.zig");
+const tooltip = @import("components/tooltip.zig");
 
 pub const HEADER_HEIGHT: f32 = 30;
 pub const ROW_HEIGHT: f32 = 30;
@@ -195,8 +196,8 @@ pub const TimelineView = struct {
             clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow } } })({});
             // Titelaktionen wie VS Code nur beim Überfahren sichtbar
             if (t.expanded and (header_hover or body_hover)) {
-                headerButton(arena, theme, "pin", if (t.pinned) svg.Lucide.pin_off else svg.Lucide.pin, t.pinned, mouse_x, mouse_y);
-                headerButton(arena, theme, "refresh", svg.Lucide.refresh_cw, false, mouse_x, mouse_y);
+                headerButton(arena, theme, "pin", if (t.pinned) svg.Lucide.pin_off else svg.Lucide.pin, if (t.pinned) "Unpin the Current Timeline" else "Pin the Current Timeline", t.pinned);
+                headerButton(arena, theme, "refresh", svg.Lucide.refresh_cw, "Refresh", false);
             }
         });
 
@@ -319,17 +320,8 @@ pub const TimelineView = struct {
     }
 };
 
-fn headerButton(arena: std.mem.Allocator, theme: Theme, comptime name: []const u8, icon: []const u8, toggled: bool, mouse_x: f32, mouse_y: f32) void {
-    const id = TimelineView.buttonId(name);
-    const hovered = if (TimelineView.box(id)) |b| TimelineView.inside(b, mouse_x, mouse_y) else false;
-    clay.UI()(.{
-        .id = id,
-        .layout = .{ .sizing = .{ .w = .fixed(24), .h = .fixed(24) }, .child_alignment = .{ .x = .center, .y = .center } },
-        .background_color = if (hovered) tint(theme.text, 30) else if (toggled) tint(theme.primary, 50) else .{ 0, 0, 0, 0 },
-        .corner_radius = .all(4),
-    })({
-        svg.Svg(arena, "tl_icon_btn_" ++ name, icon, 16, theme.text);
-    });
+fn headerButton(arena: std.mem.Allocator, theme: Theme, comptime name: []const u8, icon: []const u8, label: []const u8, toggled: bool) void {
+    tooltip.iconButton(arena, theme, TimelineView.buttonId(name), "tl_icon_btn_" ++ name, icon, label, .{ .toggled = toggled });
 }
 
 fn tint(c: clay.Color, alpha: f32) clay.Color {

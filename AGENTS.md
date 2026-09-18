@@ -789,6 +789,23 @@ MuPDFs Story-Engine. Folienvorschau in `MarkdownView` (`deck`-Feld), Command
   Der RPC `open_project` wechselt den Projektordner wie der Dialog (Explorer, Watcher, Branch,
   git status), `open_folder` lädt nur den Explorer.
 
+## Tooltips für Icon-Schaltflächen
+
+- `src/ui/components/tooltip.zig`: `iconButton(arena, theme, id, icon_id, icon, label, opts)` ist der
+  gemeinsame Knopf (Hintergrund beim Überfahren, `toggled` in Primärfarbe), `attach(theme, id,
+  label)` hängt einen Tooltip an ein selbst gezeichnetes Element. Tooltip erscheint nach 700 ms über
+  demselben Element unter dem Element (`hover_delay.Hover`, Modul `hover_delay`, unit-getestet);
+  `beginFrame`/`endFrame` rahmen `renderExample` ein. Zustand ist modulweit, der Text muss den
+  Frame überleben (Literal oder Frame-Arena).
+- Beschriftungen wie VS Code: Timeline (Pin the Current Timeline / Unpin …, Refresh), Graph
+  (Refresh, Open Changes), Changes (Commit, Push, Refresh, Open File, Stage/Unstage/Discard
+  Changes, Stage/Unstage/Discard All Changes), Diff-Editor (Previous/Next Change, Toggle Collapse
+  Unchanged Regions, Switch to Inline/Side by Side View), Multi-File-Diff (Collapse/Expand All
+  Diffs), Ordner-Dialog (Parent Folder), Statusleiste (Current Git Branch, Toggle Autosave).
+  Neue Icon-Knöpfe immer über `tooltip.iconButton` anlegen.
+- E2E: `ui_state.tooltip` = Text des Tooltips im letzten Frame (null ohne), geprüft in
+  `e2e_scm_changes.py` und `e2e_timeline.py` (Maus 1 s über dem Knopf halten).
+
 ## Clay: gepatchte clay.h unter libs/clay-zig/vendor
 
 Das Submodul zeigt auf den eigenen Fork `gstrainovic/clay-zig-bindings`, Branch `zid`
