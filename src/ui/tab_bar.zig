@@ -498,6 +498,12 @@ pub fn renderTabBar(
         state.scroll_x = @max(0, @min(state.scroll_x, max_scroll));
     }
 
+    // Links weggescrollte Tabs liegen unsichtbar unter „+“ und der Sidebar, ihre Bounding-Box
+    // reicht aber dorthin: ein Klick zählt nur im sichtbaren Streifen.
+    const in_strip = strip_data.found and blk: {
+        const sb = strip_data.bounding_box;
+        break :blk mouse_x >= sb.x and mouse_x < sb.x + sb.width and mouse_y >= sb.y and mouse_y < sb.y + sb.height;
+    };
     // Drag & Drop: loslassen → Tab an die Position unter der Maus verschieben
     if (state.drag) |d| {
         if (!mouse_down) {
@@ -555,7 +561,7 @@ pub fn renderTabBar(
                     i,
                     is_active,
                     theme,
-                    mouse_pressed,
+                    mouse_pressed and in_strip,
                     mouse_x,
                     mouse_y,
                 );
