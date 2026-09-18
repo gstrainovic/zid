@@ -37,6 +37,9 @@ pub const ResultTag = enum {
     file_deleted,
     ai_chat_reply,
     ai_chat_error,
+    /// „Generate Commit Message“: Antwort des Modells bzw. Fehlername (ChatParams.reply_tag/error_tag)
+    ai_commit_message,
+    ai_commit_message_error,
     /// Teilstück einer gestreamten Antwort (Worker pusht per pushResult)
     ai_chat_delta,
     /// Antwort per Escape abgebrochen; Payload = bisheriger Text

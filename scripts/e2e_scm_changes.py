@@ -141,6 +141,14 @@ def step_show():
     time.sleep(1.0); settle(4)
     check(result_json("ui_state")["tooltip"] == "Refresh", f"Tooltip „Refresh“: {result_json('ui_state')['tooltip']!r}")
     shot("e2e_scm_tooltip.ppm")
+    # Sparkle im Feld: ohne KI (--ai=off) ein Hinweis, kein Absturz, kein Text im Feld
+    b = bounds("sc_btn_generate")
+    rpc("move_mouse", [b["x"] + b["w"] / 2, b["y"] + b["h"] / 2]); time.sleep(1.0); settle(4)
+    check(result_json("ui_state")["tooltip"] == "Generate Commit Message", f"Tooltip am Sparkle: {result_json('ui_state')['tooltip']!r}")
+    click_center("sc_btn_generate"); settle(6)
+    ui = result_json("ui_state")
+    check("AI is not available" in ui.get("toast", ""), f"ohne KI: Hinweis statt Erzeugung ({ui.get('toast')!r})")
+    check(ch()["message"] == "" and not ch()["generating"], "Feld bleibt leer, nichts läuft")
 
 
 def step_stage_and_diffs():

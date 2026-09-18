@@ -22,6 +22,10 @@ pub const ChatParams = struct {
     cancel: ?*const std.atomic.Value(bool) = null,
     /// OpenAI-`tools`-Array (owned Kopie), null = ohne Werkzeuge
     tools: ?[]u8 = null,
+    /// Ergebnis-Tags der blockierenden Antwort (Commit-Nachricht nutzt eigene, damit die
+    /// Antwort nicht im Chat landet)
+    reply_tag: scheduler.ResultTag = .ai_chat_reply,
+    error_tag: scheduler.ResultTag = .ai_chat_error,
 
     pub fn init(
         alloc: std.mem.Allocator,
@@ -167,11 +171,11 @@ pub fn taskChatCompletion(alloc: std.mem.Allocator, data: ?*anyopaque) !schedule
 
     const reply = params.agent.sendChatCompletionWithStop(params.messages, params.should_stop) catch |err| {
         const msg = try std.fmt.allocPrint(alloc, "{s}", .{@errorName(err)});
-        return .{ .tag = .ai_chat_error, .payload = msg, .allocator = alloc };
+        return .{ .tag = params.error_tag, .payload = msg, .allocator = alloc };
     };
 
     return .{
-        .tag = .ai_chat_reply,
+        .tag = params.reply_tag,
         .payload = reply,
         .allocator = alloc,
     };
