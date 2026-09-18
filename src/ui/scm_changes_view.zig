@@ -132,6 +132,35 @@ pub const ScmChangesView = struct {
 
     pub fn handleMouseMove(self: *Self, x: f32, y: f32) void {
         self.hover_row = self.rowAt(x, y);
+        // Auswahl im Eingabefeld ziehen (Taste im Feld gedrückt)
+        if (self.message.mouse_selecting) {
+            self.message.prepareMove(true);
+            self.setMessageCursorAt(x, y);
+        }
+    }
+
+    pub fn handleMouseUp(self: *Self) void {
+        line_edit.handleRelease(&self.message);
+    }
+
+    /// Cursor der Nachricht an die Fensterposition (Zeile aus y, Spalte aus x); außerhalb
+    /// des Felds wird an die Ränder geklemmt, damit Ziehen bis Anfang/Ende reicht.
+    fn setMessageCursorAt(self: *Self, x: f32, y: f32) void {
+        const b = box(inputId()) orelse return;
+        const rel_line: usize = @intFromFloat(@max(0, (y - b.y - INPUT_PAD) / INPUT_LINE_HEIGHT));
+        const line_idx = @min(self.input_first_line + rel_line, self.message.lineCount() - 1);
+        const text = self.message.line(line_idx);
+        const rel_x = x - b.x - 6;
+        var col: usize = 0;
+        var left: f32 = 0;
+        var it = std.unicode.Utf8View.initUnchecked(text).iterator();
+        while (it.nextCodepointSlice()) |cp| {
+            const w = ui.measureTextWidth(cp, input_field.font_size);
+            if (rel_x < left + w / 2) break;
+            left += w;
+            col += 1;
+        }
+        self.message.setCursorAtLine(line_idx, col);
     }
 
     pub fn scrollLines(self: *Self, delta: i32) void {
@@ -165,7 +194,8 @@ pub const ScmChangesView = struct {
         };
     }
 
-    pub fn handleMouseDown(self: *Self, x: f32, y: f32, right: bool) Action {
+    /// `shift`: Klick ins Eingabefeld markiert bis zur Klickstelle.
+    pub fn handleMouseDown(self: *Self, x: f32, y: f32, right: bool, shift: bool) Action {
         if (!self.contains(x, y)) return .none;
         if (right) return .consumed;
         if (box(clay.ElementId.ID("sc_btn_refresh"))) |b| if (inside(b, x, y)) return .refresh;
@@ -176,21 +206,10 @@ pub const ScmChangesView = struct {
             return if (self.view.actionButton() == .commit) .commit else .push;
         };
         if (box(inputId())) |b| if (inside(b, x, y)) {
-            // Zeile aus y, Spalte aus x (Codepoints der Zeile messen)
-            const rel_line: usize = @intFromFloat(@max(0, (y - b.y - INPUT_PAD) / INPUT_LINE_HEIGHT));
-            const line_idx = @min(self.input_first_line + rel_line, self.message.lineCount() - 1);
-            const text = self.message.line(line_idx);
-            const rel_x = x - b.x - 6;
-            var col: usize = 0;
-            var left: f32 = 0;
-            var it = std.unicode.Utf8View.initUnchecked(text).iterator();
-            while (it.nextCodepointSlice()) |cp| {
-                const w = ui.measureTextWidth(cp, input_field.font_size);
-                if (rel_x < left + w / 2) break;
-                left += w;
-                col += 1;
-            }
-            self.message.setCursorAtLine(line_idx, col);
+            // Zeile aus y, Spalte aus x; Shift markiert bis hierher, Ziehen beginnt
+            self.message.prepareMove(shift);
+            self.setMessageCursorAt(x, y);
+            self.message.mouse_selecting = true;
             return .focus_input;
         };
         const i = self.rowAt(x, y) orelse return .consumed;
@@ -251,20 +270,33 @@ pub const ScmChangesView = struct {
         return action;
     }
 
-    /// Tasten im Eingabefeld: Ctrl+Enter = Commit, Enter = neue Zeile, ↑↓ zwischen Zeilen,
-    /// Pos1/Ende in der Zeile, sonst Cursor/Backspace/Entf über line_edit.
-    pub fn handleInputKey(self: *Self, key: wio.Button, ctrl: bool) Action {
+    /// Tasten im Eingabefeld: Ctrl+Enter = Commit, Enter = neue Zeile, ↑↓ zwischen Zeilen
+    /// (Shift markiert), Pos1/Ende in der Zeile, sonst Cursor/Auswahl/Backspace/Entf und
+    /// Ctrl+A/C/X/V über line_edit (mehrzeiliges Einfügen).
+    pub fn handleInputKey(self: *Self, key: wio.Button, mods: line_edit.Mods, clip: ?line_edit.Clipboard) Action {
         switch (key) {
             .enter, .kp_enter => {
-                if (ctrl) return .commit;
+                if (mods.ctrl) return .commit;
                 self.message.insertCodepoint('\n');
                 self.validation = null;
             },
-            .up => self.message.moveUp(),
-            .down => self.message.moveDown(),
-            .home => self.message.moveLineHome(),
-            .end => self.message.moveLineEnd(),
-            else => if (line_edit.handleKey(&self.message, key) == .edited) {
+            .up => {
+                self.message.prepareMove(mods.shift);
+                self.message.moveUp();
+            },
+            .down => {
+                self.message.prepareMove(mods.shift);
+                self.message.moveDown();
+            },
+            .home => {
+                self.message.prepareMove(mods.shift);
+                self.message.moveLineHome();
+            },
+            .end => {
+                self.message.prepareMove(mods.shift);
+                self.message.moveLineEnd();
+            },
+            else => if (line_edit.handleKeyEx(&self.message, key, mods, clip, true) == .edited) {
                 self.validation = null;
             },
         }
@@ -337,13 +369,32 @@ pub const ScmChangesView = struct {
                     clay.UI()(.{ .floating = .{ .attach_to = .to_parent, .attach_points = .{ .element = .right_top, .parent = .right_top }, .offset = .{ .x = -3, .y = 3 }, .z_index = 5 }, .layout = .{ .sizing = .{ .w = .fit, .h = .fit } } })({
                         tooltip.iconButton(arena, theme, clay.ElementId.ID("sc_btn_generate"), "sc_btn_generate_icon", if (self.generating) svg.Lucide.loader_circle else svg.Lucide.sparkles, if (self.generating) "Generating commit message..." else "Generate Commit Message", .{ .size = 20, .icon_size = 14 });
                     });
+                    const sel = self.message.selection();
                     for (self.input_first_line..self.input_first_line + shown) |li| {
                         const text = self.message.line(li);
+                        // Byte-Bereich der Zeile im Puffer (für die Markierung)
+                        const line_start = @intFromPtr(text.ptr) - @intFromPtr(&self.message.buf);
+                        const line_end = line_start + text.len;
                         clay.UI()(.{
                             .id = clay.ElementId.IDI("sc_input_line", @intCast(li)),
                             .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(INPUT_LINE_HEIGHT) }, .child_alignment = .{ .y = .center } },
                         })({
                             clay.text(text, .{ .font_size = 16, .color = theme.text, .wrap_mode = .none });
+                            // Markierung: Schnitt der Auswahl mit der Zeile; reicht sie über das
+                            // Zeilenende hinaus, ein Stück breiter als Hinweis auf den Umbruch
+                            if (sel) |s| if (s.start < line_end + 1 and s.end > line_start) {
+                                const a = @max(s.start, line_start) - line_start;
+                                const b_end = @min(s.end, line_end) - line_start;
+                                const x0 = ui.measureTextWidth(text[0..a], 16);
+                                var x1 = ui.measureTextWidth(text[0..b_end], 16);
+                                if (s.end > line_end) x1 += 6;
+                                clay.UI()(.{
+                                    .id = clay.ElementId.IDI("sc_input_sel", @intCast(li)),
+                                    .floating = .{ .attach_to = .to_parent, .attach_points = .{ .element = .left_center, .parent = .left_center }, .offset = .{ .x = x0, .y = 0 }, .z_index = 9, .pointer_capture_mode = .passthrough },
+                                    .layout = .{ .sizing = .{ .w = .fixed(@max(1, x1 - x0)), .h = .fixed(INPUT_LINE_HEIGHT - 2) } },
+                                    .background_color = line_edit.selectionColor(theme),
+                                })({});
+                            };
                             if (input_focused and li == cur_line) {
                                 const before = self.message.textBeforeCursor();
                                 const ls = if (std.mem.lastIndexOfScalar(u8, before, '\n')) |i| i + 1 else 0;

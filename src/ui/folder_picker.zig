@@ -65,12 +65,21 @@ pub const FolderPicker = struct {
         self.visible = false;
     }
 
-    pub fn handleKey(self: *Self, key: wio.Button) void {
+    pub fn handleKey(self: *Self, key: wio.Button, mods: line_edit.Mods, clip: ?line_edit.Clipboard) void {
         switch (key) {
             .enter, .kp_enter => self.confirm(),
             .escape => self.close(),
-            else => if (line_edit.handleKey(&self.model.edit, key) == .edited) self.model.clearError(),
+            else => if (line_edit.handleKey(&self.model.edit, key, mods, clip) == .edited) self.model.clearError(),
         }
+    }
+
+    /// Maus mit gedrückter Taste: Auswahl im Pfadfeld ziehen.
+    pub fn handleMouseMove(self: *Self, x: f32) void {
+        line_edit.handleDrag(&self.model.edit, path_field, x);
+    }
+
+    pub fn handleMouseUp(self: *Self) void {
+        line_edit.handleRelease(&self.model.edit);
     }
 
     pub fn handleChar(self: *Self, cp: u21) void {
@@ -85,8 +94,8 @@ pub const FolderPicker = struct {
     }
 
     /// Klick im Dialog auswerten (Hover-Zustand des letzten Layouts, `x` in Fensterkoordinaten).
-    pub fn handleMouseDown(self: *Self, x: f32) void {
-        if (line_edit.handleClick(&self.model.edit, path_field, x)) return;
+    pub fn handleMouseDown(self: *Self, x: f32, shift: bool) void {
+        if (line_edit.handleClick(&self.model.edit, path_field, x, shift)) return;
         if (clay.pointerOver(clay.ElementId.ID("fp_cancel"))) return self.close();
         if (clay.pointerOver(clay.ElementId.ID("fp_open"))) return self.confirm();
         if (clay.pointerOver(clay.ElementId.ID("fp_up"))) {

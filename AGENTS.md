@@ -405,6 +405,17 @@ gepinnt, `models/` hält GGUFs flach und ignoriert (nie committen), `llm-bench/`
 - **Kontextmenü** ist datengetrieben (`context_menu_items`, Labels/Kürzel aus der Tabelle, IDs
   `fx_menu_<command>`, gezeichnet über `context_menu.zig`); der Klick landet in `pending_command`,
   die UI führt `executeCommand` aus.
+- **Kleine Editierfelder** (Umbenennen, Anlegen, Filter, Picker-Suche, Pfad im Ordner-Dialog,
+  Commit-Nachricht) teilen `explorer_ops.EditBuffer` und `line_edit.zig`. Seit 18.09.2026 mit
+  Auswahl: `anchor` im Puffer, Shift+Pfeile/Pos1/Ende/↑↓ erweitern, Ctrl+←/→ wortweise
+  (`moveWordLeft/Right`, Klassen Wort/Satzzeichen/Leerraum), Ctrl+A/C/X/V über
+  `line_edit.Clipboard` (`UI.editClipboard`: Fenster oder headless `last_clipboard_text`),
+  Shift+Klick und Ziehen (`handleClick(extend)`, `handleDrag`, `handleRelease`; `mouse_selecting`
+  im Puffer). Tippen/Backspace/Entf/Einfügen ersetzen die Auswahl im `EditBuffer`, einzeilige
+  Felder machen beim Einfügen aus Umbrüchen Leerzeichen (`insertText(multiline)`). Markierung:
+  Element `<feld-id>_sel` (Commit-Feld `sc_input_sel` je Zeile). Die Feld-Handler bekommen
+  `line_edit.Mods` und `?Clipboard` von `mod.zig` (`editMods`). Unit-Tests in `explorer_ops.zig`,
+  E2E `python3 scripts/e2e_line_edit.py`.
   Anlegen zeigt eine Eingabezeile unter dem Zielordner (`startCreate`, `targetFolder`: markierter
   Ordner, sonst Elternordner, sonst Root); Enter legt an (Dateien werden geöffnet), Escape bricht ab.
 - **Löschen = Papierkorb** (`explorer_ops.trashPath`: `$XDG_DATA_HOME/Trash` bzw. `~/.local/share/Trash`,

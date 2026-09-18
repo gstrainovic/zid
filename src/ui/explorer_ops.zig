@@ -15,11 +15,18 @@ pub fn EditBuffer(comptime capacity: usize) type {
         len: usize = 0,
         /// Byte-Offset des Cursors (immer auf einer Codepoint-Grenze).
         cursor: usize = 0,
+        /// Anker der Auswahl (Byte-Offset); die Auswahl reicht von Anker bis Cursor,
+        /// in beliebiger Richtung. null oder gleich dem Cursor: keine Auswahl.
+        anchor: ?usize = null,
+        /// Maustaste im Feld gedrückt: Bewegen zieht die Auswahl (line_edit.handleDrag)
+        mouse_selecting: bool = false,
         /// Gemerkte Spalte für Auf/Ab und der Cursor, bei dem sie gilt
         goal_col: usize = 0,
         goal_cursor: usize = std.math.maxInt(usize),
 
         const Self = @This();
+
+        pub const Range = struct { start: usize, end: usize };
 
         pub fn init(initial: []const u8) Self {
             var e = Self{};
@@ -27,12 +34,13 @@ pub fn EditBuffer(comptime capacity: usize) type {
             return e;
         }
 
-        /// Ersetzt den Inhalt, Cursor steht danach am Ende.
+        /// Ersetzt den Inhalt, Cursor steht danach am Ende, keine Auswahl.
         pub fn set(self: *Self, value: []const u8) void {
             const n = @min(value.len, capacity);
             @memcpy(self.buf[0..n], value[0..n]);
             self.len = n;
             self.cursor = n;
+            self.anchor = null;
         }
 
         pub fn text(self: *const Self) []const u8 {
@@ -47,8 +55,58 @@ pub fn EditBuffer(comptime capacity: usize) type {
             return self.buf[self.cursor..self.len];
         }
 
-        /// Fügt ein Codepoint an der Cursorposition ein.
+        // ─── Auswahl ───
+
+        /// Aktuelle Auswahl als Byte-Bereich, null ohne Auswahl.
+        pub fn selection(self: *const Self) ?Range {
+            const a = self.anchor orelse return null;
+            if (a == self.cursor) return null;
+            return .{ .start = @min(a, self.cursor), .end = @max(a, self.cursor) };
+        }
+
+        pub fn hasSelection(self: *const Self) bool {
+            return self.selection() != null;
+        }
+
+        pub fn selectedText(self: *const Self) []const u8 {
+            const r = self.selection() orelse return "";
+            return self.buf[r.start..r.end];
+        }
+
+        pub fn selectAll(self: *Self) void {
+            self.anchor = 0;
+            self.cursor = self.len;
+        }
+
+        pub fn clearSelection(self: *Self) void {
+            self.anchor = null;
+        }
+
+        /// Vor einer Cursorbewegung: mit `extend` (Shift) beginnt oder verlängert sie die
+        /// Auswahl, sonst hebt sie sie auf.
+        pub fn prepareMove(self: *Self, extend: bool) void {
+            if (extend) {
+                if (self.anchor == null) self.anchor = self.cursor;
+            } else {
+                self.anchor = null;
+            }
+        }
+
+        /// Entfernt die Auswahl; true, wenn es eine gab.
+        pub fn deleteSelection(self: *Self) bool {
+            const r = self.selection() orelse {
+                self.anchor = null;
+                return false;
+            };
+            self.removeRange(r.start, r.end);
+            self.cursor = r.start;
+            self.anchor = null;
+            return true;
+        }
+
+        /// Fügt ein Codepoint an der Cursorposition ein; eine Auswahl wird ersetzt.
         pub fn insertCodepoint(self: *Self, cp: u21) void {
+            _ = self.deleteSelection();
             var tmp: [4]u8 = undefined;
             const n = std.unicode.utf8Encode(cp, &tmp) catch return;
             if (self.len + n > capacity) return;
@@ -58,16 +116,36 @@ pub fn EditBuffer(comptime capacity: usize) type {
             self.cursor += n;
         }
 
-        /// Entfernt das Codepoint vor dem Cursor (nicht nur das letzte Byte).
+        /// Fügt Text ein (Einfügen aus der Zwischenablage): Codepoint für Codepoint, bis die
+        /// Kapazität erreicht ist. '\r' fällt weg; Zeilenumbrüche nur mit `multiline`, sonst
+        /// werden sie zu Leerzeichen (einzeilige Felder wie Dateiname oder Filter).
+        pub fn insertText(self: *Self, value: []const u8, multiline: bool) void {
+            _ = self.deleteSelection();
+            var view = std.unicode.Utf8View.init(value) catch return;
+            var it = view.iterator();
+            while (it.nextCodepoint()) |cp| {
+                if (cp == '\r') continue;
+                if (cp == '\n' and !multiline) {
+                    self.insertCodepoint(' ');
+                    continue;
+                }
+                if (cp < 0x20 and cp != '\n') continue;
+                self.insertCodepoint(cp);
+            }
+        }
+
+        /// Entfernt die Auswahl, sonst das Codepoint vor dem Cursor (nicht nur das letzte Byte).
         pub fn backspace(self: *Self) void {
+            if (self.deleteSelection()) return;
             if (self.cursor == 0) return;
             const start = prevBoundary(self.buf[0..self.len], self.cursor);
             self.removeRange(start, self.cursor);
             self.cursor = start;
         }
 
-        /// Entfernt das Codepoint hinter dem Cursor.
+        /// Entfernt die Auswahl, sonst das Codepoint hinter dem Cursor.
         pub fn delete(self: *Self) void {
+            if (self.deleteSelection()) return;
             if (self.cursor >= self.len) return;
             const end = nextBoundary(self.buf[0..self.len], self.cursor);
             self.removeRange(self.cursor, end);
@@ -87,6 +165,44 @@ pub fn EditBuffer(comptime capacity: usize) type {
 
         pub fn moveEnd(self: *Self) void {
             self.cursor = self.len;
+        }
+
+        // ─── Wortweise (Ctrl+←/→) wie VS Code: Wortzeichen, Satzzeichen und Leerraum sind Klassen ───
+
+        const CharClass = enum { space, word, punct };
+
+        fn classOf(b: u8) CharClass {
+            if (b == ' ' or b == '\t' or b == '\n') return .space;
+            if (std.ascii.isAlphanumeric(b) or b == '_' or b >= 0x80) return .word;
+            return .punct;
+        }
+
+        /// Cursor an den Anfang des Worts davor (Leerraum davor wird übersprungen).
+        pub fn moveWordLeft(self: *Self) void {
+            const s = self.buf[0..self.len];
+            var i = self.cursor;
+            while (i > 0 and classOf(s[prevBoundary(s, i)]) == .space) i = prevBoundary(s, i);
+            if (i == 0) {
+                self.cursor = 0;
+                return;
+            }
+            const class = classOf(s[prevBoundary(s, i)]);
+            while (i > 0 and classOf(s[prevBoundary(s, i)]) == class) i = prevBoundary(s, i);
+            self.cursor = i;
+        }
+
+        /// Cursor hinter das Wort danach (Leerraum danach wird übersprungen).
+        pub fn moveWordRight(self: *Self) void {
+            const s = self.buf[0..self.len];
+            var i = self.cursor;
+            while (i < s.len and classOf(s[i]) == .space) i = nextBoundary(s, i);
+            if (i >= s.len) {
+                self.cursor = s.len;
+                return;
+            }
+            const class = classOf(s[i]);
+            while (i < s.len and classOf(s[i]) == class) i = nextBoundary(s, i);
+            self.cursor = i;
         }
 
         // ─── Mehrzeilig (Commit-Nachricht): Zeilen durch '\n' getrennt ───
@@ -787,4 +903,84 @@ test "EditBuffer mehrzeilig: Zeilenanfang/-ende, Auf und Ab halten die Spalte, Z
     try std.testing.expectEqualStrings("ab\ncde", e.textBeforeCursor());
     e.setCursorAtLine(9, 0); // hinter der letzten Zeile: Ende
     try std.testing.expectEqualStrings("ab\ncdef\n\nxy", e.textBeforeCursor());
+}
+
+test "EditBuffer Auswahl: Shift-Bewegung markiert, Tippen ersetzt, Backspace/Entf löschen die Auswahl" {
+    var e = EditBuffer(64).init("hallo welt");
+    try std.testing.expect(!e.hasSelection());
+    // Shift+← zweimal: "lt" markiert, Anker bleibt am Ende
+    e.prepareMove(true);
+    e.moveLeft();
+    e.prepareMove(true);
+    e.moveLeft();
+    try std.testing.expectEqualStrings("lt", e.selectedText());
+    try std.testing.expectEqual(@as(usize, 8), e.selection().?.start);
+    // Bewegung ohne Shift hebt auf
+    e.prepareMove(false);
+    e.moveRight();
+    try std.testing.expect(!e.hasSelection());
+    // Alles markieren und tippen ersetzt den Inhalt
+    e.selectAll();
+    try std.testing.expectEqualStrings("hallo welt", e.selectedText());
+    e.insertCodepoint('x');
+    try std.testing.expectEqualStrings("x", e.text());
+    try std.testing.expect(!e.hasSelection());
+    // Auswahl rückwärts (Anker hinter dem Cursor) und Backspace löscht nur sie
+    e.set("abcdef");
+    e.moveLeft();
+    e.prepareMove(true);
+    e.moveLeft();
+    e.moveLeft();
+    e.moveLeft();
+    try std.testing.expectEqualStrings("cde", e.selectedText());
+    e.backspace();
+    try std.testing.expectEqualStrings("abf", e.text());
+    try std.testing.expectEqualStrings("ab", e.textBeforeCursor());
+    // Entf mit Auswahl ebenso, ohne Auswahl wie gewohnt
+    e.prepareMove(true);
+    e.moveLeft();
+    e.delete();
+    try std.testing.expectEqualStrings("af", e.text());
+    e.delete();
+    try std.testing.expectEqualStrings("a", e.text());
+    // set() hebt die Auswahl auf
+    e.selectAll();
+    e.set("neu");
+    try std.testing.expect(!e.hasSelection());
+}
+
+test "EditBuffer: wortweise Bewegung und Einfügen aus der Zwischenablage" {
+    var e = EditBuffer(64).init("foo_bar  baz.qux");
+    e.moveWordLeft();
+    try std.testing.expectEqualStrings("foo_bar  baz.", e.textBeforeCursor());
+    e.moveWordLeft();
+    try std.testing.expectEqualStrings("foo_bar  baz", e.textBeforeCursor());
+    e.moveWordLeft();
+    try std.testing.expectEqualStrings("foo_bar  ", e.textBeforeCursor());
+    e.moveWordLeft();
+    try std.testing.expectEqualStrings("", e.textBeforeCursor());
+    e.moveWordLeft(); // am Anfang: bleibt
+    try std.testing.expectEqualStrings("", e.textBeforeCursor());
+    e.moveWordRight();
+    try std.testing.expectEqualStrings("foo_bar", e.textBeforeCursor());
+    e.moveWordRight();
+    try std.testing.expectEqualStrings("foo_bar  baz", e.textBeforeCursor());
+    e.moveWordRight();
+    e.moveWordRight();
+    try std.testing.expectEqualStrings("foo_bar  baz.qux", e.textBeforeCursor());
+    // Ctrl+Shift+←: Wort markieren
+    e.prepareMove(true);
+    e.moveWordLeft();
+    try std.testing.expectEqualStrings("qux", e.selectedText());
+    // Einfügen ersetzt die Auswahl; einzeilig macht aus Umbrüchen Leerzeichen, '\r' fällt weg
+    e.insertText("a\r\nb", false);
+    try std.testing.expectEqualStrings("foo_bar  baz.a b", e.text());
+    e.selectAll();
+    e.insertText("x\ny", true);
+    try std.testing.expectEqualStrings("x\ny", e.text());
+    // Kapazität: mehr als 64 Bytes werden abgeschnitten, nie mitten im Zeichen
+    e.set("");
+    e.insertText("ä" ** 40, false);
+    try std.testing.expectEqual(@as(usize, 64), e.len);
+    try std.testing.expect(std.unicode.utf8ValidateSlice(e.text()));
 }

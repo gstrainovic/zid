@@ -376,14 +376,14 @@ pub const Picker = struct {
         return dirShown(self.selectedLabel(), buf);
     }
 
-    pub fn handleKey(self: *Self, key: wio.Button) void {
+    pub fn handleKey(self: *Self, key: wio.Button, mods: line_edit.Mods, clip: ?line_edit.Clipboard) void {
         const n = self.matches.items.len;
         switch (key) {
             .escape => self.close(),
             .enter, .kp_enter => self.choose(self.selected),
-            // Backspace/Entf ändern die Suche, Links/Rechts nur den Cursor;
-            // Pos1/Ende springen in der Trefferliste (unten)
-            .backspace, .delete, .left, .right => if (line_edit.handleKey(&self.edit, key) == .edited) {
+            // Backspace/Entf/Ausschneiden/Einfügen ändern die Suche, Links/Rechts (auch mit
+            // Shift/Ctrl) nur Cursor und Auswahl; Pos1/Ende springen in der Trefferliste (unten)
+            .backspace, .delete, .left, .right, .a, .c, .x, .v => if (line_edit.handleKey(&self.edit, key, mods, clip) == .edited) {
                 self.selected = 0;
                 self.filter();
             },
@@ -428,9 +428,18 @@ pub const Picker = struct {
         self.scroll_y = std.math.clamp(self.scroll_y - @as(f32, @floatFromInt(lines)) * ROW_HEIGHT, 0, max_scroll);
     }
 
-    /// Klick: Zeile wählt, außerhalb des Kastens schließt.
-    pub fn handleMouseDown(self: *Self, x: f32) void {
-        if (line_edit.handleClick(&self.edit, query_field, x)) return;
+    /// Maus mit gedrückter Taste: Auswahl in der Suchzeile ziehen.
+    pub fn handleMouseMove(self: *Self, x: f32) void {
+        line_edit.handleDrag(&self.edit, query_field, x);
+    }
+
+    pub fn handleMouseUp(self: *Self) void {
+        line_edit.handleRelease(&self.edit);
+    }
+
+    /// Klick: Zeile wählt, außerhalb des Kastens schließt. `shift` markiert bis zum Klick.
+    pub fn handleMouseDown(self: *Self, x: f32, shift: bool) void {
+        if (line_edit.handleClick(&self.edit, query_field, x, shift)) return;
         for (0..self.matches.items.len) |i| {
             if (clay.pointerOver(rowId(i))) {
                 self.choose(i);

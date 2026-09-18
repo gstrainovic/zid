@@ -861,7 +861,7 @@ pub const FileExplorerState = struct {
         if (self.visibleIndexOfNode(parent)) |i| self.scrollToIndex(i + 1);
     }
 
-    pub fn handleRenameKey(self: *Self, key: wio.Button) void {
+    pub fn handleRenameKey(self: *Self, key: wio.Button, mods: line_edit.Mods, clip: ?line_edit.Clipboard) void {
         if (self.filter_active) {
             switch (key) {
                 .enter, .kp_enter => self.filter_active = false,
@@ -870,7 +870,7 @@ pub const FileExplorerState = struct {
                     self.filter_active = false;
                     _ = self.handleNavKey(key, false);
                 },
-                else => if (line_edit.handleKey(&self.filter, key) == .edited) self.rebuildVisible(),
+                else => if (line_edit.handleKey(&self.filter, key, mods, clip) == .edited) self.rebuildVisible(),
             }
             return;
         }
@@ -879,7 +879,7 @@ pub const FileExplorerState = struct {
             switch (key) {
                 .enter, .kp_enter => self.commitCreate(),
                 .escape => self.creating = null,
-                else => _ = line_edit.handleKey(&st.edit, key),
+                else => _ = line_edit.handleKey(&st.edit, key, mods, clip),
             }
             return;
         }
@@ -887,7 +887,7 @@ pub const FileExplorerState = struct {
         switch (key) {
             .enter, .kp_enter => self.commitRename(),
             .escape => self.rename = null,
-            else => _ = line_edit.handleKey(&st.edit, key),
+            else => _ = line_edit.handleKey(&st.edit, key, mods, clip),
         }
     }
 
@@ -1213,7 +1213,8 @@ pub const FileExplorerState = struct {
 
     // ───────────────────────────── Maus ─────────────────────────────
 
-    pub fn handleMouseDown(self: *Self, x: f32, y: f32, button: wio.Button) bool {
+    /// `shift`: Klick ins Editierfeld markiert bis zur Klickstelle.
+    pub fn handleMouseDown(self: *Self, x: f32, y: f32, button: wio.Button, shift: bool) bool {
         // Offenes Kontextmenü: Eintrag ausführen oder Menü schließen
         if (self.context_menu) |_| {
             self.context_menu = null;
@@ -1222,10 +1223,10 @@ pub const FileExplorerState = struct {
         }
         // Laufendes Umbenennen/Anlegen: Klick ins Feld setzt den Cursor, jeder andere bricht ab
         if (button == .mouse_left) {
-            if (self.rename) |*st| if (line_edit.handleClick(&st.edit, rename_field, x)) return true;
-            if (self.creating) |*st| if (line_edit.handleClick(&st.edit, create_field, x)) return true;
+            if (self.rename) |*st| if (line_edit.handleClick(&st.edit, rename_field, x, shift)) return true;
+            if (self.creating) |*st| if (line_edit.handleClick(&st.edit, create_field, x, shift)) return true;
             // Klick ins Filterfeld: Cursor setzen und Eingabe (wieder) aktivieren
-            if (line_edit.handleClick(&self.filter, filter_field, x)) {
+            if (line_edit.handleClick(&self.filter, filter_field, x, shift)) {
                 self.rename = null;
                 self.creating = null;
                 self.filter_active = true;
@@ -1269,7 +1270,11 @@ pub const FileExplorerState = struct {
         return true;
     }
 
-    pub fn handleMouseMove(self: *Self, _: f32, y: f32) void {
+    pub fn handleMouseMove(self: *Self, x: f32, y: f32) void {
+        // Auswahl in Umbenennen/Anlegen/Filter ziehen (nur mit gedrückter Taste im Feld)
+        if (self.rename) |*st| line_edit.handleDrag(&st.edit, rename_field, x);
+        if (self.creating) |*st| line_edit.handleDrag(&st.edit, create_field, x);
+        line_edit.handleDrag(&self.filter, filter_field, x);
         if (!self.scrollbar_dragging) return;
         if (self.content_height <= self.viewport_height) return;
 
@@ -1293,6 +1298,9 @@ pub const FileExplorerState = struct {
 
     pub fn handleMouseUp(self: *Self) void {
         self.scrollbar_dragging = false;
+        if (self.rename) |*st| line_edit.handleRelease(&st.edit);
+        if (self.creating) |*st| line_edit.handleRelease(&st.edit);
+        line_edit.handleRelease(&self.filter);
     }
 };
 
