@@ -206,7 +206,8 @@ pub const Platform = struct {
                 }
             },
             .close => {
-                self.running = false;
+                // Nicht selbst beenden: main.zig fragt über UI.requestQuit nach ungespeicherten
+                // Änderungen und beendet über `quit_confirmed`
                 if (self.event_callback) |cb| {
                     cb(WindowEvent{ .closed = {} }, self.user_data);
                 }

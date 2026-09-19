@@ -15,6 +15,7 @@ const marp = @import("marp");
 const PdfViewState = @import("pdf_view.zig").PdfViewState;
 const pdf_nav = @import("pdf_nav.zig");
 const editor_mod = @import("../editor/mod.zig");
+const backup = @import("../editor/backup.zig");
 const lsp_client = @import("lsp_client");
 const tab_mru = @import("tab_mru.zig");
 const lsp_proto = @import("lsp_proto");
@@ -212,6 +213,9 @@ pub const UI = struct {
     picker: picker_mod.Picker,
     /// Vom Dialog bestätigter Projektordner (owned); main.zig holt ihn per takePendingOpenFolder
     pending_open_folder: ?[]u8 = null,
+    /// Beenden ist bestätigt (keine ungespeicherten Änderungen oder im Dialog entschieden);
+    /// der Main-Loop endet danach.
+    quit_confirmed: bool = false,
     pending_tab_closes: std.ArrayListUnmanaged(TabCloseRequest),
 
     open_buffers: std.StringHashMap(*@import("flow_core").Buffer),
@@ -4005,6 +4009,70 @@ pub const UI = struct {
     fn handleDeleteConfirmation(ui: *UI, res: dialog_mod.DialogResult, idx: usize, _: ?*anyopaque) void {
         // Nicht hier löschen: Render-Commands dieses Frames zeigen noch auf Knotennamen.
         if (res == .yes) ui.file_explorer.confirmDelete(@intCast(idx));
+    }
+
+    /// Fenster schließen (wio `.close`, RPC `request_quit`): ohne ungespeicherte Buffer sofort
+    /// beenden, sonst nachfragen. Vorher beendete die Plattform ohne Nachfrage, Autosave ist aus.
+    pub fn requestQuit(self: *Self) void {
+        if (self.active_dialog != null) return; // erst den offenen Dialog beantworten
+        var names: std.ArrayListUnmanaged(u8) = .empty;
+        defer names.deinit(self.allocator);
+        var count: usize = 0;
+        var it = self.open_buffers.valueIterator();
+        while (it.next()) |buf| {
+            if (!buf.*.is_dirty()) continue;
+            count += 1;
+            if (count <= 3) {
+                if (names.items.len > 0) names.appendSlice(self.allocator, ", ") catch {};
+                names.appendSlice(self.allocator, std.fs.path.basename(buf.*.get_file_path())) catch {};
+            }
+        }
+        if (count == 0) {
+            self.quit_confirmed = true;
+            return;
+        }
+        var more_buf: [32]u8 = undefined;
+        const more = if (count > 3) std.fmt.bufPrint(&more_buf, " and {d} more", .{count - 3}) catch "" else "";
+        const msg = std.fmt.allocPrint(self.allocator, "{d} file{s} with unsaved changes: {s}{s}. Save before closing?", .{
+            count, if (count == 1) "" else "s", names.items, more,
+        }) catch {
+            self.quit_confirmed = false;
+            return;
+        };
+        self.active_dialog = .{
+            .dialog = .{
+                .title = "Unsaved Changes",
+                .message = msg,
+                .actions = &.{
+                    .{ .label = "Save All", .result = .yes },
+                    .{ .label = "Don't Save", .result = .no },
+                    .{ .label = "Cancel", .result = .cancel },
+                },
+            },
+            .callback = handleQuitConfirmation,
+            .message_needs_free = true,
+        };
+    }
+
+    fn handleQuitConfirmation(ui: *UI, res: dialog_mod.DialogResult, _: usize, _: ?*anyopaque) void {
+        switch (res) {
+            .yes => {
+                var it = ui.open_buffers.valueIterator();
+                while (it.next()) |buf| {
+                    if (!buf.*.is_dirty()) continue;
+                    const path = buf.*.get_file_path();
+                    backup.backup(ui.allocator, path) catch |err| log.warn("backup for '{s}' failed: {}", .{ path, err });
+                    buf.*.store_to_file_and_clean(path) catch |err| {
+                        // Nicht beenden: sonst ginge genau die Änderung verloren
+                        ui.reportError("Could not save '{s}': {s}", .{ path, @errorName(err) });
+                        return;
+                    };
+                }
+                ui.quit_confirmed = true;
+            },
+            .no => ui.quit_confirmed = true,
+            .cancel => {},
+        }
     }
 
     fn showSaveConfirmationDialog(self: *Self, pane: *pane_mod.Pane, tab_index: usize) void {

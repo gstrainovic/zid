@@ -51,6 +51,8 @@ pub const InputEvent = union(enum) {
     /// `loadDirectory` leert `nodes` und `visible_entries`, ein gleichzeitiges Render
     /// fiel mit „index out of bounds“ in `renderTreeEntry` (flaky in e2e_timeline.py).
     open_folder: []const u8,
+    /// Schließen-Knopf des Fensters nachstellen (wio `.close` → `UI.requestQuit`)
+    request_quit,
 };
 
 /// E2E Server Context - teilt State mit Main Thread
@@ -470,6 +472,7 @@ fn applyInput(ctx: *E2EContext, ev: InputEvent) void {
             ui.setAltState(false);
         },
         .char => |cp| ui.handleChar(cp),
+        .request_quit => ui.requestQuit(),
         .scroll => |sc| {
             ui.setPointerState(sc.x, sc.y, false);
             ui.handleMouseMove(sc.x, sc.y);
@@ -534,6 +537,7 @@ pub fn createDispatcher(alloc: std.mem.Allocator, ctx: *E2EContext) !*zigjr.RpcD
     try rpc_dispatcher.addWithCtx("split_pane", ctx, splitPane);
     try rpc_dispatcher.addWithCtx("show_context_menu", ctx, showContextMenuRpc);
     try rpc_dispatcher.addWithCtx("close_active_tab", ctx, closeActiveTabRpc);
+    try rpc_dispatcher.addWithCtx("request_quit", ctx, requestQuitRpc);
     try rpc_dispatcher.addWithCtx("shutdown", ctx, shutdown);
     try rpc_dispatcher.addWithCtx("screenshot", ctx, screenshot);
 
@@ -1300,6 +1304,12 @@ pub fn showContextMenuRpc(ctx: *E2EContext, _: *zigjr.DispatchCtx, x: f64, y: f6
     ed.show_context_menu = true;
     ed.context_menu_x = @floatCast(x);
     ed.context_menu_y = @floatCast(y);
+}
+
+fn requestQuitRpc(ctx: *E2EContext, _: *zigjr.DispatchCtx) ![]const u8 {
+    log.info("RPC: request_quit", .{});
+    dispatchInput(ctx, .request_quit);
+    return "ok";
 }
 
 fn closeActiveTabRpc(ctx: *E2EContext, _: *zigjr.DispatchCtx) !void {
