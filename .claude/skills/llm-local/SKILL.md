@@ -62,6 +62,14 @@ ablesen. Messreihe: `llm-bench/results/windows-i5-13500T-gemma4-vs-qwen3.md`.
 `ai_chat_reply`. **Escape** setzt `cancel_flag`, der Worker beendet den Stream
 (`ai_chat_cancelled`), der Teiltext bleibt mit „(abgebrochen)".
 
+**Kontextfenster voll:** Prompt und Antwort teilen sich `-c 8192`. Läuft die Antwort ans
+Ende, meldet llama-server `finish_reason: "length"` (`agent.finishReason`); `endStream`
+liefert dann `error.ReplyTruncated`. Der Worker zeigt den Teiltext mit „*(Antwort
+abgeschnitten: Kontextfenster voll.)*“, ein abgeschnittener Werkzeugaufruf wird nie
+ausgeführt (unvollständiges JSON), ohne Text erscheint eine Fehlermeldung. Kein
+`max_tokens`: das würde lange `write_file`-Inhalte kappen. E2E
+`python3 scripts/e2e_ai_truncated.py` (12 KB wiedergeben lassen, ~3 min).
+
 `AgentStatus` (`none`, `model_missing`, `initializing`, `ready`, `failed`) ist der echte
 Verbindungszustand: Statuspunkt, Kopfzeile (`agentTitle`: Modell · Gerät) und
 `sendMessage` hängen daran. Warmup schickt „ping" mit `max_tokens = 1`, ohne Limit

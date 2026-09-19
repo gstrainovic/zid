@@ -143,6 +143,12 @@ pub fn taskChatCompletion(alloc: std.mem.Allocator, data: ?*anyopaque) !schedule
             if (err == error.Cancelled) {
                 return .{ .tag = .ai_chat_cancelled, .payload = try acc.text.toOwnedSlice(alloc), .allocator = alloc };
             }
+            // Kontextfenster voll: Teiltext mit Hinweis, sonst Fehlermeldung (ein abgeschnittener
+            // Werkzeugaufruf wird nicht ausgeführt)
+            if (err == error.ReplyTruncated and acc.text.items.len > 0) {
+                try acc.text.appendSlice(alloc, "\n\n*(Antwort abgeschnitten: Kontextfenster voll.)*");
+                return .{ .tag = .ai_chat_reply, .payload = try acc.text.toOwnedSlice(alloc), .allocator = alloc };
+            }
             // Stream brach nach Teiltext ab: lieber den Teiltext zeigen als nur den Fehler
             if (acc.text.items.len > 0) {
                 return .{ .tag = .ai_chat_reply, .payload = try acc.text.toOwnedSlice(alloc), .allocator = alloc };

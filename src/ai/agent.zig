@@ -458,17 +458,22 @@ pub const LlamaAgent = struct {
 
             var reader_buf: [64 * 1024]u8 = undefined;
             const reader = response.reader(&reader_buf);
+            // finish_reason "length": Antwort lief ans Ende des Kontextfensters
+            var truncated = false;
             while (true) {
                 if (isSet(should_stop) or isSet(cancel)) return error.Cancelled;
                 // null = Stream zu Ende (EndOfStream kommt hier als null, nicht als Fehler)
-                const line = (try reader.takeDelimiter('\n')) orelse return try self.finishToolCalls(&calls);
+                const line = (try reader.takeDelimiter('\n')) orelse return try self.endStream(&calls, truncated);
                 const trimmed = std.mem.trim(u8, line, " \r");
                 if (!std.mem.startsWith(u8, trimmed, "data:")) continue;
                 const data = std.mem.trim(u8, trimmed["data:".len..], " ");
-                if (std.mem.eql(u8, data, "[DONE]")) return try self.finishToolCalls(&calls);
+                if (std.mem.eql(u8, data, "[DONE]")) return try self.endStream(&calls, truncated);
                 const parsed = std.json.parseFromSlice(std.json.Value, self.allocator, data, .{ .ignore_unknown_fields = true }) catch continue;
                 defer parsed.deinit();
                 logUsage(parsed.value);
+                if (finishReason(parsed.value)) |fr| {
+                    if (std.mem.eql(u8, fr, "length")) truncated = true;
+                }
                 const choices = parsed.value.object.get("choices") orelse continue;
                 if (choices != .array or choices.array.items.len == 0) continue;
                 const delta = choices.array.items[0].object.get("delta") orelse continue;
@@ -497,6 +502,17 @@ pub const LlamaAgent = struct {
                 if (f.object.get("arguments")) |a| if (a == .string) try c.args.appendSlice(self.allocator, a.string);
             };
         }
+    }
+
+    /// Stream-Ende: abgeschnittene Antworten melden `error.ReplyTruncated` (der Worker zeigt den
+    /// Teiltext mit Hinweis); abgeschnittene Werkzeugaufrufe werden nie ausgeführt, ihre
+    /// Argumente wären unvollständiges JSON.
+    fn endStream(self: *Self, calls: *std.ArrayListUnmanaged(PartialCall), truncated: bool) !?[]u8 {
+        if (truncated) {
+            std.log.warn("reply hit the end of the context window (finish_reason length), {d} tool call(s) dropped", .{calls.items.len});
+            return error.ReplyTruncated;
+        }
+        return self.finishToolCalls(calls);
     }
 
     /// OpenAI-Form: [{"id","type":"function","function":{"name","arguments"}}]
@@ -562,10 +578,38 @@ pub const LlamaAgent = struct {
     }
 };
 
+/// `choices[0].finish_reason` eines Stream-Chunks, null solange keiner gesetzt ist.
+/// "length" heisst: die Antwort lief ans Ende des Kontextfensters und ist abgeschnitten.
+pub fn finishReason(v: std.json.Value) ?[]const u8 {
+    if (v != .object) return null;
+    const choices = v.object.get("choices") orelse return null;
+    if (choices != .array or choices.array.items.len == 0) return null;
+    const first = choices.array.items[0];
+    if (first != .object) return null;
+    const fr = first.object.get("finish_reason") orelse return null;
+    return if (fr == .string) fr.string else null;
+}
+
 /// Fehler-Body von llama-server: `{"error":{"type":"exceed_context_size_error",…}}`. Nur dieser
 /// Typ heisst „Prompt zu lang“; andere 400er (kaputtes Schema, Template) dürfen keine Kürzung auslösen.
 pub fn isContextOverflow(body: []const u8) bool {
     return std.mem.indexOf(u8, body, "\"exceed_context_size_error\"") != null;
+}
+
+test "finishReason: liest choices[0].finish_reason, null wenn keiner gesetzt" {
+    const a = std.testing.allocator;
+    const chunks = [_]struct { json: []const u8, want: ?[]const u8 }{
+        .{ .json = "{\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"length\"}]}", .want = "length" },
+        .{ .json = "{\"choices\":[{\"index\":0,\"delta\":{\"content\":\"x\"},\"finish_reason\":null}]}", .want = null },
+        .{ .json = "{\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}", .want = "stop" },
+        .{ .json = "{\"choices\":[]}", .want = null },
+    };
+    for (chunks) |c| {
+        const parsed = try std.json.parseFromSlice(std.json.Value, a, c.json, .{});
+        defer parsed.deinit();
+        const got = finishReason(parsed.value);
+        if (c.want) |w| try std.testing.expectEqualStrings(w, got.?) else try std.testing.expect(got == null);
+    }
 }
 
 test "isContextOverflow: nur exceed_context_size_error zählt, andere 400er nicht" {

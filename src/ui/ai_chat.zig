@@ -546,6 +546,8 @@ pub const AIChatState = struct {
         log.err("AI task error: {s}", .{payload});
         const text = if (std.mem.eql(u8, payload, "ContextTooLong"))
             "The request exceeds the model's context window (8192 tokens). Start a new chat or ask about a smaller file."
+        else if (std.mem.eql(u8, payload, "ReplyTruncated"))
+            "The reply hit the end of the context window (8192 tokens) and was cut off; a cut-off tool call was not run. Start a new chat or ask about a smaller part."
         else
             "Error communicating with AI agent.";
         self.addMessage("assistant", text) catch {};
