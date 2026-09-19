@@ -340,7 +340,8 @@ gepinnte Engines unter `engines/`, Modellablage und die Messregeln aus `llm-benc
 Kurz: Standard ist `engines/llama.cpp-vulkan/build/bin/llama-server` (unter Windows
 `.exe`, sonst fällt zid still auf Ollama zurück) mit
 `models/gemma-4-E2B-it-Q4_0.gguf` auf allen Plattformen (`src/ai/paths.zig`). Fallback Ollama.
-`LLAMA_SERVER_PATH` und `LLAMA_MODEL_PATH` überschreiben. RPC `chat_state`,
+`LLAMA_SERVER_PATH` und `LLAMA_MODEL_PATH` überschreiben. zid nutzt nur lokale Backends; Cloud-
+Anbieter (Claude, OpenAI) sind eine Entscheidung des Projektinhabers dagegen. RPC `chat_state`,
 E2E `python3 scripts/e2e_ai_chat.py` und `scripts/e2e_ai_tools.py`.
 
 Drei Regeln aus der Messreihe vom 17.09.2026
