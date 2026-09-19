@@ -949,7 +949,7 @@ MuPDFs Story-Engine. Folienvorschau in `MarkdownView` (`deck`-Feld), Command
 
 Das Submodul zeigt auf den eigenen Fork `gstrainovic/clay-zig-bindings`, Branch `zid`
 (Upstream johan0A als Remote `upstream`); dort liegen beide Fixes als Commits `598a5c7`
-(Scroll-Container) und `27407cd` (Hash-Map). Für eine neuere clay.h den Branch `zid` auf
+(Scroll-Container), `27407cd` (Hash-Map) und `7c66140` (Messcache). Für eine neuere clay.h den Branch `zid` auf
 upstream rebasen. `libs/clay-zig/build.zig` legt `vendor/clay.h` vor die Abhängigkeit. Gegenüber v0.14 (upstream
 unverändert) sind dort drei Stellen in `Clay_UpdateScrollContainers` korrigiert, alle mit „zid:“
 markiert: Swap-Remove ohne `i--` übersprang Einträge, `Clay__GetHashMapItem` liefert nie `NULL`
@@ -974,6 +974,15 @@ im Gleichschritt (Zeiger je Eintrag) und baut die Buckets neu. Für die E2E hei�
 `element_bounds` verschwundener Elemente bleiben nur, solange die Map nicht verdichtet wurde —
 darauf nie bauen (siehe `visible_blocks` in `e2e_md_preview.py`). Bei „Element X nicht im
 Layout“, obwohl X sichtbar ist: zuerst an diese Map denken.
+
+Dritter Fix (`7c66140`): **Der Messcache der Texte lief beim Streamen voll.** Clay gibt Einträge
+und ihre Wörter nur frei, wenn ein Nachschlagen zufällig über einen veralteten Eintrag im selben
+Bucket läuft. Die gestreamte Chat-Antwort ist ein einziger wachsender Absatz: jedes Delta ein
+neuer Eintrag mit allen Wörtern, die alten trifft kaum ein Nachschlagen; nach ~1500 Zeichen war
+die Wortgrenze (16384) voll („run out of space in it's internal text measurement cache“), danach
+blieb Text ungemessen. `Clay__ResetMeasureTextCacheWhenFull` leert den Cache in
+`Clay_BeginLayout`, sobald Wort- oder Eintragsliste zu drei Vierteln voll ist. Unit-Test
+`src/ui/clay_cache_tests.zig` (eigenes Test-Root mit Clay, ohne UI).
 
 ## Explorer: .gitignore-Einträge
 

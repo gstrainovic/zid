@@ -535,6 +535,17 @@ pub fn build(b: *std.Build) void {
     const run_scrollbar_tests = b.addRunArtifact(scrollbar_tests);
     run_scrollbar_tests.has_side_effects = true;
 
+    // Clay-Kapazitäten über viele Frames (Messcache, Hash-Map), ohne UI
+    const clay_cache_mod = b.createModule(.{
+        .root_source_file = b.path("src/ui/clay_cache_tests.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    clay_cache_mod.addImport("clay", clay_dep.module("zclay"));
+    const clay_cache_tests = b.addTest(.{ .root_module = clay_cache_mod });
+    const run_clay_cache_tests = b.addRunArtifact(clay_cache_tests);
+    run_clay_cache_tests.has_side_effects = true;
+
     const context_menu_tests = b.addTest(.{ .root_module = context_menu_mod });
     const run_context_menu_tests = b.addRunArtifact(context_menu_tests);
     run_context_menu_tests.has_side_effects = true;
@@ -764,6 +775,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_ai_paths_tests.step);
     test_step.dependOn(&run_ai_tools_tests.step);
     test_step.dependOn(&run_agent_tests.step);
+    test_step.dependOn(&run_clay_cache_tests.step);
 
     const run_word_wrap_tests = b.addRunArtifact(word_wrap_tests);
     run_word_wrap_tests.has_side_effects = true;
