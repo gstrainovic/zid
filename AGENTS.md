@@ -73,11 +73,16 @@ echo -e "open ./README.md\nget-state\nshutdown" | zig build run -- --interactive
   Server-Thread traf `renderTabBar` mitten in der Iteration: General protection exception in
   `tabLabel`); nach `open_file` also `settle`, bevor Tabs abgefragt werden. `split_pane` und
   `show_context_menu` mutieren noch direkt aus dem Server-Thread.
-- **Lesende RPCs laufen weiterhin im Server-Thread.** Gemeinsame Daten brauchen deshalb eine
-  Sperre: `file_explorer.git_status` hängt an `git_status_mutex`, weil der Main-Thread die Map in
-  `updateGitStatus` ersetzt (Keys werden freigegeben) und `explorer_entries` sie gleichzeitig liest
-  — das war ein Segfault in `isIgnored`. Zugriff nur über `statusFor`, `isIgnored`, `folderStatus`,
-  nie direkt auf die Map.
+- **Lesende RPCs laufen im Server-Thread, außer sie durchlaufen Buffer.** `editor_state`,
+  `file_text` und `get_chat_input` gehen über `onMain`: der Server-Thread legt den Aufruf ab,
+  `drainInputs` führt ihn im nächsten Frame aus, der Server wartet (5 s Zeitlimit). Im
+  Server-Thread lasen sie Buffer, die der Main-Thread per `setText` ersetzte: „switch on corrupt
+  value“ in `Buffer.walk_const` (Stresstest `python3 scripts/e2e_rpc_race.py`). Neue RPCs, die
+  Buffer, Editoren oder Listen der UI lesen, ebenfalls über `onMain`.
+  Übrige Lesezugriffe auf gemeinsame Daten brauchen eine Sperre: `file_explorer.git_status`
+  hängt an `git_status_mutex`, weil der Main-Thread die Map in `updateGitStatus` ersetzt (Keys
+  werden freigegeben) und `explorer_entries` sie gleichzeitig liest — das war ein Segfault in
+  `isIgnored`. Zugriff nur über `statusFor`, `isIgnored`, `folderStatus`, nie direkt auf die Map.
 - Headless-Screenshot ist 1200x800, Tab-Kopf liegt bei y≈105, Inhalt ab y≈130.
 - Explorer testen: `explorer_entries` liefert Viewport-Bounds, `row_height`, `scroll` und die
   sichtbaren Zeilen mit Index; Zeilenmitte = `viewport.y + index*row_height + row_height/2 - scroll`.

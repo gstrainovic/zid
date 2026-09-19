@@ -55,6 +55,66 @@ pub const InputEvent = union(enum) {
     request_quit,
 };
 
+/// Ein im Main-Thread auszuführender RPC-Handler (siehe `onMain`).
+pub const MainCall = struct {
+    run: *const fn (*MainCall) void,
+    done: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+};
+
+/// Handler `f(ctx, dc, args...)` im Main-Thread ausführen und auf das Ergebnis warten.
+/// Lesende RPCs, die Buffer durchlaufen (editor_state, file_text, get_chat_input), liefen im
+/// Server-Thread, während der Main-Thread den Buffer per setText ersetzte: „switch on corrupt
+/// value“ in `Buffer.walk_const` (`scripts/e2e_rpc_race.py`). Ohne Frame-Loop (`--interactive`)
+/// direkt ausführen.
+fn onMain(ctx: *E2EContext, dc: *zigjr.DispatchCtx, comptime f: anytype, args: anytype) @typeInfo(@TypeOf(f)).@"fn".return_type.? {
+    const R = @typeInfo(@TypeOf(f)).@"fn".return_type.?;
+    if (!ctx.defer_input) return @call(.auto, f, .{ ctx, dc } ++ args);
+    const Call = struct {
+        base: MainCall,
+        ctx: *E2EContext,
+        dc: *zigjr.DispatchCtx,
+        args: @TypeOf(args),
+        result: R = undefined,
+        fn run(b: *MainCall) void {
+            const self: *@This() = @fieldParentPtr("base", b);
+            self.result = @call(.auto, f, .{ self.ctx, self.dc } ++ self.args);
+        }
+    };
+    ctx.main_call_serial.lock();
+    defer ctx.main_call_serial.unlock();
+    var call = Call{ .base = .{ .run = Call.run }, .ctx = ctx, .dc = dc, .args = args };
+    ctx.main_call_mutex.lock();
+    ctx.main_call = &call.base;
+    ctx.main_call_mutex.unlock();
+    @import("wio").cancelWait();
+    var waited_ms: u32 = 0;
+    while (!call.base.done.load(.acquire)) : (waited_ms += 1) {
+        if (waited_ms == 5000) {
+            ctx.main_call_mutex.lock();
+            const still_queued = ctx.main_call == &call.base;
+            if (still_queued) ctx.main_call = null;
+            ctx.main_call_mutex.unlock();
+            // Noch nicht abgeholt: zurückziehen. Schon in Arbeit: fertig abwarten (der
+            // Main-Thread hält einen Zeiger auf `call`).
+            if (still_queued) return "error: main thread did not answer";
+        }
+        std.Thread.sleep(std.time.ns_per_ms);
+    }
+    return call.result;
+}
+
+/// Vom Main-Thread pro Frame: wartenden lesenden RPC ausführen.
+fn serviceMainCall(ctx: *E2EContext) void {
+    ctx.main_call_mutex.lock();
+    const call = ctx.main_call;
+    ctx.main_call = null;
+    ctx.main_call_mutex.unlock();
+    if (call) |c| {
+        c.run(c);
+        c.done.store(true, .release);
+    }
+}
+
 /// E2E Server Context - teilt State mit Main Thread
 pub const E2EContext = struct {
     allocator: std.mem.Allocator,
@@ -65,6 +125,11 @@ pub const E2EContext = struct {
     defer_input: bool = false,
     input_mutex: std.Thread.Mutex = .{},
     pending_inputs: std.ArrayListUnmanaged(InputEvent) = .empty,
+    /// Lesender RPC, der im Main-Thread laufen muss (`onMain`); `main_call_mutex` schützt den
+    /// Platz, `main_call_serial` reiht gleichzeitige Verbindungen hintereinander.
+    main_call_mutex: std.Thread.Mutex = .{},
+    main_call_serial: std.Thread.Mutex = .{},
+    main_call: ?*MainCall = null,
     /// Fenstermodus: Screenshot wird vom Main-Thread nach dem nächsten Frame geschrieben.
     screenshot_requested: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
     screenshot_done: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
@@ -380,6 +445,7 @@ fn dispatchInput(ctx: *E2EContext, ev: InputEvent) void {
 
 /// Vom Main-Thread pro Frame aufrufen: gepufferte Eingaben anwenden.
 pub fn drainInputs(ctx: *E2EContext) void {
+    serviceMainCall(ctx);
     var batch: [64]InputEvent = undefined;
     while (true) {
         ctx.input_mutex.lock();
@@ -804,6 +870,10 @@ fn openChatRpc(ctx: *E2EContext, _: *zigjr.DispatchCtx) ![]const u8 {
 
 /// Chat Input Content abfragen
 fn getChatInput(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
+    return onMain(ctx, dc, getChatInputMain, .{});
+}
+
+fn getChatInputMain(ctx: *E2EContext, dc: *zigjr.DispatchCtx) anyerror![]const u8 {
     log.info("RPC: get_chat_input", .{});
     const buf = ctx.ui_system.ai_chat.input_buffer;
     const text = buf.store_to_string_cached(buf.root, buf.file_eol_mode);
@@ -981,6 +1051,10 @@ fn editorLines(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
 
 /// Editor-Zustand: Zeilen, Cursor und der gesamte Text (JSON-escaped).
 fn editorState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
+    return onMain(ctx, dc, editorStateMain, .{});
+}
+
+fn editorStateMain(ctx: *E2EContext, dc: *zigjr.DispatchCtx) anyerror![]const u8 {
     const ed = ctx.ui_system.getActiveEditor();
     const lines = ed.lineCount();
     const last: usize = if (lines > 0) lines - 1 else 0;
@@ -1045,6 +1119,10 @@ fn chatLineBounds(ctx: *E2EContext, dc: *zigjr.DispatchCtx, msg: i64, line: i64)
 
 /// Inhalt des offenen Buffers zu `path` (wie ihn der Editor zeigt), oder open=false.
 fn fileText(ctx: *E2EContext, dc: *zigjr.DispatchCtx, path: []const u8) ![]const u8 {
+    return onMain(ctx, dc, fileTextMain, .{path});
+}
+
+fn fileTextMain(ctx: *E2EContext, dc: *zigjr.DispatchCtx, path: []const u8) anyerror![]const u8 {
     var buf = std.Io.Writer.Allocating.init(dc.arena());
     if (ctx.ui_system.open_buffers.get(path)) |b| {
         const text = b.store_to_string_cached(b.root, b.file_eol_mode);
