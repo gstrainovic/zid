@@ -92,5 +92,29 @@ Jeder Punkt mit geschätzter Wirkung vorab, gemessen vorher/nachher (`scripts/e2
       `animation/spring.zig`); `src/ui/animation.zig` wird bisher nirgends benutzt.
    8. Grenzwerte zentral (`limits`-Modul) und laut statt still: Shaper liefert bei > 2048 Bytes
       leer, Clay-Kapazität läuft ohne Meldung voll. Loggen und im RPC zählen, nicht abstürzen.
-7. **Referenz-Klone löschen:** `reference/KrillClaw`, `reference/pls`, `reference/lite-xl`, `reference/flow`, `reference/gooey`, sobald
+7. **Aus flow** (`reference/flow`, Quelle von `libs/flow-core`):
+   1. Absturz in `View.clamp_row` (`libs/flow-core/src/buffer/View.zig:112-113`): bei einer
+      sichtbaren Zeile und unterem Abstand 2 läuft `view.row + 1 - 2` über (Panic in Debug/
+      ReleaseSafe). flow rechnet mit `-|`. Auslösbar im auf 40 px verkleinerten Chat-Eingabefeld
+      mit zwei Zeilen oder bei großem Zoom.
+   2. Horizontales Scrollen begrenzen: `scrollColumns` (`code_editor.zig`) erhöht `view.col` ohne
+      Obergrenze; flow klemmt auf `longest_line_len - cols + 1`, `maxLineWidth()` gibt es schon.
+   3. LSP: Diagnosen (publishDiagnostics, inline und Sprung zur nächsten), inkrementelles
+      `didChange`, Hover, Referenzen, Umbenennen (WorkspaceEdit), Datei-Symbole, Server je
+      Dateityp (`libs/flow-core/src/file_type_lsp.zig` ist vorhanden, `src/` nutzt nur zls),
+      Formatieren über den Formatter-Eintrag derselben Tabelle (auch beim Speichern).
+   4. Git-Änderungsmarken im Gutter (`flow_core.diff` ist exportiert, ungenutzt) und Sprung zur
+      nächsten/vorigen Änderung.
+   5. Suche: alle Treffer markieren, Trefferzahl in der Statuszeile, F3/Shift+F3, Groß/Klein-
+      ignorieren auch für Nicht-ASCII (`find_ops.zig` nutzt `eqlIgnoreCase`, nur ASCII).
+   6. Inkrementelles Highlighting nach Undo/Redo/Reload: alten gegen neuen Text diffen und als
+      tree-sitter-Edits melden statt `resetTree()` (flow `editor.zig:6256-6285`).
+   7. Editier-Komfort: Smart Home (erst Codeanfang, dann Spalte 0), Smart Backspace (eine
+      Einrückstufe), Auswahl nach Syntaxbaum vergrößern/verkleinern, zur passenden Klammer
+      springen, Zeilen verbinden, letzten Mehrfach-Cursor zurücknehmen, Cursor an alle
+      Zeilenenden der Auswahl.
+   8. Unicode-Fallfaltung in `libs/flow-core/src/buffer/unicode.zig` ist fehlerhaft (× → ÷,
+      ß → ÿ, Σ/Τ, Č/Š/Ž und Kyrillisch fehlen). Vor Groß-/Kleinschreibung (Editor 3) auf uucode
+      umstellen wie flow.
+8. **Referenz-Klone löschen:** `reference/KrillClaw`, `reference/pls`, `reference/lite-xl`, `reference/flow`, `reference/gooey`, sobald
    die Punkte oben umgesetzt sind.
