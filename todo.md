@@ -46,13 +46,7 @@ KI-Punkte: Wirkung vorab schätzen, vorher/nachher messen (`scripts/e2e_ai_read_
       Link-Pfad melden.
    3. AGENTS.md-Satz „Der Windows-Watcher folgt Symlink-Ordnern nicht“ danach streichen.
 
-9. **E2E: `editor_state` liest den Buffer im Server-Thread** (`e2e_server.zig` `editorState` →
-   `getTextInRange`), während der Main-Thread ihn per `setText` ersetzt (Datei außen geändert):
-   „switch on corrupt value“ in `Buffer.walk_const`, zufällig in `e2e_editor.py` Schritt „Datei
-   außerhalb geändert“ (1 von 3 Läufen). Lesende RPCs auf den Buffer in den Main-Thread verlegen
-   oder den Buffer-Tausch sperren wie `git_status_mutex`.
-
-10. **mupdf stürzt bei manchen kaputten PDFs ab** (System-Bibliothek 1.27.2; `mutool draw` auf
+9. **mupdf stürzt bei manchen kaputten PDFs ab** (System-Bibliothek 1.27.2; `mutool draw` auf
     einem zu 40 % geschriebenen PDF: Segfault, in zid „double free“). Der Reload wartet deshalb
     auf eine ruhende Datei; eine dauerhaft kaputte Datei öffnen reißt zid aber weiter mit.
     Rendern in einen Kindprozess auslagern oder mupdf-Version prüfen.
