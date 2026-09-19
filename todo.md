@@ -16,3 +16,47 @@ seit `bc6872c` behoben (`scripts/e2e_external_change.py`, vier Fälle grün).
    Overlapped-Schleife), Ereignispfade unter dem Link-Pfad melden. Ziel innerhalb der Wurzel
    braucht kein zweites Handle.
 3. AGENTS.md-Satz „Der Windows-Watcher folgt Symlink-Ordnern nicht“ danach streichen.
+
+## KI-Agent
+
+Jeder Punkt mit geschätzter Wirkung vorab, gemessen vorher/nachher (`scripts/e2e_ai_read_limits.py`,
+`scripts/e2e_ai_tools.py`); Antworten streuen bei Temperatur 0.7, also Fälle wiederholen.
+
+1. **Werkzeugergebnisse als Klartext statt JSON-String.** `read_file` liefert heute
+   `{"path","content"}` als String; das gemma4-Template reicht ihn unverändert durch, das Modell
+   sieht `\n` und `\"` statt echter Zeilen. Erwartung: 5–10 % weniger Prompt-Token bei Code, evtl.
+   zuverlässigere „letzte Zeile“ ab 12 KB. `ai_tools.shrinkToolResult` muss das neue Format kürzen.
+2. **Deny beendet die Runde.** Heute geht `{"error":"the user denied this action"}` zurück ans Modell
+   (eine volle Runde mehr, der abgelehnte Inhalt steht im Prompt) und weitere Aufrufe derselben
+   Antwort laufen trotzdem. Neu: übrige Aufrufe als „skipped“ eintragen, kein weiterer LLM-Aufruf.
+   Erwartung: 3–8 s schneller nach Deny (`e2e_ai_tools.py` Schritt 5).
+3. **`finish_reason: "length"` auswerten.** Läuft die Antwort ans Ende von `-c 8192`, ist sie still
+   abgeschnitten; abgeschnittene Tool-Argumente enden als „arguments are not valid JSON“. Neu:
+   Hinweis „abgeschnitten“, abgeschnittene Aufrufe nicht ausführen. Kein `max_tokens`, das würde
+   lange `write_file`-Inhalte kappen. Nachstellen: 20-KB-Datei lesen und vollständig wiedergeben
+   lassen.
+4. **`list_files` sortiert, ohne `.git/` und `.zig-cache/`; `read_file` lehnt Binärdateien ab**
+   (NUL in den ersten 512 Bytes).
+5. **Projektweite Suche als Werkzeug** anstelle von `find_in_editor` (gleiche Werkzeugzahl, die
+   Suchleiste bleibt über `command` erreichbar). Teilstring, `pfad:zeile:text`, höchstens 30
+   Treffer, Zeilen auf 200 Zeichen, gitignored/`engines/`/`models/`/`reference/` ausgeschlossen.
+   Gemeinsamer Kern mit der Projektsuche im Editor. Werkzeugwahl mit `llm-bench/bench/agent_eval.py`
+   prüfen.
+6. **Clay-Überlauf bei langen Chat-Antworten:** eine Antwort mit 1 844 Token löste
+   `elements_capacity_exceeded` aus (`e2e_ai_read_limits.py 40000:first`).
+7. **Download-Zweig in `ai_chat.zig` ist veraltet:** `model_filename` und die URL zeigen auf
+   `gemma-4-E2B-it-Q4_K_M` (unsloth), das Standardmodell ist `gemma-4-E2B-it-Q4_0` (ggml-org,
+   `src/ai/paths.zig`); der Knopf erscheint nur für Ollama. Auf das Standardmodell umstellen oder
+   den Zweig entfernen.
+
+## Editor
+
+1. **Suchen und Ersetzen im ganzen Projekt:** Ergebnisliste mit Datei und Zeile, Klick öffnet die
+   Stelle, Ersetzen einzeln und alle. Kern teilt sich die Suche mit dem Agent-Werkzeug.
+2. **Leerzeichen am Zeilenende beim Speichern entfernen** (abschaltbar, wie Autosave gemerkt).
+3. **Editier-Befehle:** Zeile darunter/darüber einfügen (Ctrl+Enter, Ctrl+Shift+Enter), Zeile
+   markieren (Ctrl+L), alle Vorkommen markieren (Ctrl+Shift+L), Groß-/Kleinschreibung.
+4. **Autovervollständigung:** Wörter aus offenen Dokumenten, LSP-Vorschläge, falls ein Server
+   läuft (`lsp_completion` ist im Client schon vorhanden, aber ungenutzt).
+5. **Referenz-Klone löschen:** `reference/KrillClaw`, `reference/pls`, `reference/lite-xl`, sobald
+   die Punkte oben umgesetzt sind.
