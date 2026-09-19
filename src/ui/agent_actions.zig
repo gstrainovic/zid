@@ -89,7 +89,9 @@ fn executeInner(ui: *UI, alloc: std.mem.Allocator, call: *const ai_tools.ToolCal
             else => return err,
         };
         defer alloc.free(content);
-        return .{ .done = try jsonObject(alloc, &.{ .{ "path", path }, .{ "content", content } }) };
+        // Klartext ohne Kopf: als JSON-String sah das Modell `\n` und `\"` statt echter Zeilen,
+        // ein Kopf (`path:`) galt ihm als erste Dateizeile
+        return .{ .done = try alloc.dupe(u8, content) };
     }
 
     if (std.mem.eql(u8, call.name, "write_file")) {

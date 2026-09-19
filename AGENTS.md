@@ -415,15 +415,21 @@ für Nachmessungen.
   dem Budget, und beginnt nie mit einem verwaisten `tool`-Ergebnis. Ein Ergebnis ohne Frage und
   Aufruf verwirft das Chat-Template, das Modell antwortet dann ohne jeden Kontext („What would you
   like to do?"). Die Anzeige im Chat bleibt vollständig.
+- **`read_file` liefert den rohen Dateiinhalt, ohne JSON und ohne Kopf.** Als JSON-String sah das
+  Modell `\n` und `\"` statt echter Zeilen (das gemma4-Template reicht den String unverändert
+  durch); ein Kopf wie `path: …` galt ihm als erste Dateizeile (erste Zeile 0/3 statt 3/3). Roh
+  spart 6–7 % Prompt-Token beim Ergebnis. Fehler bleiben `{"error":…}`, daran erkennt
+  `pushToolResult` sie (Präfix, nicht Teilstring: Dateien dürfen `"error"` enthalten).
 - **Zu große Werkzeugergebnisse werden erst nach der Ablehnung gekürzt:** `handleError` kürzt bei
-  `ContextTooLong` das größte `tool`-Ergebnis der Runde (`ai_tools.shrinkToolResult`: `content` auf
-  zwei Drittel, höchstens 24 000 Bytes, an einer Zeilengrenze; `truncated`/`file_bytes` nennen die
-  Originalgröße) und sendet neu, bis es passt. Was passt, geht ungekürzt raus; eine feste Grenze in
+  `ContextTooLong` das größte `tool`-Ergebnis der Runde (`ai_tools.shrinkToolResult`: Anfang auf
+  zwei Drittel, höchstens 24 000 Bytes, an einer Zeilengrenze; am Ende die Zeile
+  `[zid: file truncated: N bytes total, first M shown]`; JSON mit `content`-Feld wird im Feld
+  gekürzt) und sendet neu, bis es passt. Was passt, geht ungekürzt raus; eine feste Grenze in
   `read_file` hätte Dateien gekappt, die ganz ins Fenster passen. Die Ablehnung kostet kaum Zeit.
   Messwerte P1000 (`python3 scripts/e2e_ai_read_limits.py`, erste/letzte Zeile aus N Bytes Zig-Code):
-  Grundlast 1 366 Prompt-Token, 4 KB 22 s, 12 KB 51 s, 20 KB 7 511 Token und 87 s, 28/40 KB nach
-  dem Kürzen 80/68 s. Die „letzte Zeile" trifft gemma4-E2B ab 12 KB nicht zuverlässig, bei gleichem
-  Prompt mal ja, mal nein (Temperatur 0.7).
+  Grundlast 1 366 Prompt-Token, 4 KB 2 628 Token und 20 s, 12 KB 4 974 Token und 47 s, 28 KB nach
+  dem Kürzen 75 s (20 KB passte noch ungekürzt: 7 511 Token, 87 s, gemessen mit JSON-Ergebnis). Die „letzte Zeile" streut ab 12 KB bei gleichem
+  Prompt (Temperatur 0.7); Fälle wiederholen.
 - **Gemessene Grenzen (Bench `~/projects/bitnet-colibri-bench`, Engine b10524 Commit 9ee9fc0,
   Qwen3-4B-Instruct-2507-Q4_K_M sha256 3605803b982cb64a…):** Ein-Datei-Fix gelingt; Ursachen über
   einen Import hinweg scheitern (Qwen3 bricht gefahrlos ab, Llama-3.2-3B schrieb destruktiv). Der

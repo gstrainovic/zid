@@ -309,11 +309,35 @@ pub fn headForModel(text: []const u8, max: usize) []const u8 {
 pub const shrink_first_max: usize = 24_000;
 const shrink_min: usize = 1_000;
 
-/// Kürzt das `content`-Feld eines Werkzeugergebnisses (JSON) auf zwei Drittel, höchstens auf
+const truncated_mark = "\n[zid: file truncated: ";
+
+/// Kürzt den Inhalt eines Werkzeugergebnisses auf zwei Drittel, höchstens auf
 /// `shrink_first_max`. Nur für den Fall, dass llama-server die Anfrage als zu lang ablehnt: was
-/// passt, geht ungekürzt raus. `file_bytes` und `truncated` nennen die Originalgröße.
-/// null = kein `content` oder zu kurz, um weiter zu kürzen.
-pub fn shrinkToolResult(alloc: std.mem.Allocator, json_text: []const u8) !?[]u8 {
+/// passt, geht ungekürzt raus. `read_file` liefert den Dateiinhalt ohne Kopf (ein Kopf galt dem
+/// Modell als erste Dateizeile); gekürzt wird der Anfang behalten und am Ende ein markierter
+/// Hinweis mit der Originalgröße angehängt. JSON mit `content`-Feld wird im Feld gekürzt.
+/// null = zu kurz, um weiter zu kürzen.
+pub fn shrinkToolResult(alloc: std.mem.Allocator, text: []const u8) !?[]u8 {
+    if (try shrinkJsonResult(alloc, text)) |out| return out;
+    return shrinkPlainResult(alloc, text);
+}
+
+fn shrinkPlainResult(alloc: std.mem.Allocator, text: []const u8) !?[]u8 {
+    var content = text;
+    var total = text.len;
+    if (std.mem.lastIndexOf(u8, text, truncated_mark)) |i| {
+        content = text[0 .. i + 1];
+        const num_start = i + truncated_mark.len;
+        const num_end = std.mem.indexOfScalarPos(u8, text, num_start, ' ') orelse text.len;
+        total = std.fmt.parseInt(usize, text[num_start..num_end], 10) catch text.len;
+    }
+    if (content.len <= shrink_min) return null;
+    const head = headForModel(content, @min(content.len * 2 / 3, shrink_first_max));
+    const sep: []const u8 = if (std.mem.endsWith(u8, head, "\n")) "" else "\n";
+    return try std.fmt.allocPrint(alloc, "{s}{s}" ++ truncated_mark[1..] ++ "{d} bytes total, first {d} shown]", .{ head, sep, total, head.len });
+}
+
+fn shrinkJsonResult(alloc: std.mem.Allocator, json_text: []const u8) !?[]u8 {
     var parsed = std.json.parseFromSlice(std.json.Value, alloc, json_text, .{}) catch return null;
     defer parsed.deinit();
     if (parsed.value != .object) return null;
@@ -494,6 +518,36 @@ test "shrinkToolResult: große Ergebnisse springen sofort unter die Obergrenze" 
     var parsed = try std.json.parseFromSlice(std.json.Value, a, out, .{});
     defer parsed.deinit();
     try testing.expect(parsed.value.object.get("content").?.string.len <= shrink_first_max);
+}
+
+test "shrinkToolResult: Klartext beginnt weiter mit der ersten Dateizeile, Hinweis steht am Ende" {
+    const a = testing.allocator;
+    const content = "0123456789abcdef\n" ** 200; // 3400 Bytes
+    const out = (try shrinkToolResult(a, content)).?;
+    defer a.free(out);
+    // Kein Kopf: die erste Zeile des Ergebnisses ist die erste Zeile der Datei
+    try testing.expect(std.mem.startsWith(u8, out, "0123456789abcdef\n"));
+    const mark = std.mem.lastIndexOf(u8, out, "\n[zid: file truncated: 3400 bytes total, first ").?;
+    const shown = out[0 .. mark + 1];
+    try testing.expect(shown.len <= content.len * 2 / 3);
+    try testing.expect(std.mem.startsWith(u8, content, shown));
+    try testing.expect(std.mem.endsWith(u8, out, " shown]"));
+
+    // Zweite Runde: Originalgröße bleibt, Inhalt schrumpft weiter, nur ein Hinweis
+    const out2 = (try shrinkToolResult(a, out)).?;
+    defer a.free(out2);
+    try testing.expect(std.mem.indexOf(u8, out2, "3400 bytes total") != null);
+    try testing.expectEqual(@as(usize, 1), std.mem.count(u8, out2, "[zid: file truncated"));
+    try testing.expect(out2.len < out.len);
+}
+
+test "shrinkToolResult: gelesene JSON-Datei ohne content-Feld wird als Text gekürzt" {
+    const a = testing.allocator;
+    const json_file = "{\"items\":[" ++ ("{\"id\":1,\"name\":\"abc\"},\n" ** 100) ++ "{}]}";
+    const out = (try shrinkToolResult(a, json_file)).?;
+    defer a.free(out);
+    try testing.expect(std.mem.startsWith(u8, out, "{\"items\":["));
+    try testing.expect(std.mem.indexOf(u8, out, "[zid: file truncated") != null);
 }
 
 test "shrinkToolResult: nichts zu kürzen → null" {

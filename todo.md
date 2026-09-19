@@ -68,31 +68,28 @@ KI-Punkte: Wirkung vorab schätzen, vorher/nachher messen (`scripts/e2e_ai_read_
 
 ## 3. Wichtige Funktionen
 
-1. **KI: Werkzeugergebnisse als Klartext statt JSON-String** (in Arbeit). Das Modell sah `\n`
-   und `\"` statt echter Zeilen. Ein Kopf (`path:`) galt ihm als erste Dateizeile, daher roher
-   Inhalt ohne Kopf, Kürzungshinweis am Ende.
-2. **KI: Deny beendet die Runde.** Heute geht der Fehler zurück ans Modell (eine volle Runde mehr,
+1. **KI: Deny beendet die Runde.** Heute geht der Fehler zurück ans Modell (eine volle Runde mehr,
    der abgelehnte Inhalt steht im Prompt) und weitere Aufrufe derselben Antwort laufen trotzdem.
    Neu: übrige Aufrufe als „skipped“, kein weiterer LLM-Aufruf. Erwartung: 3–8 s schneller nach
    Deny (`e2e_ai_tools.py` Schritt 5).
-3. **Suchen und Ersetzen im ganzen Projekt:** Ergebnisliste mit Datei und Zeile, Klick öffnet die
-   Stelle, Ersetzen einzeln und alle. Gemeinsamer Kern mit 3.4.
-4. **KI: projektweite Suche als Werkzeug** anstelle von `find_in_editor` (gleiche Werkzeugzahl,
+2. **Suchen und Ersetzen im ganzen Projekt:** Ergebnisliste mit Datei und Zeile, Klick öffnet die
+   Stelle, Ersetzen einzeln und alle. Gemeinsamer Kern mit 3.3.
+3. **KI: projektweite Suche als Werkzeug** anstelle von `find_in_editor` (gleiche Werkzeugzahl,
    Suchleiste bleibt über `command` erreichbar). Teilstring, `pfad:zeile:text`, höchstens 30
    Treffer, Zeilen auf 200 Zeichen, gitignored/`engines/`/`models/`/`reference/` ausgeschlossen.
    Werkzeugwahl mit `llm-bench/bench/agent_eval.py` prüfen.
-5. **LSP:** Diagnosen (publishDiagnostics, inline und Sprung zur nächsten), inkrementelles
+4. **LSP:** Diagnosen (publishDiagnostics, inline und Sprung zur nächsten), inkrementelles
    `didChange`, Hover, Referenzen, Umbenennen (WorkspaceEdit), Datei-Symbole, Server je Dateityp
    (`libs/flow-core/src/file_type_lsp.zig` ist vorhanden, `src/` nutzt nur zls), Formatieren über
    den Formatter-Eintrag derselben Tabelle (auch beim Speichern).
-6. **Autovervollständigung:** Wörter aus offenen Dokumenten, LSP-Vorschläge, falls ein Server
+5. **Autovervollständigung:** Wörter aus offenen Dokumenten, LSP-Vorschläge, falls ein Server
    läuft (`lsp_completion` ist im Client vorhanden, aber ungenutzt).
-7. **Suche im Editor:** alle Treffer markieren, Trefferzahl in der Statuszeile, F3/Shift+F3.
-8. **Git-Änderungsmarken im Gutter** (`flow_core.diff` ist exportiert, ungenutzt) und Sprung zur
+6. **Suche im Editor:** alle Treffer markieren, Trefferzahl in der Statuszeile, F3/Shift+F3.
+7. **Git-Änderungsmarken im Gutter** (`flow_core.diff` ist exportiert, ungenutzt) und Sprung zur
    nächsten/vorigen Änderung.
-9. **Inkrementelles Highlighting nach Undo/Redo/Reload:** alten gegen neuen Text diffen und als
+8. **Inkrementelles Highlighting nach Undo/Redo/Reload:** alten gegen neuen Text diffen und als
    tree-sitter-Edits melden statt `resetTree()` (flow `editor.zig:6256-6285`).
-10. **KI: `list_files` sortiert, ohne `.git/` und `.zig-cache/`; `read_file` lehnt Binärdateien
+9. **KI: `list_files` sortiert, ohne `.git/` und `.zig-cache/`; `read_file` lehnt Binärdateien
     ab** (NUL in den ersten 512 Bytes).
 
 ## 4. Komfort
