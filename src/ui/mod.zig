@@ -150,6 +150,8 @@ pub const UI = struct {
     current_directory: ?[]const u8,
     pending_tab_switch: ?[]const u8,
     pending_pdf_page_change: ?PdfPageChange,
+    /// Offene PDFs, die sich auf der Platte geändert haben (Schlüssel aus `open_pdfs`, owned)
+    pending_pdf_reloads: std.ArrayListUnmanaged([]u8) = .empty,
     /// Vom Main-Thread beim Rendern gesetzt, damit E2E den Zustand lesen kann,
     /// ohne im Server-Thread über Tabs und Handler-Map zu laufen.
     /// Beschriftung der Blätter-Leiste: gehört der UI, weil Clay den Text erst
@@ -481,6 +483,8 @@ pub const UI = struct {
             handler.deinit();
         }
         self.open_pdfs.deinit();
+        for (self.pending_pdf_reloads.items) |p| self.allocator.free(p);
+        self.pending_pdf_reloads.deinit(self.allocator);
 
         // Markdown Previews aufräumen
         var md_iter = self.open_markdown_views.iterator();
@@ -2580,6 +2584,11 @@ pub const UI = struct {
 
     /// Datei auf der Platte geändert (Watcher): ungeänderte Buffer still neu laden, geänderte fragen.
     pub fn handleExternalChange(self: *Self, event_path: []const u8) void {
+        // Offenes PDF (z. B. erneuter Marp-Export): im Main-Loop neu öffnen
+        if (self.keyForPath(*anyopaque, &self.open_pdfs, event_path)) |pdf_key| {
+            self.requestPdfReload(pdf_key);
+            return;
+        }
         // Der Watcher meldet den Pfad, unter dem er das Verzeichnis registriert hat; der
         // Buffer ist unter dem Pfad geschlüsselt, mit dem die Datei geöffnet wurde. Bei
         // Symlink-Ordnern (Link im Projekt, Ziel woanders) sind das zwei Schreibweisen
@@ -2616,11 +2625,50 @@ pub const UI = struct {
 
     /// Schlüssel in `open_buffers` für einen Pfad: direkt, sonst der Buffer mit demselben
     /// realpath (Symlink-Ordner). null, wenn die Datei nicht offen ist.
+    /// PDF neu laden lassen (Main-Loop, `takeDuePdfReload`). `key` ist der Schlüssel in `open_pdfs`.
+    pub fn requestPdfReload(self: *Self, key: []const u8) void {
+        for (self.pending_pdf_reloads.items) |p| if (std.mem.eql(u8, p, key)) return;
+        const owned = self.allocator.dupe(u8, key) catch return;
+        self.pending_pdf_reloads.append(self.allocator, owned) catch self.allocator.free(owned);
+    }
+
+    /// Ruhezeit vor dem Neuladen. mupdf (System-Bibliothek 1.27.2) stürzt beim Reparieren
+    /// mancher halb geschriebener PDFs ab (`mutool draw` segfaultet auf derselben Datei), und der
+    /// Watcher meldet von einer Schreibfolge nur das erste Ereignis je 100 ms.
+    pub const pdf_reload_quiet_ns: i128 = 150 * std.time.ns_per_ms;
+
+    /// Nächster fälliger PDF-Reload: die Datei wurde seit `pdf_reload_quiet_ns` nicht mehr
+    /// geändert (mtime). Eigentum geht an den Aufrufer; nicht fällige bleiben in der Liste.
+    pub fn takeDuePdfReload(self: *Self) ?[]u8 {
+        const now = std.time.nanoTimestamp();
+        var i: usize = 0;
+        while (i < self.pending_pdf_reloads.items.len) : (i += 1) {
+            const key = self.pending_pdf_reloads.items[i];
+            const st = std.fs.cwd().statFile(key) catch {
+                // Gerade ersetzt oder gelöscht: beim nächsten Frame erneut schauen, gelöscht
+                // bleibt es stehen, bis der Tab geschlossen wird
+                if (std.fs.cwd().access(key, .{})) |_| {} else |_| {
+                    return self.pending_pdf_reloads.orderedRemove(i);
+                }
+                continue;
+            };
+            if (now - st.mtime < pdf_reload_quiet_ns) continue;
+            return self.pending_pdf_reloads.orderedRemove(i);
+        }
+        return null;
+    }
+
     fn bufferKeyForPath(self: *Self, path: []const u8) ?[]const u8 {
-        if (self.open_buffers.getKey(path)) |k| return k;
+        return self.keyForPath(*@import("flow_core").Buffer, &self.open_buffers, path);
+    }
+
+    /// Schlüssel in `map` für `path`: direkt oder über realpath (Symlink-Ordner, siehe
+    /// handleExternalChange).
+    fn keyForPath(self: *Self, comptime V: type, map: *std.StringHashMap(V), path: []const u8) ?[]const u8 {
+        if (map.getKey(path)) |k| return k;
         const real = std.fs.cwd().realpathAlloc(self.allocator, path) catch return null;
         defer self.allocator.free(real);
-        var it = self.open_buffers.keyIterator();
+        var it = map.keyIterator();
         while (it.next()) |key| {
             if (!std.fs.path.isAbsolute(key.*)) continue; // "scratchpad", "error"
             const key_real = std.fs.cwd().realpathAlloc(self.allocator, key.*) catch continue;
@@ -2923,6 +2971,8 @@ pub const UI = struct {
             return;
         };
         log.info("Marp-PDF geschrieben: {s}", .{out_path});
+        // Schon offen: neu laden, sonst zeigt der Tab den alten Export
+        if (self.keyForPath(*anyopaque, &self.open_pdfs, out_path)) |key| self.requestPdfReload(key);
 
         // Ergebnis im PDF-Tab zeigen — die Vorschau ist damit das, was rauskommt.
         const owned = self.allocator.dupe(u8, out_path) catch return;
@@ -4148,6 +4198,7 @@ pub const UI = struct {
     /// (Icon-Knopf, Explorer-Pfad, Timeline- oder Graph-Commit) noch auf seine 700 ms wartet.
     pub fn wantsFrameSoon(self: *Self) bool {
         if (tooltip.pending()) return true;
+        if (self.pending_pdf_reloads.items.len > 0) return true; // wartet, bis die Datei ruht
         const fx = &self.file_explorer;
         if (fx.hover_index != null and fx.now_ms - fx.hover_since_ms <= 700) return true;
         const tl = &self.timeline_view;

@@ -119,6 +119,27 @@ def step_pdf_tab():
     check(any(t["path"].endswith("deck.pdf") for t in tabs), "PDF ist als Tab offen")
 
 
+def step_reexport_reloads_pdf():
+    print("--- Erneuter Export: der offene PDF-Tab zeigt den neuen Stand")
+    with open(DECK, "a") as f:
+        f.write("\n---\n\n# Nachtrag\n\nNeue Folie.\n")
+    settle(30)  # Watcher lädt deck.md im Editor neu
+    # Über das View-Menü mit deck.md als aktivem Tab (der Tab-Streifen ist hier schon voll)
+    rpc("open_file", [DECK]); settle(20)
+    click_center("menu_view")
+    click_center("menu_item_md_export_pdf")
+    t0 = time.time()
+    while time.time() - t0 < 20 and pdf_pages(DECK_PDF) != 8:
+        time.sleep(0.1)
+    check(pdf_pages(DECK_PDF) == 8, f"deck.pdf hat jetzt 8 Seiten (ist {pdf_pages(DECK_PDF)})")
+    t0 = time.time()
+    st = result_json("pdf_state")
+    while time.time() - t0 < 10 and not (st["pdf"] and st["pages"] == 8):
+        settle(6)
+        st = result_json("pdf_state")
+    check(st["pdf"] and st["pages"] == 8, f"offener PDF-Tab zeigt 8 Seiten (ist {st['pages']})")
+
+
 def step_not_a_deck():
     print("--- Markdown ohne marp: true")
     rpc("open_file", [PLAIN])
@@ -264,6 +285,7 @@ STEPS = [
     step_wide_pane,
     step_overflow_warning,
     step_preview_without_deck,
+    step_reexport_reloads_pdf,  # zuletzt: ändert das Deck (8 Folien)
 ]
 
 

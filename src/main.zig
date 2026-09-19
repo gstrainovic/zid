@@ -661,6 +661,47 @@ pub fn main() !void {
                 ui_system.pending_pdf_page_change = null;
             }
 
+            // Offene PDFs neu laden, wenn sich die Datei geändert hat (Watcher, Marp-Export),
+            // erst wenn sie 150 ms ruht (UI.takeDuePdfReload). Scheitert das Öffnen trotzdem,
+            // bleibt der alte Stand.
+            while (ui_system.takeDuePdfReload()) |pdf_key| {
+                defer allocator.free(pdf_key);
+                const PdfHandler = @import("rendering/pdf_handler.zig").PdfHandler;
+                const slot = ui_system.open_pdfs.getPtr(pdf_key) orelse continue;
+                const old: *PdfHandler = @ptrCast(@alignCast(slot.*));
+                const fresh = PdfHandler.init(allocator, pdf_key) catch |err| {
+                    log.warn("PDF reload of {s} failed ({}), keeping the old state", .{ pdf_key, err });
+                    continue;
+                };
+                if (fresh.total_pages == 0) {
+                    log.warn("PDF reload of {s}: no pages, keeping the old state", .{pdf_key});
+                    fresh.deinit();
+                    continue;
+                }
+                fresh.current_page = @min(old.current_page, fresh.total_pages - 1);
+                const info = fresh.renderPage(fresh.current_page, 2.0) catch |err| {
+                    log.warn("PDF reload of {s}: render failed ({}), keeping the old state", .{ pdf_key, err });
+                    fresh.deinit();
+                    continue;
+                };
+                defer allocator.free(info.pixels);
+                if (ui_system.open_images.get(pdf_key)) |tex_ptr| {
+                    const ImageTexture = @import("clay_renderer/image_renderer.zig").ImageTexture;
+                    const tex: *ImageTexture = @ptrCast(@alignCast(tex_ptr));
+                    const new_tex = image_rdr.createTextureFromPixels(info.pixels, info.width, info.height) catch |err| {
+                        log.warn("PDF reload of {s}: texture failed ({})", .{ pdf_key, err });
+                        fresh.deinit();
+                        continue;
+                    };
+                    tex.deinit();
+                    tex.* = new_tex;
+                }
+                old.deinit();
+                slot.* = fresh;
+                log.info("PDF reloaded: {s} ({d} pages, page {d})", .{ pdf_key, fresh.total_pages, fresh.current_page + 1 });
+                wio.cancelWait();
+            }
+
             // Zustand der PDF-Vorschau für E2E spiegeln (nur hier im Main-Thread).
             if (e2e_ctx) |*c| {
                 var page: u32 = 0;
