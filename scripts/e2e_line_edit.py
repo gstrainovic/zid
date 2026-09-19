@@ -8,6 +8,7 @@ import os, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from e2e_open_folder import ROOT, rpc, result_json, wait_port, settle, start_zid, stop_zid, check, bounds  # noqa: E402
+from e2e_explorer import rows_in_view  # noqa: E402
 
 
 def key(name, ctrl=False, shift=False):
@@ -101,12 +102,12 @@ def step_commit_mouse():
 def step_rename():
     print("--- Umbenennen im Explorer")
     rpc("key_press_mods", ["e", True, True]); settle(6)
-    ex = result_json("explorer_entries")
-    names = [e["name"] for e in ex["entries"]]
+    entries = result_json("explorer_entries")["entries"]
+    names = [e["name"] for e in entries]
     target = "README.md" if "README.md" in names else names[-1]
-    idx = names.index(target)
-    vp, rh = ex["viewport"], ex["row_height"]
-    rpc("click", [vp["x"] + 60, vp["y"] + idx * rh + rh / 2 - ex["scroll"]]); settle(4)
+    # Im Projekt-Root liegt README.md unterhalb des Viewports: erst hereinscrollen
+    [(x, y)], _ = rows_in_view(entries[names.index(target)]["path"])
+    rpc("click", [x, y]); settle(4)
     key("f2")
     check(result_json("explorer_entries")["renaming"], "Umbenennen aktiv")
     key("a", ctrl=True)
