@@ -528,6 +528,13 @@ für Nachmessungen.
   die Zwischenablage, dann `DeleteLine`. Mit Auswahl bleibt Cut wie gehabt.
 - **Metrik-Fix:** `egc_chunk_width` lieferte für jeden Chunk 1; `insert_chars` addiert die Chunk-
   Breite zur Cursor-Spalte, der Cursor stand nach Einfügen/Autoclose eine Spalte zu weit links.
+- **Undo-Schritte und Undo-Cursor:** `snapshotForUndo` legt die Cursor-Position (`zeile:spalte`)
+  als Metadaten in den flow-core-Undo-Stand; `afterUndoRedo` setzt den Cursor dorthin (begrenzt)
+  statt an den Dateianfang und nimmt den Geändert-Status aus `Buffer.is_dirty()`. Eine Tipp-Gruppe
+  endet, wenn der Cursor nicht mehr hinter dem zuletzt getippten Zeichen steht (`typing_end`), und
+  beim Speichern (`markSaved`): nur dann ist der root des nächsten Undo-Stands `last_save`, und
+  Undo zurück dorthin macht den Tab sauber. Vorher lief eine Gruppe über Cursorsprünge hinweg, ein
+  Undo nahm auch weit entfernte Eingaben zurück.
 - **Cursor-Spalte nach Tippen kommt aus `insert_chars`** (`result[1]`), nie aus der Byte-Länge: ein
   Umlaut ist 2 Bytes, aber 1 Spalte. Mit Byte-Länge stand der Cursor danach im Chat-Eingabefeld
   hinter dem Zeilenende und jede weitere Eingabe scheiterte still (`INSERT FAILED`).

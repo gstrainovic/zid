@@ -111,6 +111,28 @@ def step_goto_replace():
     check("hello" in text(), "Undo macht das Ersetzen rückgängig")
 
 
+def tab_modified():
+    s = ui_state()
+    return s["tabs"][s["active_tab"]]["modified"]
+
+
+def step_undo_cursor_dirty():
+    print("--- Undo: Cursor bleibt an der Änderung, Tab wird wieder sauber")
+    key("s", ctrl=True); settle(5)
+    check(not tab_modified(), "nach Ctrl+S ist der Tab sauber")
+    goto_line(4)
+    key("end")
+    rpc("type_text", ["Q"]); settle()
+    check(tab_modified(), "nach dem Tippen ist der Tab geändert")
+    key("z", ctrl=True); settle()
+    st = ed()
+    check(st["row"] == 3, f"Undo lässt den Cursor in Zeile 4 (row {st['row']})")
+    check(not tab_modified(), "Undo zurück auf den gespeicherten Stand: Tab sauber")
+    key("y", ctrl=True); settle()
+    check(tab_modified() and ed()["row"] == 3, "Redo: wieder geändert, Cursor in Zeile 4")
+    key("z", ctrl=True); settle()
+
+
 def step_mouse():
     print("--- Dreifachklick, Shift-Klick, Ctrl-Klick")
     idx = text().split("\n").index("    hello();")
@@ -402,7 +424,7 @@ def step_hscrollbar():
     check(ed()["row"] == 59, "Klicks auf die Leiste versetzen den Cursor nicht")
 
 
-STEPS = [step_autoclose_and_indent, step_comment_move_duplicate, step_goto_replace, step_mouse, step_status_bar, step_panes, step_external_change, step_visuals, step_search_options, step_multicursor, step_word_wrap, step_hscrollbar]
+STEPS = [step_autoclose_and_indent, step_comment_move_duplicate, step_goto_replace, step_undo_cursor_dirty, step_mouse, step_status_bar, step_panes, step_external_change, step_visuals, step_search_options, step_multicursor, step_word_wrap, step_hscrollbar]
 
 
 def main():
