@@ -3884,6 +3884,20 @@ test "DeleteLine: einzige Zeile wird nur geleert" {
     try std.testing.expectEqual(@as(usize, 0), t.ed.cursor.row);
 }
 
+test "ensureCursorVisible: eine sichtbare Zeile, Cursor in Zeile 2 → kein Überlauf, Cursor sichtbar" {
+    var t = try testEditor(std.testing.allocator, "eins\nzwei\ndrei");
+    defer t.buffer.deinit();
+    defer t.ed.deinit();
+    // Höhe für genau eine Zeile (z. B. auf 40 px verkleinertes Chat-Eingabefeld)
+    t.ed.height = @as(f32, @floatFromInt(t.ed.font_size + 16)) + 1;
+    t.ed.width = 800;
+    try std.testing.expectEqual(@as(usize, 1), t.ed.visibleLineCount());
+    t.ed.cursor.row = 1;
+    t.ed.ensureCursorVisible();
+    try std.testing.expect(t.ed.view.row <= t.ed.cursor.row);
+    try std.testing.expect(t.ed.cursor.row < t.ed.view.row + t.ed.view.rows);
+}
+
 test "Undo/Redo: Cursor steht an der Änderung, nicht am Dateianfang" {
     var t = try testEditor(std.testing.allocator, "eins\nzwei\ndrei");
     defer t.buffer.deinit();

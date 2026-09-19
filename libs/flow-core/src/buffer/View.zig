@@ -109,8 +109,18 @@ fn clamp_row(self: *Self, cursor: *const Cursor, abs: bool, bottom_offset: usize
     }
     if (cursor.row < self.row) {
         self.row = 0;
-    } else if (cursor.row > self.row + self.rows - bottom_min_border_distance) {
-        self.row = cursor.row + bottom_min_border_distance - self.rows;
+    } else if (cursor.row > (self.row + self.rows) -| bottom_min_border_distance) {
+        // Sättigend wie flow: bei weniger sichtbaren Zeilen als Randabstand lief `-` über (Panic)
+        self.row = (cursor.row + bottom_min_border_distance) -| self.rows;
+    }
+    // Weniger Zeilen als die Randabstände (verkleinertes Eingabefeld, großer Zoom): der Cursor
+    // muss trotzdem im sichtbaren Bereich liegen
+    if (self.rows > 0) {
+        if (cursor.row < self.row) {
+            self.row = cursor.row;
+        } else if (cursor.row >= self.row + self.rows) {
+            self.row = cursor.row + 1 - self.rows;
+        }
     }
 }
 
