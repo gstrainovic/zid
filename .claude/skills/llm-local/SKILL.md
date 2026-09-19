@@ -153,7 +153,7 @@ aufgebaut ist.
   Perplexity nur mit `llm-bench/bench/ppl-corpus.txt` bei `-c 512`.
 - Entscheidungen des Projektinhabers und die Liste „nicht erneut aufrollen" stehen in
   `llm-bench/CLAUDE.md`.
-- **Standardmodell des Chats** ist gemma-4-E2B-it Q4_0 (ggml-org). Qwen3-4B-Instruct-2507
-  ist auf beiden Maschinen gelöscht; ein erneuter Vergleich braucht den Download (unsloth,
-  sha256 `3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597`). Llama-3.2-3B
-  ist sinnvoll; die fünf reinen Bench-Modelle bleiben, bis der Projektinhaber entscheidet.
+- **`models/` hält nur das Standardmodell** gemma-4-E2B-it Q4_0 (ggml-org). Alle anderen
+  Modelle der Messreihen sind gelöscht; ein erneuter Vergleich braucht den Download, Quelle und
+  sha256 stehen in `llm-bench/results/` (Qwen3-4B-Instruct-2507: unsloth,
+  `3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597`).
