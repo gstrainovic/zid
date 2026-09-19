@@ -929,8 +929,9 @@ MuPDFs Story-Engine. Folienvorschau in `MarkdownView` (`deck`-Feld), Command
 ## Clay: gepatchte clay.h unter libs/clay-zig/vendor
 
 Das Submodul zeigt auf den eigenen Fork `gstrainovic/clay-zig-bindings`, Branch `zid`
-(Upstream johan0A als Remote `upstream`); dort liegt der Fix. Zusätzlich liegt er als
-`patches/clay-updatescrollcontainers.patch`, um ihn gegen eine neuere clay.h anzuwenden. `libs/clay-zig/build.zig` legt `vendor/clay.h` vor die Abhängigkeit. Gegenüber v0.14 (upstream
+(Upstream johan0A als Remote `upstream`); dort liegen beide Fixes als Commits `598a5c7`
+(Scroll-Container) und `27407cd` (Hash-Map). Für eine neuere clay.h den Branch `zid` auf
+upstream rebasen. `libs/clay-zig/build.zig` legt `vendor/clay.h` vor die Abhängigkeit. Gegenüber v0.14 (upstream
 unverändert) sind dort drei Stellen in `Clay_UpdateScrollContainers` korrigiert, alle mit „zid:“
 markiert: Swap-Remove ohne `i--` übersprang Einträge, `Clay__GetHashMapItem` liefert nie `NULL`
 (sondern `&Clay_LayoutElementHashMapItem_DEFAULT`), und der Zeiger auf das Clip-Element wird vor
@@ -939,7 +940,7 @@ type Clay_ClipElementConfig“ ab, sobald nach einem Diff-Tab ein Multi-File-Dif
 stand. Clays Scroll-Positionen benutzt zid nicht, aber jedes `.clip`-Element legt dort einen
 Eintrag an, und nur `UI.updateScroll` räumt die (10 Einträge große) Liste auf.
 
-Zweiter Patch (`patches/clay-hashmap-compact.patch`, 18.09.2026): **Clays Hash-Map der
+Zweiter Fix (`27407cd`): **Clays Hash-Map der
 Element-IDs liegt im persistenten Speicher und wurde nie geleert.** Jede je gesehene ID
 (auch anonyme Textstücke: Hash aus Eltern-ID und Kindindex) belegt einen Eintrag, bis die
 Kapazität `maxElementCount` (16384) erreicht ist; danach liefert `Clay__AddHashMapItem` still
