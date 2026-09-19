@@ -73,5 +73,24 @@ Jeder Punkt mit geschätzter Wirkung vorab, gemessen vorher/nachher (`scripts/e2
    6. LRU-Cache gerenderter Seiten (Schlüssel: Seite, Zoom, Modus, Farbe), Textur beim Verdrängen
       freigeben.
    7. Zu Seite N springen, dazu Home/End.
-6. **Referenz-Klone löschen:** `reference/KrillClaw`, `reference/pls`, `reference/lite-xl`, `reference/flow`, `reference/gooey`, sobald
+6. **Rendering und Eingabe** (Ideen aus gooey, `reference/gooey`):
+   1. Clip-Stapel: verschachtelte Clips schneiden statt ersetzen (`clay_renderer/mod.zig`
+      `scissor_start`/`scissor_end` setzen absolut bzw. aufs ganze Fenster zurück). Vorbild
+      `scene.zig` `pushClip`/`popClip` mit Schnittmenge.
+   2. Abgerundete Ecken und Rahmen mit Radius: der Renderer ignoriert `corner_radius` (69 Stellen in
+      `src/` werden eckig gezeichnet). SDF-Shader aus gooey `platform/wgpu/shaders/unified.wgsl`
+      ist WGSL und übertragbar.
+   3. Schatten für Dialoge, Menüs, Tooltips, Picker (gleicher Shader, `PRIM_SHADOW`).
+   4. Undo/Redo in einzeiligen Feldern (`line_edit.zig`: Suche, Picker, Umbenennen,
+      Commit-Nachricht, Ordnerauswahl), schnelle Eingaben zu einem Schritt zusammenfassen
+      (gooey `widgets/edit_history.zig`).
+   5. IME: wio liefert `preview_reset`/`preview_char`/`preview_cursor`, `platform/mod.zig` wirft
+      sie weg; Vorschautext unterstrichen zeichnen, Cursor-Rechteck an `enableTextInput` geben.
+   6. Debug: Clays eingebauten Debug-Modus (`setDebugModeEnabled`) per Kürzel schaltbar; später
+      Profiler-Overlay mit Zeiten je Phase (Layout, Render, Atlas-Upload).
+   7. Weiches Scrollen: Pixel-Versatz statt ganzer Zeilen, Feder-Physik (gooey
+      `animation/spring.zig`); `src/ui/animation.zig` wird bisher nirgends benutzt.
+   8. Grenzwerte zentral (`limits`-Modul) und laut statt still: Shaper liefert bei > 2048 Bytes
+      leer, Clay-Kapazität läuft ohne Meldung voll. Loggen und im RPC zählen, nicht abstürzen.
+7. **Referenz-Klone löschen:** `reference/KrillClaw`, `reference/pls`, `reference/lite-xl`, `reference/flow`, `reference/gooey`, sobald
    die Punkte oben umgesetzt sind.
