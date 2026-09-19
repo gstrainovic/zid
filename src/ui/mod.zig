@@ -939,6 +939,10 @@ pub const UI = struct {
             if (self.is_ctrl_down and key == .c) return self.copyPreviewSelection(v);
             if (key == .escape and v.hasSelection()) return v.clearSelection();
         }
+        // Vorschau, Bild, PDF, Binär, Commit: kein Editor sichtbar, also erreicht keine Taste den
+        // unsichtbaren Editor dahinter. Ctrl+F öffnete dort eine unsichtbare Suchleiste, die
+        // alles Getippte schluckte und es später im Editor-Tab als Suchbegriff zeigte.
+        if (self.activeTabKind()) |k| if (k != .text) return;
         self.getActiveEditor().handleKeyPress(key);
     }
 
@@ -1005,6 +1009,8 @@ pub const UI = struct {
             term.sendInput(buf[0..len]) catch {};
             return;
         }
+        // kein Text in den unsichtbaren Editor hinter Vorschau, Bild, PDF, Binär
+        if (self.activeTabKind()) |k| if (k != .text) return;
         self.getActiveEditor().handleChar(char_code);
     }
 

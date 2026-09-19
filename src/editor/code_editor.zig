@@ -1884,6 +1884,11 @@ pub const CodeEditor = struct {
 
     fn handleFindKey(self: *Self, key: wio.Button) void {
         // Alt+C Groß/Klein, Alt+W Ganzwort, Alt+R Regex (wie VS Code)
+        // Ctrl+F / Ctrl+H bei offener Leiste: wie in VS Code steht der Begriff danach
+        // markiert (Tippen ersetzt ihn). Vorher schluckte die Leiste beide Kürzel und ein
+        // früher getippter Begriff blieb stehen, Neues hängte sich daran.
+        if (self.mods.ctrl and !self.mods.alt and key == .f) return self.openFind();
+        if (self.mods.ctrl and !self.mods.alt and key == .h) return self.openReplace();
         if (self.mods.alt and (key == .c or key == .w or key == .r)) {
             switch (key) {
                 .c => self.find.case_sensitive = !self.find.case_sensitive,
@@ -1951,9 +1956,11 @@ pub const CodeEditor = struct {
         self.findStep(true, true);
     }
 
+    /// Widget-IDs tragen das Editor-Salz (`idi`): zwei Panes mit offener Suchleiste meldeten
+    /// sonst je Frame duplicate_id für Leiste und Eingabefeld.
     fn renderFindWidget(self: *Self, arena: std.mem.Allocator, editor_id: clay.ElementId) void {
         clay.UI()(.{
-            .id = clay.ElementId.ID("find_widget"),
+            .id = self.idi("find_widget", 0),
             .floating = .{
                 .attach_to = .to_element_with_id,
                 .parentId = editor_id.id,
@@ -1974,7 +1981,7 @@ pub const CodeEditor = struct {
         })({
             clay.text("Find", .{ .font_size = 18, .color = .{ 150, 150, 170, 255 }, .wrap_mode = .none });
             clay.UI()(.{
-                .id = clay.ElementId.ID("find_input"),
+                .id = self.idi("find_input", 0),
                 .layout = .{
                     .sizing = .{ .w = .fixed(260), .h = .fixed(30) },
                     .padding = .axes(0, 8),
@@ -2013,7 +2020,7 @@ pub const CodeEditor = struct {
 
     fn renderReplaceRow(self: *Self, arena: std.mem.Allocator, editor_id: clay.ElementId) void {
         clay.UI()(.{
-            .id = clay.ElementId.ID("replace_widget"),
+            .id = self.idi("replace_widget", 0),
             .floating = .{
                 .attach_to = .to_element_with_id,
                 .parentId = editor_id.id,
@@ -2034,7 +2041,7 @@ pub const CodeEditor = struct {
         })({
             clay.text("Replace", .{ .font_size = 18, .color = .{ 150, 150, 170, 255 }, .wrap_mode = .none });
             clay.UI()(.{
-                .id = clay.ElementId.ID("replace_input"),
+                .id = self.idi("replace_input", 0),
                 .layout = .{
                     .sizing = .{ .w = .fixed(260), .h = .fixed(30) },
                     .padding = .axes(0, 8),
@@ -2061,7 +2068,7 @@ pub const CodeEditor = struct {
 
     fn renderGotoWidget(self: *Self, arena: std.mem.Allocator, editor_id: clay.ElementId) void {
         clay.UI()(.{
-            .id = clay.ElementId.ID("goto_widget"),
+            .id = self.idi("goto_widget", 0),
             .floating = .{
                 .attach_to = .to_element_with_id,
                 .parentId = editor_id.id,
@@ -2082,7 +2089,7 @@ pub const CodeEditor = struct {
         })({
             clay.text("Go to line", .{ .font_size = 18, .color = .{ 150, 150, 170, 255 }, .wrap_mode = .none });
             clay.UI()(.{
-                .id = clay.ElementId.ID("goto_input"),
+                .id = self.idi("goto_input", 0),
                 .layout = .{ .sizing = .{ .w = .fixed(120), .h = .fixed(30) }, .padding = .axes(0, 8), .child_alignment = .{ .y = .center } },
                 .background_color = .{ 30, 30, 46, 255 },
                 .border = .{ .width = .all(1), .color = .{ 120, 140, 220, 255 } },
@@ -4233,6 +4240,28 @@ test "Alt+↓ / Alt+↑ verschieben die Zeile, Ctrl+Shift+D dupliziert sie" {
     try std.testing.expectEqualStrings("one\none\ntwo\nthree", text);
     std.testing.allocator.free(text);
     try std.testing.expectEqual(@as(usize, 1), t.ed.cursor.row);
+}
+
+test "Suchleiste: Ctrl+F bei offener Leiste markiert den Begriff neu, Ctrl+H schaltet Ersetzen ein" {
+    var t = try testEditor(std.testing.allocator, "foo bar foo\nbaz foo");
+    defer t.buffer.deinit();
+    defer t.ed.deinit();
+    t.ed.dispatchAction(.Search);
+    t.ed.handleChar('f');
+    t.ed.handleChar('o');
+    try std.testing.expectEqualStrings("fo", t.ed.find.text());
+    // Zweites Ctrl+F: wie in VS Code steht der Begriff markiert, Tippen ersetzt ihn
+    t.ed.mods = .{ .ctrl = true };
+    t.ed.handleKeyPress(.f);
+    t.ed.mods = .{};
+    try std.testing.expect(t.ed.find.active);
+    t.ed.handleChar('b');
+    try std.testing.expectEqualStrings("b", t.ed.find.text());
+    t.ed.mods = .{ .ctrl = true };
+    t.ed.handleKeyPress(.h);
+    t.ed.mods = .{};
+    try std.testing.expect(t.ed.find.replace_mode);
+    try std.testing.expectEqualStrings("b", t.ed.find.text());
 }
 
 test "Ersetzen: replaceAll ersetzt alle Treffer, Gehe zu Zeile springt" {

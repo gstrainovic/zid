@@ -268,9 +268,12 @@ liegen in `src/ui/mod.zig`, das Virtualisierungsmuster in
   (zigdown macht aus Leerzeilen `Break`-Blöcke, die bleiben stumm), Absatzenden verlieren ihr
   Leerzeichen-Stück; ein nie gezeichneter Block dazwischen kommt als Fließtext aus dem Baum.
   Ändern sich Umbruchbreite oder Schriftgröße, wird die Auswahl aufgehoben (Zeilennummern
-  stimmen dann nicht mehr). Tasten in der Vorschau erreichen sonst weiter den unsichtbaren
-  Editor dahinter. RPC `md_selection` (`open`, `lines`, `text`), E2E in
-  `scripts/e2e_md_preview.py` (`step_selection`).
+  stimmen dann nicht mehr). Andere Tasten und Buchstaben erreichen den unsichtbaren Editor
+  hinter Vorschau, Bild, PDF und Binär-Tab nicht (`UI.handleKeyPress`/`handleChar` prüfen
+  `activeTabKind() == .text`); Ctrl+F über der Vorschau öffnete dort eine unsichtbare
+  Suchleiste, die alles Getippte schluckte. Die Vorschau hat keine eigene Suche.
+  RPC `md_selection` (`open`, `lines`, `text`), E2E in `scripts/e2e_md_preview.py`
+  (`step_selection`).
   **Deck (Marp):** dieselbe Auswahl auf der Folie (`beginSelection("md_slide", …)`, Block 0);
   ein Folienwechsel hebt sie auf. E2E in `e2e_marp_pdf.py`.
   **Chat-Bubbles:** jede Nachricht hat ihre eigene `MarkdownView`, `AIChatState.handleMouseDown`
@@ -329,6 +332,10 @@ liegen in `src/ui/mod.zig`, das Virtualisierungsmuster in
   Ctrl+Tab kommen im Terminal nicht mehr an der Shell an (bewusst, wie in Zed).
 - Suchleiste (`CodeEditor.find`, Logik in `src/editor/find_ops.zig`): inkrementell beim Tippen,
   Enter/Shift+Enter weiter/zurück mit Umbruch, Escape schließt, markierter Text wird Suchbegriff.
+  Ctrl+F bei offener Leiste markiert den Begriff neu (Tippen ersetzt ihn), Ctrl+H schaltet
+  Ersetzen dazu. Die Widget-IDs (`find_widget`, `find_input`, `replace_*`, `goto_*`) tragen das
+  Editor-Salz (`idi`), zwei Panes mit offener Leiste meldeten sonst duplicate_id.
+  E2E: `python3 scripts/e2e_find_preview.py` (Vorschau, Editor-Tab, Split).
   Spalten sind Codepoints, Tabs/Breitzeichen sind nicht berücksichtigt.
 - Tests in `src/editor/code_editor.zig` laufen nur, weil die Datei eigenes Test-Root ist
   (`code_editor_tests` in build.zig, wio-Symbol-Hack unter `is_test` in der Datei). Tests in
