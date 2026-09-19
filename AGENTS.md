@@ -364,9 +364,11 @@ Drei Regeln aus der Messreihe vom 17.09.2026
 ## Engines und Modelle (`engines/`, `models/`, `llm-bench/`)
 
 Alles liegt im Repo. Layout, gepinnte Submodule, `fix-rpath.sh` und die Messregeln stehen in
-`.claude/skills/llm-local/SKILL.md`. Kurz: `engines/BitNet` und `engines/llama.cpp-vulkan` sind
-gepinnt, `models/` hält GGUFs flach und ignoriert (nie committen), `llm-bench/` ist ein
-`git subtree` mit historischen Protokollen, die nicht angefasst werden.
+`.claude/skills/llm-local/SKILL.md`. Kurz: `engines/llama.cpp-vulkan` ist die einzige Engine
+(gepinnt, CPU und GPU in einem Build), `models/` hält GGUFs flach und ignoriert (nie committen),
+`llm-bench/` ist ein `git subtree` mit historischen Protokollen, die nicht angefasst werden. Die
+BitNet-Engine und ihr Modell liegen nicht im Repo; `llm-bench/setup/linux.sh` holt und baut sie
+für Nachmessungen.
 
 ## Agent-Werkzeuge: der Agent kann, was der Editor kann
 

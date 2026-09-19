@@ -1,7 +1,9 @@
 # CLAUDE.md — llm-bench (früher bitnet-colibri-bench)
 
-Seit 06.09.2026 als `git subtree` Teil des zid-Repos: Engines unter `engines/`, Modelle
-flach unter `models/` (BitNet-Referenz `models/bitnet-b1.58-2B-4T/`), colibri gelöscht.
+Seit 06.09.2026 als `git subtree` Teil des zid-Repos: Engine unter
+`engines/llama.cpp-vulkan`, Modelle flach unter `models/`, colibri gelöscht. Die
+BitNet-Engine und `models/bitnet-b1.58-2B-4T/` liegen nicht im Repo, weil zid sie nicht
+nutzt; `setup/linux.sh` holt und baut beides gepinnt neu.
 
 ## Projektstand: abgeschlossen (20.08.2026)
 
@@ -82,7 +84,7 @@ Seit der zweiten Laptop-Runde gibt es eine zweite Engine: llama.cpp Tag
 gepinnte b3962 die Architekturen von Qwen3, Phi-4 und Gemma-3 nicht kennt
 und kein taugliches Vulkan hat. Die Zuordnung ist fest:
 
-- **BitNet i2_s → nur die gepinnte BitNet-Engine** (`engines/BitNet`). Auf der
+- **BitNet i2_s → nur die gepinnte BitNet-Engine** (`engines/BitNet`, per `setup/linux.sh`). Auf der
   neuen Engine ist i2_s kaputt (der `Q1_0`-Defekt aus Abschnitt oben).
 - **Qwen3/Phi-4/Gemma-3/gemma4 → nur b10524**, CPU wie GPU. gemma4 zusätzlich mit
   `--chat-template-kwargs {"enable_thinking":false}`, sonst frisst das Denken das
