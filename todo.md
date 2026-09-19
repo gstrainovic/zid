@@ -7,16 +7,14 @@ KI-Punkte: Wirkung vorab schätzen, vorher/nachher messen (`scripts/e2e_ai_read_
 
 ## 1. Kritisch: Datenverlust, Absturz, falscher Stand, stilles Scheitern
 
-1. **Clay-Überlauf bei langen Chat-Antworten:** eine Antwort mit 1 844 Token löste
-   `elements_capacity_exceeded` aus (`e2e_ai_read_limits.py 40000:first`); Elemente fehlen dann.
-2. **PDF zeigt nach Änderung den alten Stand:** ein offenes PDF zeigt nach erneutem Marp-Export
+1. **PDF zeigt nach Änderung den alten Stand:** ein offenes PDF zeigt nach erneutem Marp-Export
    den alten Stand (`handleExternalChange` kennt nur Text-Buffer, `main.zig` lädt nur, wenn der Pfad
    noch nicht in `open_pdfs` ist). Neu laden bei Dateiänderung, bei halb geschriebener Datei kurz
    erneut versuchen, Seite klemmen, wenn das Dokument kürzer wird.
-3. **Grenzwerte laut statt still:** Shaper liefert bei > 2048 Bytes leeren Text, Clay-Kapazität
+2. **Grenzwerte laut statt still:** Shaper liefert bei > 2048 Bytes leeren Text, Clay-Kapazität
    läuft ohne Meldung voll. Zentral (`limits`-Modul), loggen und im RPC zählen, nicht abstürzen
    (Vorbild gooey `core/limits.zig`).
-4. **KI: `finish_reason: "length"` auswerten.** Läuft die Antwort ans Ende von `-c 8192`, ist sie
+3. **KI: `finish_reason: "length"` auswerten.** Läuft die Antwort ans Ende von `-c 8192`, ist sie
    still abgeschnitten; abgeschnittene Tool-Argumente enden als „arguments are not valid JSON“.
    Neu: Hinweis „abgeschnitten“, abgeschnittene Aufrufe nicht ausführen. Kein `max_tokens`, das
    würde lange `write_file`-Inhalte kappen. Nachstellen: 20-KB-Datei lesen und vollständig
