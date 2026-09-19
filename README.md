@@ -94,3 +94,8 @@ Ordnername ist der `.hash`-Wert aus der fehlgeschlagenen `build.zig.zon`
 (z. B. `tree_sitter-0.26.7-z0Lhy...`), die URL steht direkt daneben. Bei
 Zig 0.15 landet das Paket unter `%LOCALAPPDATA%\zig\p`, bei 0.16 im
 projektlokalen `zig-pkg/`.
+
+## Lizenz
+
+AGPL-3.0-only, siehe `LICENSE`. zid linkt MuPDF (AGPL-3.0), daher ist eine
+AGPL-kompatible Lizenz für zid verpflichtend.
