@@ -7,14 +7,10 @@ KI-Punkte: Wirkung vorab schätzen, vorher/nachher messen (`scripts/e2e_ai_read_
 
 ## 1. Kritisch: Datenverlust, Absturz, falscher Stand, stilles Scheitern
 
-1. **PDF zeigt nach Änderung den alten Stand:** ein offenes PDF zeigt nach erneutem Marp-Export
-   den alten Stand (`handleExternalChange` kennt nur Text-Buffer, `main.zig` lädt nur, wenn der Pfad
-   noch nicht in `open_pdfs` ist). Neu laden bei Dateiänderung, bei halb geschriebener Datei kurz
-   erneut versuchen, Seite klemmen, wenn das Dokument kürzer wird.
-2. **Grenzwerte laut statt still:** Shaper liefert bei > 2048 Bytes leeren Text, Clay-Kapazität
+1. **Grenzwerte laut statt still:** Shaper liefert bei > 2048 Bytes leeren Text, Clay-Kapazität
    läuft ohne Meldung voll. Zentral (`limits`-Modul), loggen und im RPC zählen, nicht abstürzen
    (Vorbild gooey `core/limits.zig`).
-3. **KI: `finish_reason: "length"` auswerten.** Läuft die Antwort ans Ende von `-c 8192`, ist sie
+2. **KI: `finish_reason: "length"` auswerten.** Läuft die Antwort ans Ende von `-c 8192`, ist sie
    still abgeschnitten; abgeschnittene Tool-Argumente enden als „arguments are not valid JSON“.
    Neu: Hinweis „abgeschnitten“, abgeschnittene Aufrufe nicht ausführen. Kein `max_tokens`, das
    würde lange `write_file`-Inhalte kappen. Nachstellen: 20-KB-Datei lesen und vollständig
@@ -55,6 +51,11 @@ KI-Punkte: Wirkung vorab schätzen, vorher/nachher messen (`scripts/e2e_ai_read_
    „switch on corrupt value“ in `Buffer.walk_const`, zufällig in `e2e_editor.py` Schritt „Datei
    außerhalb geändert“ (1 von 3 Läufen). Lesende RPCs auf den Buffer in den Main-Thread verlegen
    oder den Buffer-Tausch sperren wie `git_status_mutex`.
+
+10. **mupdf stürzt bei manchen kaputten PDFs ab** (System-Bibliothek 1.27.2; `mutool draw` auf
+    einem zu 40 % geschriebenen PDF: Segfault, in zid „double free“). Der Reload wartet deshalb
+    auf eine ruhende Datei; eine dauerhaft kaputte Datei öffnen reißt zid aber weiter mit.
+    Rendern in einen Kindprozess auslagern oder mupdf-Version prüfen.
 
 ## 3. Wichtige Funktionen
 

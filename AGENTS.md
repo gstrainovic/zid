@@ -741,7 +741,17 @@ MuPDFs Story-Engine. Folienvorschau in `MarkdownView` (`deck`-Feld), Command
 `md_export_pdf`. E2E: `python3 scripts/e2e_marp_pdf.py`, Fixture
 `scripts/fixtures/marp_test.md`.
 
-## PDF-Vorschau: Blättern
+## PDF-Vorschau: Blättern und Neuladen
+
+- **Neu laden bei Dateiänderung:** `handleExternalChange` erkennt offene PDFs (`keyForPath` über
+  `open_pdfs`, auch per realpath) und reiht sie in `pending_pdf_reloads` ein; `exportMarpPdf` tut
+  das direkt. Der Main-Loop lädt erst, wenn die Datei 150 ms ruht (`takeDuePdfReload`, mtime):
+  Das System-mupdf 1.27.2 (Linux linkt `/lib64/libmupdf.so`, nicht fancy-cats mupdf) stürzt beim
+  Reparieren mancher halb geschriebener PDFs ab („double free“, `mutool draw` segfaultet auf
+  derselben Datei), und der Watcher meldet je Datei nur ein Ereignis pro 100 ms. Neuer Handler,
+  Seite geklemmt, Textur ersetzt; scheitert etwas, bleibt der alte Stand. `wantsFrameSoon` hält
+  den Loop wach, solange ein Reload wartet. E2E `python3 scripts/e2e_pdf_reload.py`, Marp-Weg in
+  `e2e_marp_pdf.py` (letzter Schritt).
 
 - Blätter-Logik als reines Modul `src/ui/pdf_nav.zig` (Tasten, Mausrad, Sättigung an den
   Rändern, Beschriftung). Die Ansicht `src/ui/pdf_view.zig` liefert nur ein Seiten-Delta,
