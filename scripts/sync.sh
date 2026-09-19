@@ -15,7 +15,7 @@ REPO_ROOT="$(pwd)"
 
 # Eigene Forks: hier wird committet und gepusht. libs/clay-zig traegt den Fix an
 # Clay_UpdateScrollContainers (Branch zid, siehe AGENTS.md).
-OWN_SUBMODULES=("libs/gooey" "libs/wgpu_native_zig" "libs/wio" "libs/zigdown" "libs/clay-zig")
+OWN_SUBMODULES=("libs/wgpu_native_zig" "libs/wio" "libs/zigdown" "libs/clay-zig")
 
 # Referenz-Repos: Inspiration/Lesequelle, kein Build-Input.
 # Format: "<relativer Pfad>|<git-URL>"
@@ -23,7 +23,6 @@ OWN_SUBMODULES=("libs/gooey" "libs/wgpu_native_zig" "libs/wio" "libs/zigdown" "l
 # im Build); ein reset auf origin/main zieht einen Stand, der Zig 0.16 verlangt.
 REFERENCES=(
     "reference/lite-xl|https://github.com/lite-xl/lite-xl.git"
-    "reference/sev|https://github.com/dylancobb/sev.git"
 )
 
 RED='\033[0;31m'

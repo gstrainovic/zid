@@ -1,9 +1,6 @@
 [submodule "libs/wgpu_native_zig"]
 	path = libs/wgpu_native_zig
 	url = https://github.com/gstrainovic/wgpu_native_zig.git
-[submodule "libs/gooey"]
-	path = libs/gooey
-	url = https://github.com/gstrainovic/gooey-vulkan
 [submodule "libs/clay-zig"]
 	path = libs/clay-zig
 	url = https://github.com/gstrainovic/clay-zig-bindings
@@ -17,16 +14,13 @@
 [submodule "libs/zigjr"]
 	path = libs/zigjr
 	url = https://github.com/williamw520/zigjr
-[submodule "libs/flow"]
-	path = libs/flow
-	url = https://github.com/neurocyte/flow.git
 [submodule "libs/fancy-cat"]
 	path = libs/fancy-cat
-	url = https://github.com/freref/fancy-cat.git
+	url = https://github.com/gstrainovic/fancy-cat.git
 	ignore = dirty
 [submodule "libs/nanosvg-zig"]
 	path = libs/nanosvg-zig
-	url = https://github.com/zweiler1/nanosvg-zig
+	url = https://github.com/gstrainovic/nanosvg-zig
 [submodule "libs/zigdown"]
 	path = libs/zigdown
 	url = https://github.com/gstrainovic/zigdown.git
