@@ -58,5 +58,20 @@ Jeder Punkt mit geschätzter Wirkung vorab, gemessen vorher/nachher (`scripts/e2
    markieren (Ctrl+L), alle Vorkommen markieren (Ctrl+Shift+L), Groß-/Kleinschreibung.
 4. **Autovervollständigung:** Wörter aus offenen Dokumenten, LSP-Vorschläge, falls ein Server
    läuft (`lsp_completion` ist im Client schon vorhanden, aber ungenutzt).
-5. **Referenz-Klone löschen:** `reference/KrillClaw`, `reference/pls`, `reference/lite-xl`, sobald
+5. **PDF-Ansicht** (Ideen aus fancy-cat, `src/ui/pdf_view.zig`, `src/ui/pdf_nav.zig`,
+   `src/rendering/pdf_handler.zig`):
+   1. Neu laden, wenn sich die Datei ändert: ein offenes PDF zeigt nach erneutem Marp-Export den
+      alten Stand (`handleExternalChange` kennt nur Text-Buffer, `main.zig` lädt nur, wenn der Pfad
+      noch nicht in `open_pdfs` ist). Bei halb geschriebener Datei kurz erneut versuchen, Seite
+      klemmen, wenn das Dokument kürzer wird.
+   2. Render-Auflösung aus der Pane-Größe statt fest (heute 1.5 beim Öffnen, 2.0 beim Blättern),
+      bei Größenänderung neu rendern.
+   3. Umschalten ganze Seite / volle Breite (heute immer volle Breite).
+   4. Dunkelmodus: Seite in Theme-Farben umfärben (`fz_tint_pixmap`).
+   5. Zoom und Verschieben innerhalb der Seite (z. B. Ctrl+Rad), ohne das Blättern per Rad zu
+      brechen.
+   6. LRU-Cache gerenderter Seiten (Schlüssel: Seite, Zoom, Modus, Farbe), Textur beim Verdrängen
+      freigeben.
+   7. Zu Seite N springen, dazu Home/End.
+6. **Referenz-Klone löschen:** `reference/KrillClaw`, `reference/pls`, `reference/lite-xl`, `reference/flow`, `reference/gooey`, sobald
    die Punkte oben umgesetzt sind.
