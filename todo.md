@@ -5,14 +5,6 @@ Sortiert nach Dringlichkeit: Abstürze und falsches Verhalten zuerst, Komfort zu
 KI-Punkte: Wirkung vorab schätzen, vorher/nachher messen (`scripts/e2e_ai_read_limits.py`,
 `scripts/e2e_ai_tools.py`); Antworten streuen bei Temperatur 0.7, also Fälle wiederholen.
 
-## 1. Kritisch: Datenverlust, Absturz, falscher Stand, stilles Scheitern
-
-1. **KI: `finish_reason: "length"` auswerten.** Läuft die Antwort ans Ende von `-c 8192`, ist sie
-   still abgeschnitten; abgeschnittene Tool-Argumente enden als „arguments are not valid JSON“.
-   Neu: Hinweis „abgeschnitten“, abgeschnittene Aufrufe nicht ausführen. Kein `max_tokens`, das
-   würde lange `write_file`-Inhalte kappen. Nachstellen: 20-KB-Datei lesen und vollständig
-   wiedergeben lassen.
-
 ## 2. Fehler: sichtbar falsch, aber ohne Datenverlust
 
 1. **Verschachtelte Clips** ersetzen sich statt sich zu schneiden (`clay_renderer/mod.zig`
