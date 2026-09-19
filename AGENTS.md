@@ -625,6 +625,12 @@ für Nachmessungen.
   (Minimap-Rückkopplung, siehe Skill `clay-layout`; `python3 scripts/e2e_layout_stable.py`).
   Der Glyph-Cache (4096 Einträge, je Größe × 4 Subpixel-Varianten) leert sich komplett, wenn er
   voll ist (`GlyphCache.ensureFreeSlot`), statt neue Glyphen jeden Frame neu zu rastern.
+- **Fenster schließen fragt nach:** wio `.close` beendet nicht selbst (`platform/mod.zig`), sondern
+  ruft `UI.requestQuit`. Ohne ungespeicherte Buffer (`Buffer.is_dirty()` über `open_buffers`)
+  setzt es `quit_confirmed`, sonst Dialog „Unsaved Changes“ (Save All / Don't Save / Cancel);
+  Save All legt wie `save()` eine Sicherung an und bricht beim ersten Speicherfehler ab, ohne zu
+  beenden. Der Main-Loop endet über `quit_confirmed`. RPC `request_quit` stellt den
+  Schließen-Knopf nach, E2E `python3 scripts/e2e_quit_unsaved.py`.
 - **Autosave:** File → Toggle Autosave (`UI.autosave`), speichert 1 s nach der letzten Änderung
   (`CodeEditor.last_edit_ms`) nur Text-Tabs mit Pfad. Jedes Speichern legt vorher eine Sicherung
   unter `$XDG_DATA_HOME/zid/backup/<name>.<hash>.bak` ab (`src/editor/backup.zig`, eine je

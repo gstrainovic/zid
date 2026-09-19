@@ -466,7 +466,7 @@ pub fn main() !void {
         // Headless und Fenster teilen sich diesen Loop. Headless hat keine Plattform:
         // keine Fenster-Events, kein Cursor, keine Präsentation, Polling statt wio.wait.
         var last_frame_ns = std.time.nanoTimestamp();
-        while ((headless_mode or plat.isRunning()) and (e2e_ctx == null or !e2e_ctx.?.shutdown_flag.load(.seq_cst))) {
+        while ((headless_mode or plat.isRunning()) and !ui_system.quit_confirmed and (e2e_ctx == null or !e2e_ctx.?.shutdown_flag.load(.seq_cst))) {
             if (e2e_ctx) |*c| e2e_server.drainInputs(c);
             const frame_t0 = std.time.nanoTimestamp();
             // Echte Zeit seit dem letzten Frame, nicht pauschal 16 ms: Frames dauern mit
@@ -603,6 +603,8 @@ pub fn main() !void {
                         .char => |char_code| {
                             ui_system.handleChar(char_code);
                         },
+                        // Schließen-Knopf: nachfragen, wenn etwas ungespeichert ist
+                        .close => ui_system.requestQuit(),
                         .focused => {
                             plat.setTextInput(true);
                         },
