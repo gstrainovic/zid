@@ -7,10 +7,7 @@ KI-Punkte: Wirkung vorab schätzen, vorher/nachher messen (`scripts/e2e_ai_read_
 
 ## 1. Kritisch: Datenverlust, Absturz, falscher Stand, stilles Scheitern
 
-1. **Grenzwerte laut statt still:** Shaper liefert bei > 2048 Bytes leeren Text, Clay-Kapazität
-   läuft ohne Meldung voll. Zentral (`limits`-Modul), loggen und im RPC zählen, nicht abstürzen
-   (Vorbild gooey `core/limits.zig`).
-2. **KI: `finish_reason: "length"` auswerten.** Läuft die Antwort ans Ende von `-c 8192`, ist sie
+1. **KI: `finish_reason: "length"` auswerten.** Läuft die Antwort ans Ende von `-c 8192`, ist sie
    still abgeschnitten; abgeschnittene Tool-Argumente enden als „arguments are not valid JSON“.
    Neu: Hinweis „abgeschnitten“, abgeschnittene Aufrufe nicht ausführen. Kein `max_tokens`, das
    würde lange `write_file`-Inhalte kappen. Nachstellen: 20-KB-Datei lesen und vollständig

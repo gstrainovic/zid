@@ -264,7 +264,12 @@ pub const UI = struct {
     /// Clay meldet Layout-Fehler hierher statt sie nur auf den Bildschirm zu
     /// malen. Ohne diesen Handler stand die Meldung rot im Fenster und tauchte
     /// in keinem Log auf.
+    /// Clay-Fehler seit Start (RPC `ui_state.clay_errors`): E2E prüfen damit, dass nichts still
+    /// verloren ging.
+    pub var clay_error_count: std.atomic.Value(u32) = std.atomic.Value(u32).init(0);
+
     fn clayError(data: clay.ErrorData) callconv(.c) void {
+        _ = clay_error_count.fetchAdd(1, .monotonic);
         log.err("Clay: {s} ({s})", .{ data.error_text.chars[0..@intCast(data.error_text.length)], @tagName(data.error_type) });
         if (data.error_type == .duplicate_id) logDuplicateParent();
     }

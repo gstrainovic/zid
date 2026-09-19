@@ -1261,6 +1261,8 @@ fn uiState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     try buf.writer.print(", \"glyph_rasterized\": {d}, \"glyph_cache_clears\": {d}, \"glyph_cache_entries\": {d}", .{
         if (glyph_stats) |s| s.rasterized else 0, if (glyph_stats) |s| s.clears else 0, if (glyph_stats) |s| s.entries else 0,
     });
+    const runs_dropped: u64 = if (@import("rendering/mod.zig").Renderer.g_text_renderer) |tr| tr.ts_ptr.runs_dropped.load(.monotonic) else 0;
+    try buf.writer.print(", \"text_runs_dropped\": {d}, \"clay_errors\": {d}", .{ runs_dropped, ui_mod.UI.clay_error_count.load(.monotonic) });
     try buf.writer.print(", \"active_pane_index\": {d}, \"light_theme\": {}, \"font_size\": {d}, \"autosave\": {}, \"menu_highlight\": {d}, \"shortcuts_scroll\": {d:.0}, \"toast\": ", .{
         activePaneIndex(ui), ui.isLightTheme(), ui.getActiveEditor().font_size, ui.autosave, ui.menu_highlight orelse 999, ui.shortcuts_scroll_y,
     });
