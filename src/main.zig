@@ -388,8 +388,8 @@ pub fn main() !void {
         defer image_rdr.deinit();
         ui_system.image_renderer = &image_rdr;
 
-        // Logo Textur laden (PNG via gooey)
-        var logo_texture = image_rdr.createTextureFromPath(allocator, "libs/gooey/assets/ziglang_logo.png") catch |err| blk: {
+        // Logo der Kopfzeile
+        var logo_texture = image_rdr.createTextureFromPath(allocator, "assets/ziglang_logo.png") catch |err| blk: {
             log.err("Failed to load logo: {}. Falling back to test pattern.", .{err});
             break :blk try image_rdr.createTestPattern(64, 64);
         };

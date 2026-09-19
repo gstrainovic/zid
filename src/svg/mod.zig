@@ -63,5 +63,4 @@ pub const SvgRenderInfo = struct {
 // Lucide Icons
 // =============================================================================
 
-// Wir werden die Lucide Icons später aus libs/gooey/src/components/svg.zig importieren
-// oder eine eigene Version davon bauen.
+// Die Lucide-Icons liegen in src/ui/components/svg.zig.
