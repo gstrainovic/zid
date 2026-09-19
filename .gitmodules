@@ -33,10 +33,6 @@
 [submodule "libs/ghostty"]
 	path = libs/ghostty
 	url = https://github.com/ghostty-org/ghostty.git
-[submodule "engines/BitNet"]
-	path = engines/BitNet
-	url = https://github.com/microsoft/BitNet.git
-	ignore = dirty
 [submodule "engines/llama.cpp-vulkan"]
 	path = engines/llama.cpp-vulkan
 	url = https://github.com/ggml-org/llama.cpp

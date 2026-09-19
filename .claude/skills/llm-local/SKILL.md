@@ -108,17 +108,20 @@ RPC `chat_state`: Status, Detail, Titel, loading/initializing/downloading,
 
 ## Engines und Modelle
 
-**Layout:** `engines/BitNet` (Submodul, gepinnt `01eb415`; dessen Submodul
-`3rdparty/llama.cpp` auf `1f86f05` = b3962, `.gitmodules` mit `ignore = dirty`, weil
-`src/ggml-bitnet-mad.cpp` den Patch `llm-bench/patches/bitnet-mad-const-y_col.patch`
-trägt) und `engines/llama.cpp-vulkan` (Submodul `9ee9fc0` = b10524, Build mit
-`GGML_VULKAN=ON`). Builds liegen unbeobachtet in `engines/*/build/`. `models/` hält alle
-GGUFs flach (per `*.gguf` ignoriert, **nie committen**). In `engines/BitNet/models/`
-zeigen zwei Symlinks auf `models/`, damit BitNets eigene Skripte laufen.
+**Layout:** `engines/llama.cpp-vulkan` (Submodul `9ee9fc0` = b10524, Build mit
+`GGML_VULKAN=ON`) ist die einzige Engine; derselbe Build läuft auf GPU und CPU. Der Build
+liegt unbeobachtet in `engines/llama.cpp-vulkan/build/`. `models/` hält alle GGUFs flach
+(per `*.gguf` ignoriert, **nie committen**).
+
+**BitNet ist nicht im Repo.** zid nutzt es nicht (braucht eine eigene gepinnte Engine ohne
+Vulkan und einen Tokenizer-Override). Für Nachmessungen holt `llm-bench/setup/linux.sh`
+die Engine gepinnt auf `01eb415` (Submodul `3rdparty/llama.cpp` auf `1f86f05` = b3962)
+nach `engines/BitNet`, spielt `llm-bench/patches/bitnet-mad-const-y_col.patch` ein und lädt
+`models/bitnet-b1.58-2B-4T/`.
 
 **cmake brennt absolute Pfade ein.** Nach einem Umzug finden `llama-server` und
 `llama-bench` ihre `libllama.so` nicht. `llm-bench/setup/fix-rpath.sh` schreibt die
-RUNPATHs beider Builds per patchelf auf `$ORIGIN`-relative Pfade um (Kopie patchen und
+RUNPATHs der Builds per patchelf auf `$ORIGIN`-relative Pfade um (Kopie patchen und
 darüberschieben, weil ein laufender llama-server die Datei gemappt hält: „Text file
 busy"). Nach jedem Neubau oder Verschieben erneut ausführen. Die Build-Verzeichnisse
 selbst kann cmake nach einem Umzug nicht neu konfigurieren, ein Neubau muss von vorn
@@ -128,6 +131,9 @@ beginnen.
 `results/*.md` sind historische Protokolle und werden nicht angefasst.
 
 ## Messregeln
+
+Die drei BitNet-Regeln gelten nur, wenn BitNet per `llm-bench/setup/linux.sh` wieder
+aufgebaut ist.
 
 - **Die BitNet-Engine ist gepinnt, und das ist keine Vorsicht.** Der aktuelle Stand von
   microsoft/BitNet zeigt auf einen Fork-Branch, mit dem BitNet-b1.58-2B-4T unbrauchbar
@@ -150,5 +156,4 @@ beginnen.
 - **Standardmodell des Chats** ist gemma-4-E2B-it Q4_0 (ggml-org). Qwen3-4B-Instruct-2507
   ist auf beiden Maschinen gelöscht; ein erneuter Vergleich braucht den Download (unsloth,
   sha256 `3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597`). Llama-3.2-3B
-  und das BitNet-Referenzmodell sind sinnvoll; die fünf reinen Bench-Modelle bleiben, bis
-  der Projektinhaber entscheidet.
+  ist sinnvoll; die fünf reinen Bench-Modelle bleiben, bis der Projektinhaber entscheidet.
