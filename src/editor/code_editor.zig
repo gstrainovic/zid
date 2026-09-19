@@ -167,6 +167,9 @@ pub const CodeEditor = struct {
     pending_split_h: bool = false,
 
     typing_in_progress: bool = false,
+    /// Cursor nach dem zuletzt getippten Zeichen. Steht der Cursor beim nächsten Zeichen woanders
+    /// (Klick, Pfeil, Sprung), beginnt ein neuer Undo-Schritt.
+    typing_end: struct { row: usize, col: usize } = .{ .row = 0, .col = 0 },
 
     pending_md_preview: bool = false,
     pending_md_export_pdf: bool = false,
@@ -324,9 +327,17 @@ pub const CodeEditor = struct {
         backup.backup(self.allocator, path) catch |err| std.log.scoped(.editor).warn("backup for '{s}' failed: {}", .{ path, err });
         try self.buffer.store_to_file_and_clean(path);
 
-        self.is_modified = false;
+        self.markSaved();
         self.saved_event = true;
         std.log.scoped(.editor).info("Saved file: {s}", .{path});
+    }
+
+    /// Stand nach erfolgreichem Speichern (Buffer hat `last_save` schon gesetzt).
+    pub fn markSaved(self: *Self) void {
+        self.is_modified = false;
+        // Nächstes Zeichen legt einen neuen Undo-Stand an: dessen root ist `last_save`, Undo
+        // dorthin macht den Tab wieder sauber
+        self.typing_in_progress = false;
     }
 
     /// true genau einmal nach jedem erfolgreichen Speichern (Toast in der UI).
@@ -1582,18 +1593,12 @@ pub const CodeEditor = struct {
                     std.log.debug("Undo: nichts mehr rückgängig zu machen ({})", .{err});
                     return;
                 };
-                std.log.info("Undo: success, meta len={}", .{meta.len});
-                self.longest_valid = false;
-                self.cursor = .{};
-                self.selection_anchor = null;
+                self.afterUndoRedo(meta);
                 return;
             },
             .Redo => {
                 const meta = self.buffer.redo() catch return;
-                _ = meta;
-                self.longest_valid = false;
-                self.cursor = .{};
-                self.selection_anchor = null;
+                self.afterUndoRedo(meta);
                 return;
             },
             .MdPreview => {
@@ -1644,10 +1649,34 @@ pub const CodeEditor = struct {
     }
 
     /// Snapshot for undo - saves current buffer state before edits
+    /// Die Metadaten tragen die Cursor-Position vor der Änderung (`zeile:spalte`); Undo/Redo
+    /// setzen den Cursor dorthin statt an den Dateianfang.
     fn snapshotForUndo(self: *Self) void {
-        self.buffer.store_undo("edit") catch {
+        var buf: [48]u8 = undefined;
+        const meta = std.fmt.bufPrint(&buf, "{d}:{d}", .{ self.cursor.row, self.cursor.col }) catch "";
+        self.buffer.store_undo(meta) catch {
             std.log.err("Failed to store undo snapshot", .{});
         };
+    }
+
+    /// Nach Undo/Redo: Cursor aus den Metadaten (sonst der alte, begrenzt), Geändert-Status aus
+    /// dem Vergleich mit dem gespeicherten Stand.
+    fn afterUndoRedo(self: *Self, meta: []const u8) void {
+        self.longest_valid = false;
+        self.selection_anchor = null;
+        if (std.mem.indexOfScalar(u8, meta, ':')) |sep| {
+            const row = std.fmt.parseInt(usize, meta[0..sep], 10) catch self.cursor.row;
+            const col = std.fmt.parseInt(usize, meta[sep + 1 ..], 10) catch self.cursor.col;
+            self.cursor.row = row;
+            self.cursor.col = col;
+        }
+        const last_row = self.lineCount() -| 1;
+        if (self.cursor.row > last_row) self.cursor.row = last_row;
+        const line_cols = self.buffer.root.line_width(self.cursor.row, self.metrics()) catch 0;
+        if (self.cursor.col > line_cols) self.cursor.col = line_cols;
+        self.cursor.target = self.cursor.col;
+        self.is_modified = self.buffer.is_dirty();
+        self.recordCursorMovement();
     }
 
     pub const FindState = struct {
@@ -3104,10 +3133,12 @@ pub const CodeEditor = struct {
             return;
         }
 
-        if (!self.typing_in_progress and !self.in_multi) {
+        const moved = self.cursor.row != self.typing_end.row or self.cursor.col != self.typing_end.col;
+        if (!self.in_multi and (!self.typing_in_progress or moved)) {
             self.snapshotForUndo();
             self.typing_in_progress = true;
         }
+        defer self.typing_end = .{ .row = self.cursor.row, .col = self.cursor.col };
 
         // Autoclose: Klammern und Anführungszeichen als Paar, Schließen springt drüber
         if (edit_ops.closerFor(char_code)) |closer| {
@@ -3851,6 +3882,68 @@ test "DeleteLine: einzige Zeile wird nur geleert" {
     t.ed.dispatchAction(.DeleteLine);
     try std.testing.expectEqual(@as(usize, 1), t.ed.lineCount());
     try std.testing.expectEqual(@as(usize, 0), t.ed.cursor.row);
+}
+
+test "Undo/Redo: Cursor steht an der Änderung, nicht am Dateianfang" {
+    var t = try testEditor(std.testing.allocator, "eins\nzwei\ndrei");
+    defer t.buffer.deinit();
+    defer t.ed.deinit();
+    t.ed.cursor.row = 2;
+    t.ed.cursor.col = 4;
+    t.ed.handleChar('X');
+    try std.testing.expectEqualStrings("dreiX", t.ed.getLine(2));
+    t.ed.dispatchAction(.Undo);
+    try std.testing.expectEqualStrings("drei", t.ed.getLine(2));
+    try std.testing.expectEqual(@as(usize, 2), t.ed.cursor.row);
+    try std.testing.expectEqual(@as(usize, 4), t.ed.cursor.col);
+    t.ed.dispatchAction(.Redo);
+    try std.testing.expectEqualStrings("dreiX", t.ed.getLine(2));
+    try std.testing.expectEqual(@as(usize, 2), t.ed.cursor.row);
+}
+
+test "Undo: Tippen nach einem Cursorsprung ist ein eigener Schritt" {
+    var t = try testEditor(std.testing.allocator, "eins\nzwei\ndrei");
+    defer t.buffer.deinit();
+    defer t.ed.deinit();
+    t.ed.cursor.col = 4;
+    t.ed.handleChar('a');
+    t.ed.handleChar('b');
+    t.ed.cursor.row = 2; // woanders hin, ohne dazwischen etwas anderes zu tun
+    t.ed.cursor.col = 4;
+    t.ed.handleChar('X');
+    t.ed.dispatchAction(.Undo);
+    try std.testing.expectEqualStrings("einsab", t.ed.getLine(0));
+    try std.testing.expectEqualStrings("drei", t.ed.getLine(2));
+    try std.testing.expectEqual(@as(usize, 2), t.ed.cursor.row);
+}
+
+test "Undo: nach dem Speichern beginnt ein neuer Schritt, Undo trifft den gespeicherten Stand" {
+    var t = try testEditor(std.testing.allocator, "eins");
+    defer t.buffer.deinit();
+    defer t.ed.deinit();
+    t.ed.cursor.col = 4;
+    t.ed.handleChar('a');
+    t.buffer.last_save = t.buffer.root; // wie store_to_file_and_clean
+    t.ed.markSaved();
+    t.ed.handleChar('b');
+    t.ed.dispatchAction(.Undo);
+    try std.testing.expectEqualStrings("einsa", t.ed.getLine(0));
+    try std.testing.expect(!t.ed.is_modified);
+}
+
+test "Undo zurück auf den gespeicherten Stand: Tab wieder sauber, Redo wieder geändert" {
+    var t = try testEditor(std.testing.allocator, "eins\n");
+    defer t.buffer.deinit();
+    defer t.ed.deinit();
+    t.buffer.last_save = t.buffer.root; // wie nach dem Laden/Speichern
+    t.ed.is_modified = false;
+    t.ed.cursor.col = 4;
+    t.ed.handleChar('X');
+    try std.testing.expect(t.ed.is_modified);
+    t.ed.dispatchAction(.Undo);
+    try std.testing.expect(!t.ed.is_modified);
+    t.ed.dispatchAction(.Redo);
+    try std.testing.expect(t.ed.is_modified);
 }
 
 test "handleChar: nach einem Umlaut steht der Cursor eine Spalte weiter, nicht zwei" {

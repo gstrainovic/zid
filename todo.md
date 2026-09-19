@@ -7,26 +7,20 @@ KI-Punkte: Wirkung vorab schätzen, vorher/nachher messen (`scripts/e2e_ai_read_
 
 ## 1. Kritisch: Datenverlust, Absturz, falscher Stand, stilles Scheitern
 
-1. **Undo/Redo setzen den Cursor an den Dateianfang** (`code_editor.zig` `.Undo`/`.Redo`:
-   `self.cursor = .{}`) und der Geändert-Status stimmt danach nicht: `is_modified` wird nur in
-   `pushEditForChange` gesetzt, Undo nach dem Speichern zeigt einen sauberen Tab mit geändertem
-   Inhalt (Autosave greift nicht), Undo zurück auf den gespeicherten Stand bleibt geändert.
-   Cursor aus der Undo-`meta` wiederherstellen, Dirty-Status über `Buffer.is_dirty()` (flow-core,
-   vergleicht `root` mit `last_save`, bisher ungenutzt).
-2. **Absturz in `View.clamp_row`** (`libs/flow-core/src/buffer/View.zig:112-113`): bei einer
+1. **Absturz in `View.clamp_row`** (`libs/flow-core/src/buffer/View.zig:112-113`): bei einer
    sichtbaren Zeile und unterem Abstand 2 läuft `view.row + 1 - 2` über (Panic in Debug/
    ReleaseSafe). flow rechnet mit `-|`. Auslösbar im auf 40 px verkleinerten Chat-Eingabefeld mit
    zwei Zeilen oder bei großem Zoom.
-3. **Clay-Überlauf bei langen Chat-Antworten:** eine Antwort mit 1 844 Token löste
+2. **Clay-Überlauf bei langen Chat-Antworten:** eine Antwort mit 1 844 Token löste
    `elements_capacity_exceeded` aus (`e2e_ai_read_limits.py 40000:first`); Elemente fehlen dann.
-4. **PDF zeigt nach Änderung den alten Stand:** ein offenes PDF zeigt nach erneutem Marp-Export
+3. **PDF zeigt nach Änderung den alten Stand:** ein offenes PDF zeigt nach erneutem Marp-Export
    den alten Stand (`handleExternalChange` kennt nur Text-Buffer, `main.zig` lädt nur, wenn der Pfad
    noch nicht in `open_pdfs` ist). Neu laden bei Dateiänderung, bei halb geschriebener Datei kurz
    erneut versuchen, Seite klemmen, wenn das Dokument kürzer wird.
-5. **Grenzwerte laut statt still:** Shaper liefert bei > 2048 Bytes leeren Text, Clay-Kapazität
+4. **Grenzwerte laut statt still:** Shaper liefert bei > 2048 Bytes leeren Text, Clay-Kapazität
    läuft ohne Meldung voll. Zentral (`limits`-Modul), loggen und im RPC zählen, nicht abstürzen
    (Vorbild gooey `core/limits.zig`).
-6. **KI: `finish_reason: "length"` auswerten.** Läuft die Antwort ans Ende von `-c 8192`, ist sie
+5. **KI: `finish_reason: "length"` auswerten.** Läuft die Antwort ans Ende von `-c 8192`, ist sie
    still abgeschnitten; abgeschnittene Tool-Argumente enden als „arguments are not valid JSON“.
    Neu: Hinweis „abgeschnitten“, abgeschnittene Aufrufe nicht ausführen. Kein `max_tokens`, das
    würde lange `write_file`-Inhalte kappen. Nachstellen: 20-KB-Datei lesen und vollständig
