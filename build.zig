@@ -563,6 +563,10 @@ pub fn build(b: *std.Build) void {
     const run_device_select_tests = b.addRunArtifact(device_select_tests);
     run_device_select_tests.has_side_effects = true;
 
+    const agent_tests = b.addTest(.{ .root_module = agent_mod });
+    const run_agent_tests = b.addRunArtifact(agent_tests);
+    run_agent_tests.has_side_effects = true;
+
     const ai_tools_tests = b.addTest(.{ .root_module = ai_tools_mod });
     const run_ai_tools_tests = b.addRunArtifact(ai_tools_tests);
     run_ai_tools_tests.has_side_effects = true;
@@ -759,6 +763,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_ai_history_tests.step);
     test_step.dependOn(&run_ai_paths_tests.step);
     test_step.dependOn(&run_ai_tools_tests.step);
+    test_step.dependOn(&run_agent_tests.step);
 
     const run_word_wrap_tests = b.addRunArtifact(word_wrap_tests);
     run_word_wrap_tests.has_side_effects = true;

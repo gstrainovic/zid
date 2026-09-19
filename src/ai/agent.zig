@@ -354,8 +354,9 @@ pub const LlamaAgent = struct {
                     std.log.debug("llama-server still loading (503)", .{});
                     return error.ServerLoading;
                 }
-                if (res.status == .bad_request) return error.ContextTooLong;
-                std.log.err("Llama Server Error: {d}", .{res.status});
+                const body = alloc_writer.written();
+                if (res.status == .bad_request and isContextOverflow(body)) return error.ContextTooLong;
+                std.log.err("Llama Server Error: {d} {s}", .{ res.status, body[0..@min(body.len, 400)] });
                 return error.LlamaServerError;
             }
 
@@ -441,12 +442,17 @@ pub const LlamaAgent = struct {
             var redirect_buf: [4096]u8 = undefined;
             var response = try req.receiveHead(&redirect_buf);
             if (response.head.status != .ok) {
-                // 400 über der Kontextgrenze: llama-server kürzt nicht still, sondern lehnt ab
-                if (response.head.status == .bad_request) {
-                    std.log.err("Llama Server rejected the request (400): prompt exceeds the context window?", .{});
+                // 400 über der Kontextgrenze: llama-server kürzt nicht still, sondern lehnt ab.
+                // Andere 400er (Schema, Template) nicht als Kontextfehler behandeln.
+                var err_buf: [4096]u8 = undefined;
+                var err_reader = response.reader(&err_buf);
+                const body = err_reader.allocRemaining(self.allocator, .limited(16 * 1024)) catch "";
+                defer if (body.len > 0) self.allocator.free(body);
+                if (response.head.status == .bad_request and isContextOverflow(body)) {
+                    std.log.info("llama-server: prompt exceeds the context window", .{});
                     return error.ContextTooLong;
                 }
-                std.log.err("Llama Server Error: {d}", .{@intFromEnum(response.head.status)});
+                std.log.err("Llama Server Error: {d} {s}", .{ @intFromEnum(response.head.status), body[0..@min(body.len, 400)] });
                 return error.LlamaServerError;
             }
 
@@ -555,6 +561,23 @@ pub const LlamaAgent = struct {
         }
     }
 };
+
+/// Fehler-Body von llama-server: `{"error":{"type":"exceed_context_size_error",…}}`. Nur dieser
+/// Typ heisst „Prompt zu lang“; andere 400er (kaputtes Schema, Template) dürfen keine Kürzung auslösen.
+pub fn isContextOverflow(body: []const u8) bool {
+    return std.mem.indexOf(u8, body, "\"exceed_context_size_error\"") != null;
+}
+
+test "isContextOverflow: nur exceed_context_size_error zählt, andere 400er nicht" {
+    try std.testing.expect(isContextOverflow(
+        \\{"error":{"code":400,"message":"request (24017 tokens) exceeds the available context size (8192 tokens), try increasing it","type":"exceed_context_size_error","n_prompt_tokens":24017,"n_ctx":8192}}
+    ));
+    try std.testing.expect(!isContextOverflow(
+        \\{"error":{"code":400,"message":"Failed to parse tools","type":"invalid_request_error"}}
+    ));
+    try std.testing.expect(!isContextOverflow(""));
+    try std.testing.expect(!isContextOverflow("<html>Bad Request</html>"));
+}
 
 test "buildPayload: reasoning_effort none nur für Ollama" {
     const a = std.testing.allocator;
