@@ -99,7 +99,9 @@ echo -e "open ./README.md\nget-state\nshutdown" | zig build run -- --interactive
 - `ui_state` liefert Dialog-Titel, offenes Menü, Explorer-Fokus, Explorer sichtbar, Picker/Shortcut-
   Dialog offen, Tabs (Pfad, Art, geändert) und aktiven Tab, dazu `last_frame_ms`/`max_frame_ms`
   (Layout-Zeit; headless rendert nur beim Screenshot) und die Glyph-Cache-Diagnose
-  `glyph_rasterized`, `glyph_cache_clears`, `glyph_cache_entries`. `editor_state` liefert Zeilen,
+  `glyph_rasterized`, `glyph_cache_clears`, `glyph_cache_entries`, dazu `text_runs_dropped` (nicht
+  gezeichnete Textstücke) und `clay_errors` (Clay-Fehler seit Start). E2E können damit prüfen, dass
+  nichts still verloren ging (`scripts/e2e_long_runs.py`). `editor_state` liefert Zeilen,
   Cursor, Suchleiste (offen, Begriff, kein Treffer), den Text sowie `height`/`visible_rows`
   (Bounding-Box des Editors aus dem Vorframe, muss über Frames konstant bleiben). `element_bounds(id)` /
   `element_bounds_i(id, index)` geben Clay-Bounding-Boxen für Klicks; für "existiert das Element
@@ -1043,8 +1045,10 @@ blieb Text ungemessen. `Clay__ResetMeasureTextCacheWhenFull` leert den Cache in
   nicht). UTF-16 gilt als binär, es gibt keinen Decoder. Bild/PDF entscheidet weiter die Endung.
   Eingaben auf einem Binär-Tab gehen wie bei Bild-Tabs an den Editor des vorherigen Buffers —
   bekanntes Verhalten (Tastatur-Fokus pro Tab-Art ist nicht umgesetzt).
-- Runs über `ShapedRunCache.MAX_TEXT_LEN` (2048 Bytes) liefert der Shaper stumm leer. Deshalb gibt der
-  Editor pro Zeile nur den sichtbaren Spaltenausschnitt an Clay (`CodeEditor.visibleSliceOf`: ab
+- Textstücke über `ShapedRunCache.MAX_TEXT_LEN` (2048 Bytes) passen nicht in den Shape-Cache und
+  gehen ungecacht über den Heap (`shapeTextInto` → `shapeText`); erst über `max_draw_run_bytes`
+  (256 KiB, Schutz gegen kaputte Zeiger) werden sie verworfen, gezählt (`ui_state.text_runs_dropped`)
+  und einmal geloggt. Der Editor gibt pro Zeile trotzdem nur den sichtbaren Spaltenausschnitt an Clay (`CodeEditor.visibleSliceOf`: ab
   `view.col`, `view.cols + 2` Spalten; `view.cols` kommt aus `visibleColCount` = Editor-Breite minus
   Gutter durch Zeichenbreite). Highlight-Tags, Auswahl und Cursor rechnen mit dem Byte-Offset des
   Ausschnitts. `View.clamp` (flow-core) zieht `view.col` dem Cursor nach; Shift+Mausrad bzw.

@@ -522,9 +522,15 @@ pub const CachedGlyph = cache_mod.CachedGlyph;
 pub const SUBPIXEL_VARIANTS_X = types.SUBPIXEL_VARIANTS_X;
 
 /// High-level text system
+/// Obergrenze für ein einzelnes gezeichnetes Textstück; darüber: Schutz gegen kaputte Zeiger.
+pub const max_draw_run_bytes: usize = 256 * 1024;
+
 pub const TextSystem = struct {
     allocator: std.mem.Allocator,
     cache: cache_mod.GlyphCache,
+    /// Textstücke, die `shapeTextInto` wegen der Längengrenze nicht gezeichnet hat (RPC
+    /// `ui_state.text_runs_dropped`); das erste wird geloggt.
+    runs_dropped: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
     /// Current font face (platform-specific)
     current_face: ?PlatformFace,
     /// Complex shaper (native only, void on web)
@@ -586,6 +592,7 @@ pub const TextSystem = struct {
         self.shape_cache.initInPlace();
         self.shape_cache_mutex = .{};
         self.glyph_cache_mutex = .{};
+        self.runs_dropped = std.atomic.Value(u64).init(0);
     }
 
     pub fn setScaleFactor(self: *Self, scale: f32) void {
@@ -730,7 +737,17 @@ pub const TextSystem = struct {
         out_glyphs: []types.ShapedGlyph,
     ) !ShapedRun {
         // Guard against invalid text pointers to prevent segfaults
-        if (text.len == 0 or @intFromPtr(text.ptr) == 0 or text.len > ShapedRunCache.MAX_TEXT_LEN) {
+        if (text.len == 0 or @intFromPtr(text.ptr) == 0) {
+            return ShapedRun{ .glyphs = out_glyphs[0..0], .width = 0, .owned = false };
+        }
+        // Längere Stücke als der Shape-Cache fasst gehen über shapeText auf den Heap. Die frühere
+        // Grenze von 2048 Bytes (Schutz gegen kaputte Zeiger) verwarf z. B. einen langen
+        // JSON-String im Markdown-Codeblock still: gemessen, nie gezeichnet.
+        if (text.len > max_draw_run_bytes) {
+            // Nicht still: gemessen wurde der Text, gezeichnet würde er sonst nie
+            if (self.runs_dropped.fetchAdd(1, .monotonic) == 0) {
+                std.log.scoped(.text).warn("text run of {d} bytes not drawn (limit {d})", .{ text.len, max_draw_run_bytes });
+            }
             return ShapedRun{ .glyphs = out_glyphs[0..0], .width = 0, .owned = false };
         }
         std.debug.assert(out_glyphs.len > 0);
