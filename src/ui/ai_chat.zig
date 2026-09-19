@@ -438,7 +438,8 @@ pub const AIChatState = struct {
 
     /// Ergebnis eines Aufrufs eintragen; ist die Runde komplett, geht sie ans Modell.
     pub fn pushToolResult(self: *Self, call: *const ai_tools.ToolCall, result_json: []const u8) void {
-        const ok = std.mem.indexOf(u8, result_json, "\"error\"") == null;
+        // Fehler sind immer `{"error":…}`; read_file liefert rohen Dateiinhalt, der das Wort enthalten darf
+        const ok = !std.mem.startsWith(u8, result_json, "{\"error\"");
         var disp_buf: [512]u8 = undefined;
         const preview = result_json[0..@min(result_json.len, 300)];
         const display = std.fmt.bufPrint(&disp_buf, "{s} **{s}** → `{s}{s}`", .{
