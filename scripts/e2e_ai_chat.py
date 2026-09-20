@@ -196,6 +196,32 @@ def copy_conversation():
     check(ui_state()["clipboard_text"].startswith("## Du"), "Ctrl+Shift+C kopiert denselben Verlauf")
 
 
+def select_across_bubbles():
+    """Ziehen über Nachrichtengrenzen markiert alles dazwischen.
+
+    Jede Bubble ist eine eigene MarkdownView; vorher endete die Auswahl an der
+    Bubble-Grenze, man bekam entweder nur die Frage oder nur die Antwort."""
+    print("--- Auswahl über mehrere Bubbles")
+    first = result_json("element_bounds", ["ai_msg_0"])
+    last_idx = len(chat()["messages"]) - 1
+    last = result_json("element_bounds", [f"ai_msg_{last_idx}"])
+    check(first["found"] and last["found"], f"erste und letzte Bubble im Layout (0 und {last_idx})")
+
+    rpc("mouse_down", [first["x"] + 10, first["y"] + first["h"] / 2])
+    settle(4)
+    rpc("move_mouse", [last["x"] + last["w"] - 20, last["y"] + last["h"] / 2])
+    settle(6)
+    rpc("mouse_up", [last["x"] + last["w"] - 20, last["y"] + last["h"] / 2])
+    settle(4)
+    rpc("key_press", ["c", True])
+    settle(8)
+
+    text = ui_state()["clipboard_text"]
+    check(text.startswith("hallo"), f"beginnt in der ersten Nachricht ({text[:20]!r})")
+    check("not connected" in text, "Antwort der ersten Bubble ist dabei")
+    check(text.count("not connected") >= 1 and len(text) > 120, f"reicht über mehrere Bubbles ({len(text)} Zeichen)")
+
+
 def run_ai_off():
     print("--- B. --ai=off: Senden erklärt sofort, kein endloses Laden")
     proc, log = start(["--ai=off"], "e2e_ai_chat_off.log")
@@ -214,6 +240,7 @@ def run_ai_off():
         select_in_bubble()
         chat_takes_keys_from_explorer()
         copy_conversation()
+        select_across_bubbles()
     finally:
         stop(proc, log)
 

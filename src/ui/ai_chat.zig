@@ -82,6 +82,8 @@ pub const AIChatState = struct {
     setup_prompted: bool = false,
     /// „Später" gedrückt: bis zum nächsten Start keine Antwortknöpfe mehr.
     setup_dismissed: bool = false,
+    /// Nachricht, in der die bubble-übergreifende Auswahl gerade endet.
+    sel_end_msg: ?usize = null,
     is_downloading: bool = false,
     is_initializing: bool = false,
     download_progress: f32 = 0,
@@ -740,6 +742,7 @@ pub const AIChatState = struct {
             self.mutex.lock();
             defer self.mutex.unlock();
             self.sel_msg = null;
+            self.sel_end_msg = null;
             for (self.messages.items, 0..) |*msg, idx| {
                 msg.md.clearSelection();
                 if (self.sel_msg == null and bubbleHit(idx, x, y)) {
@@ -756,10 +759,45 @@ pub const AIChatState = struct {
             const new_height = self.input_height + (self.input_splitter_y + self.input_splitter_h - y);
             self.input_height = @max(40, @min(400, new_height));
         }
-        if (self.sel_msg) |idx| {
+        if (self.sel_msg) |start| {
             self.mutex.lock();
             defer self.mutex.unlock();
-            if (idx < self.messages.items.len) self.messages.items[idx].md.handleMouseMove(x, y);
+            if (start < self.messages.items.len) {
+                // Über welcher Bubble steht die Maus? Ausserhalb bleibt es beim zuletzt
+                // erreichten Ende, damit Ziehen über den Rand hinaus nicht zurückspringt.
+                var cur = self.sel_end_msg orelse start;
+                for (self.messages.items, 0..) |_, i| {
+                    if (bubbleHit(i, x, y)) {
+                        cur = i;
+                        break;
+                    }
+                }
+                self.sel_end_msg = cur;
+
+                if (cur == start) {
+                    // Innerhalb einer Nachricht: genaue Auswahl wie bisher.
+                    for (self.messages.items, 0..) |*msg, i| {
+                        if (i != start) msg.md.clearSelection();
+                    }
+                    self.messages.items[start].md.handleMouseMove(x, y);
+                } else {
+                    // Über Nachrichten hinweg: Startnachricht ab dem Anker bis zum Ende,
+                    // die dazwischen ganz, die zuletzt erreichte bis zur Mausposition.
+                    const lo = @min(start, cur);
+                    const hi = @max(start, cur);
+                    for (self.messages.items, 0..) |*msg, i| {
+                        if (i < lo or i > hi) {
+                            msg.md.clearSelection();
+                        } else if (i == start) {
+                            msg.md.selectFromAnchorToEnd();
+                        } else if (i == cur) {
+                            msg.md.selectFromStartTo(x, y);
+                        } else {
+                            msg.md.selectAllContent();
+                        }
+                    }
+                }
+            }
         }
         self.input_editor.handleMouseMove(x, y);
     }
@@ -789,14 +827,26 @@ pub const AIChatState = struct {
         return x >= b.x and x <= b.x + b.width and y >= b.y and y <= b.y + b.height;
     }
 
-    /// Markierter Text einer Bubble (Ctrl+C), gehört dem Aufrufer; null ohne Auswahl.
+    /// Markierter Text, auch über mehrere Bubbles hinweg (Ctrl+C). Gehört dem Aufrufer;
+    /// null ohne Auswahl. Nachrichten werden in Reihenfolge verkettet, getrennt durch
+    /// Leerzeilen — sonst klebt die Antwort an der Frage.
     pub fn selectedText(self: *Self, alloc: std.mem.Allocator) ?[]u8 {
         self.mutex.lock();
         defer self.mutex.unlock();
+        var out: std.ArrayListUnmanaged(u8) = .empty;
+        errdefer out.deinit(alloc);
         for (self.messages.items) |*msg| {
-            if (msg.md.hasSelection()) return msg.md.selectedText(alloc);
+            if (!msg.md.hasSelection()) continue;
+            const part = msg.md.selectedText(alloc) orelse continue;
+            defer alloc.free(part);
+            if (out.items.len > 0) out.appendSlice(alloc, "\n\n") catch {};
+            out.appendSlice(alloc, part) catch {};
         }
-        return null;
+        if (out.items.len == 0) {
+            out.deinit(alloc);
+            return null;
+        }
+        return out.toOwnedSlice(alloc) catch null;
     }
 
     /// Verlauf in die Zwischenablage (Knopf in der Kopfzeile, Ctrl+Shift+C).
