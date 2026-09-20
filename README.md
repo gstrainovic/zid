@@ -44,14 +44,16 @@ sudo apt install libmupdf-dev \
 ### Linux — MuPDF statisch (für Pakete und Releases)
 
 `-Dmupdf=bundled` linkt die vendorte MuPDF 1.26.5 aus dem Submodul statisch. Die
-Archive baut man einmalig; FreeType, HarfBuzz, zlib und libjpeg kommen weiter vom
-System (ABI-stabil), Tesseract, Leptonica, ZXing und libcurl fallen ganz weg:
+Archive baut man einmalig; FreeType, HarfBuzz und zlib kommen weiter vom System
+(ABI-stabil), libjpeg dagegen nicht — ihr SONAME wechselt je Distribution
+(`.62` auf Debian und Fedora, `.8` auf Ubuntu und Arch). Tesseract, Leptonica,
+ZXing und libcurl fallen ganz weg:
 
 ```bash
 cd libs/fancy-cat/deps/mupdf
 make -j$(nproc) libs HAVE_X11=no HAVE_GLUT=no HAVE_OBJCOPY=no tools=no apps=no \
      USE_SYSTEM_FREETYPE=yes USE_SYSTEM_HARFBUZZ=yes USE_SYSTEM_ZLIB=yes \
-     USE_SYSTEM_LIBJPEG=yes HAVE_LEPTONICA=no HAVE_TESSERACT=no HAVE_ZXINGCPP=no \
+     USE_SYSTEM_LIBJPEG=no HAVE_LEPTONICA=no HAVE_TESSERACT=no HAVE_ZXINGCPP=no \
      XCFLAGS="-w -fPIC"
 cd -
 zig build -Dmupdf=bundled
@@ -60,6 +62,32 @@ zig build -Dmupdf=bundled
 Danach hängt das Binary nur noch an Bibliotheken, die auf jedem Desktop liegen
 (libc, libm, libz, libjpeg, freetype, harfbuzz, png, Wayland/X11, EGL). Prüfen
 mit `ldd zig-out/bin/zid`.
+
+### Release-Tarball bauen (Linux)
+
+```bash
+packaging/build-release.sh          # podman, sonst docker
+packaging/build-release.sh --engine docker
+```
+
+Baut in einem Debian-12-Container und legt `dist/zid-<version>-x86_64-linux.tar.xz`
+ab. Der Container ist kein Selbstzweck: gegen die glibc der Entwicklungsmaschine
+gelinkt verlangt zid `GLIBC_2.38` und startet auf älteren Distributionen nicht.
+Debian 12 hat 2.36 und deckt damit Ubuntu 22.04 LTS mit ab. Auf altem System
+gebaut läuft auf neuem, umgekehrt nicht.
+
+Der Container baut MuPDF in ein eigenes `build/release-deb12` und nutzt einen
+eigenen Zig-Cache, die Artefakte der Entwicklungsmaschine bleiben also liegen.
+
+Im Tarball steckt ein `install.sh`:
+
+```bash
+tar xf zid-0.1.0-x86_64-linux.tar.xz
+cd zid-0.1.0-x86_64-linux
+./install.sh                 # nach ~/.local
+./install.sh /usr/local      # systemweit (als root)
+./install.sh --uninstall     # wieder entfernen
+```
 
 ### KI & Automatisierung (Abhängigkeiten)
 
