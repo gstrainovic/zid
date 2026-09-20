@@ -151,7 +151,8 @@ pub const Platform = struct {
     /// aus der Umgebung gewählt hat (`XDG_SESSION_TYPE`, sonst Probieren).
     pub fn nativeWindow(self: *const Self) ?NativeWindow {
         const win = self.window orelse return null;
-        if (!is_linux) return .{ .win32 = win.backend.window };
+        // Windows: wio hält das HWND optional, ohne Fenster gibt es keine Surface.
+        if (!is_linux) return .{ .win32 = win.backend.window orelse return null };
         return switch (unix.active) {
             .wayland => .{ .wayland = .{
                 .display = @ptrCast(wayland.display),
