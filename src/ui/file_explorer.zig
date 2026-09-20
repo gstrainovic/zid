@@ -1386,7 +1386,10 @@ pub fn renderFileExplorer(
                 })({
                     for (state.visible_entries.items, 0..) |entry, i| {
                         renderTreeEntry(arena, state, entry, i, theme, effective_press, in_sidebar, mods, mouse);
-                        if (state.creating) |cs| {
+                        // `|*cs|`, nicht `|cs|`: Clay merkt sich den Zeiger auf den Text
+                        // und zeichnet ihn erst nach dem Layout. Eine Kopie des Zustands
+                        // ist bis dahin weg, und in der Zeile standen zufällige Bytes.
+                        if (state.creating) |*cs| {
                             if (cs.parent == entry.node_index) renderCreateRow(arena, cs, entry.depth + 1, theme);
                         }
                     }
@@ -1455,7 +1458,7 @@ fn renderContextMenu(menu: ContextMenu, theme: Theme) void {
 }
 
 /// Eingabezeile für „neue Datei / neuer Ordner“ unter dem Elternordner
-fn renderCreateRow(arena: std.mem.Allocator, cs: CreateState, depth: u32, theme: Theme) void {
+fn renderCreateRow(arena: std.mem.Allocator, cs: *const CreateState, depth: u32, theme: Theme) void {
     const indent = @as(f32, @floatFromInt(depth)) * DEFAULT_INDENT_PX + 8.0 + 24.0;
     clay.UI()(.{
         .id = clay.ElementId.ID("fx_create_row"),

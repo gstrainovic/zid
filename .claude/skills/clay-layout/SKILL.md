@@ -83,6 +83,25 @@ Die Zeilenschleife des Editors (`visible + 1` Reihen) ist nur deshalb harmlos, w
 `editor_state.height` über Frames konstant bleibt; mit `ZID_DEBUG=1` listet jeder
 Headless-Screenshot alle Render-Commands mit Box, daran sieht man wachsende Elemente.
 
+## Text muss den Frame überleben
+
+`clay.text(slice, …)` merkt sich **den Zeiger**, gezeichnet wird erst nach `endLayout`.
+Der Text muss also mindestens bis dahin leben: Zustand der UI, Frame-Arena oder eine
+Konstante — nie ein Stack-Puffer und nie das Feld einer **Kopie**.
+
+```zig
+if (state.creating) |cs| renderCreateRow(arena, cs, …);   // FALSCH: cs ist eine Kopie
+if (state.creating) |*cs| renderCreateRow(arena, cs, …);  // richtig: Zeiger in den Zustand
+```
+
+Mit der Kopie stand in der Anlege-Zeile des Explorers statt `copr` zufälliger Speicher
+(leere Kästchen). Dasselbe Muster traf vorher die Fortschrittsanzeige der KI-Einrichtung
+mit einem `bufPrint`-Puffer.
+
+Prüfen lässt sich das nur am **gezeichneten** Text, nicht am Zustand über RPC: headless
+mit `ZID_DEBUG=1` einen Screenshot ziehen, im Command-Dump steht je Textstück
+`text id=… len=… "…"`. `scripts/e2e_explorer.py` (`drawn_text`) tut das.
+
 ## Kein `return` im Kinderblock
 
 ```zig
