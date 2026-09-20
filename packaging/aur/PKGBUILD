@@ -19,6 +19,8 @@ optdepends=('vulkan-icd-loader: GPU-Rendering'
             'vulkan-intel: Vulkan-Treiber für Intel'
             'nvidia-utils: Vulkan-Treiber für NVIDIA'
             'ollama: lokale KI im Chat')
+# Fertiges Binary: nicht nochmal strippen, kein Debug-Paket erzeugen.
+options=('!strip' '!debug')
 provides=('zid')
 conflicts=('zid')
 source=("$url/releases/download/v$pkgver/zid-$pkgver-x86_64-linux.tar.xz")

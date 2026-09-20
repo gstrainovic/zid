@@ -18,7 +18,7 @@ Source0:        %{url}/releases/download/v%{version}/zid-%{version}-x86_64-linux
 ExclusiveArch:  x86_64
 
 BuildRequires:  desktop-file-utils
-BuildRequires:  libappstream-glib
+BuildRequires:  appstream
 
 # Dynamisch gelinkt; MuPDF, libjpeg, tree-sitter und wgpu stecken im Binary.
 Requires:       freetype
@@ -54,7 +54,7 @@ install -Dm644 LICENSE %{buildroot}%{_datadir}/licenses/%{name}/LICENSE
 
 %check
 desktop-file-validate %{buildroot}%{_datadir}/applications/%{appid}.desktop
-appstream-util validate-relax --nonet \
+appstreamcli validate --no-net \
     %{buildroot}%{_datadir}/metainfo/%{appid}.metainfo.xml
 
 %files
