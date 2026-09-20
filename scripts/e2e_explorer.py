@@ -140,12 +140,23 @@ def step_navigation():
     check(not ui_state()["explorer_focused"], "Escape gibt den Fokus an den Editor")
 
 
+def drawn_text(want):
+    """Steht `want` unter den gezeichneten Textstücken? Liest den Command-Dump des
+    Screenshots (ZID_DEBUG=1). Der Zustand über RPC genügt nicht: die Anlege-Zeile
+    zeichnete einmal den Text einer Kopie, die Clay schon nicht mehr hatte."""
+    shot("e2e_explorer_drawn.ppm")
+    with open(os.path.join(ROOT, "tmp", "e2e_explorer.log"), errors="replace") as f:
+        lines = [ln for ln in f if "cmd[" in ln and " text " in ln]
+    return any(f'"{want}"' in ln for ln in lines[-200:])
+
+
 def step_create_rename():
     print("--- a/A legen an, r benennt um")
     explorer_click("beta.txt")
     key("a")
     check(explorer()["creating"], "a öffnet die Eingabe für eine neue Datei")
     rpc("type_text", ["neu.md"]); settle()
+    check(drawn_text("neu.md"), "die Eingabezeile zeichnet den getippten Namen")
     key("enter")
     wait_for(lambda: os.path.exists(os.path.join(FX, "neu.md")), "neu.md wurde angelegt")
     wait_for(lambda: result_json("get_active_tab")["editor_file"].endswith("neu.md"), "neu.md ist im Editor offen")
@@ -433,7 +444,9 @@ STEPS = [step_focus_and_letters, step_dialog_keyboard_trash, step_navigation, st
 def main():
     setup_fixture()
     log = open(os.path.join(ROOT, "tmp", "e2e_explorer.log"), "w")
-    env = dict(os.environ, XDG_DATA_HOME=XDG, XDG_CONFIG_HOME=XDG_CONFIG)
+    # ZID_DEBUG=1: jeder Screenshot listet die Render-Commands mit Text. Nur damit
+    # sieht der Test, was wirklich gezeichnet wurde — der Zustand über RPC sagt es nicht.
+    env = dict(os.environ, XDG_DATA_HOME=XDG, XDG_CONFIG_HOME=XDG_CONFIG, ZID_DEBUG="1")
     proc = start_zid(["--headless", "--ai=off"], log, env=env)
     try:
         wait_port(proc)
