@@ -497,6 +497,19 @@ Drei Regeln aus der Messreihe vom 17.09.2026
   `agent_actions` als Kommando aus (`ai_tools.commandFromToolName`), statt „unknown tool"
   zu melden; kleine Modelle tun das.
 
+## Chat: Kürzel-Werkzeug und Verlauf kopieren
+
+- Die Tastenkürzel stehen **nicht** im Prompt (das kostete 1000 Token). Der Agent holt sie
+  über das Werkzeug `list_shortcuts` (`agent_actions.zig`), optional mit `filter`. Gemessen:
+  gemma-4-E2B ruft es von selbst auf und beantwortet „Which key opens quick_open?" mit
+  `Ctrl+P`; bei einer umschreibenden Frage („Datei-Schnellsuche") rät es trotz Liste
+  gelegentlich daneben — das Werkzeug liefert `command`, `label` und `key`, das Übersetzen
+  bleibt Sache des Modells.
+- Ganzen Verlauf kopieren: Knopf `ai_copy_all` in der Kopfzeile oder Ctrl+Shift+C
+  (`AIChatState.conversationText` als Markdown, `## Du` / `## AI` je Nachricht). Ctrl+C
+  bleibt die markierte Bubble. Der Weg läuft über `UI.setClipboard`, damit `ui_state`
+  ihn headless prüfen kann.
+
 ## Selbsteinrichtung der KI (`src/ai/setup.zig`, `download.zig`, `install.zig`, `selfsetup.zig`)
 
 - Ein installiertes zid hat kein `engines/` und `models/` neben sich. Fehlt beides, lädt der
