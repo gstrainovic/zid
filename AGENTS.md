@@ -115,6 +115,14 @@ zig build test-text        # nur Textsystem (Glyph-Cache, Atlas; Root src/text_t
   Fedora 39+, Ubuntu 24.04 und Debian 13, aber nicht auf Ubuntu 22.04 (2.35). Wer weiter
   zurück will, baut auf einer älteren Distribution oder gegen musl.
 
+## Lesende RPCs gehören in den Hauptthread
+
+`onMain` ist Pflicht für jeden RPC, der veränderlichen UI-Zustand liest. `explorer_entries`
+tat das nicht und las, während der Hauptthread den Baum neu baute: der Test sah einen
+eingeklappten Baum, Einträge fehlten sporadisch (`Explorer-Eintrag 'beta.txt' nicht
+sichtbar`), und die Namen zeigten in gerade freigegebenen Speicher. Wer einen neuen
+Lese-RPC ergänzt, nimmt `onMain` wie `editorState` und `chatState`.
+
 ## Headless / Interactive Mode
 
 ### Interactive Mode (stdin/stdout)
@@ -449,8 +457,11 @@ liegen in `src/ui/mod.zig`, das Virtualisierungsmuster in
   2048 Bytes ohne Ctrl+Z; `scm_changes_view` zeichnete Zeilen, Auswahl und Schreibmarke
   von Hand.
 - **Einzeilig → `line_edit` + `explorer_ops.EditBuffer`**: Umbenennen und Filter im
-  Explorer, Schnellöffner, Ordner-Dialog. Klein gehalten, kein Umbruch (`wrap_mode = .none`),
-  kein Undo.
+  Explorer, Schnellöffner, Ordner-Dialog. Klein gehalten, kein Umbruch
+  (`wrap_mode = .none`). Rückgängig gibt es dort seit Kurzem, aber nur **einen** Schritt
+  (`undoEdit`/`redoEdit`): zusammenhängendes Tippen ist eine Gruppe, eine Cursorbewegung
+  schliesst sie. Doppelklick markiert das Wort (`selectWordAtCursor`); die Zeit dafür kommt
+  aus `std.time.milliTimestamp`, damit die Aufrufer keine Uhr durchreichen müssen.
 - Jeder eingebettete `CodeEditor` braucht die Modifier: `UI.setCtrlState`/`setAltState`/
   `setShiftState` reichen sie an Chat **und** Commit-Feld weiter. Ohne das greift die
   Keymap des Editors nicht und Ctrl+Z tut nichts.

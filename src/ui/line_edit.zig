@@ -74,6 +74,13 @@ pub fn handleKeyEx(edit: anytype, key: wio.Button, mods: Mods, clip: ?Clipboard,
             edit.insertText(text, multiline);
             return .edited;
         },
+        // Ctrl+Z zurück, Ctrl+Shift+Z und Ctrl+Y wieder vor — ein Schritt, wie im
+        // Namens- und Pfadfeld üblich (`EditBuffer.undoEdit`).
+        .z => return if (mods.shift)
+            (if (edit.redoEdit()) .edited else .moved)
+        else
+            (if (edit.undoEdit()) .edited else .moved),
+        .y => return if (edit.redoEdit()) .edited else .moved,
         else => {},
     };
     switch (key) {
@@ -118,6 +125,18 @@ pub fn handleClick(edit: anytype, comptime cfg: Config, x: f32, extend: bool) bo
     if (!data.found) return false;
     edit.prepareMove(extend);
     edit.setCursorAtX(ui.measureTextWidth, cfg.font_size, x - data.bounding_box.x);
+
+    // Doppelklick markiert das Wort. Die Zeit kommt direkt von der Uhr, damit die
+    // Aufrufer (Explorer, Picker, Ordner-Dialog) keine Uhr durchreichen müssen.
+    const now = std.time.milliTimestamp();
+    const quick = now - edit.last_click_ms < 500;
+    if (quick and edit.last_click_cursor == edit.cursor and !extend) {
+        edit.selectWordAtCursor();
+        edit.last_click_ms = 0;
+    } else {
+        edit.last_click_ms = now;
+        edit.last_click_cursor = edit.cursor;
+    }
     edit.mouse_selecting = true;
     return true;
 }
