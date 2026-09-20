@@ -3,9 +3,19 @@ const std = @import("std");
 /// Version aus build.zig.zon: eine Quelle für Paket, `--version` und AppStream.
 const zid_version = @import("build.zig.zon").version;
 
+/// Woher MuPDF kommt. `system` ist der Entwicklerpfad (Fedora: mupdf-devel),
+/// `bundled` linkt die vendorte 1.26.5 statisch — für Pakete und Releases, weil
+/// das SONAME von libmupdf je Distribution anders ist.
+const MupdfSource = enum { system, bundled };
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    const mupdf_source = b.option(
+        MupdfSource,
+        "mupdf",
+        "MuPDF beziehen: system (Vorgabe) oder bundled (statisch aus libs/fancy-cat/deps/mupdf)",
+    ) orelse .system;
 
     // wio Dependency - Wayland und X11; wio wählt beim Start das passende Backend
     const wio_dep = b.dependency("wio", .{
@@ -228,23 +238,41 @@ pub fn build(b: *std.Build) void {
         exe.root_module.linkSystemLibrary("png", .{});
         exe.root_module.link_libc = true;
 
-        // MuPDF: System-Library + System-Header verwenden (Fedora: mupdf-devel).
-        // Der bundled Header-Pfad darf NICHT addiert werden — FZ_VERSION wird
-        // in fz_new_context() als Laufzeit-Check gegen libmupdf.so geprüft,
-        // und bundled (1.26.5) ≠ System (1.27.x) würde den Context verwerfen.
         // fitz-z.c ist unser setjmp-Wrapper.
         exe.root_module.addIncludePath(b.path("src/rendering/mupdf_wrapper"));
-        // Fedoras mupdf.pc ist defekt (leeres -L) → pkg-config umgehen.
-        exe.root_module.linkSystemLibrary("mupdf", .{ .use_pkg_config = .no });
+        switch (mupdf_source) {
+            // System-Library + System-Header (Fedora: mupdf-devel). Der bundled
+            // Header-Pfad darf hier NICHT dazu — FZ_VERSION wird in fz_new_context()
+            // gegen libmupdf.so geprüft, und bundled (1.26.5) ≠ System (1.27.x)
+            // würde den Context verwerfen.
+            .system => {
+                // Fedoras mupdf.pc ist defekt (leeres -L) → pkg-config umgehen.
+                exe.root_module.linkSystemLibrary("mupdf", .{ .use_pkg_config = .no });
+            },
+            // Statisch aus dem Submodul: bundled Header und bundled .a, damit
+            // FZ_VERSION zusammenpasst. Die .a baut `make libs` (siehe README).
+            .bundled => {
+                exe.root_module.addIncludePath(b.path("libs/fancy-cat/deps/mupdf/include"));
+                // Die Archive direkt angeben: `linkSystemLibrary("mupdf")` liefe über
+                // Fedoras defekte mupdf.pc und suchte dann nach einem Verzeichnis '-lmupdf'.
+                exe.root_module.addObjectFile(b.path("libs/fancy-cat/deps/mupdf/build/release/libmupdf.a"));
+                exe.root_module.addObjectFile(b.path("libs/fancy-cat/deps/mupdf/build/release/libmupdf-third.a"));
+                // mupdf-third ist mit USE_SYSTEM_* gebaut: diese Teile kommen vom System
+                // (ABI-stabil und überall vorhanden, anders als libmupdf selbst).
+                exe.root_module.linkSystemLibrary("z", .{});
+                exe.root_module.linkSystemLibrary("jpeg", .{});
+                exe.root_module.linkSystemLibrary("m", .{});
+            },
+        }
         exe.addCSourceFile(.{
             .file = b.path("src/rendering/mupdf_wrapper/fitz-z.c"),
             .flags = &[_][]const u8{ "-std=c99", "-w" },
         });
     }
 
-    // Automatische Kompilierung der MuPDF Font-Ressourcen nur unter Windows
-    // (Linux verwendet System-libmupdf — Fonts sind dort bereits enthalten).
-    if (target.result.os.tag == .windows) {
+    // MuPDF-Font-Ressourcen mitkompilieren, wenn MuPDF statisch dazukommt.
+    // Mit System-libmupdf stecken die Fonts schon in der .so.
+    if (target.result.os.tag == .windows or mupdf_source == .bundled) {
         if (std.fs.cwd().openDir("libs/fancy-cat/deps/mupdf/generated/resources/fonts/urw", .{ .iterate = true })) |mut_dir| {
             var dir = mut_dir;
             defer dir.close();

@@ -29,7 +29,8 @@ def main():
     os.makedirs(os.path.join(WORKDIR, "tmp"))
     env = isolated_env("e2e_installed_run")
     with open(LOG, "w") as log:
-        build = subprocess.run(["zig", "build"], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, env=env)
+        build_args = os.environ.get("ZID_BUILD_ARGS", "").split()
+        build = subprocess.run(["zig", "build"] + build_args, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, env=env)
         if build.returncode != 0:
             raise RuntimeError(f"zig build fehlgeschlagen, siehe {LOG}")
         log.flush()

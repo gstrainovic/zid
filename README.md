@@ -13,9 +13,13 @@ zig build run          # Debug-Build starten
 
 ### Linux — System-Pakete
 
-PDF-Rendering linkt gegen System-`libmupdf`, weil Fedora einen ABI-Versions-
-Check in `fz_new_context()` erzwingt und ein gebundelter Header unweigerlich
-mit der installierten `.so` auseinanderläuft.
+Standardmäßig linkt das PDF-Rendering gegen System-`libmupdf` (`-Dmupdf=system`).
+Der bundled Header darf dabei nicht mit hinein: `fz_new_context()` prüft
+`FZ_VERSION` gegen die installierte `.so`.
+
+Für Pakete und Releases stattdessen `-Dmupdf=bundled` nehmen (siehe unten):
+das SONAME von `libmupdf` unterscheidet sich je Distribution, statisch gelinkt
+läuft dasselbe Binary überall.
 
 Fedora/RHEL:
 
@@ -36,6 +40,26 @@ sudo apt install libmupdf-dev \
                  libegl1-mesa-dev libvulkan-dev \
                  libfreetype-dev libharfbuzz-dev libpng-dev
 ```
+
+### Linux — MuPDF statisch (für Pakete und Releases)
+
+`-Dmupdf=bundled` linkt die vendorte MuPDF 1.26.5 aus dem Submodul statisch. Die
+Archive baut man einmalig; FreeType, HarfBuzz, zlib und libjpeg kommen weiter vom
+System (ABI-stabil), Tesseract, Leptonica, ZXing und libcurl fallen ganz weg:
+
+```bash
+cd libs/fancy-cat/deps/mupdf
+make -j$(nproc) libs HAVE_X11=no HAVE_GLUT=no HAVE_OBJCOPY=no tools=no apps=no \
+     USE_SYSTEM_FREETYPE=yes USE_SYSTEM_HARFBUZZ=yes USE_SYSTEM_ZLIB=yes \
+     USE_SYSTEM_LIBJPEG=yes HAVE_LEPTONICA=no HAVE_TESSERACT=no HAVE_ZXINGCPP=no \
+     XCFLAGS="-w -fPIC"
+cd -
+zig build -Dmupdf=bundled
+```
+
+Danach hängt das Binary nur noch an Bibliotheken, die auf jedem Desktop liegen
+(libc, libm, libz, libjpeg, freetype, harfbuzz, png, Wayland/X11, EGL). Prüfen
+mit `ldd zig-out/bin/zid`.
 
 ### KI & Automatisierung (Abhängigkeiten)
 

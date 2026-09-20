@@ -54,6 +54,19 @@ zig build test-text        # nur Textsystem (Glyph-Cache, Atlas; Root src/text_t
 - Die Version steht in `build.zig.zon` und kommt über die Build-Option `build_info.version`
   ins Binary (`zid --version`); AppStream-`<release>` von Hand nachziehen.
 
+## MuPDF: system oder bundled
+
+- `-Dmupdf=system` (Vorgabe) linkt System-`libmupdf`; der bundled Header darf dann nicht in
+  den Include-Pfad, weil `fz_new_context()` `FZ_VERSION` gegen die `.so` prüft.
+- `-Dmupdf=bundled` nimmt Header und `.a` aus `libs/fancy-cat/deps/mupdf` — für Pakete und
+  Releases, weil das SONAME von libmupdf je Distribution anders ist. Die Archive gibt
+  build.zig direkt als Objektdateien an: über `linkSystemLibrary` liefe es in Fedoras defekte
+  `mupdf.pc` und der Linker suchte ein Verzeichnis `-lmupdf`.
+- Mit `bundled` kompiliert build.zig zusätzlich die MuPDF-Font-Ressourcen mit, wie unter
+  Windows. Die Bauanleitung für die Archive steht im README.
+- E2E mit bundled MuPDF: `ZID_BUILD_ARGS=-Dmupdf=bundled python3 scripts/e2e_pdf_pager.py`.
+  `ZID_BUILD_ARGS` reicht Build-Optionen an den `zig build`-Aufruf der Suiten durch.
+
 ## Headless / Interactive Mode
 
 ### Interactive Mode (stdin/stdout)

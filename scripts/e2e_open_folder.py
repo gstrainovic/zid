@@ -56,7 +56,9 @@ def start_zid(args, log, env=None):
     if env is None:
         env = isolated_env(os.path.splitext(os.path.basename(log.name))[0])
     log.flush()
-    build = subprocess.run(["zig", "build"], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, env=env)
+    # ZID_BUILD_ARGS reicht Build-Optionen durch, z.B. ZID_BUILD_ARGS=-Dmupdf=bundled
+    build_args = os.environ.get("ZID_BUILD_ARGS", "").split()
+    build = subprocess.run(["zig", "build"] + build_args, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, env=env)
     if build.returncode != 0:
         raise RuntimeError(f"zig build fehlgeschlagen (Code {build.returncode}), siehe {log.name}")
     log.flush()
