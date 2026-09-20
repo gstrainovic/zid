@@ -72,6 +72,29 @@ def step_scrollbar():
 STEPS = [step_scrollbar]
 
 
+def step_toggle():
+    """Ctrl+J: hin zum zuletzt benutzten Terminal, zurück zum Tab davor.
+
+    Vorher sprang es immer zum ersten Terminal, und war der gemerkte Tab inzwischen
+    selbst ein Terminal, tat die Taste gar nichts."""
+    print("--- Ctrl+J wechselt zum zuletzt benutzten Terminal und zurück")
+    rpc("open_file", [os.path.join(ROOT, "README.md")])
+    settle(10)
+    start = ui_state()["active_tab"]
+
+    rpc("open_terminal"); settle(10)
+    rpc("open_terminal"); settle(10)
+    second = ui_state()["active_tab"]
+
+    # Zurück auf die Datei, dann Ctrl+J: erwartet das zuletzt benutzte Terminal
+    rpc("setActiveTab", [start]); settle(8)
+    key("j", ctrl=True); settle(8)
+    check(ui_state()["active_tab"] == second, f"Ctrl+J öffnet das zuletzt benutzte Terminal (ist {ui_state()['active_tab']}, erwartet {second})")
+
+    key("j", ctrl=True); settle(8)
+    check(ui_state()["active_tab"] == start, f"Ctrl+J springt zurück zur Datei (ist {ui_state()['active_tab']}, erwartet {start})")
+
+
 def main():
     log = open(os.path.join(ROOT, "tmp", "e2e_terminal.log"), "w")
     proc = start_zid(["--headless", "--ai=off"], log)
@@ -80,10 +103,11 @@ def main():
         settle(20)
         for step in STEPS:
             step()
-        print("ALL PASSED")
+        step_toggle()
     finally:
         stop_zid(proc)
         log.close()
+    print("ALL PASSED")
 
 
 if __name__ == "__main__":
