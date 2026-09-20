@@ -411,7 +411,7 @@ pub const UI = struct {
             .file_explorer = file_explorer,
             .timeline_view = timeline_view_mod.TimelineView.init(allocator),
             .scm_graph = scm_graph_view_mod.ScmGraphView.init(allocator),
-            .scm_changes = scm_changes_view_mod.ScmChangesView.init(allocator),
+            .scm_changes = try scm_changes_view_mod.ScmChangesView.init(allocator),
             .show_file_explorer = true,
             .ai_chat = ai_chat,
             .show_ai_chat = false,
@@ -1040,6 +1040,9 @@ pub const UI = struct {
     pub fn setShiftState(self: *Self, pressed: bool) void {
         self.is_shift_down = pressed;
         self.ai_chat.setShiftState(pressed);
+        // Das Commit-Feld ist seit dem Umbau ebenfalls ein CodeEditor und braucht die
+        // Modifier, sonst greift seine Keymap nicht (Ctrl+Z, Ctrl+C, …).
+        self.scm_changes.editor.setShiftState(pressed);
         self.getActiveEditor().setShiftState(pressed);
     }
 
@@ -1047,12 +1050,18 @@ pub const UI = struct {
         self.is_ctrl_down = pressed;
         if (!pressed) self.commitTabSwitcher();
         self.ai_chat.setCtrlState(pressed);
+        // Das Commit-Feld ist seit dem Umbau ebenfalls ein CodeEditor und braucht die
+        // Modifier, sonst greift seine Keymap nicht (Ctrl+Z, Ctrl+C, …).
+        self.scm_changes.editor.setCtrlState(pressed);
         self.getActiveEditor().setCtrlState(pressed);
     }
 
     pub fn setAltState(self: *Self, pressed: bool) void {
         self.is_alt_down = pressed;
         self.ai_chat.setAltState(pressed);
+        // Das Commit-Feld ist seit dem Umbau ebenfalls ein CodeEditor und braucht die
+        // Modifier, sonst greift seine Keymap nicht (Ctrl+Z, Ctrl+C, …).
+        self.scm_changes.editor.setAltState(pressed);
         self.getActiveEditor().setAltState(pressed);
     }
 
@@ -4403,8 +4412,7 @@ pub const UI = struct {
             self.showToast("Generate commit message: empty reply", .{});
             return;
         }
-        sc.message.set(text);
-        sc.validation = null;
+        sc.setMessage(text);
         self.sidebar_focus = .commit_input;
     }
 
@@ -4442,13 +4450,13 @@ pub const UI = struct {
     fn scmCommit(self: *Self) void {
         const sc = &self.scm_changes;
         if (sc.busy) return;
-        if (sc.message.len == 0) {
+        if (sc.messageText().len == 0) {
             sc.validation = "Please provide a commit message";
             self.sidebar_focus = .commit_input;
             return;
         }
         if (sc.view.count(.staged) > 0) {
-            self.submitScm("commit", &.{}, sc.message.text());
+            self.submitScm("commit", &.{}, sc.messageText());
         } else if (sc.view.count(.changes) + sc.view.count(.merge) > 0) {
             self.scm_pending = .commit_all;
             self.showScmDialog("Commit", "There are no staged changes to commit.\n\nWould you like to stage all your changes and commit them directly?", "Yes");
@@ -4499,7 +4507,7 @@ pub const UI = struct {
                 if (tracked.items.len > 0) ui.submitScm("discard_tracked", tracked.items, null);
                 if (untracked.items.len > 0) ui.submitScm("discard_untracked", untracked.items, null);
             },
-            .commit_all => ui.submitScm("commit_all", &.{}, sc.message.text()),
+            .commit_all => ui.submitScm("commit_all", &.{}, sc.messageText()),
         }
     }
 
@@ -4551,8 +4559,7 @@ pub const UI = struct {
             self.timeline_view.timeline.refresh();
         }
         if (is_commit) {
-            sc.message.set("");
-            sc.validation = null;
+            sc.setMessage("");
             self.scm_graph.refresh();
             self.timeline_view.timeline.refresh();
         }

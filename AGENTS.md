@@ -441,6 +441,20 @@ liegen in `src/ui/mod.zig`, das Virtualisierungsmuster in
   F2/Entf, Tabs, Ansicht, Menüleiste, Kontextmenü, Shortcut-Dialog, Suchleiste) und legt
   Screenshots unter `tmp/e2e_*.ppm` ab.
 
+## Textfelder: zwei Sorten, klar getrennt
+
+- **Mehrzeilig → `CodeEditor`**: Haupteditor, KI-Chat-Eingabe und das Commit-Feld der
+  Source-Control-Ansicht. Damit gibt es dort Umbruch, Rückgängig, Mausauswahl,
+  Kontextmenü und unbegrenzte Länge. Das Commit-Feld war vorher ein eigener Puffer mit
+  2048 Bytes ohne Ctrl+Z; `scm_changes_view` zeichnete Zeilen, Auswahl und Schreibmarke
+  von Hand.
+- **Einzeilig → `line_edit` + `explorer_ops.EditBuffer`**: Umbenennen und Filter im
+  Explorer, Schnellöffner, Ordner-Dialog. Klein gehalten, kein Umbruch (`wrap_mode = .none`),
+  kein Undo.
+- Jeder eingebettete `CodeEditor` braucht die Modifier: `UI.setCtrlState`/`setAltState`/
+  `setShiftState` reichen sie an Chat **und** Commit-Feld weiter. Ohne das greift die
+  Keymap des Editors nicht und Ctrl+Z tut nichts.
+
 ## KI-Chat (llama-server)
 
 Details in der Skill `.claude/skills/llm-local/SKILL.md`: Backend- und Gerätewahl,

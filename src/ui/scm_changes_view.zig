@@ -12,7 +12,8 @@ const Theme = ui.Theme;
 const git_changes = @import("git_changes");
 const git_list = @import("git_list");
 const line_edit = @import("line_edit.zig");
-const explorer_ops = @import("explorer_ops.zig");
+const flow_core = @import("flow_core");
+const CodeEditor = @import("../editor/code_editor.zig").CodeEditor;
 const svg = @import("components/svg.zig");
 const tooltip = @import("components/tooltip.zig");
 
@@ -30,8 +31,6 @@ const DIM_FONT: u16 = 13;
 const BODY_SHARE: f32 = 0.45;
 const BODY_MIN: f32 = 80;
 
-pub const MessageEdit = explorer_ops.EditBuffer(2048);
-pub const input_field: line_edit.Config = .{ .id = "sc_input_text", .font_size = 16 };
 
 /// Aktionen beim Überfahren, in der Reihenfolge von VS Code package.json (inline@1 openFile,
 /// inline@2 stage/unstage/clean). Gruppenköpfe: Staged = unstage all; Changes = stage all, discard all.
@@ -60,25 +59,55 @@ pub const Action = union(enum) {
 
 pub const ScmChangesView = struct {
     view: git_changes.View,
-    message: MessageEdit = .{},
+    /// Commit-Nachricht im vollen Editor, wie die Chat-Eingabe: Umbruch, Rückgängig,
+    /// Mausauswahl und unbegrenzte Länge. Vorher ein eigener Puffer mit 2048 Bytes,
+    /// ohne Ctrl+Z und ohne Umbruch.
+    editor: CodeEditor,
+    input_buffer: *flow_core.Buffer,
     hover_row: ?usize = null,
     /// Hinweis unter dem Feld (VS Code inputValidation), z. B. bei leerer Nachricht
     validation: ?[]const u8 = null,
     /// Commit, Publish oder Sync läuft: Knopf und Kopf-Aktion gesperrt
     busy: bool = false,
-    /// Erste sichtbare Zeile des Eingabefelds, wenn es mehr als INPUT_MAX_LINES Zeilen hat
-    input_first_line: usize = 0,
     /// Commit-Nachricht wird gerade vom Modell erzeugt (Sparkle dreht, Platzhalter „Generating…“)
     generating: bool = false,
 
     const Self = @This();
 
-    pub fn init(alloc: std.mem.Allocator) Self {
-        return .{ .view = git_changes.View.init(alloc) };
+    pub fn init(alloc: std.mem.Allocator) !Self {
+        const buf = try flow_core.Buffer.create(alloc);
+        errdefer buf.deinit();
+        var self = Self{
+            .view = git_changes.View.init(alloc),
+            .editor = CodeEditor.init(alloc, buf),
+            .input_buffer = buf,
+        };
+        self.editor.show_gutter = false;
+        self.editor.show_minimap = false;
+        self.editor.show_indent_guides = false;
+        self.editor.compact_menu = true;
+        self.editor.word_wrap = true;
+        // Buffer.create liefert einen Root ohne Zeilenanfang; erst setText macht ihn
+        // beschreibbar (siehe ai_chat.zig).
+        self.editor.setText("");
+        return self;
     }
 
     pub fn deinit(self: *Self) void {
         self.view.deinit();
+        self.editor.deinit();
+        self.input_buffer.deinit();
+    }
+
+    /// Aktueller Inhalt des Felds (Zeiger gehört dem Puffer).
+    pub fn messageText(self: *Self) []const u8 {
+        const buf = self.input_buffer;
+        return buf.store_to_string_cached(buf.root, buf.file_eol_mode);
+    }
+
+    pub fn setMessage(self: *Self, text: []const u8) void {
+        self.editor.setText(text);
+        self.validation = null;
     }
 
     pub fn headerId() clay.ElementId {
@@ -132,35 +161,12 @@ pub const ScmChangesView = struct {
 
     pub fn handleMouseMove(self: *Self, x: f32, y: f32) void {
         self.hover_row = self.rowAt(x, y);
-        // Auswahl im Eingabefeld ziehen (Taste im Feld gedrückt)
-        if (self.message.mouse_selecting) {
-            self.message.prepareMove(true);
-            self.setMessageCursorAt(x, y);
-        }
+        // Auswahl im Eingabefeld ziehen übernimmt der Editor selbst.
+        self.editor.handleMouseMove(x, y);
     }
 
     pub fn handleMouseUp(self: *Self) void {
-        line_edit.handleRelease(&self.message);
-    }
-
-    /// Cursor der Nachricht an die Fensterposition (Zeile aus y, Spalte aus x); außerhalb
-    /// des Felds wird an die Ränder geklemmt, damit Ziehen bis Anfang/Ende reicht.
-    fn setMessageCursorAt(self: *Self, x: f32, y: f32) void {
-        const b = box(inputId()) orelse return;
-        const rel_line: usize = @intFromFloat(@max(0, (y - b.y - INPUT_PAD) / INPUT_LINE_HEIGHT));
-        const line_idx = @min(self.input_first_line + rel_line, self.message.lineCount() - 1);
-        const text = self.message.line(line_idx);
-        const rel_x = x - b.x - 6;
-        var col: usize = 0;
-        var left: f32 = 0;
-        var it = std.unicode.Utf8View.initUnchecked(text).iterator();
-        while (it.nextCodepointSlice()) |cp| {
-            const w = ui.measureTextWidth(cp, input_field.font_size);
-            if (rel_x < left + w / 2) break;
-            left += w;
-            col += 1;
-        }
-        self.message.setCursorAtLine(line_idx, col);
+        self.editor.handleMouseUp();
     }
 
     pub fn scrollLines(self: *Self, delta: i32) void {
@@ -206,10 +212,8 @@ pub const ScmChangesView = struct {
             return if (self.view.actionButton() == .commit) .commit else .sync;
         };
         if (box(inputId())) |b| if (inside(b, x, y)) {
-            // Zeile aus y, Spalte aus x; Shift markiert bis hierher, Ziehen beginnt
-            self.message.prepareMove(shift);
-            self.setMessageCursorAt(x, y);
-            self.message.mouse_selecting = true;
+            _ = shift;
+            self.editor.handleMouseDown(x, y, .mouse_left);
             return .focus_input;
         };
         const i = self.rowAt(x, y) orelse return .consumed;
@@ -270,42 +274,19 @@ pub const ScmChangesView = struct {
         return action;
     }
 
-    /// Tasten im Eingabefeld: Ctrl+Enter = Commit, Enter = neue Zeile, ↑↓ zwischen Zeilen
-    /// (Shift markiert), Pos1/Ende in der Zeile, sonst Cursor/Auswahl/Backspace/Entf und
-    /// Ctrl+A/C/X/V über line_edit (mehrzeiliges Einfügen).
+    /// Tasten im Eingabefeld: Ctrl+Enter committet, alles andere macht der Editor —
+    /// Umbruch, Auswahl, Rückgängig, Zwischenablage.
     pub fn handleInputKey(self: *Self, key: wio.Button, mods: line_edit.Mods, clip: ?line_edit.Clipboard) Action {
-        switch (key) {
-            .enter, .kp_enter => {
-                if (mods.ctrl) return .commit;
-                self.message.insertCodepoint('\n');
-                self.validation = null;
-            },
-            .up => {
-                self.message.prepareMove(mods.shift);
-                self.message.moveUp();
-            },
-            .down => {
-                self.message.prepareMove(mods.shift);
-                self.message.moveDown();
-            },
-            .home => {
-                self.message.prepareMove(mods.shift);
-                self.message.moveLineHome();
-            },
-            .end => {
-                self.message.prepareMove(mods.shift);
-                self.message.moveLineEnd();
-            },
-            else => if (line_edit.handleKeyEx(&self.message, key, mods, clip, true) == .edited) {
-                self.validation = null;
-            },
-        }
+        _ = clip;
+        if ((key == .enter or key == .kp_enter) and mods.ctrl) return .commit;
+        self.editor.handleKeyPress(key);
+        self.validation = null;
         return .consumed;
     }
 
     pub fn handleInputChar(self: *Self, cp: u21) void {
         if (cp < 0x20) return;
-        self.message.insertCodepoint(cp);
+        self.editor.handleChar(cp);
         self.validation = null;
     }
 
@@ -341,13 +322,10 @@ pub const ScmChangesView = struct {
                 }
             });
 
-            // Eingabefeld: wächst mit den Zeilen bis INPUT_MAX_LINES, danach scrollt es zur Cursorzeile
-            const line_count = self.message.lineCount();
-            const shown = @min(line_count, INPUT_MAX_LINES);
-            const cur_line = self.message.cursorLine();
-            if (cur_line < self.input_first_line) self.input_first_line = cur_line;
-            if (cur_line >= self.input_first_line + shown) self.input_first_line = cur_line + 1 - shown;
-            if (self.input_first_line + shown > line_count) self.input_first_line = line_count - shown;
+            // Eingabefeld: der Editor zeichnet Text, Auswahl und Schreibmarke selbst und
+            // wächst bis INPUT_MAX_LINES; darüber scrollt er.
+            const line_count = self.editor.lineCount();
+            const shown = @min(@max(line_count, 1), INPUT_MAX_LINES);
             const input_h = @as(f32, @floatFromInt(shown)) * INPUT_LINE_HEIGHT + 2 * INPUT_PAD;
             clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(input_h + 10) }, .padding = .{ .left = 8, .right = 8, .top = 5, .bottom = 5 } } })({
                 clay.UI()(.{
@@ -357,7 +335,7 @@ pub const ScmChangesView = struct {
                     .border = .{ .width = .all(1), .color = if (input_focused) theme.border_focus else theme.border },
                     .corner_radius = .all(4),
                 })({
-                    if (self.message.len == 0) {
+                    if (self.messageText().len == 0) {
                         // In der Arena, nicht auf dem Stack: Clay hält den Zeiger bis zum Zeichnen
                         // nach `render`. Ein Stack-Puffer wurde bis dahin überschrieben (Debug: 0xAA),
                         // der Shaper meldete InvalidUtf8 und der ganze Frame fiel aus (Zittern).
@@ -371,46 +349,17 @@ pub const ScmChangesView = struct {
                     clay.UI()(.{ .floating = .{ .attach_to = .to_parent, .attach_points = .{ .element = .right_top, .parent = .right_top }, .offset = .{ .x = -3, .y = 3 }, .z_index = 5 }, .layout = .{ .sizing = .{ .w = .fit, .h = .fit } } })({
                         tooltip.iconButton(arena, theme, clay.ElementId.ID("sc_btn_generate"), "sc_btn_generate_icon", if (self.generating) svg.Lucide.loader_circle else svg.Lucide.sparkles, if (self.generating) "Generating commit message..." else "Generate Commit Message", .{ .size = 20, .icon_size = 14 });
                     });
-                    const sel = self.message.selection();
-                    for (self.input_first_line..self.input_first_line + shown) |li| {
-                        const text = self.message.line(li);
-                        // Byte-Bereich der Zeile im Puffer (für die Markierung)
-                        const line_start = @intFromPtr(text.ptr) - @intFromPtr(&self.message.buf);
-                        const line_end = line_start + text.len;
-                        clay.UI()(.{
-                            .id = clay.ElementId.IDI("sc_input_line", @intCast(li)),
-                            .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(INPUT_LINE_HEIGHT) }, .child_alignment = .{ .y = .center } },
-                        })({
-                            clay.text(text, .{ .font_size = 16, .color = theme.text, .wrap_mode = .none });
-                            // Markierung: Schnitt der Auswahl mit der Zeile; reicht sie über das
-                            // Zeilenende hinaus, ein Stück breiter als Hinweis auf den Umbruch
-                            if (sel) |s| if (s.start < line_end + 1 and s.end > line_start) {
-                                const a = @max(s.start, line_start) - line_start;
-                                const b_end = @min(s.end, line_end) - line_start;
-                                const x0 = ui.measureTextWidth(text[0..a], 16);
-                                var x1 = ui.measureTextWidth(text[0..b_end], 16);
-                                if (s.end > line_end) x1 += 6;
-                                clay.UI()(.{
-                                    .id = clay.ElementId.IDI("sc_input_sel", @intCast(li)),
-                                    .floating = .{ .attach_to = .to_parent, .attach_points = .{ .element = .left_center, .parent = .left_center }, .offset = .{ .x = x0, .y = 0 }, .z_index = 9, .pointer_capture_mode = .passthrough },
-                                    .layout = .{ .sizing = .{ .w = .fixed(@max(1, x1 - x0)), .h = .fixed(INPUT_LINE_HEIGHT - 2) } },
-                                    .background_color = line_edit.selectionColor(theme),
-                                })({});
-                            };
-                            if (input_focused and li == cur_line) {
-                                const before = self.message.textBeforeCursor();
-                                const ls = if (std.mem.lastIndexOfScalar(u8, before, '\n')) |i| i + 1 else 0;
-                                clay.UI()(.{
-                                    .id = clay.ElementId.ID("sc_input_caret"),
-                                    .floating = .{ .attach_to = .to_parent, .attach_points = .{ .element = .left_center, .parent = .left_center }, .offset = .{ .x = ui.measureTextWidth(before[ls..], 16), .y = 0 }, .z_index = 10, .pointer_capture_mode = .passthrough },
-                                    .layout = .{ .sizing = .{ .w = .fixed(2), .h = .fixed(16) } },
-                                    .background_color = theme.text,
-                                })({});
-                            }
-                        });
-                    }
+                    self.editor.render(arena, false);
                 });
             });
+            // Der Editor rechnet Maus- und Cursorpositionen gegen diese Box.
+            const input_box = clay.getElementData(inputId());
+            if (input_box.found) {
+                self.editor.content_origin_x = input_box.bounding_box.x + 6;
+                self.editor.content_origin_y = input_box.bounding_box.y + INPUT_PAD;
+                self.editor.width = input_box.bounding_box.width - 12;
+                self.editor.height = input_box.bounding_box.height - 2 * INPUT_PAD;
+            }
             if (self.validation) |text| {
                 clay.UI()(.{ .id = clay.ElementId.ID("sc_validation"), .layout = .{ .sizing = .{ .w = .grow }, .padding = .{ .left = 8, .right = 8, .bottom = 4 } } })({
                     clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow }, .padding = .all(4) }, .background_color = tint(theme.warning, 60), .border = .{ .width = .all(1), .color = theme.warning } })({
