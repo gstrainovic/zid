@@ -210,7 +210,10 @@ pub const UI = struct {
     /// Scroll-Versatz im Kürzel-Dialog
     shortcuts_scroll_y: f32 = 0,
     /// Tab-Index vor dem letzten Wechsel ins Terminal (Ctrl+J zurück)
-    terminal_return_index: ?usize = null,
+    /// Tab, zu dem Ctrl+J zurückkehrt, und das zuletzt benutzte Terminal — als Pfad,
+    /// weil Indizes sich beim Schliessen von Tabs verschieben (beide owned).
+    terminal_return_path: ?[]const u8 = null,
+    last_terminal_path: ?[]const u8 = null,
     /// "Open Folder…"-Dialog
     folder_picker: folder_picker_mod.FolderPicker,
     /// Schnellöffner (Ctrl+P) und Command Palette (Ctrl+Shift+P)
@@ -447,6 +450,8 @@ pub const UI = struct {
         if (self.lsp) |l| l.deinit();
         self.lsp = null;
         if (self.lsp_goto) |g| self.allocator.free(g.path);
+        if (self.terminal_return_path) |p| self.allocator.free(p);
+        if (self.last_terminal_path) |p| self.allocator.free(p);
         self.lsp_goto = null;
 
         if (self.active_dialog) |ad| {
@@ -1466,6 +1471,15 @@ pub const UI = struct {
     fn focusFollowsActiveTab(self: *Self) void {
         const kind = self.activeTabKind();
         defer self.last_active_tab_kind = kind;
+
+        // Zuletzt benutztes Terminal mitschreiben, egal wie es aktiv wurde (Klick,
+        // Ctrl+Tab, neu geöffnet). Ctrl+J springt genau dorthin zurück.
+        if (kind == .terminal) {
+            if (self.getActiveTabBar().getActiveTab()) |t| {
+                const same = if (self.last_terminal_path) |p| std.mem.eql(u8, p, t.path) else false;
+                if (!same) self.setLastTerminalPath(t.path);
+            }
+        }
         if (kind == null or kind == self.last_active_tab_kind) return;
         if (kind == .chat or kind == .terminal) {
             self.explorer_focused = false;
@@ -1767,6 +1781,7 @@ pub const UI = struct {
                 }
             },
             .new_terminal => self.getActiveTabBar().openTerminal(),
+            .new_chat => self.getActiveTabBar().openChat(),
             // Editor-Commands: dieselben Actions wie die Tastenkürzel im Editor-Keymap
             .save => self.getActiveEditor().dispatchAction(.Save),
             .undo => self.getActiveEditor().dispatchAction(.Undo),
@@ -2626,15 +2641,38 @@ pub const UI = struct {
 
     /// Ctrl+J: Terminal-Tab im aktiven Pane aktivieren (anlegen, wenn keiner da ist);
     /// vom Terminal aus zurück zum vorherigen Tab.
+    /// Ctrl+J: hin zum zuletzt benutzten Terminal, zurück zum Tab davor.
+    ///
+    /// Vorher sprang es immer zum **ersten** Terminal, und war der gemerkte Tab inzwischen
+    /// selbst ein Terminal (oder geschlossen), tat die Taste gar nichts. Gemerkt wird
+    /// deshalb der Pfad statt eines Index — Indizes verschieben sich beim Schliessen.
     fn toggleTerminal(self: *Self) void {
         const tb = self.getActiveTabBar();
         if (self.isTerminalActive()) {
-            if (self.terminal_return_index) |i| {
-                if (i < tb.tabs.items.len and tb.tabs.items[i].kind != .terminal) tb.setActive(i);
+            // Zurück: der gemerkte Tab, sonst der erste, der kein Terminal ist.
+            if (self.tabIndexOfPath(tb, self.terminal_return_path)) |i| {
+                if (tb.tabs.items[i].kind != .terminal) {
+                    tb.setActive(i);
+                    return;
+                }
+            }
+            for (tb.tabs.items, 0..) |tab, i| {
+                if (tab.kind != .terminal) {
+                    tb.setActive(i);
+                    return;
+                }
             }
             return;
         }
-        self.terminal_return_index = tb.active_index;
+
+        if (tb.getActiveTab()) |t| self.setTerminalReturnPath(t.path);
+        // Zuletzt benutztes Terminal, sonst das erste, sonst ein neues.
+        if (self.tabIndexOfPath(tb, self.last_terminal_path)) |i| {
+            if (tb.tabs.items[i].kind == .terminal) {
+                tb.setActive(i);
+                return;
+            }
+        }
         for (tb.tabs.items, 0..) |tab, i| {
             if (tab.kind == .terminal) {
                 tb.setActive(i);
@@ -2642,6 +2680,25 @@ pub const UI = struct {
             }
         }
         tb.openTerminal();
+    }
+
+    fn tabIndexOfPath(self: *Self, tb: *tab_bar_mod.TabBarState, path: ?[]const u8) ?usize {
+        _ = self;
+        const p = path orelse return null;
+        for (tb.tabs.items, 0..) |tab, i| {
+            if (std.mem.eql(u8, tab.path, p)) return i;
+        }
+        return null;
+    }
+
+    fn setLastTerminalPath(self: *Self, path: []const u8) void {
+        if (self.last_terminal_path) |old| self.allocator.free(old);
+        self.last_terminal_path = self.allocator.dupe(u8, path) catch null;
+    }
+
+    fn setTerminalReturnPath(self: *Self, path: []const u8) void {
+        if (self.terminal_return_path) |old| self.allocator.free(old);
+        self.terminal_return_path = self.allocator.dupe(u8, path) catch null;
     }
 
     /// Text der Statusleiste für den aktiven Editor (Zeile/Spalte, Auswahl, EOL, Encoding, Sprache, Einrückung).
