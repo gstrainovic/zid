@@ -23,7 +23,7 @@ options=('!strip' '!debug')
 provides=('zid')
 conflicts=('zid')
 source=("$url/releases/download/v$pkgver/zid-$pkgver-x86_64-linux.tar.xz")
-sha256sums=('714a06d2a2fe6097f9c2d50aced40d0945b08a353f6e0cfd826a9ef3e950326e')
+sha256sums=('d62014495c4e8ef7b236197d791e6ffdb54faf80c7a09a2790a0e69bd6e45f70')
 
 package() {
     cd "zid-$pkgver-x86_64-linux"

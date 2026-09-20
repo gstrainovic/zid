@@ -11,9 +11,9 @@ Fertiges Binary, kein Zig, kein Compiler. Läuft unter Wayland und X11.
 ### Alle Distributionen: Tarball
 
 ```bash
-curl -LO https://github.com/gstrainovic/zid/releases/latest/download/zid-0.1.0-x86_64-linux.tar.xz
-tar xf zid-0.1.0-x86_64-linux.tar.xz
-cd zid-0.1.0-x86_64-linux
+curl -LO https://github.com/gstrainovic/zid/releases/latest/download/zid-0.1.1-x86_64-linux.tar.xz
+tar xf zid-0.1.1-x86_64-linux.tar.xz
+cd zid-0.1.1-x86_64-linux
 ./install.sh            # nach ~/.local, ohne root
 ```
 
@@ -136,8 +136,8 @@ eigenen Zig-Cache, die Artefakte der Entwicklungsmaschine bleiben also liegen.
 Im Tarball steckt ein `install.sh`:
 
 ```bash
-tar xf zid-0.1.0-x86_64-linux.tar.xz
-cd zid-0.1.0-x86_64-linux
+tar xf zid-0.1.1-x86_64-linux.tar.xz
+cd zid-0.1.1-x86_64-linux
 ./install.sh                 # nach ~/.local
 ./install.sh /usr/local      # systemweit (als root)
 ./install.sh --uninstall     # wieder entfernen
@@ -147,9 +147,9 @@ cd zid-0.1.0-x86_64-linux
 
 ```bash
 packaging/build-release.sh                       # dist/…tar.xz + .sha256
-git tag -a v0.1.0 -m "zid 0.1.0" && git push origin v0.1.0
-gh release create v0.1.0 dist/zid-0.1.0-x86_64-linux.tar.xz* \
-    --title "zid 0.1.0" --notes "…"
+git tag -a v0.1.1 -m "zid 0.1.1" && git push origin v0.1.1
+gh release create v0.1.1 dist/zid-0.1.1-x86_64-linux.tar.xz* \
+    --title "zid 0.1.1" --notes "…"
 ```
 
 Danach die beiden Distributionspakete auf die neue Version ziehen — beide
@@ -162,7 +162,7 @@ installieren das Release-Tarball, bauen also nichts nach:
   ```bash
   git clone ssh://aur@aur.archlinux.org/zid-bin.git
   cp packaging/aur/PKGBUILD packaging/aur/.SRCINFO zid-bin/
-  cd zid-bin && git commit -am "zid-bin 0.1.0" && git push
+  cd zid-bin && git commit -am "zid-bin 0.1.1" && git push
   ```
 
   `.SRCINFO` erzeugt `makepkg --printsrcinfo > .SRCINFO`; ohne Arch-Rechner:

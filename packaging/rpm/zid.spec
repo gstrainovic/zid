@@ -65,5 +65,8 @@ appstreamcli validate --no-net \
 %{_datadir}/metainfo/%{appid}.metainfo.xml
 
 %changelog
+* Sun Sep 20 2026 gstrainovic <g.strainovic@gmail.com> - 0.1.1-1
+- Farbige Emoji, KI richtet Engine und Modell selbst ein, Ollama entfernt
+
 * Sun Sep 20 2026 gstrainovic <g.strainovic@gmail.com> - 0.1.0-1
 - Erstes Paket
