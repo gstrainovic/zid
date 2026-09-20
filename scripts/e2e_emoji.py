@@ -84,6 +84,27 @@ def colored_pixels(path, box):
     return count
 
 
+def step_markdown():
+    """Die eingecheckte Emoji-Datei in der Vorschau: Emoji kommen auch dort farbig,
+    und die Vorschau baut sie ohne Clay-Fehler."""
+    print("--- Markdown-Vorschau")
+    fixture = os.path.join(ROOT, "scripts", "fixtures", "emoji_test.md")
+    rpc("open_file", [fixture])
+    settle(20)
+    rpc("key_press_mods", ["v", True, True])  # Ctrl+Shift+V
+    settle(30)
+
+    shot("e2e_emoji_md.ppm")
+    # Ganzer Textbereich rechts der Seitenleiste, ohne Tab-Leiste.
+    area = {"x": 260, "y": 120, "w": 900, "h": 600}
+    colored = colored_pixels(os.path.join(ROOT, "tmp", "e2e_emoji_md.ppm"), area)
+    check(colored > 200, f"farbige Pixel in der Vorschau: {colored}")
+
+    errors = result_json("ui_state").get("clay_errors", 0)
+    check(errors == 0, f"Vorschau ohne Clay-Fehler ({errors})")
+    return colored > 200 and errors == 0
+
+
 def main():
     setup()
     env = isolated_env("e2e_emoji")
@@ -112,9 +133,11 @@ def main():
         colored = colored_pixels(os.path.join(ROOT, "tmp", "e2e_emoji.ppm"), line)
         check(colored > 20, f"farbige Pixel in der Textzeile: {colored}")
 
+        ok = colored > 20 and step_markdown()
+
         state = result_json("ui_state")
         check(state.get("toast", "") is not None, "läuft ohne Absturz weiter")
-        return 0 if colored > 20 else 1
+        return 0 if ok else 1
     finally:
         stop_zid(proc)
         log.close()
