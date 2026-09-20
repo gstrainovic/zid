@@ -956,7 +956,8 @@ pub const UI = struct {
             if (self.is_ctrl_down and key == .c) {
                 if (self.ai_chat.selectedText(self.allocator)) |text| {
                     defer self.allocator.free(text);
-                    if (self.window) |win| win.setClipboardText(text);
+                    // Über setClipboard, damit ui_state den Text headless zeigt.
+                    self.setClipboard(text);
                     return;
                 }
             }
@@ -1039,7 +1040,7 @@ pub const UI = struct {
     pub fn copyPreviewSelection(self: *Self, v: *markdown_view_mod.MarkdownView) void {
         const text = v.selectedText(self.allocator) orelse return;
         defer self.allocator.free(text);
-        if (self.window) |win| win.setClipboardText(text);
+        self.setClipboard(text);
     }
 
     fn handleDialogKey(self: *Self, ad: *ActiveDialog, key: wio.Button) void {

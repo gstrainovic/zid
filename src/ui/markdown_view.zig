@@ -395,6 +395,45 @@ pub const MarkdownView = struct {
         return true;
     }
 
+    /// Erste und letzte Position dieser Ansicht (aus den Zeilen dieses Frames).
+    fn firstPos(self: *Self) ?md_select.Pos {
+        const fl = if (self.frame_lines.items.len > 0) self.frame_lines.items[0] else return null;
+        return .{ .block = fl.block, .line = fl.line, .offset = 0 };
+    }
+
+    fn lastPos(self: *Self) ?md_select.Pos {
+        const n = self.frame_lines.items.len;
+        if (n == 0) return null;
+        const fl = self.frame_lines.items[n - 1];
+        const text = self.line_texts.get(lineKey(fl.block, fl.line));
+        const len: u32 = if (text) |t| @intCast(t.text.len) else 0;
+        return .{ .block = fl.block, .line = fl.line, .offset = len };
+    }
+
+    /// Ganze Ansicht markieren (Auswahl über mehrere Chat-Bubbles).
+    pub fn selectAllContent(self: *Self) void {
+        const a = self.firstPos() orelse return;
+        const b = self.lastPos() orelse return;
+        self.sel_anchor = a;
+        self.sel_head = b;
+        self.selecting = false;
+    }
+
+    /// Vom bestehenden Anker bis ans Ende markieren; ohne Anker ab dem Anfang.
+    pub fn selectFromAnchorToEnd(self: *Self) void {
+        const b = self.lastPos() orelse return;
+        if (self.sel_anchor == null) self.sel_anchor = self.firstPos() orelse return;
+        self.sel_head = b;
+    }
+
+    /// Vom Anfang bis zur Mausposition markieren (Ende einer bubble-übergreifenden Auswahl).
+    pub fn selectFromStartTo(self: *Self, x: f32, y: f32) void {
+        const a = self.firstPos() orelse return;
+        const head = self.hitLine(x, y) orelse self.lastPos() orelse return;
+        self.sel_anchor = a;
+        self.sel_head = head;
+    }
+
     pub fn clearSelection(self: *Self) void {
         self.sel_anchor = null;
         self.sel_head = null;

@@ -505,6 +505,10 @@ Drei Regeln aus der Messreihe vom 17.09.2026
   `Ctrl+P`; bei einer umschreibenden Frage („Datei-Schnellsuche") rät es trotz Liste
   gelegentlich daneben — das Werkzeug liefert `command`, `label` und `key`, das Übersetzen
   bleibt Sache des Modells.
+- Markieren geht über Bubble-Grenzen: jede Nachricht ist eine eigene `MarkdownView`, beim
+  Ziehen markiert `handleMouseMove` die Startnachricht ab dem Anker (`selectFromAnchorToEnd`),
+  die dazwischen ganz (`selectAllContent`) und die zuletzt erreichte bis zur Maus
+  (`selectFromStartTo`). `selectedText` verkettet alle markierten Nachrichten.
 - Ganzen Verlauf kopieren: Knopf `ai_copy_all` in der Kopfzeile oder Ctrl+Shift+C
   (`AIChatState.conversationText` als Markdown, `## Du` / `## AI` je Nachricht). Ctrl+C
   bleibt die markierte Bubble. Der Weg läuft über `UI.setClipboard`, damit `ui_state`
