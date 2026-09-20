@@ -186,8 +186,19 @@ installieren das Release-Tarball, bauen also nichts nach:
 
   `.SRCINFO` erzeugt `makepkg --printsrcinfo > .SRCINFO`; ohne Arch-Rechner:
   `podman run --rm -v "$PWD/packaging/aur:/b" archlinux bash -c 'pacman -Sy --noconfirm pacman-contrib && useradd -m b && chown -R b /b && su b -c "cd /b && makepkg --printsrcinfo > .SRCINFO"'`
-* `packaging/rpm/zid.spec` — `Version` und `%changelog` anpassen, dann
-  `copr-cli build zid packaging/rpm/zid.spec` im COPR-Projekt `gstrainovic/zid`.
+* `packaging/rpm/zid.spec` — `Version` und `%changelog` anpassen, dann SRPM bauen
+  und ins COPR-Projekt `gstrainovic/zid` schicken. `copr-cli build` nimmt ein SRPM
+  oder eine URL, keine Spec-Datei:
+
+  ```bash
+  rpmbuild -bs --define "_topdir $PWD/tmp/rpm" --define "_sourcedir $PWD/dist" \
+      packaging/rpm/zid.spec
+  copr-cli build zid tmp/rpm/SRPMS/zid-<version>-1.fc*.src.rpm
+  ```
+
+  Das Tarball muss dafür in `dist/` liegen (Source0 wird von dort genommen, nicht
+  geladen). Zugangsdaten holt `copr-cli` aus `~/.config/copr`, zu erzeugen unter
+  <https://copr.fedorainfracloud.org/api/>.
 
 Warum Binärpakete statt Bauen aus den Quellen: zid verlangt exakt Zig 0.15.2,
 die vendorte MuPDF aus einem Submodul und Netzzugang während des Builds. Das
