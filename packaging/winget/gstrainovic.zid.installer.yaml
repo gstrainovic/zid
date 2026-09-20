@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.6.0.schema.json
+PackageIdentifier: gstrainovic.zid
+PackageVersion: 0.1.1
+MinimumOSVersion: 10.0.0.0
+InstallerType: zip
+NestedInstallerType: portable
+NestedInstallerFiles:
+  - RelativeFilePath: zid-0.1.1-x86_64-windows\zid.exe
+    PortableCommandAlias: zid
+UpgradeBehavior: install
+ReleaseDate: 2026-09-20
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/gstrainovic/zid/releases/download/v0.1.1/zid-0.1.1-x86_64-windows.zip
+    InstallerSha256: 2FA9BC3B7D3B50B8059515DE656250F465638564EC6CDDC4EB7515A82FBCEB5E
+ManifestType: installer
+ManifestVersion: 1.6.0

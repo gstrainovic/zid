@@ -1,0 +1,27 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.6.0.schema.json
+PackageIdentifier: gstrainovic.zid
+PackageVersion: 0.1.1
+PackageLocale: en-US
+Publisher: gstrainovic
+PublisherUrl: https://github.com/gstrainovic
+PublisherSupportUrl: https://github.com/gstrainovic/zid/issues
+PackageName: zid
+PackageUrl: https://github.com/gstrainovic/zid
+License: AGPL-3.0-only
+LicenseUrl: https://github.com/gstrainovic/zid/blob/main/LICENSE
+ShortDescription: GPU-accelerated editor with markdown preview, PDF viewer and a local AI chat
+Description: |-
+  zid is an editor rendered on the GPU through Vulkan/WGPU. It shows code with
+  tree-sitter highlighting, renders markdown and PDF side by side, embeds
+  terminals, and talks to a local llama-server that it can set up by itself.
+  No compiler or runtime is needed to run it.
+Moniker: zid
+Tags:
+  - editor
+  - markdown
+  - pdf
+  - terminal
+  - vulkan
+ReleaseNotesUrl: https://github.com/gstrainovic/zid/releases/tag/v0.1.1
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0
