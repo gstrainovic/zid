@@ -95,6 +95,31 @@ def wait_port_free(timeout=15):
     raise RuntimeError("Port 9999 bleibt belegt — läuft noch eine zid-Instanz?")
 
 
+def clay_errors(log):
+    """Clay-Fehlerzeilen im bisherigen Log. Clay meldet jede doppelte ID einzeln."""
+    log.flush()
+    with open(log.name, encoding="utf-8", errors="replace") as f:
+        return [l for l in f.read().splitlines() if "error(ui): Clay:" in l]
+
+
+def step_split(log):
+    """Der Split kopiert die Tabs: dasselbe PDF steht dann in beiden Panes. Ohne
+    Salz in den IDs meldete Clay je Frame über 100 `duplicate_id`, und
+    `getElementData("pdf_next_page")` der zweiten Pane bekam die Box der ersten."""
+    before = len(clay_errors(log))
+    rpc("split_pane", ["v"])
+    settle(30)
+    new = clay_errors(log)[before:]
+    check(not new, f"Split mit PDF meldet keinen Clay-Fehler ({len(new)} neu)")
+
+    # Die Leiste der aktiven Pane bleibt bedienbar
+    to_first_page()
+    click_center("pdf_next_page")
+    settle(10)
+    expect_page(1, "Klick auf Weiter blättert auch im Split")
+    to_first_page()
+
+
 def main():
     log = open(os.path.join(ROOT, "tmp", "e2e_pdf_pager.log"), "w")
     # Eigener, frischer Sitzungszustand pro Lauf: sonst stellt der Start die Tabs
@@ -198,6 +223,8 @@ def main():
         settle(10)
         after = page()
         check(not after["pdf"] or after["page"] == before, "Ctrl+Bild ab blättert nicht")
+
+        step_split(log)
 
         try:
             rpc("shutdown")

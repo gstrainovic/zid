@@ -2191,6 +2191,20 @@ pub const UI = struct {
         return @truncate(@intFromPtr(pane));
     }
 
+    /// Blatt-Pane, die gerade den Inhalt zeichnet (`active_pane` kann ein Split sein).
+    fn activeLeafPane(self: *Self) *pane_mod.Pane {
+        var p = self.active_pane;
+        while (p.data == .split) p = p.data.split.children[0];
+        return p;
+    }
+
+    /// Salz der IDs, die die aktive Pane in diesem Frame vergeben hat. PDF-, Bild- und
+    /// Binäransicht salzen ihre IDs je Pane, damit dieselbe Datei in beiden Hälften eines
+    /// Splits stehen kann; E2E-Abfragen und Treffertests brauchen deshalb dieses Salz.
+    pub fn activePaneSalt(self: *Self) u32 {
+        return paneSalt(self.activeLeafPane());
+    }
+
     pub const EditorOption = enum { minimap, whitespace, indent_guides, word_wrap };
 
     /// Anzeigeoption in allen Editoren umschalten (gemerkt).
@@ -3592,20 +3606,20 @@ pub const UI = struct {
                         if (idx < tab_bar.tabs.items.len) {
                             const tab = &tab_bar.tabs.items[idx];
                             if (tab.kind == .image) {
-                                image_view_mod.ImageViewState.render(allocator, tab.path, t, &self.open_images);
+                                image_view_mod.ImageViewState.render(allocator, tab.path, t, paneSalt(pane), &self.open_images);
                                 special_active = true;
                             } else if (tab.kind == .pdf) {
                                 const maybe_handler = self.open_pdfs.get(tab.path);
                                 const maybe_texture = self.open_images.get(tab.path);
                                 if (maybe_handler) |handler_ptr| {
                                     const handler: *PdfHandler = @ptrCast(@alignCast(handler_ptr));
-                                    if (PdfViewState.render(&self.pdf_label_buf, handler, maybe_texture, t, self.mouse_pressed_this_frame, self.mouse_x, self.mouse_y)) |delta| {
+                                    if (PdfViewState.render(&self.pdf_label_buf, handler, maybe_texture, t, paneSalt(pane), self.mouse_pressed_this_frame, self.mouse_x, self.mouse_y)) |delta| {
                                         self.pending_pdf_page_change = .{ .path = tab.path, .delta = delta };
                                     }
                                 }
                                 special_active = true;
                             } else if (tab.kind == .binary) {
-                                binary_view_mod.render(allocator, tab.path, t);
+                                binary_view_mod.render(allocator, tab.path, t, paneSalt(pane));
                                 special_active = true;
                             } else if (tab.kind == .git_commit) {
                                 if (self.gitCommitFor(tab.path)) |v| {
@@ -3779,7 +3793,9 @@ pub const UI = struct {
     pub fn getDesiredCursor(self: *Self) wio.Cursor {
         // PDF-Leiste: Hand über den Schaltflächen (Bounds-Check, clay.pointerOver
         // meldet in dieser Ansicht nichts).
-        if (self.activePdfTabPath() != null and PdfViewState.overPagerButton(self.mouse_x, self.mouse_y)) {
+        // Salz der aktiven Pane: steht dasselbe PDF nach einem Split in beiden Panes,
+        // gilt der Hand-Cursor für die Leiste der aktiven.
+        if (self.activePdfTabPath() != null and PdfViewState.overPagerButton(self.activePaneSalt(), self.mouse_x, self.mouse_y)) {
             return .hand;
         }
 

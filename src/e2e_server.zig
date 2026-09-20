@@ -1030,6 +1030,10 @@ fn elementBoundsIndexed(ctx: *E2EContext, dc: *zigjr.DispatchCtx, id: []const u8
 fn lookupElement(ctx: *E2EContext, id: []const u8, index: u32) clay.ElementData {
     const global = clay.getElementData(clay.ElementId.IDI(id, index));
     if (global.found) return global;
+    // PDF-, Bild- und Binäransicht salzen ihre IDs je Pane (dieselbe Datei kann nach einem
+    // Split in beiden Hälften stehen): dieselbe Abfrage nochmal mit dem Salz der aktiven Pane.
+    const paned = clay.getElementData(clay.ElementId.IDI(id, index +% ctx.ui_system.activePaneSalt()));
+    if (paned.found) return paned;
     if (ctx.ui_system.activeMarkdownView()) |v| {
         const md = clay.getElementData(v.idi(id, index));
         if (md.found) return md;

@@ -7,12 +7,20 @@ const PdfHandler = @import("../rendering/pdf_handler.zig").PdfHandler;
 const ImageTexture = @import("../clay_renderer/image_renderer.zig").ImageTexture;
 
 pub const PdfViewState = struct {
+    /// ID eines Elements dieser Ansicht. Ein Split kopiert die Tabs, dasselbe PDF
+    /// steht dann in beiden Panes: ohne Salz meldet Clay `duplicate_id` und
+    /// `getElementData` der zweiten Pane bekommt die Box der ersten.
+    pub fn idi(name: []const u8, salt: u32) clay.ElementId {
+        return clay.ElementId.IDI(name, salt);
+    }
+
     /// Rückgabe: Seiten-Delta, das die Hauptschleife anwendet.
     pub fn render(
         label_buf: []u8,
         handler: *PdfHandler,
         maybe_texture: ?*anyopaque,
         theme: Theme,
+        salt: u32,
         mouse_pressed: bool,
         mouse_x: f32,
         mouse_y: f32,
@@ -20,7 +28,7 @@ pub const PdfViewState = struct {
         var delta: ?i16 = null;
 
         clay.UI()(.{
-            .id = clay.ElementId.ID("pdf_view_container"),
+            .id = idi("pdf_view_container", salt),
             .layout = .{
                 .sizing = .grow,
                 .direction = .top_to_bottom,
@@ -38,7 +46,7 @@ pub const PdfViewState = struct {
                     1.0;
 
                 clay.UI()(.{
-                    .id = clay.ElementId.ID("pdf_image"),
+                    .id = idi("pdf_image", salt),
                     .layout = .{
                         .sizing = .{ .w = .grow, .h = .fit },
                     },
@@ -53,7 +61,7 @@ pub const PdfViewState = struct {
             // Leiste: Zurück, Seitenzahl, Weiter. Gesperrte Ränder bleiben
             // sichtbar, damit die Leiste ihre Breite nicht ändert.
             clay.UI()(.{
-                .id = clay.ElementId.ID("pdf_pager"),
+                .id = idi("pdf_pager", salt),
                 .layout = .{
                     .sizing = .{ .w = .fit, .h = .fit },
                     .child_alignment = .{ .x = .center, .y = .center },
@@ -64,14 +72,14 @@ pub const PdfViewState = struct {
                 const back = pdf_nav.canGoBack(handler.current_page);
                 const forward = pdf_nav.canGoForward(handler.current_page, handler.total_pages);
 
-                if (pagerButton("pdf_prev_page", "‹", theme, back, mouse_pressed, mouse_x, mouse_y)) delta = -1;
+                if (pagerButton("pdf_prev_page", "‹", theme, salt, back, mouse_pressed, mouse_x, mouse_y)) delta = -1;
 
                 clay.text(pdf_nav.pageLabel(label_buf, handler.current_page, handler.total_pages), .{
                     .font_size = 18,
                     .color = theme.text,
                 });
 
-                if (pagerButton("pdf_next_page", "›", theme, forward, mouse_pressed, mouse_x, mouse_y)) delta = 1;
+                if (pagerButton("pdf_next_page", "›", theme, salt, forward, mouse_pressed, mouse_x, mouse_y)) delta = 1;
             });
         });
 
@@ -86,12 +94,13 @@ pub const PdfViewState = struct {
         id: []const u8,
         label: []const u8,
         theme: Theme,
+        salt: u32,
         enabled: bool,
         mouse_pressed: bool,
         mouse_x: f32,
         mouse_y: f32,
     ) bool {
-        const element_id = clay.ElementId.ID(id);
+        const element_id = idi(id, salt);
         const hovered = enabled and over(element_id, mouse_x, mouse_y);
 
         const base_bg = if (enabled) theme.primary else theme.surface;
@@ -122,9 +131,9 @@ pub const PdfViewState = struct {
     }
 
     /// Zeiger über einer der beiden Schaltflächen? Für den Hand-Cursor.
-    pub fn overPagerButton(mouse_x: f32, mouse_y: f32) bool {
-        return over(clay.ElementId.ID("pdf_prev_page"), mouse_x, mouse_y) or
-            over(clay.ElementId.ID("pdf_next_page"), mouse_x, mouse_y);
+    pub fn overPagerButton(salt: u32, mouse_x: f32, mouse_y: f32) bool {
+        return over(idi("pdf_prev_page", salt), mouse_x, mouse_y) or
+            over(idi("pdf_next_page", salt), mouse_x, mouse_y);
     }
 
     /// Zeiger über dem Element? Bounding-Box aus dem letzten Layout.
