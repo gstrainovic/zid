@@ -13,6 +13,7 @@ const types = @import("types.zig");
 const emoji_font = @import("emoji_font.zig");
 const font_face_mod = @import("font_face.zig");
 const shaper_mod = @import("shaper.zig");
+const text_scan = @import("text_scan.zig");
 const cache_mod = @import("cache.zig");
 const platform = struct {
     pub const is_wasm = builtin.cpu.arch == .wasm32 or builtin.cpu.arch == .wasm64;
@@ -795,12 +796,8 @@ pub const TextSystem = struct {
     fn needsEmojiFallback(self: *Self, text: []const u8) bool {
         if (!emoji_fallback_supported) return false;
         const face = self.current_face orelse return false;
-        var it = std.unicode.Utf8View.initUnchecked(text).iterator();
-        while (it.nextCodepoint()) |cp| {
-            if (cp < 0x80) continue; // ASCII hat jede Schrift
-            if (!face.hasCodepoint(cp)) return true;
-        }
-        return false;
+
+        return text_scan.hasMissingGlyph(text, face);
     }
 
     /// Text in Läufe zerlegen (Hauptschrift / Emoji-Schrift), jeden Lauf für sich
@@ -832,13 +829,15 @@ pub const TextSystem = struct {
         var have_run = false;
 
         while (pos < text.len) {
-            const len = std.unicode.utf8ByteSequenceLength(text[pos]) catch 1;
-            const cp = std.unicode.utf8Decode(text[pos..@min(pos + len, text.len)]) catch 0xFFFD;
+            // Verlustfrei dekodieren: gezeichnet wird auch, was kein gültiges UTF-8
+            // ist (Dateinamen, Dateiinhalte). `next_pos` steht danach am nächsten Zeichen.
+            var next_pos = pos;
+            const cp = text_scan.decodeLossy(text, &next_pos);
 
             // Der Variantenwähler gehört zum Zeichen davor und entscheidet nichts
             // für sich: er bleibt im laufenden Lauf.
             if (emoji_font.isVariationSelector(cp)) {
-                pos += len;
+                pos = next_pos;
                 continue;
             }
 
@@ -846,9 +845,9 @@ pub const TextSystem = struct {
             // wenn die Hauptschrift das Zeichen hätte (⚠ gibt es in JetBrains Mono).
             // U+20E3 macht aus dem Zeichen davor eine Taste (1️⃣); beide müssen in
             // denselben Lauf, sonst formt HarfBuzz sie nicht zusammen.
-            const next = codepointAt(text, @intCast(pos + len));
+            const next = codepointAt(text, @intCast(next_pos));
             const after_next = if (next == 0xFE0F or next == 0xFE0E)
-                codepointAt(text, @intCast(pos + len + utf8Len(next)))
+                codepointAt(text, @intCast(next_pos + utf8Len(next)))
             else
                 next;
             const in_emoji = switch (next) {
@@ -868,7 +867,7 @@ pub const TextSystem = struct {
                 start = pos;
                 run_is_emoji = in_emoji;
             }
-            pos += len;
+            pos = next_pos;
         }
         if (have_run and start < text.len) {
             try self.appendRun(&glyphs, &width, face, emoji, text[start..], run_is_emoji, start);
@@ -889,7 +888,7 @@ pub const TextSystem = struct {
     fn codepointAt(text: []const u8, offset: u32) u21 {
         if (offset >= text.len) return 0xFFFD;
         var i: usize = offset;
-        return shaper_mod.decodeLossy(text, &i);
+        return text_scan.decodeLossy(text, &i);
     }
 
     fn appendRun(

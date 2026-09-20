@@ -695,7 +695,8 @@ für Nachmessungen.
   `measureTextWidth`), ein Tooltip mit dem vollen Pfad erscheint nach 700 ms über einer Zeile
   (`hover_index`/`hover_since_ms`, Element `fx_tooltip`). Ordner erben die Git-Farbe ihrer Nachfahren
   (`folderStatus`, C > M > A > ?), Icons nach Endung (`fileIcon`-Tabelle). Versteckte Einträge zeigt
-  Taste `.` (`show_hidden`, gedämpft), das Filterfeld öffnet `/` (Name enthält Text, Elternordner
+  Taste `.` oder „Toggle Hidden Files" im View-Menü (`show_hidden`, gedämpft, mit Häkchen); die
+  Taste allein war nicht auffindbar. Das Filterfeld öffnet `/` (Name enthält Text, Elternordner
   bleiben, Ordner mit Treffern gelten als aufgeklappt; nur geladene Knoten werden durchsucht; Enter
   behält den Filter, Escape leert ihn). Drag & Drop: Ziehen eines Eintrags auf einen Ordner (oder eine
   Datei darin) fragt „Move 'a' into 'b'?“ und ruft `performMove` (`drag`/`pending_move`).
