@@ -34,6 +34,13 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.1.1" date="2026-09-20">
+      <description>
+        <p>Color emoji in editor, preview and chat; the font is fetched on first use.</p>
+        <p>The chat sets up its own engine and model, Ollama is gone.</p>
+        <p>Undo and double-click in the small text fields, selection across chat messages.</p>
+      </description>
+    </release>
     <release version="0.1.0" date="2026-09-20">
       <description>
         <p>First packaged release.</p>

@@ -8,7 +8,7 @@
 %global __brp_check_rpaths %{nil}
 
 Name:           zid
-Version:        0.1.0
+Version:        0.1.1
 Release:        1%{?dist}
 Summary:        GPU-beschleunigter Editor mit Markdown-Vorschau, PDF-Anzeige und lokaler KI
 
