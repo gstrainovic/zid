@@ -449,6 +449,33 @@ liegen in `src/ui/mod.zig`, das Virtualisierungsmuster in
   F2/Entf, Tabs, Ansicht, Menüleiste, Kontextmenü, Shortcut-Dialog, Suchleiste) und legt
   Screenshots unter `tmp/e2e_*.ppm` ab.
 
+## Farbige Emoji (`src/text/emoji_font.zig`, `bitmap_scale.zig`)
+
+- JetBrains Mono hat keine Emoji. `TextSystem.shapeText` prüft je Textstück, ob ein
+  Zeichen in der Hauptschrift fehlt (`FreeTypeFace.hasCodepoint`), und zerlegt den Text
+  dann in Läufe: Hauptschrift und Emoji-Schrift getrennt, weil HarfBuzz je Aufruf nur eine
+  Schrift kennt. Emoji-Glyphen bekommen `font_ref` und `is_color`; `resolveGlyphBatch`
+  schickt sie an `GlyphCache.getOrRenderFallback`.
+- Brauchbar ist nur eine **Bitmap**-Emoji-Schrift (CBDT, `FreeTypeFace.isColorBitmapFont`).
+  Die COLRv1-Fassung, die Fedora ausliefert, besteht aus Malanweisungen; FreeType 2.13
+  malt sie nicht aus und liefert ein leeres Bitmap. Debian, Ubuntu und Arch haben CBDT,
+  sonst lädt zid NotoColorEmoji (10 MB, Fassung v2.047) einmalig nach
+  `<AppData>/zid/fonts/` — derselbe Weg wie bei der KI-Selbsteinrichtung.
+- Bitmap-Schriften lassen keine freie Grösse zu: `finishFace` wählt über `FT_Select_Size`
+  die nächstliegende feste Grösse und merkt `strike_scale`; `renderStrikeGlyph` verkleinert
+  das 128-px-Bild mit `bitmap_scale.downscaleBgraToRgba` (Kastenfilter, BGRA nach RGBA, ohne
+  Vormultiplikation). HarfBuzz meldet für solche Schriften **keinen Vorschub**; ohne
+  `FreeTypeFace.strikeAdvance` stünde das nächste Zeichen im Emoji.
+- Zwei Atlanten: Text bleibt einkanalig, Emoji liegen in `GlyphCache.color_atlas` (RGBA).
+  Der Vertex trägt einen Schalter (`location(3)`), `shaders/text_atlas.wgsl` mischt zwischen
+  Maske und Farbbild. Die SVG-Schicht hat deshalb einen eigenen Shader
+  (`shaders/svg_atlas.wgsl`); vorher teilte sie sich den Text-Shader, und die neue
+  Vertexspalte liess die `svg_pipeline` beim Erzeugen abstürzen.
+- Windows (DirectWrite) und macOS (CoreText) reichen keine rohe FT_Face heraus; dort
+  greift der Rückfall nicht (`emoji_fallback_supported`) und Emoji bleiben leer.
+- E2E: `python3 scripts/e2e_emoji.py` öffnet eine Datei mit Emoji, wartet notfalls auf den
+  Download und zählt bunte Pixel in der Textzeile.
+
 ## Textfelder: zwei Sorten, klar getrennt
 
 - **Mehrzeilig → `CodeEditor`**: Haupteditor, KI-Chat-Eingabe und das Commit-Feld der

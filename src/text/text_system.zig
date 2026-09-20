@@ -10,6 +10,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 const types = @import("types.zig");
+const emoji_font = @import("emoji_font.zig");
 const font_face_mod = @import("font_face.zig");
 const shaper_mod = @import("shaper.zig");
 const cache_mod = @import("cache.zig");
@@ -497,6 +498,11 @@ else if (is_windows)
 else
     backend.CoreTextFace;
 
+/// Rückfall auf eine Emoji-Schrift gibt es nur dort, wo die Face eine rohe
+/// FT_Face herausgibt: `GlyphCache.getOrRenderFallback` rastert damit direkt.
+/// DirectWrite und CoreText zeichnen weiter ein leeres Kästchen.
+const emoji_fallback_supported = @hasDecl(PlatformFace, "hasCodepoint") and @hasDecl(PlatformFace, "rawFace");
+
 /// Platform-specific shaper type
 const PlatformShaper = if (is_wasm)
     backend.WebShaper
@@ -533,6 +539,10 @@ pub const TextSystem = struct {
     runs_dropped: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
     /// Current font face (platform-specific)
     current_face: ?PlatformFace,
+    /// Rückfall für Zeichen, die die Hauptschrift nicht hat (Emoji). Wird beim ersten
+    /// Bedarf geladen; fehlt auf dem System eine Emoji-Schrift, bleibt es bei null.
+    emoji_face: ?PlatformFace = null,
+    emoji_tried: bool = false,
     /// Complex shaper (native only, void on web)
     shaper: ?PlatformShaper,
     scale_factor: f32,
@@ -547,6 +557,8 @@ pub const TextSystem = struct {
     glyph_cache_mutex: std.Thread.Mutex,
     /// Trackt Atlas-Änderungen für GPU-Upload (inkrementiert bei jeder Glyph-Rasterisierung)
     atlas_generation: u32 = 0,
+    /// Eigene Generation für den Emoji-Atlas; er wird getrennt hochgeladen.
+    color_atlas_generation: u32 = 0,
 
     const Self = @This();
 
@@ -586,6 +598,12 @@ pub const TextSystem = struct {
         self.current_face = null;
         self.shaper = null;
         self.scale_factor = scale;
+        // Der Speicher kommt roh vom Allocator: Felder mit Vorgabewert im
+        // Struct sind hier noch Müll und müssen einzeln gesetzt werden.
+        self.emoji_face = null;
+        self.emoji_tried = false;
+        self.atlas_generation = 0;
+        self.color_atlas_generation = 0;
 
         // Initialize caches in-place to avoid large stack temporaries
         try self.cache.initInPlace(allocator, scale);
@@ -605,6 +623,7 @@ pub const TextSystem = struct {
 
     pub fn deinit(self: *Self) void {
         if (self.current_face) |*f| f.deinit();
+        if (self.emoji_face) |*f| f.deinit();
         if (self.shaper) |*s| s.deinit();
         self.cache.deinit();
         self.shape_cache.deinit();
@@ -705,7 +724,10 @@ pub const TextSystem = struct {
 
         // Time the shaping call for performance debugging (not available on WASM)
         const start_time = if (!is_wasm) std.time.nanoTimestamp() else 0;
-        const result = try self.shaper.?.shape(&face, text, self.allocator);
+        const result = if (self.needsEmojiFallback(text))
+            try self.shapeMixed(&face, text)
+        else
+            try self.shaper.?.shape(&face, text, self.allocator);
         const end_time = if (!is_wasm) std.time.nanoTimestamp() else 0;
 
         std.debug.assert(result.width >= 0);
@@ -730,6 +752,137 @@ pub const TextSystem = struct {
         }
 
         return result;
+    }
+
+    /// Emoji-Schrift des Systems laden, einmal je Sitzung versucht.
+    fn ensureEmojiFace(self: *Self, size: f32) ?*PlatformFace {
+        if (!emoji_fallback_supported) return null;
+        if (self.emoji_face) |*f| return f;
+        // Nach einem erfolglosen Versuch erst wieder laden, wenn die nachgeladene
+        // Schrift eingetroffen ist.
+        if (self.emoji_tried and !emoji_font.takeFinished()) return null;
+        self.emoji_tried = true;
+
+        for (emoji_font.candidates) |path| {
+            if (self.tryEmojiFace(path, size)) return &self.emoji_face.?;
+        }
+
+        if (emoji_font.findCached(self.allocator)) |path| {
+            defer self.allocator.free(path);
+            if (self.tryEmojiFace(path, size)) return &self.emoji_face.?;
+        }
+
+        // Nichts Brauchbares auf dem System: Schrift einmalig selbst holen.
+        if (!emoji_font.fetchRunning()) emoji_font.startFetch();
+        return null;
+    }
+
+    /// Schrift laden und prüfen, ob FreeType daraus Farbbilder liefert.
+    fn tryEmojiFace(self: *Self, path: []const u8, size: f32) bool {
+        var face = PlatformFace.init(path, size) catch return false;
+        if (!face.isColorBitmapFont()) {
+            std.log.scoped(.text).debug("Emoji-Schrift {s} übersprungen: keine Farbbilder", .{path});
+            face.deinit();
+            return false;
+        }
+        std.log.scoped(.text).info("Emoji-Schrift: {s}", .{path});
+        self.emoji_face = face;
+        return true;
+    }
+
+    /// Enthält der Text ein Zeichen, das die Hauptschrift nicht hat?
+    fn needsEmojiFallback(self: *Self, text: []const u8) bool {
+        if (!emoji_fallback_supported) return false;
+        const face = self.current_face orelse return false;
+        var it = std.unicode.Utf8View.initUnchecked(text).iterator();
+        while (it.nextCodepoint()) |cp| {
+            if (cp < 0x80) continue; // ASCII hat jede Schrift
+            if (!face.hasCodepoint(cp)) return true;
+        }
+        return false;
+    }
+
+    /// Text in Läufe zerlegen (Hauptschrift / Emoji-Schrift), jeden Lauf für sich
+    /// formen und die Glyphen aneinanderhängen. HarfBuzz kennt nur eine Schrift je
+    /// Aufruf, deshalb die Zerlegung hier statt im Shaper.
+    fn shapeMixed(self: *Self, face: *const PlatformFace, text: []const u8) !ShapedRun {
+        // Der Zweig darf auf Plattformen ohne rohe FT_Face gar nicht erst geprüft
+        // werden; `comptime` hält `shapeMixedImpl` dort aus der Analyse heraus.
+        if (comptime emoji_fallback_supported) {
+            return self.shapeMixedImpl(face, text);
+        } else {
+            return self.shaper.?.shape(face, text, self.allocator);
+        }
+    }
+
+    fn shapeMixedImpl(self: *Self, face: *const PlatformFace, text: []const u8) !ShapedRun {
+        const emoji = self.ensureEmojiFace(face.metrics.point_size) orelse {
+            // Keine Emoji-Schrift: ohne Rückfall gibt es nichts zu zerlegen.
+            return self.shaper.?.shape(face, text, self.allocator);
+        };
+
+        var glyphs: std.ArrayListUnmanaged(types.ShapedGlyph) = .empty;
+        errdefer glyphs.deinit(self.allocator);
+        var width: f32 = 0;
+
+        var start: usize = 0;
+        var pos: usize = 0;
+        var run_is_emoji = false;
+        var have_run = false;
+
+        while (pos < text.len) {
+            const len = std.unicode.utf8ByteSequenceLength(text[pos]) catch 1;
+            const cp = std.unicode.utf8Decode(text[pos..@min(pos + len, text.len)]) catch 0xFFFD;
+            const in_emoji = cp >= 0x80 and !face.hasCodepoint(cp);
+
+            if (!have_run) {
+                run_is_emoji = in_emoji;
+                have_run = true;
+            } else if (in_emoji != run_is_emoji) {
+                try self.appendRun(&glyphs, &width, face, emoji, text[start..pos], run_is_emoji, start);
+                start = pos;
+                run_is_emoji = in_emoji;
+            }
+            pos += len;
+        }
+        if (have_run and start < text.len) {
+            try self.appendRun(&glyphs, &width, face, emoji, text[start..], run_is_emoji, start);
+        }
+
+        return ShapedRun{
+            .glyphs = try glyphs.toOwnedSlice(self.allocator),
+            .width = width,
+            .owned = true,
+        };
+    }
+
+    fn appendRun(
+        self: *Self,
+        glyphs: *std.ArrayListUnmanaged(types.ShapedGlyph),
+        width: *f32,
+        face: *const PlatformFace,
+        emoji: *PlatformFace,
+        run: []const u8,
+        is_emoji: bool,
+        cluster_offset: usize,
+    ) !void {
+        if (run.len == 0) return;
+        const use_face: *const PlatformFace = if (is_emoji) emoji else face;
+        var shaped = try self.shaper.?.shape(use_face, run, self.allocator);
+        defer shaped.deinit(self.allocator);
+
+        for (shaped.glyphs) |g| {
+            var copy = g;
+            copy.cluster += @intCast(cluster_offset);
+            if (is_emoji) {
+                copy.font_ref = emoji.rawFace();
+                copy.is_color = true;
+                // HarfBuzz meldet für Bitmap-Schriften keinen Vorschub.
+                if (copy.x_advance == 0) copy.x_advance = emoji.strikeAdvance(copy.glyph_id);
+            }
+            width.* += copy.x_advance;
+            try glyphs.append(self.allocator, copy);
+        }
     }
 
     /// Shape text into a caller-provided glyph buffer, avoiding heap allocation
@@ -946,6 +1099,7 @@ pub const TextSystem = struct {
         defer self.glyph_cache_mutex.unlock();
 
         const old_gen = self.cache.getGeneration();
+        const old_color_gen = self.cache.getColorGeneration();
 
         for (0..glyphs.len) |i| {
             if (glyphs[i].font_ref) |fallback_font| {
@@ -958,6 +1112,9 @@ pub const TextSystem = struct {
         // Atlas wurde potentiell geändert (neue Glyphen gerastert)
         if (self.cache.getGeneration() != old_gen) {
             self.atlas_generation +%= 1;
+        }
+        if (self.cache.getColorGeneration() != old_color_gen) {
+            self.color_atlas_generation +%= 1;
         }
     }
 };

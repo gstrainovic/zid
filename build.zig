@@ -487,6 +487,16 @@ pub fn build(b: *std.Build) void {
     const run_ai_paths_tests = b.addRunArtifact(ai_paths_tests);
     run_ai_paths_tests.has_side_effects = true;
 
+    // Herunterladen mit Fortschritt: eigenes Modul, weil es zwei Ecken des
+    // Programms brauchen (Selbsteinrichtung der KI, Emoji-Schrift). Eine Datei
+    // darf nur zu einem Modul gehören, deshalb geht der Zugriff über den Namen.
+    const download_mod = b.createModule(.{
+        .root_source_file = b.path("src/ai/download.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    exe_mod.addImport("download", download_mod);
+
     // Selbsteinrichtung der KI (Datenverzeichnis, Download, Auspacken) als Modul,
     // damit UI und Chat dieselben Pfade sehen wie die Tests.
     const ai_selfsetup_mod = b.createModule(.{
@@ -494,6 +504,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    ai_selfsetup_mod.addImport("download", download_mod);
     exe_mod.addImport("ai_selfsetup", ai_selfsetup_mod);
 
     const ai_history_mod = b.createModule(.{
@@ -608,20 +619,24 @@ pub fn build(b: *std.Build) void {
     run_ai_setup_tests.has_side_effects = true;
 
     // Selbsteinrichtung als Vorgang (Zustand, Fortschritt, Hintergrundthread).
-    const ai_selfsetup_tests = b.addTest(.{ .root_module = b.createModule(.{
+    const ai_selfsetup_test_mod = b.createModule(.{
         .root_source_file = b.path("src/ai/selfsetup.zig"),
         .target = target,
         .optimize = optimize,
-    }) });
+    });
+    ai_selfsetup_test_mod.addImport("download", download_mod);
+    const ai_selfsetup_tests = b.addTest(.{ .root_module = ai_selfsetup_test_mod });
     const run_ai_selfsetup_tests = b.addRunArtifact(ai_selfsetup_tests);
     run_ai_selfsetup_tests.has_side_effects = true;
 
     // Engine und Modell auspacken.
-    const ai_install_tests = b.addTest(.{ .root_module = b.createModule(.{
+    const ai_install_test_mod = b.createModule(.{
         .root_source_file = b.path("src/ai/install.zig"),
         .target = target,
         .optimize = optimize,
-    }) });
+    });
+    ai_install_test_mod.addImport("download", download_mod);
+    const ai_install_tests = b.addTest(.{ .root_module = ai_install_test_mod });
     const run_ai_install_tests = b.addRunArtifact(ai_install_tests);
     run_ai_install_tests.has_side_effects = true;
 
@@ -642,6 +657,26 @@ pub fn build(b: *std.Build) void {
     }) });
     const run_font_cache_tests = b.addRunArtifact(font_cache_tests);
     run_font_cache_tests.has_side_effects = true;
+
+    // Emoji-Schrift finden oder nachladen.
+    const emoji_font_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/text/emoji_font.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    emoji_font_test_mod.addImport("download", download_mod);
+    const emoji_font_tests = b.addTest(.{ .root_module = emoji_font_test_mod });
+    const run_emoji_font_tests = b.addRunArtifact(emoji_font_tests);
+    run_emoji_font_tests.has_side_effects = true;
+
+    // Farbige Emoji-Bitmaps auf die Textgrösse verkleinern.
+    const bitmap_scale_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("src/text/bitmap_scale.zig"),
+        .target = target,
+        .optimize = optimize,
+    }) });
+    const run_bitmap_scale_tests = b.addRunArtifact(bitmap_scale_tests);
+    run_bitmap_scale_tests.has_side_effects = true;
 
     // Mausrad → Zeilen-Delta: reine Funktion, damit das Vorzeichen testbar ist.
     const wheel_tests = b.addTest(.{ .root_module = b.createModule(.{
@@ -889,6 +924,8 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_display_check_tests.step);
     test_step.dependOn(&run_asset_path_tests.step);
     test_step.dependOn(&run_font_cache_tests.step);
+    test_step.dependOn(&run_emoji_font_tests.step);
+    test_step.dependOn(&run_bitmap_scale_tests.step);
     test_step.dependOn(&run_ai_setup_tests.step);
     test_step.dependOn(&run_ai_download_tests.step);
     test_step.dependOn(&run_ai_install_tests.step);

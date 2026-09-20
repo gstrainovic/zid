@@ -16,6 +16,12 @@ pub const TextRendererGPU = struct {
     queue: *wgpu.Queue,
     atlas_texture: ?*wgpu.Texture = null,
     atlas_texture_view: ?*wgpu.TextureView = null,
+    /// Farbatlas für Emoji (RGBA). Liegt getrennt vom Textatlas, weil der
+    /// Textatlas nur einen Kanal hat.
+    color_texture: ?*wgpu.Texture = null,
+    color_texture_view: ?*wgpu.TextureView = null,
+    color_atlas_size: u32 = 1,
+    last_color_generation: u32 = 0,
     sampler: ?*wgpu.Sampler = null,
     pipeline: ?*wgpu.RenderPipeline = null,
     text_pipeline: ?*wgpu.RenderPipeline = null,
@@ -38,6 +44,9 @@ pub const TextRendererGPU = struct {
     batch_vertices: std.ArrayListUnmanaged(f32) = .empty,
 
     const Self = @This();
+
+    /// Floats je Vertex: Position, UV, Farbe, Emoji-Schalter.
+    const VERTEX_FLOATS: usize = 9;
 
     pub const GlyphQuad = struct {
         x0: f32, y0: f32, x1: f32, y1: f32,
@@ -92,9 +101,9 @@ pub const TextRendererGPU = struct {
         };
 const vertex_buffers = [_]wgpu.VertexBufferLayout{
     .{
-        .array_stride = 8 * @sizeOf(f32), // pos: 2, uv: 2, color: 4
+        .array_stride = VERTEX_FLOATS * @sizeOf(f32), // pos: 2, uv: 2, color: 4, is_color: 1
         .step_mode = .vertex,
-        .attribute_count = 3,
+        .attribute_count = 4,
         .attributes = &[_]wgpu.VertexAttribute{
             // pos
             .{ .format = .float32x2, .offset = 0, .shader_location = 0 },
@@ -102,6 +111,8 @@ const vertex_buffers = [_]wgpu.VertexBufferLayout{
             .{ .format = .float32x2, .offset = 2 * @sizeOf(f32), .shader_location = 1 },
             // color
             .{ .format = .float32x4, .offset = 4 * @sizeOf(f32), .shader_location = 2 },
+            // 1 = Glyph aus dem Farbatlas (Emoji), 0 = Maske aus dem Textatlas
+            .{ .format = .float32, .offset = 8 * @sizeOf(f32), .shader_location = 3 },
         },
     },
 };
@@ -122,6 +133,15 @@ const vertex_buffers = [_]wgpu.VertexBufferLayout{
                 .visibility = wgpu.ShaderStages.fragment,
                 .sampler = .{
                     .@"type" = .filtering,
+                },
+            },
+            .{
+                .binding = 2,
+                .visibility = wgpu.ShaderStages.fragment,
+                .texture = .{
+                    .sample_type = .float,
+                    .view_dimension = .@"2d",
+                    .multisampled = 0,
                 },
             },
         };
@@ -188,6 +208,8 @@ const vertex_buffers = [_]wgpu.VertexBufferLayout{
         if (self.vertex_buffer) |b| b.release();
         if (self.atlas_texture_view) |v| v.release();
         if (self.atlas_texture) |t| t.release();
+        if (self.color_texture_view) |v| v.release();
+        if (self.color_texture) |t| t.release();
         if (self.bind_group_layout) |l| l.release();
         if (self.pipeline_layout) |l| l.release();
         if (self.text_pipeline) |p| p.release();
@@ -250,6 +272,59 @@ const vertex_buffers = [_]wgpu.VertexBufferLayout{
 
         self.atlas_texture = texture;
         self.atlas_texture_view = view;
+    }
+
+    /// Farbatlas (Emoji) hochladen. Vier Byte je Pixel, sonst wie der Textatlas.
+    pub fn updateColorAtlas(self: *Self, atlas_data: []const u8, atlas_size: u32) !void {
+        if (self.color_texture) |t| t.release();
+        if (self.color_texture_view) |v| v.release();
+
+        self.color_atlas_size = atlas_size;
+        const texture = self.device.createTexture(&wgpu.TextureDescriptor{
+            .label = wgpu.StringView.fromSlice("emoji_atlas"),
+            .size = .{ .width = atlas_size, .height = atlas_size, .depth_or_array_layers = 1 },
+            .format = .rgba8_unorm,
+            .usage = wgpu.TextureUsages.texture_binding | wgpu.TextureUsages.copy_dst,
+        }) orelse return error.TextureCreateFailed;
+
+        const destination = wgpu.TexelCopyTextureInfo{
+            .texture = texture,
+            .mip_level = 0,
+            .origin = .{ .x = 0, .y = 0, .z = 0 },
+            .aspect = .all,
+        };
+        const data_layout = wgpu.TexelCopyBufferLayout{
+            .offset = 0,
+            .bytes_per_row = atlas_size * 4,
+            .rows_per_image = atlas_size,
+        };
+        const write_size = wgpu.Extent3D{
+            .width = atlas_size,
+            .height = atlas_size,
+            .depth_or_array_layers = 1,
+        };
+        self.queue.writeTexture(
+            &destination,
+            atlas_data.ptr,
+            atlas_data.len,
+            &data_layout,
+            &write_size,
+        );
+
+        const view = texture.createView(&wgpu.TextureViewDescriptor{
+            .label = wgpu.StringView.fromSlice("emoji_atlas_view"),
+        }) orelse return error.TextureViewCreateFailed;
+
+        self.color_texture = texture;
+        self.color_texture_view = view;
+    }
+
+    /// Bis der erste Emoji gezeichnet wird, braucht die Bindegruppe trotzdem eine
+    /// Textur; ein einzelner durchsichtiger Pixel genügt.
+    fn ensureColorTexture(self: *Self) !void {
+        if (self.color_texture_view != null) return;
+        const empty = [_]u8{ 0, 0, 0, 0 };
+        try self.updateColorAtlas(&empty, 1);
     }
 
     /// Text rendern mit echtem Glyph-Atlas Rendering
@@ -328,6 +403,15 @@ const vertex_buffers = [_]wgpu.VertexBufferLayout{
                 self.last_atlas_generation = text_renderer.atlasGeneration();
             }
 
+            // Emoji liegen im zweiten Atlas; er wächst unabhängig vom Textatlas.
+            if (text_renderer.colorAtlasGeneration() != self.last_color_generation) {
+                if (self.batch_vertices.items.len > 0) {
+                    try self.flush(render_pass);
+                }
+                try self.updateColorAtlas(text_renderer.getColorAtlasData(), text_renderer.getColorAtlasSize());
+                self.last_color_generation = text_renderer.colorAtlasGeneration();
+            }
+
             // === Phase 4: GPU Vertices aus echten Glyph-Metriken bauen ===
             for (cached_results[0..n], device_x[0..n], device_y[0..n]) |cached, dev_x, dev_y| {
                 if (cached.region.width == 0 or cached.region.height == 0) continue;
@@ -348,14 +432,17 @@ const vertex_buffers = [_]wgpu.VertexBufferLayout{
                 const ndc_x1 = ((glyph_x + glyph_w) / self.viewport_width) * 2.0 - 1.0;
                 const ndc_y1 = -(((glyph_y + glyph_h) / self.viewport_height) * 2.0 - 1.0);
 
-                // 2 Dreiecke = 6 Vertices (pos: 2f32 + uv: 2f32 + color: 4f32)
+                // Emoji bringen ihre eigenen Farben mit; die Textfarbe gilt für sie nicht.
+                const cf: f32 = if (cached.is_color) 1.0 else 0.0;
+
+                // 2 Dreiecke = 6 Vertices (pos: 2f32 + uv: 2f32 + color: 4f32 + Schalter: 1f32)
                 try self.batch_vertices.appendSlice(self.allocator, &.{
-                    ndc_x0, ndc_y0, uv.u0, uv.v0, r, g, b, a,
-                    ndc_x1, ndc_y0, uv.u1, uv.v0, r, g, b, a,
-                    ndc_x0, ndc_y1, uv.u0, uv.v1, r, g, b, a,
-                    ndc_x1, ndc_y0, uv.u1, uv.v0, r, g, b, a,
-                    ndc_x1, ndc_y1, uv.u1, uv.v1, r, g, b, a,
-                    ndc_x0, ndc_y1, uv.u0, uv.v1, r, g, b, a,
+                    ndc_x0, ndc_y0, uv.u0, uv.v0, r, g, b, a, cf,
+                    ndc_x1, ndc_y0, uv.u1, uv.v0, r, g, b, a, cf,
+                    ndc_x0, ndc_y1, uv.u0, uv.v1, r, g, b, a, cf,
+                    ndc_x1, ndc_y0, uv.u1, uv.v0, r, g, b, a, cf,
+                    ndc_x1, ndc_y1, uv.u1, uv.v1, r, g, b, a, cf,
+                    ndc_x0, ndc_y1, uv.u0, uv.v1, r, g, b, a, cf,
                 });
             }
         }
@@ -368,11 +455,13 @@ const vertex_buffers = [_]wgpu.VertexBufferLayout{
     pub fn flush(self: *Self, render_pass: *wgpu.RenderPassEncoder) !void {
         if (self.batch_vertices.items.len == 0) return;
 
+        try self.ensureColorTexture();
+
         // Atlas Bind Group
         const bind_group = self.device.createBindGroup(&wgpu.BindGroupDescriptor{
             .label = wgpu.StringView.fromSlice("text_bind_group"),
             .layout = self.bind_group_layout.?,
-            .entry_count = 2,
+            .entry_count = 3,
             .entries = &[_]wgpu.BindGroupEntry{
                 .{
                     .binding = 0,
@@ -383,6 +472,11 @@ const vertex_buffers = [_]wgpu.VertexBufferLayout{
                     .binding = 1,
                     .texture_view = null,
                     .sampler = self.sampler.?,
+                },
+                .{
+                    .binding = 2,
+                    .texture_view = self.color_texture_view.?,
+                    .sampler = null,
                 },
             },
         }) orelse return error.BindGroupCreateFailed;
@@ -415,7 +509,7 @@ const vertex_buffers = [_]wgpu.VertexBufferLayout{
         render_pass.setPipeline(self.pipeline.?);
         render_pass.setVertexBuffer(0, self.text_vertex_buffer.?, offset, needed_size);
         render_pass.setBindGroup(0, bind_group, 0, null);
-        const vertex_count = self.batch_vertices.items.len / 8;
+        const vertex_count = self.batch_vertices.items.len / VERTEX_FLOATS;
         render_pass.draw(@intCast(vertex_count), 1, 0, 0);
 
         self.batch_vertices.clearRetainingCapacity();

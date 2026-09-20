@@ -305,6 +305,19 @@ pub extern "c" fn FT_Set_Char_Size(
     vert_resolution: FT_UInt, // DPI (0 = default 72)
 ) FT_Error;
 
+/// Eine der festen Bitmap-Grössen eines Bitmap-Fonts (CBDT/EBDT, etwa NotoColorEmoji).
+pub const FT_Bitmap_Size = extern struct {
+    height: FT_Short,
+    width: FT_Short,
+    size: FT_Pos,
+    x_ppem: FT_Pos,
+    y_ppem: FT_Pos,
+};
+
+/// Bitmap-Fonts lassen keine freie Grösse zu; `FT_Set_Char_Size` gibt dort
+/// `Invalid_Pixel_Size`. Stattdessen eine der festen Grössen wählen.
+pub extern "c" fn FT_Select_Size(face: FT_Face, strike_index: FT_Int) FT_Error;
+
 pub extern "c" fn FT_Set_Pixel_Sizes(
     face: FT_Face,
     pixel_width: FT_UInt, // 0 = same as height
@@ -584,6 +597,42 @@ pub inline fn hasKerning(face: FT_Face) bool {
 /// Check if a FreeType face is scalable
 pub inline fn isScalable(face: FT_Face) bool {
     return (face.face_flags & FT_FACE_FLAG_SCALABLE) != 0;
+}
+
+/// Reine Bitmap-Schrift: nur feste Grössen, keine Umrisse. NotoColorEmoji (CBDT)
+/// ist so gebaut, Text-Schriften nicht.
+pub inline fn isBitmapOnly(face: FT_Face) bool {
+    return !isScalable(face) and face.num_fixed_sizes > 0;
+}
+
+pub const Strike = struct {
+    index: FT_Int,
+    /// Höhe des Bitmaps in Pixeln; daraus folgt der Verkleinerungsfaktor.
+    y_ppem: f32,
+};
+
+/// Die feste Grösse, die der gewünschten Pixelhöhe am nächsten kommt.
+pub fn bestStrike(face: FT_Face, target_px: f32) ?Strike {
+    if (face.num_fixed_sizes <= 0) return null;
+    const sizes: [*]const FT_Bitmap_Size = @ptrCast(@alignCast(face.available_sizes orelse return null));
+
+    var best: FT_Int = 0;
+    var best_ppem: f32 = 0;
+    var best_delta: f32 = std.math.floatMax(f32);
+    var i: FT_Int = 0;
+    while (i < face.num_fixed_sizes) : (i += 1) {
+        // y_ppem steht in 26.6-Festkomma.
+        const ppem = @as(f32, @floatFromInt(sizes[@intCast(i)].y_ppem)) / 64.0;
+        if (ppem <= 0) continue;
+        const delta = @abs(ppem - target_px);
+        if (delta < best_delta) {
+            best_delta = delta;
+            best = i;
+            best_ppem = ppem;
+        }
+    }
+    if (best_ppem <= 0) return null;
+    return .{ .index = best, .y_ppem = best_ppem };
 }
 
 /// Check if a FreeType face has color glyphs

@@ -5,6 +5,7 @@
 
 const std = @import("std");
 const ft = @import("bindings.zig");
+const bitmap_scale = @import("../../bitmap_scale.zig");
 const types = @import("../../types.zig");
 const font_face_mod = @import("../../font_face.zig");
 
@@ -53,6 +54,11 @@ pub const FreeTypeFace = struct {
     metrics: Metrics,
     /// Font size in points
     point_size: f32,
+    /// Verhältnis gewünschte Grösse zu fester Bitmap-Grösse. Nur Bitmap-Schriften
+    /// (NotoColorEmoji, CBDT) haben feste Grössen; dort liefern FreeType und
+    /// HarfBuzz Masse in Pixeln der Bitmap-Grösse, die damit umgerechnet werden.
+    /// Schriften mit Umrissen haben 1.0.
+    strike_scale: f32 = 1.0,
     /// Font file path (for debugging)
     font_path_buf: [512]u8,
     font_path_len: usize,
@@ -107,13 +113,26 @@ pub const FreeTypeFace = struct {
     fn finishFace(ft_face: ft.FT_Face, name: []const u8, size: f32) !Self {
         errdefer _ = ft.FT_Done_Face(ft_face);
 
-        // Set character size (in 1/64th points at 72 DPI for 1:1 point-to-pixel)
-        // Using 96 DPI is more common on Linux
-        const size_f26d6 = ft.floatToF26dot6(size);
-        const size_err = ft.FT_Set_Char_Size(ft_face, 0, size_f26d6, 96, 96);
-        if (size_err != 0) {
-            std.log.err("FreeType set size error: {s}", .{ft.ftErrorString(size_err)});
-            return error.FontSizeError;
+        // Bitmap-Schriften lassen keine freie Grösse zu; dort die nächstliegende
+        // feste Grösse wählen und den Faktor merken.
+        var strike_scale: f32 = 1.0;
+        if (ft.isBitmapOnly(ft_face)) {
+            const strike = ft.bestStrike(ft_face, size) orelse return error.FontSizeError;
+            const sel_err = ft.FT_Select_Size(ft_face, strike.index);
+            if (sel_err != 0) {
+                std.log.err("FreeType select size error: {s}", .{ft.ftErrorString(sel_err)});
+                return error.FontSizeError;
+            }
+            strike_scale = size / strike.y_ppem;
+        } else {
+            // Set character size (in 1/64th points at 72 DPI for 1:1 point-to-pixel)
+            // Using 96 DPI is more common on Linux
+            const size_f26d6 = ft.floatToF26dot6(size);
+            const size_err = ft.FT_Set_Char_Size(ft_face, 0, size_f26d6, 96, 96);
+            if (size_err != 0) {
+                std.log.err("FreeType set size error: {s}", .{ft.ftErrorString(size_err)});
+                return error.FontSizeError;
+            }
         }
 
         // Create HarfBuzz font from FreeType face
@@ -130,6 +149,7 @@ pub const FreeTypeFace = struct {
             .hb_font = hb_font,
             .metrics = undefined,
             .point_size = size,
+            .strike_scale = strike_scale,
             .font_path_buf = undefined,
             .font_path_len = @min(name.len, 511),
             .advance_cache = [_]f32{ADVANCE_UNCACHED} ** ADVANCE_CACHE_SIZE,
@@ -141,8 +161,51 @@ pub const FreeTypeFace = struct {
 
         // Compute metrics
         self.metrics = computeMetrics(ft_face, size);
+        if (strike_scale != 1.0) self.metrics = scaleMetrics(self.metrics, strike_scale, size);
 
         return self;
+    }
+
+    /// Masse einer Bitmap-Schrift von Bitmap-Pixeln auf die gewünschte Grösse rechnen.
+    fn scaleMetrics(m: Metrics, strike_scale: f32, size: f32) Metrics {
+        var out = m;
+        out.ascender *= strike_scale;
+        out.descender *= strike_scale;
+        out.line_gap *= strike_scale;
+        out.cap_height *= strike_scale;
+        out.x_height *= strike_scale;
+        out.underline_position *= strike_scale;
+        out.underline_thickness = @max(1.0, m.underline_thickness * strike_scale);
+        out.line_height *= strike_scale;
+        out.cell_width *= strike_scale;
+        out.point_size = size;
+        return out;
+    }
+
+    /// Vorschub eines Glyphs einer Bitmap-Schrift, in Punkten der gewünschten
+    /// Grösse. HarfBuzz meldet für solche Schriften 0, weil sie keine Umrisse
+    /// haben; ohne eigene Rechnung stünde das nächste Zeichen im Emoji.
+    pub fn strikeAdvance(self: *const Self, glyph_id: u16) f32 {
+        if (ft.FT_Load_Glyph(self.ft_face, glyph_id, ft.FT_LOAD_DEFAULT | ft.FT_LOAD_COLOR) != 0) return 0;
+        return ft.f26dot6ToFloat(self.ft_face.glyph.metrics.horiAdvance) * self.strike_scale;
+    }
+
+    /// Taugt diese Schrift als Emoji-Rückfall? Nur Bitmap-Schriften (CBDT) liefern
+    /// über FreeType fertige Farbbilder. COLRv1-Schriften bestehen aus
+    /// Malanweisungen, die FreeType nicht ausmalt: das Bitmap bliebe leer.
+    pub fn isColorBitmapFont(self: *const Self) bool {
+        return ft.hasColor(self.ft_face) and ft.isBitmapOnly(self.ft_face);
+    }
+
+    /// Hat diese Schrift ein Glyph für das Zeichen? 0 = fehlt (Clay zeichnet sonst
+    /// ein leeres Kästchen). Grundlage der Rückfall-Kette auf die Emoji-Schrift.
+    pub fn hasCodepoint(self: *const Self, cp: u21) bool {
+        return ft.FT_Get_Char_Index(self.ft_face, cp) != 0;
+    }
+
+    /// Rohe FreeType-Face, für den Rückfall-Pfad im Glyph-Cache (`font_ref`).
+    pub fn rawFace(self: *const Self) *anyopaque {
+        return @ptrCast(self.ft_face);
     }
 
     pub fn deinit(self: *Self) void {
@@ -374,11 +437,15 @@ fn renderGlyphInternal(
     buffer: []u8,
     buffer_size: u32,
 ) !RasterizedGlyph {
-    _ = buffer_size;
-
     // Assertions for input validation
     std.debug.assert(scale > 0);
     std.debug.assert(point_size > 0);
+
+    // Bitmap-Schriften (Emoji) haben nur feste Grössen; sie brauchen einen
+    // eigenen Weg mit Auswahl der Grösse und eigenem Verkleinern.
+    if (ft.isBitmapOnly(ft_face)) {
+        return renderStrikeGlyph(ft_face, glyph_id, point_size, scale, buffer, buffer_size);
+    }
 
     // Apply subpixel offset via FT_Set_Transform
     const subpixel_offset_x = ft.floatToF26dot6(subpixel_x * scale);
@@ -486,6 +553,69 @@ fn renderGlyphInternal(
         .offset_y = slot.bitmap_top,
         .advance_x = advance_x,
         .is_color = is_color,
+    };
+}
+
+/// Glyph aus einer Bitmap-Schrift (CBDT-Emoji). Die Schrift kennt nur feste Grössen,
+/// meist 128 px; das Bitmap wird deshalb selbst auf die Zielgrösse verkleinert.
+/// Subpixel-Versatz entfällt: bei dieser Verkleinerung ist er nicht sichtbar.
+fn renderStrikeGlyph(
+    ft_face: ft.FT_Face,
+    glyph_id: u16,
+    point_size: f32,
+    scale: f32,
+    buffer: []u8,
+    buffer_size: u32,
+) !RasterizedGlyph {
+    const target_px = point_size * scale;
+    const strike = ft.bestStrike(ft_face, target_px) orelse return error.GlyphRenderFailed;
+    if (ft.FT_Select_Size(ft_face, strike.index) != 0) return error.GlyphRenderFailed;
+
+    if (ft.FT_Load_Glyph(ft_face, glyph_id, ft.FT_LOAD_DEFAULT | ft.FT_LOAD_COLOR) != 0) {
+        return error.GlyphLoadFailed;
+    }
+    const slot = ft_face.glyph;
+    if (slot.format != .FT_GLYPH_FORMAT_BITMAP) {
+        if (ft.FT_Render_Glyph(slot, .FT_RENDER_MODE_NORMAL) != 0) return error.GlyphRenderFailed;
+    }
+
+    const bitmap = slot.bitmap;
+    const factor = target_px / strike.y_ppem;
+    const advance_x = ft.f26dot6ToFloat(slot.metrics.horiAdvance) * factor / scale;
+
+    if (bitmap.width == 0 or bitmap.rows == 0) {
+        return RasterizedGlyph{
+            .width = 0,
+            .height = 0,
+            .offset_x = 0,
+            .offset_y = 0,
+            .advance_x = advance_x,
+            .is_color = false,
+        };
+    }
+
+    const is_color = bitmap.pixel_mode == .FT_PIXEL_MODE_BGRA;
+    if (!is_color) {
+        // Einfarbige Bitmap-Schrift: kein Weg vorgesehen, lieber nichts zeichnen
+        // als Grauwerte in der falschen Grösse.
+        return error.GlyphRenderFailed;
+    }
+
+    const dst_w: u32 = @max(1, @as(u32, @intFromFloat(@round(@as(f32, @floatFromInt(bitmap.width)) * factor))));
+    const dst_h: u32 = @max(1, @as(u32, @intFromFloat(@round(@as(f32, @floatFromInt(bitmap.rows)) * factor))));
+    if (dst_w * dst_h * 4 > buffer_size) return error.BufferTooSmall;
+
+    const src_pitch: usize = if (bitmap.pitch < 0) @intCast(-bitmap.pitch) else @intCast(bitmap.pitch);
+    const src = bitmap.buffer[0 .. src_pitch * bitmap.rows];
+    bitmap_scale.downscaleBgraToRgba(src, bitmap.width, bitmap.rows, src_pitch, buffer, dst_w, dst_h);
+
+    return RasterizedGlyph{
+        .width = dst_w,
+        .height = dst_h,
+        .offset_x = @intFromFloat(@round(@as(f32, @floatFromInt(slot.bitmap_left)) * factor)),
+        .offset_y = @intFromFloat(@round(@as(f32, @floatFromInt(slot.bitmap_top)) * factor)),
+        .advance_x = advance_x,
+        .is_color = true,
     };
 }
 
