@@ -833,7 +833,31 @@ pub const TextSystem = struct {
         while (pos < text.len) {
             const len = std.unicode.utf8ByteSequenceLength(text[pos]) catch 1;
             const cp = std.unicode.utf8Decode(text[pos..@min(pos + len, text.len)]) catch 0xFFFD;
-            const in_emoji = cp >= 0x80 and !face.hasCodepoint(cp);
+
+            // Der Variantenwähler gehört zum Zeichen davor und entscheidet nichts
+            // für sich: er bleibt im laufenden Lauf.
+            if (emoji_font.isVariationSelector(cp)) {
+                pos += len;
+                continue;
+            }
+
+            // U+FE0F verlangt die farbige Form, U+FE0E die einfarbige — auch dann,
+            // wenn die Hauptschrift das Zeichen hätte (⚠ gibt es in JetBrains Mono).
+            // U+20E3 macht aus dem Zeichen davor eine Taste (1️⃣); beide müssen in
+            // denselben Lauf, sonst formt HarfBuzz sie nicht zusammen.
+            const next = codepointAt(text, @intCast(pos + len));
+            const after_next = if (next == 0xFE0F or next == 0xFE0E)
+                codepointAt(text, @intCast(pos + len + utf8Len(next)))
+            else
+                next;
+            const in_emoji = switch (next) {
+                0xFE0F => emoji.hasCodepoint(cp),
+                0xFE0E => false,
+                else => if (after_next == 0x20E3)
+                    emoji.hasCodepoint(cp)
+                else
+                    cp >= 0x80 and !face.hasCodepoint(cp),
+            };
 
             if (!have_run) {
                 run_is_emoji = in_emoji;
@@ -856,6 +880,17 @@ pub const TextSystem = struct {
         };
     }
 
+    fn utf8Len(cp: u21) usize {
+        return std.unicode.utf8CodepointSequenceLength(cp) catch 1;
+    }
+
+    /// Zeichen an einer Byteposition; bei kaputtem UTF-8 das Ersatzzeichen.
+    fn codepointAt(text: []const u8, offset: u32) u21 {
+        if (offset >= text.len) return 0xFFFD;
+        var i: usize = offset;
+        return shaper_mod.decodeLossy(text, &i);
+    }
+
     fn appendRun(
         self: *Self,
         glyphs: *std.ArrayListUnmanaged(types.ShapedGlyph),
@@ -873,13 +908,16 @@ pub const TextSystem = struct {
 
         for (shaped.glyphs) |g| {
             var copy = g;
-            copy.cluster += @intCast(cluster_offset);
+            // Der Variantenwähler ist unsichtbar. Beide Schriften bilden ihn auf ein
+            // Ersatzzeichen mit Vorschub ab, das eine Lücke im Satz hinterliesse.
+            if (emoji_font.isVariationSelector(codepointAt(run, copy.cluster))) continue;
             if (is_emoji) {
                 copy.font_ref = emoji.rawFace();
                 copy.is_color = true;
                 // HarfBuzz meldet für Bitmap-Schriften keinen Vorschub.
                 if (copy.x_advance == 0) copy.x_advance = emoji.strikeAdvance(copy.glyph_id);
             }
+            copy.cluster += @intCast(cluster_offset);
             width.* += copy.x_advance;
             try glyphs.append(self.allocator, copy);
         }

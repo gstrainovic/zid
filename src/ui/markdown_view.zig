@@ -13,6 +13,7 @@ const wio = @import("wio");
 const Theme = ui_mod.Theme;
 const ImageTexture = @import("../clay_renderer/image_renderer.zig").ImageTexture;
 const flow_core = @import("flow_core");
+const emoji_font = @import("../text/emoji_font.zig");
 const Block = zigdown.Block;
 const Inline = zigdown.Inline;
 
@@ -1652,6 +1653,22 @@ pub const MarkdownView = struct {
         return base;
     }
 
+    /// Stück anhängen — beginnt es mit einem Zeichen, das das vorige fortsetzt
+    /// (Variantenwähler, Zero-Width-Joiner, Taste, Hautton), wird es an das
+    /// vorige Stück geklebt. zigdown trennt etwa `1️⃣` in `1` und den Rest; getrennt
+    /// geformt ergäbe das eine 1 neben einem leeren Kasten statt der Taste.
+    fn appendPiece(pieces: *std.ArrayListUnmanaged(Piece), arena: std.mem.Allocator, piece: Piece) void {
+        if (piece.text.len > 0 and pieces.items.len > 0) {
+            const first = std.unicode.utf8Decode(piece.text[0..std.unicode.utf8ByteSequenceLength(piece.text[0]) catch 1]) catch 0;
+            const prev = &pieces.items[pieces.items.len - 1];
+            if (emoji_font.continuesCluster(first) and !prev.is_space) {
+                prev.text = std.mem.concat(arena, u8, &.{ prev.text, piece.text }) catch prev.text;
+                return;
+            }
+        }
+        pieces.append(arena, piece) catch {};
+    }
+
     /// Rendert eine Inline-Folge als umbrechenden Fließtext mit Per-Wort-Farben.
     ///
     /// zigdown liefert jedes Wort und jedes Leerzeichen als eigenes Inline. Clay
@@ -1664,18 +1681,18 @@ pub const MarkdownView = struct {
         var pieces: std.ArrayListUnmanaged(Piece) = .empty;
         for (inlines) |*item| {
             switch (item.content) {
-                .text => |t| pieces.append(arena, .{
+                .text => |t| appendPiece(&pieces, arena, .{
                     .text = t.text,
                     .color = styledColor(t.style, theme.text, theme),
                     .is_space = std.mem.eql(u8, t.text, " "),
-                }) catch {},
-                .codespan => |c| pieces.append(arena, .{ .text = c.text, .color = theme.warning, .is_space = false }) catch {},
+                }),
+                .codespan => |c| appendPiece(&pieces, arena, .{ .text = c.text, .color = theme.warning, .is_space = false }),
                 .link => |l| {
-                    for (l.text.items) |t| pieces.append(arena, .{
+                    for (l.text.items) |t| appendPiece(&pieces, arena, .{
                         .text = t.text,
                         .color = link_color,
                         .is_space = std.mem.eql(u8, t.text, " "),
-                    }) catch {};
+                    });
                 },
                 .image => {
                     self.flushPieces(&pieces, base_size, theme, arena);

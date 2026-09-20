@@ -66,6 +66,30 @@ pub fn findCached(allocator: std.mem.Allocator) ?[]u8 {
     }
 }
 
+/// Variantenwähler (U+FE00–U+FE0F) steuern nur, ob ein Zeichen als Text oder als
+/// Emoji gilt. Sie sind unsichtbar und ohne Breite. NotoColorEmoji kennt sie nicht,
+/// FreeType gäbe also das Ersatzzeichen samt Vorschub zurück — eine Lücke mitten
+/// im Satz.
+pub fn isVariationSelector(cp: u21) bool {
+    return cp >= 0xFE00 and cp <= 0xFE0F;
+}
+
+/// Setzt dieses Zeichen das vorherige fort, statt für sich zu stehen? Solche
+/// Zeichen dürfen nie von ihrem Grundzeichen getrennt werden, sonst formt
+/// HarfBuzz die Folge nicht zusammen: aus 1️⃣ würde eine 1 neben einem leeren
+/// Kasten.
+pub fn continuesCluster(cp: u21) bool {
+    return switch (cp) {
+        0xFE00...0xFE0F => true, // Variantenwähler
+        0x200D => true, // Zero-Width-Joiner (👩‍💻)
+        0x20E3 => true, // umschliessende Taste (1️⃣)
+        0x1F3FB...0x1F3FF => true, // Hautton
+        0xE0020...0xE007F => true, // Tag-Zeichen (Flaggen von Landesteilen)
+        0x0300...0x036F => true, // kombinierende Akzente
+        else => false,
+    };
+}
+
 /// Zustand des Nachladens. Wird aus dem Ladethread geschrieben.
 const State = enum(u8) { idle, running, done, failed, consumed };
 var state: std.atomic.Value(u8) = .init(@intFromEnum(State.idle));
@@ -134,6 +158,23 @@ test "cachedPath liegt im Datenverzeichnis von zid" {
     defer testing.allocator.free(p);
     const sep = std.fs.path.sep_str;
     try testing.expect(std.mem.endsWith(u8, p, "zid" ++ sep ++ "fonts" ++ sep ++ file_name));
+}
+
+test "isVariationSelector trifft nur die unsichtbaren Wähler" {
+    try testing.expect(isVariationSelector(0xFE0F));
+    try testing.expect(isVariationSelector(0xFE0E));
+    try testing.expect(!isVariationSelector(0x200D)); // ZWJ verbindet, er wird gebraucht
+    try testing.expect(!isVariationSelector(0x26A0)); // ⚠ selbst
+    try testing.expect(!isVariationSelector('a'));
+}
+
+test "continuesCluster erkennt anhängende Zeichen" {
+    try testing.expect(continuesCluster(0xFE0F));
+    try testing.expect(continuesCluster(0x200D));
+    try testing.expect(continuesCluster(0x20E3));
+    try testing.expect(continuesCluster(0x1F3FD)); // Hautton
+    try testing.expect(!continuesCluster(0x1F469)); // 👩 steht für sich
+    try testing.expect(!continuesCluster('1'));
 }
 
 test "takeFinished meldet den Abschluss genau einmal" {
