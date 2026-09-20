@@ -61,6 +61,28 @@ jobs:
           make -j4 libs CC="zig cc" AR="zig ar" HAVE_X11=no HAVE_GLUT=no HAVE_OBJCOPY=no \
                tools=no apps=no XCFLAGS="-w -msse4.1 -DTOFU -DTOFU_CJK"
 
+      # Der globale Zig-Cache mit allen geholten Paketen.
+      - name: Zig-Pakete aus dem Cache
+        uses: actions/cache@v6
+        with:
+          path: ~\AppData\Local\zig\p
+          key: zigpkg-${{ runner.os }}-${{ env.ZIG_VERSION }}-${{ hashFiles('**/build.zig.zon') }}
+          restore-keys: zigpkg-${{ runner.os }}-${{ env.ZIG_VERSION }}-
+
+      # Die Abhängigkeiten einzeln holen, bevor gebaut wird: der erste Lauf brach mit
+      # `HttpConnectionClosing` und `WriteFailed` ab, weil Zig viele Pakete gleichzeitig
+      # lädt und einzelne Verbindungen abreissen. Drei Anläufe, dazwischen Pause.
+      - name: Zig-Abhängigkeiten holen
+        shell: pwsh
+        run: |
+          for ($i = 1; $i -le 3; $i++) {
+            zig build --fetch
+            if ($LASTEXITCODE -eq 0) { exit 0 }
+            Write-Host "Versuch $i fehlgeschlagen, neuer Anlauf in 20 s"
+            Start-Sleep -Seconds 20
+          }
+          throw "zig build --fetch nach 3 Versuchen fehlgeschlagen"
+
       - name: zid bauen
         shell: pwsh
         run: zig build -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseSafe --prefix out
