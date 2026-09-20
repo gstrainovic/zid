@@ -1,0 +1,38 @@
+# Maintainer: gstrainovic <g.strainovic@gmail.com>
+#
+# Binärpaket aus dem offiziellen Release-Tarball. Aus den Quellen zu bauen wäre
+# in der AUR unpraktisch: zid braucht genau Zig 0.15.2, die vendorte MuPDF aus
+# einem Submodul und lädt beim Bauen Abhängigkeiten aus dem Netz.
+pkgname=zid-bin
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="GPU-beschleunigter Editor mit Markdown-Vorschau, PDF-Anzeige und lokaler KI"
+arch=('x86_64')
+url="https://github.com/gstrainovic/zid"
+license=('AGPL-3.0-only')
+# freetype2, harfbuzz, libpng, zlib und glib2 zieht das Binary dynamisch; alles
+# andere (MuPDF, libjpeg, tree-sitter, wgpu) steckt drin.
+depends=('freetype2' 'harfbuzz' 'libpng' 'zlib' 'glib2')
+# Vulkan-Treiber zur Laufzeit; welcher, entscheidet die Hardware.
+optdepends=('vulkan-icd-loader: GPU-Rendering'
+            'vulkan-radeon: Vulkan-Treiber für AMD'
+            'vulkan-intel: Vulkan-Treiber für Intel'
+            'nvidia-utils: Vulkan-Treiber für NVIDIA'
+            'ollama: lokale KI im Chat')
+provides=('zid')
+conflicts=('zid')
+source=("$url/releases/download/v$pkgver/zid-$pkgver-x86_64-linux.tar.xz")
+sha256sums=('714a06d2a2fe6097f9c2d50aced40d0945b08a353f6e0cfd826a9ef3e950326e')
+
+package() {
+    cd "zid-$pkgver-x86_64-linux"
+    local app_id=io.github.gstrainovic.zid
+    install -Dm755 bin/zid "$pkgdir/usr/bin/zid"
+    install -Dm644 "share/applications/$app_id.desktop" \
+        "$pkgdir/usr/share/applications/$app_id.desktop"
+    install -Dm644 "share/icons/hicolor/scalable/apps/$app_id.svg" \
+        "$pkgdir/usr/share/icons/hicolor/scalable/apps/$app_id.svg"
+    install -Dm644 "share/metainfo/$app_id.metainfo.xml" \
+        "$pkgdir/usr/share/metainfo/$app_id.metainfo.xml"
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

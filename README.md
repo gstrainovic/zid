@@ -4,7 +4,56 @@ Editor mit Vulkan/WGPU-Rendering, wio-Platform-Layer und Clay-UI. Unterstützt
 Code-Editing, eingebettete Terminals (ghostty-vt + PTY/ConPTY), Bild- und
 PDF-Anzeige (mupdf).
 
+## Installation (Linux)
+
+Fertiges Binary, kein Zig, kein Compiler. Läuft unter Wayland und X11.
+
+### Alle Distributionen: Tarball
+
+```bash
+curl -LO https://github.com/gstrainovic/zid/releases/latest/download/zid-0.1.0-x86_64-linux.tar.xz
+tar xf zid-0.1.0-x86_64-linux.tar.xz
+cd zid-0.1.0-x86_64-linux
+./install.sh            # nach ~/.local, ohne root
+```
+
+Danach startet `zid` aus dem Terminal, und der Eintrag steht im Anwendungsmenü.
+Liegt `~/.local/bin` nicht im PATH, sagt `install.sh` es und nennt die Zeile für
+die `~/.bashrc`. Systemweit: `sudo ./install.sh /usr/local`. Wieder weg:
+`./install.sh --uninstall` (bzw. mit demselben Präfix).
+
+### Arch, Manjaro, EndeavourOS
+
+```bash
+git clone https://aur.archlinux.org/zid-bin.git && cd zid-bin && makepkg -si
+# oder mit einem AUR-Helfer:  paru -S zid-bin
+```
+
+### Fedora
+
+```bash
+sudo dnf copr enable gstrainovic/zid
+sudo dnf install zid
+```
+
+### Voraussetzungen
+
+Eine GPU mit Vulkan-Treiber und die üblichen Desktop-Bibliotheken (freetype,
+harfbuzz, libpng, zlib, glib) — auf einer Desktop-Installation ist beides da.
+Fehlt der Vulkan-Treiber, meldet zid das beim Start; unter Fedora liefert ihn
+`mesa-vulkan-drivers`, unter Debian und Ubuntu `mesa-vulkan-drivers`, bei NVIDIA
+der proprietäre Treiber.
+
+Das Binary verlangt `GLIBC_2.35` oder neuer. Das deckt Ubuntu 22.04 LTS,
+Debian 12, Fedora 37 und alles Jüngere ab.
+
+Die KI-Funktionen sind optional und brauchen einen lokalen `llama-server` oder
+Ollama (siehe „KI-Setup"). Ohne die läuft der Editor normal, der Chat bleibt leer.
+
 ## Build
+
+Nur nötig, wenn du am Editor selbst arbeitest oder ihn portieren willst; zum
+Benutzen reicht die Installation oben.
 
 ```bash
 bash scripts/sync.sh   # Submodule + Referenzen aktualisieren
@@ -88,6 +137,27 @@ cd zid-0.1.0-x86_64-linux
 ./install.sh /usr/local      # systemweit (als root)
 ./install.sh --uninstall     # wieder entfernen
 ```
+
+### Release veröffentlichen
+
+```bash
+packaging/build-release.sh                       # dist/…tar.xz + .sha256
+git tag -a v0.1.0 -m "zid 0.1.0" && git push origin v0.1.0
+gh release create v0.1.0 dist/zid-0.1.0-x86_64-linux.tar.xz* \
+    --title "zid 0.1.0" --notes "…"
+```
+
+Danach die beiden Distributionspakete auf die neue Version ziehen — beide
+installieren das Release-Tarball, bauen also nichts nach:
+
+* `packaging/aur/PKGBUILD` — `pkgver` und `sha256sums` (Wert aus der
+  `.sha256`-Datei), dann ins AUR-Repository `zid-bin` pushen.
+* `packaging/rpm/zid.spec` — `Version`, `%changelog`; im COPR-Projekt
+  `gstrainovic/zid` als SCM-Build oder per `copr-cli build`.
+
+Warum Binärpakete statt Bauen aus den Quellen: zid verlangt exakt Zig 0.15.2,
+die vendorte MuPDF aus einem Submodul und Netzzugang während des Builds. Das
+passt weder zu einem AUR-Build auf fremden Rechnern noch zu mock in COPR.
 
 ### KI & Automatisierung (Abhängigkeiten)
 
