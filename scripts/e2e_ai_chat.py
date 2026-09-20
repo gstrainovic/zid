@@ -185,6 +185,7 @@ def copy_conversation():
     check(b["found"], "Knopf zum Kopieren des Verlaufs ist da")
     rpc("click", [b["x"] + b["w"] / 2, b["y"] + b["h"] / 2])
     settle(8)
+    check("kopiert" in ui_state().get("toast", ""), f"Toast bestätigt den Klick ({ui_state().get('toast')!r})")
     text = ui_state()["clipboard_text"]
     check(text.startswith("## Du"), f"Verlauf beginnt mit der Frage ({text[:20]!r})")
     check("## AI" in text, "Antwort steht auch drin")

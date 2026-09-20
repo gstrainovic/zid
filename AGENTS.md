@@ -497,6 +497,19 @@ Drei Regeln aus der Messreihe vom 17.09.2026
   `agent_actions` als Kommando aus (`ai_tools.commandFromToolName`), statt „unknown tool"
   zu melden; kleine Modelle tun das.
 
+## Schaltflächen: `components/button.zig`
+
+- Einheitliches Aussehen über `button(id, text, theme, mouse_x, mouse_y, mouse_pressed, opts)`
+  mit den Rollen `primary` (Hauptaktion), `secondary` (Nebenaktion) und `ghost` (unauffällig,
+  Fläche erst beim Überfahren). `disabled` dämpft und schluckt Klicks.
+- Der Treffer wird gegen die Box aus dem letzten Layout gerechnet, **nicht** über
+  `clay.pointerOver`: im Frame eines RPC-Klicks kennt Clay die neue Zeigerposition noch
+  nicht, der Klick ginge verloren.
+- Die alte Fassung war unbenutzt, hatte Schriftgröße 24 fest verdrahtet und nutzte
+  `pointerOver`. Wer eine Schaltfläche braucht, nimmt diese Komponente statt selbst zu
+  zeichnen — sonst fehlen Hover und Rahmen, wie beim ersten „Verlauf kopieren".
+- Eine Aktion ohne sichtbare Folge bestätigt sich per `UI.showToast`.
+
 ## Chat: Kürzel-Werkzeug und Verlauf kopieren
 
 - Die Tastenkürzel stehen **nicht** im Prompt (das kostete 1000 Token). Der Agent holt sie
@@ -509,6 +522,9 @@ Drei Regeln aus der Messreihe vom 17.09.2026
   Ziehen markiert `handleMouseMove` die Startnachricht ab dem Anker (`selectFromAnchorToEnd`),
   die dazwischen ganz (`selectAllContent`) und die zuletzt erreichte bis zur Maus
   (`selectFromStartTo`). `selectedText` verkettet alle markierten Nachrichten.
+- **Keine Emoji in der Oberfläche.** Gezeichnet wird mit JetBrains Mono; `🔧`, `✅`, `⛔`
+  fehlen dort und erschienen im Chat als leeres Kästchen. Werkzeugaufrufe stehen jetzt als
+  `-> \`name(...)\``, Ergebnisse als `ok`/`Fehler`.
 - Ganzen Verlauf kopieren: Knopf `ai_copy_all` in der Kopfzeile oder Ctrl+Shift+C
   (`AIChatState.conversationText` als Markdown, `## Du` / `## AI` je Nachricht). Ctrl+C
   bleibt die markierte Bubble. Der Weg läuft über `UI.setClipboard`, damit `ui_state`

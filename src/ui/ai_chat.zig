@@ -19,6 +19,7 @@ const ai_history = @import("ai_history");
 pub const history_budget_chars: usize = 12_000;
 
 const ai_selfsetup = @import("ai_selfsetup");
+const button_mod = @import("components/button.zig");
 
 const log = std.log.scoped(.ai_chat);
 
@@ -471,7 +472,7 @@ pub const AIChatState = struct {
         for (env.calls) |c| {
             const summary = ai_tools.summarizeCall(self.allocator, c) catch continue;
             defer self.allocator.free(summary);
-            display.appendSlice(self.allocator, "🔧 `") catch {};
+            display.appendSlice(self.allocator, "-> `") catch {};
             display.appendSlice(self.allocator, summary) catch {};
             display.appendSlice(self.allocator, "`\n") catch {};
         }
@@ -480,7 +481,7 @@ pub const AIChatState = struct {
         self.tool_rounds += 1;
         if (self.tool_rounds > max_tool_rounds) {
             for (env.calls) |c| {
-                self.addMessageFull("tool", "{\"error\":\"tool round limit reached; answer the user without further tools\"}", null, c.id, "⛔ tool round limit reached") catch {};
+                self.addMessageFull("tool", "{\"error\":\"tool round limit reached; answer the user without further tools\"}", null, c.id, "!! tool round limit reached") catch {};
                 c.deinit(self.allocator);
             }
             self.addMessage("assistant", "(Werkzeug-Limit erreicht, ich höre hier auf.)") catch {};
@@ -506,8 +507,10 @@ pub const AIChatState = struct {
         const ok = !std.mem.startsWith(u8, result_json, "{\"error\"");
         var disp_buf: [512]u8 = undefined;
         const preview = result_json[0..@min(result_json.len, 300)];
-        const display = std.fmt.bufPrint(&disp_buf, "{s} **{s}** → `{s}{s}`", .{
-            if (ok) "✅" else "⚠️", call.name, preview, if (result_json.len > 300) "…" else "",
+        // Kein Emoji: die Oberfläche zeichnet mit JetBrains Mono, dort fehlen die Glyphen
+        // und es erscheint ein leeres Kästchen. "ok"/"Fehler" sagt dasselbe.
+        const display = std.fmt.bufPrint(&disp_buf, "{s} **{s}** -> `{s}{s}`", .{
+            if (ok) "ok" else "Fehler", call.name, preview, if (result_json.len > 300) "..." else "",
         }) catch result_json;
         self.addMessageFull("tool", result_json, null, call.id, display) catch {};
         if (self.awaiting_tool_results > 0) self.awaiting_tool_results -= 1;
@@ -855,6 +858,8 @@ pub const AIChatState = struct {
         const text = self.conversationText(self.allocator) catch return;
         defer self.allocator.free(text);
         ui_ptr.setClipboard(text);
+        // Ohne Rückmeldung weiss niemand, ob der Klick ankam.
+        ui_ptr.showToast("Verlauf kopiert ({d} Zeichen)", .{text.len});
         log.info("Verlauf kopiert ({d} Zeichen)", .{text.len});
     }
 
@@ -1010,21 +1015,12 @@ pub fn renderAIChat(
             // Ganzen Verlauf kopieren. Ctrl+C kopiert nur die markierte Bubble; für
             // „alles" gab es bisher keinen Weg.
             if (state.messages.items.len > 0) {
-                const copy_id = clay.ElementId.ID("ai_copy_all");
-                const copy_hovered = overElement(copy_id, ui_ptr.mouse_x, ui_ptr.mouse_y);
-                if (copy_hovered and mouse_pressed) state.copyConversation(ui_ptr);
-                clay.UI()(.{
-                    .id = copy_id,
-                    .layout = .{
-                        .sizing = .{ .w = .fit, .h = .fit },
-                        .padding = .{ .left = 8, .right = 8, .top = 2, .bottom = 2 },
-                        .child_alignment = .{ .x = .center, .y = .center },
-                    },
-                    .background_color = if (copy_hovered) theme.border else .{ 0, 0, 0, 0 },
-                    .corner_radius = .all(4),
-                })({
-                    clay.text("Verlauf kopieren", .{ .font_size = 12, .color = theme.subtext, .wrap_mode = .none });
-                });
+                if (button_mod.button("ai_copy_all", "Verlauf kopieren", theme, ui_ptr.mouse_x, ui_ptr.mouse_y, mouse_pressed, .{
+                    .variant = .ghost,
+                    .font_size = 13,
+                    .padding_x = 10,
+                    .padding_y = 4,
+                })) state.copyConversation(ui_ptr);
             }
 
             const status_color: clay.Color = switch (state.agent_status) {
@@ -1235,10 +1231,6 @@ pub fn renderAIChat(
                     clay.UI()(.{
                         .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .left_to_right, .child_gap = 8 },
                     })({
-                        const yes_id = clay.ElementId.ID("ai_setup_btn");
-                        const yes_hovered = overElement(yes_id, ui_ptr.mouse_x, ui_ptr.mouse_y);
-                        if (yes_hovered and mouse_pressed and !running) state.startSelfSetup();
-
                         // Text in den Frame-Arena, nicht auf den Stack: Clay hält den
                         // Zeiger bis zum Zeichnen, ein Stack-Puffer ist bis dahin
                         // ungültig und die Schaltfläche zeigte Ersatzzeichen.
@@ -1255,49 +1247,15 @@ pub fn renderAIChat(
                         else
                             "Ja, laden";
 
-                        clay.UI()(.{
-                            .id = yes_id,
-                            .layout = .{
-                                .sizing = .{ .w = .fit, .h = .fit },
-                                .padding = .{ .left = 16, .right = 16, .top = 10, .bottom = 10 },
-                                .child_alignment = .{ .x = .center, .y = .center },
-                            },
-                            .background_color = if (running)
-                                theme.surface
-                            else if (yes_hovered)
-                                brighten(theme.primary, 30)
-                            else
-                                theme.primary,
-                            .corner_radius = .all(6),
-                            .border = .{
-                                .width = .all(2),
-                                .color = if (running) theme.border else if (yes_hovered) theme.border_focus else theme.accent,
-                            },
-                        })({
-                            clay.text(yes_label, .{
-                                .font_size = 15,
-                                .color = if (running) theme.text else theme.text_on_primary,
-                                .wrap_mode = .none,
-                            });
-                        });
+                        if (button_mod.button("ai_setup_btn", yes_label, theme, ui_ptr.mouse_x, ui_ptr.mouse_y, mouse_pressed, .{
+                            .variant = .primary,
+                            .disabled = running,
+                        })) state.startSelfSetup();
 
                         if (!running) {
-                            const later_id = clay.ElementId.ID("ai_setup_later_btn");
-                            const later_hovered = overElement(later_id, ui_ptr.mouse_x, ui_ptr.mouse_y);
-                            if (later_hovered and mouse_pressed) state.setup_dismissed = true;
-                            clay.UI()(.{
-                                .id = later_id,
-                                .layout = .{
-                                    .sizing = .{ .w = .fit, .h = .fit },
-                                    .padding = .{ .left = 16, .right = 16, .top = 10, .bottom = 10 },
-                                    .child_alignment = .{ .x = .center, .y = .center },
-                                },
-                                .background_color = if (later_hovered) theme.border else theme.surface,
-                                .corner_radius = .all(6),
-                                .border = .{ .width = .all(2), .color = theme.border },
-                            })({
-                                clay.text("Später", .{ .font_size = 15, .color = theme.text, .wrap_mode = .none });
-                            });
+                            if (button_mod.button("ai_setup_later_btn", "Später", theme, ui_ptr.mouse_x, ui_ptr.mouse_y, mouse_pressed, .{
+                                .variant = .secondary,
+                            })) state.setup_dismissed = true;
                         }
                     });
 
