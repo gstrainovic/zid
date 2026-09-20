@@ -62,10 +62,24 @@ zig build test-text        # nur Textsystem (Glyph-Cache, Atlas; Root src/text_t
   Releases, weil das SONAME von libmupdf je Distribution anders ist. Die Archive gibt
   build.zig direkt als Objektdateien an: über `linkSystemLibrary` liefe es in Fedoras defekte
   `mupdf.pc` und der Linker suchte ein Verzeichnis `-lmupdf`.
-- Mit `bundled` kompiliert build.zig zusätzlich die MuPDF-Font-Ressourcen mit, wie unter
-  Windows. Die Bauanleitung für die Archive steht im README.
+- Die MuPDF-Font-Ressourcen kompiliert build.zig nur unter Windows mit: dort baut das
+  Makefile mit `TOFU` und lässt sie aus dem Archiv. Die Linux-Archive (Bauanleitung im README)
+  haben sie drin; ein zweites Mal übersetzt gibt `duplicate symbol: _binary_Dingbats_cff`,
+  und zwar erst beim ReleaseSafe-Link, nicht im Debug-Build.
 - E2E mit bundled MuPDF: `ZID_BUILD_ARGS=-Dmupdf=bundled python3 scripts/e2e_pdf_pager.py`.
   `ZID_BUILD_ARGS` reicht Build-Optionen an den `zig build`-Aufruf der Suiten durch.
+
+## Release-Binary (Linux, `-Dmupdf=bundled -Doptimize=ReleaseSafe`)
+
+- Größe: 212 MB, gestrippt 172 MB. Davon 22 MB MuPDF-Fonts (ohne `TOFU_CJK` gebaut, also
+  inklusive CJK); der Rest verteilt sich auf wgpu_native, die tree-sitter-Parser und MuPDF.
+- `ldd` zeigt 13 Bibliotheken: libc, libm, libz, libjpeg, freetype, harfbuzz, png, brotli,
+  bz2, glib, graphite2, pcre2. Wayland, X11, EGL und Vulkan fehlen dort, weil wio und wgpu
+  sie per `dlopen` laden — die `linkSystemLibrary`-Einträge in build.zig braucht nur der
+  Debug-Build wegen der extern-Deklarationen im Debug-Info.
+- Höchste benötigte Symbolversion ist `GLIBC_2.38`. Ein hier gebautes Binary läuft damit auf
+  Fedora 39+, Ubuntu 24.04 und Debian 13, aber nicht auf Ubuntu 22.04 (2.35). Wer weiter
+  zurück will, baut auf einer älteren Distribution oder gegen musl.
 
 ## Headless / Interactive Mode
 
