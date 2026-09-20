@@ -22,7 +22,7 @@ const ai_selfsetup = @import("ai_selfsetup");
 
 const log = std.log.scoped(.ai_chat);
 
-pub const AgentStatus = enum { none, model_missing, initializing, ready, failed };
+pub const AgentStatus = enum { none, initializing, ready, failed };
 
 pub const ChatMessage = struct {
     role: []const u8,
@@ -188,9 +188,6 @@ pub const AIChatState = struct {
         if (self.model_path.len > 0) self.allocator.free(self.model_path);
     }
 
-    pub fn isOllama(self: *const Self) bool {
-        return std.mem.eql(u8, self.server_path, "ollama");
-    }
 
     pub fn statusDetail(self: *const Self) []const u8 {
         return self.status_detail_buf[0..self.status_detail_len];
@@ -205,7 +202,7 @@ pub const AIChatState = struct {
 
     /// Kopfzeile: Modell und Gerät, z.B. "Qwen3-4B-Instruct-2507-Q4_K_M · Quadro P1000"
     pub fn agentTitle(self: *Self) []const u8 {
-        const model = if (self.isOllama()) self.model_path else blk: {
+        const model = blk: {
             const base = std.fs.path.basename(self.model_path);
             break :blk if (std.mem.endsWith(u8, base, ".gguf")) base[0 .. base.len - 5] else base;
         };
@@ -252,7 +249,6 @@ pub const AIChatState = struct {
     pub fn statusText(self: *const Self) []const u8 {
         return switch (self.agent_status) {
             .none => "Not connected",
-            .model_missing => "Model missing",
             .initializing => "Initializing...",
             .ready => "Ready",
             .failed => "Failed",
@@ -276,14 +272,7 @@ pub const AIChatState = struct {
             self.model_path = mp;
         }
 
-        const port: u16 = if (self.isOllama()) 11434 else agent.default_llama_port;
-        self.agent = agent.LlamaAgent.init(self.allocator, self.server_path, self.model_path, port) catch |err| {
-            if (err == error.ModelNotInstalled) {
-                // Ollama läuft, Modell fehlt: Knopf "Pull model" anbieten, kein Fehler
-                self.model_exists = false;
-                self.setStatus(.model_missing, self.model_path);
-                return;
-            }
+        self.agent = agent.LlamaAgent.init(self.allocator, self.server_path, self.model_path, agent.default_llama_port) catch |err| {
             log.err("Failed to initialize AI Agent: {}", .{err});
             var detail_buf: [256]u8 = undefined;
             const detail: []const u8 = switch (err) {
@@ -338,7 +327,7 @@ pub const AIChatState = struct {
     /// läuft und im Datenverzeichnis noch etwas fehlt.
     pub fn needsSelfSetup(self: *Self) bool {
         const st = self.self_setup orelse return false;
-        // Läuft oder startet gerade ein Agent (Repo-Build, Ollama), gibt es nichts
+        // Läuft oder startet gerade ein Agent, gibt es nichts
         // einzurichten. Erst wenn das scheitert oder nie kam, ist der Knopf richtig.
         if (self.agent_status == .ready or self.agent_status == .initializing) return false;
         return st.missing() != .ready;
@@ -370,8 +359,7 @@ pub const AIChatState = struct {
         if (self.agent_status == .ready and self.agent != null) return null;
         var buf: [400]u8 = undefined;
         const msg: []const u8 = switch (self.agent_status) {
-            .ready, .none => "AI is not connected. Start zid without --ai=off. Default: llama-server + Qwen3-4B from engines/ and models/ in the repo, fallback Ollama; LLAMA_SERVER_PATH / LLAMA_MODEL_PATH override.",
-            .model_missing => std.fmt.bufPrint(&buf, "Model '{s}' is not installed in Ollama. Click 'Pull model' above or run: ollama pull {s}", .{ self.model_path, self.model_path }) catch "Model is not installed in Ollama.",
+            .ready, .none => "AI is not connected. Use the setup button above and zid downloads llama-server and the model itself. Override with LLAMA_SERVER_PATH / LLAMA_MODEL_PATH.",
             .initializing => "AI agent is still initializing, please try again in a moment.",
             .failed => std.fmt.bufPrint(&buf, "AI agent failed to start: {s}", .{self.statusDetail()}) catch "AI agent failed to start.",
         };
@@ -618,16 +606,6 @@ pub const AIChatState = struct {
     pub fn triggerDownload(self: *Self) !void {
         if (self.is_downloading or self.model_exists) return;
         const sched = self.scheduler orelse return error.NoScheduler;
-
-        if (self.isOllama()) {
-            const params = try ai_worker.PullParams.init(self.allocator, self.model_path);
-            if (!sched.submit(.{ .func = ai_worker.taskOllamaPull, .data = params })) {
-                params.deinit();
-                return error.SchedulerQueueFull;
-            }
-            self.is_downloading = true;
-            return;
-        }
 
         const url = "https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-Q4_K_M.gguf";
 
@@ -893,7 +871,7 @@ pub fn renderAIChat(
 
             const status_color: clay.Color = switch (state.agent_status) {
                 .ready => .{ 100, 255, 100, 255 },
-                .initializing, .model_missing => .{ 255, 200, 100, 255 },
+                .initializing => .{ 255, 200, 100, 255 },
                 .none, .failed => .{ 255, 90, 90, 255 },
             };
             clay.UI()(.{
@@ -959,29 +937,7 @@ pub fn renderAIChat(
             }
         }
 
-        // ── Download button / progress ───────────────────────────────────
-        if (!state.model_exists and state.isOllama()) {
-            const btn_id = clay.ElementId.ID("ai_download_btn");
-            const hovered = clay.pointerOver(btn_id);
-            if (hovered and mouse_pressed and !state.is_downloading) {
-                state.triggerDownload() catch {};
-            }
-            clay.UI()(.{
-                .id = btn_id,
-                .layout = .{
-                    .sizing = .{ .w = .fit, .h = .fit },
-                    .padding = .{ .left = 8, .right = 8, .top = 4, .bottom = 4 },
-                },
-                .background_color = if (state.is_downloading) .{ 100, 100, 100, 255 } else if (hovered) theme.primary else theme.border,
-                .corner_radius = .all(4),
-            })({
-                clay.text(
-                    if (state.is_downloading) (if (state.isOllama()) "Pulling..." else "Downloading...") else if (state.isOllama()) "Pull model with Ollama" else "Download Model (3GB)",
-                    .{ .font_size = 12, .color = .{ 255, 255, 255, 255 } },
-                );
-            });
-        }
-
+        // Fortschritt des alten Modell-Downloads (Repo-Pfad).
         if (state.is_downloading) {
             clay.UI()(.{
                 .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(6) } },

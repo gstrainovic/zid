@@ -337,15 +337,14 @@ pub const UI = struct {
         const active_pane = root_pane;
         if (default_file_path) |path| active_pane.data.leaf.code_editor.setLanguageFromPath(path);
 
-        // AI Chat initialisieren (falls nicht deaktiviert). Standard: Ollama mit
-        // gemma4:e2b; LLAMA_SERVER_PATH / LLAMA_MODEL_PATH überschreiben das.
-        // Ohne Agent erklärt der Chat beim Senden, warum nichts passiert.
+        // AI Chat initialisieren (falls nicht deaktiviert). Ohne Agent erklärt der Chat
+        // beim Senden, warum nichts passiert, und bietet die Selbsteinrichtung an.
         var ai_chat = ai_chat_mod.AIChatState.init(allocator) catch |err| @panic(@errorName(err));
         if (!config.ai_disabled) {
             // Standard: llama.cpp-Vulkan-Build + gemma4-E2B Q4_0 (llm-bench/: 10/10 Werkzeugwahl,
             // 27,6 tok/s auf der P1000, 18,2 auf CPU), beides im Repo (engines/, models/). Repo-Wurzel
             // aus dem Ort der ausführbaren Datei (<repo>/zig-out/bin), sonst Arbeitsverzeichnis.
-            // Fehlt der Build, fällt es auf Ollama mit gemma4:e2b zurück.
+            // Fehlt der Build, kommen Engine und Modell aus dem Datenverzeichnis.
             const ai_paths = @import("ai_paths");
             const exe_dir = std.fs.selfExeDirPathAlloc(allocator) catch null;
             defer if (exe_dir) |d| allocator.free(d);
@@ -360,7 +359,7 @@ pub const UI = struct {
 
             // Zweite Quelle: das Datenverzeichnis, das zid sich selbst einrichtet
             // (installierte Fassung ohne Quellbaum). Reihenfolge: Repo, dann
-            // Datenverzeichnis, dann Ollama.
+            // Datenverzeichnis.
             const ai_selfsetup = @import("ai_selfsetup");
             const self_setup = try allocator.create(ai_selfsetup.SelfSetup);
             self_setup.* = try ai_selfsetup.SelfSetup.init(allocator);
@@ -374,27 +373,25 @@ pub const UI = struct {
             const server_path = std.process.getEnvVarOwned(allocator, "LLAMA_SERVER_PATH") catch |err| blk: {
                 if (err == error.EnvironmentVariableNotFound) break :blk try allocator.dupe(u8, if (engine_available)
                     default_engine
-                else if (own_ready)
-                    own_engine
                 else
-                    "ollama");
+                    own_engine);
                 return err;
             };
             defer allocator.free(server_path);
-            const use_ollama = std.mem.eql(u8, server_path, "ollama");
             const model_path = std.process.getEnvVarOwned(allocator, "LLAMA_MODEL_PATH") catch |err| blk: {
-                if (err == error.EnvironmentVariableNotFound) break :blk try allocator.dupe(u8, if (use_ollama)
-                    "gemma4:e2b"
-                else if (!engine_available and own_ready)
-                    own_model
+                if (err == error.EnvironmentVariableNotFound) break :blk try allocator.dupe(u8, if (engine_available)
+                    default_model
                 else
-                    default_model);
+                    own_model);
                 return err;
             };
             defer allocator.free(model_path);
-            ai_chat.initAgent(server_path, model_path) catch |err| {
-                log.err("AI agent init failed: {}. Chat will explain when used.", .{err});
-            };
+            // Fehlt noch etwas, bleibt der Chat ohne Agent und zeigt den Einrichtungsknopf.
+            if (engine_available or own_ready) {
+                ai_chat.initAgent(server_path, model_path) catch |err| {
+                    log.err("AI agent init failed: {}. Chat will explain when used.", .{err});
+                };
+            }
         }
 
         return Self{

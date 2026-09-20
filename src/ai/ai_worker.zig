@@ -360,43 +360,6 @@ pub fn taskDownload(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.Task
     };
 }
 
-pub const PullParams = struct {
-    alloc: std.mem.Allocator,
-    model: []u8,
-
-    pub fn init(alloc: std.mem.Allocator, model: []const u8) !*PullParams {
-        const self = try alloc.create(PullParams);
-        errdefer alloc.destroy(self);
-        self.model = try alloc.dupe(u8, model);
-        self.alloc = alloc;
-        return self;
-    }
-
-    pub fn deinit(self: *PullParams) void {
-        self.alloc.free(self.model);
-        self.alloc.destroy(self);
-    }
-};
-
-/// `ollama pull <model>` im Hintergrund; meldet sich wie der GGUF-Download
-/// über ai_download_done / ai_download_error zurück.
-pub fn taskOllamaPull(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.TaskResult {
-    const params: *PullParams = @ptrCast(@alignCast(data.?));
-    defer params.deinit();
-    agent_mod.LlamaAgent.pullModel(alloc, params.model) catch |err| {
-        return .{
-            .tag = .ai_download_error,
-            .payload = try std.fmt.allocPrint(alloc, "ollama pull {s} failed: {s}", .{ params.model, @errorName(err) }),
-            .allocator = alloc,
-        };
-    };
-    return .{
-        .tag = .ai_download_done,
-        .payload = try alloc.alloc(u8, 0),
-        .allocator = alloc,
-    };
-}
-
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 test {

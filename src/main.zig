@@ -167,8 +167,8 @@ pub fn main() !void {
             try w.writeAll("  --help, -h            Show this help\n");
             try w.writeAll("\nEnvironment:\n");
             try w.writeAll("  ZID_DEBUG=1     Enable debug log lines\n");
-            try w.writeAll("  LLAMA_SERVER_PATH     llama-server binary (default: ollama)\n");
-            try w.writeAll("  LLAMA_MODEL_PATH      GGUF path or Ollama model (default: gemma4:e2b)\n");
+            try w.writeAll("  LLAMA_SERVER_PATH     llama-server binary (default: downloaded by zid)\n");
+            try w.writeAll("  LLAMA_MODEL_PATH      GGUF model file (default: downloaded by zid)\n");
             try w.flush();
             return;
         } else if (default_file_path == null) {

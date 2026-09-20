@@ -2,7 +2,7 @@
 """Headless-E2E für den KI-Chat.
 
 Lauf A (Standard): zid ohne --ai=off gegen das konfigurierte Backend
-(Default: llama-server + gemma4-E2B aus models/, sonst Ollama). Prüft:
+(Default: llama-server + gemma4-E2B aus models/, sonst aus dem Datenverzeichnis). Prüft:
 Warmup, Streaming (erstes Textstück kommt schnell), Escape bricht ab,
 kurze Frage wird vollständig beantwortet.
 Lauf B (--ai=off): Senden liefert sofort eine Erklärung statt endlos "thinking".

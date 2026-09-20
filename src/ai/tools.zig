@@ -122,7 +122,7 @@ pub fn findTool(name: []const u8) ?*const Tool {
     return null;
 }
 
-/// Kleine Modelle (gemma4:e2b über Ollama) rufen den Enum-Wert direkt als Werkzeug auf:
+/// Kleine Modelle (gemma4-E2B) rufen den Enum-Wert direkt als Werkzeug auf:
 /// `toggle_explorer` statt `command` mit `name: toggle_explorer`. Gemeint ist dasselbe;
 /// statt „unknown tool" wird das Kommando ausgeführt. Echte Werkzeugnamen haben Vorrang.
 pub fn commandFromToolName(name: []const u8) ?shortcuts.Command {

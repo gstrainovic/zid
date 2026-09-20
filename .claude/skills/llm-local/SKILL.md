@@ -1,8 +1,9 @@
 ---
 name: llm-local
 description: >
-  Lokales LLM in zid: KI-Chat über llama-server/Ollama, Engine- und Modellwahl,
-  gepinnte Engines unter engines/, Messregeln aus llm-bench/.
+  Lokales LLM in zid: KI-Chat über llama-server, Selbsteinrichtung von Engine und
+  Modell, Engine- und Modellwahl, gepinnte Engines unter engines/, Messregeln aus
+  llm-bench/.
   Use when working on the AI chat, `src/ai/*`, llama-server startup, model or device
   selection, streaming replies, `engines/`, `models/`, `llm-bench/`, or when
   benchmarking or comparing local models.
@@ -17,8 +18,10 @@ description: >
 `models/gemma-4-E2B-it-Q4_0.gguf` (ggml-org, sha256 `8e30dff3…`), beides relativ zur
 Repo-Wurzel (`src/ai/paths.zig`, unit-getestet: Wurzel aus `<repo>/zig-out/bin` der
 ausführbaren Datei, sonst das Arbeitsverzeichnis; nichts über `$HOME`). Fehlt der Build,
-Fallback auf Ollama mit `gemma4:e2b`. `LLAMA_SERVER_PATH` (Pfad oder `ollama`) und
-`LLAMA_MODEL_PATH` überschreiben.
+kommen Engine und Modell aus dem Datenverzeichnis, das zid sich selbst einrichtet
+(`src/ai/selfsetup.zig`: Knopf im Chat, llama.cpp `b11062` und das Modell von ggml-org
+nach `<AppData>/zid` bzw. `~/.local/share/zid`). `LLAMA_SERVER_PATH` und
+`LLAMA_MODEL_PATH` überschreiben beides.
 
 **Warum gemma4-E2B Q4_0:** gleiche Werkzeugwahl wie Qwen3-4B-Instruct-2507 (10/10 in
 `bench/agent_eval.py`, `e2e_ai_tools` grün), aber auf beiden Referenzmaschinen schneller:
@@ -26,8 +29,7 @@ Fallback auf Ollama mit `gemma4:e2b`. `LLAMA_SERVER_PATH` (Pfad oder `ollama`) u
 hinein), 18.2 gegen 11.9 tok/s auf der CPU des i5-13500T. Erstes Delta im Chat 8 s auf der
 P1000 (Qwen3: 15 s). Antwortet auf deutsche Fragen deutsch (`bench/probe.py`, Chat-Suite).
 Messreihen: `llm-bench/results/windows-i5-13500T-gemma4-vs-qwen3.md`,
-`llm-bench/results/linux-p1000-gemma4-vs-qwen3.md`. Das Ollama-Modell `gemma4:e2b`
-(5,2 GB, 4,4 tok/s auf dem Laptop) ist eine andere Datei und nur Fallback.
+`llm-bench/results/linux-p1000-gemma4-vs-qwen3.md`.
 
 ## llama-server starten
 
@@ -37,15 +39,14 @@ Messreihen: `llm-bench/results/windows-i5-13500T-gemma4-vs-qwen3.md`,
 der CPU-Leistung.
 
 Argumente: `--jinja -c 8192 --log-disable --chat-template-kwargs {"enable_thinking":false}`,
-auf GPU zusätzlich `-dev VulkanN -ngl 99`. Port 8080 (`default_llama_port`), Ollama bleibt
-auf 11434. Ohne `-dev` landet das Modell womöglich auf der iGPU, ohne `--jinja` stimmt das
+auf GPU zusätzlich `-dev VulkanN -ngl 99`. Port 8080 (`default_llama_port`).
+Ohne `-dev` landet das Modell womöglich auf der iGPU, ohne `--jinja` stimmt das
 Qwen3-Chat-Template nicht. `enable_thinking=false` ist für Qwen3-Instruct wirkungslos,
 schaltet aber bei gemma4 das Denken ab; `--reasoning-budget 0` tut das nicht (gemma4 denkt
-dann im Antwortkanal weiter, 0/10 Werkzeugwahl). Über Ollama entspricht dem
-`reasoning_effort: "none"` im Request (`buildPayload`); `think: false` wirkt dort nicht.
+dann im Antwortkanal weiter, 0/10 Werkzeugwahl).
 
-Unter Windows heisst die Engine `llama-server.exe` (`paths.exe_suffix`); ohne Endung schlug
-der Existenztest fehl und zid nahm still Ollama.
+Unter Windows heisst die Engine `llama-server.exe` (`paths.exe_suffix`); ohne Endung schlägt
+der Existenztest fehl und zid hält die Engine für nicht vorhanden.
 
 **Werkzeug-Prompt klein halten.** Das `command`-Werkzeug trägt die 106 Kommandos nur als
 Enum; eine Liste mit Label und Kürzel im Text kostete 1000 Token und auf CPU 20 s vor dem
@@ -70,17 +71,14 @@ ausgeführt (unvollständiges JSON), ohne Text erscheint eine Fehlermeldung. Kei
 `max_tokens`: das würde lange `write_file`-Inhalte kappen. E2E
 `python3 scripts/e2e_ai_truncated.py` (12 KB wiedergeben lassen, ~3 min).
 
-`AgentStatus` (`none`, `model_missing`, `initializing`, `ready`, `failed`) ist der echte
+`AgentStatus` (`none`, `initializing`, `ready`, `failed`) ist der echte
 Verbindungszustand: Statuspunkt, Kopfzeile (`agentTitle`: Modell · Gerät) und
 `sendMessage` hängen daran. Warmup schickt „ping" mit `max_tokens = 1`, ohne Limit
 dauert der Start minutenlang.
 
-Fehlt das Ollama-Modell, wird **nicht** synchron gepullt; der Chat zeigt „Pull model
-with Ollama". Lokales GGUF registrieren:
-
-```bash
-printf 'FROM /abs/pfad/model.gguf\n' > Modelfile && ollama create NAME -f Modelfile
-```
+Fehlen Engine oder Modell, lädt der Chat sie auf Knopfdruck selbst nach; synchron wird
+nie geladen, das blockierte den Start minutenlang (`selfsetup.zig` arbeitet im eigenen
+Thread, der Fortschritt kommt aus der Grösse der `.part`-Datei).
 
 ## Chat-Eingabe ist der CodeEditor
 

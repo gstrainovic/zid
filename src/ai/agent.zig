@@ -1,7 +1,7 @@
 const std = @import("std");
 const device_select = @import("device_select.zig");
 
-/// Standardport für einen von uns gestarteten llama-server (Ollama hat 11434).
+/// Standardport für den llama-server, den zid selbst startet.
 pub const default_llama_port: u16 = 8080;
 
 pub const LlamaAgent = struct {
@@ -10,63 +10,10 @@ pub const LlamaAgent = struct {
     model_path: []const u8,
     server_port: u16,
     connect_timeout_ns: u64,
-    is_ollama: bool,
-    /// "Quadro P1000", "CPU" oder "Ollama" für die Statuszeile (owned)
+    /// "Quadro P1000" oder "CPU" für die Statuszeile (owned)
     device_label: []const u8 = "",
 
     const Self = @This();
-
-    fn isOllamaInstalled(allocator: std.mem.Allocator) !bool {
-        const result = std.process.Child.run(.{
-            .allocator = allocator,
-            .argv = &[_][]const u8{ "ollama", "--version" },
-        }) catch return false;
-        defer allocator.free(result.stdout);
-        defer allocator.free(result.stderr);
-        return result.term == .Exited and result.term.Exited == 0;
-    }
-
-    fn isOllamaDaemonRunning(allocator: std.mem.Allocator) !bool {
-        var client = std.http.Client{ .allocator = allocator };
-        defer client.deinit();
-        const uri = try std.Uri.parse("http://127.0.0.1:11434/api/tags");
-        _ = client.fetch(.{
-            .location = .{ .uri = uri },
-            .method = .GET,
-        }) catch return false;
-        return true;
-    }
-
-    fn isModelInstalled(allocator: std.mem.Allocator, model_name: []const u8) !bool {
-        const result = try std.process.Child.run(.{
-            .allocator = allocator,
-            .argv = &[_][]const u8{ "ollama", "list" },
-        });
-        defer allocator.free(result.stdout);
-        defer allocator.free(result.stderr);
-
-        if (result.term != .Exited or result.term.Exited != 0) return false;
-
-        var lines = std.mem.tokenizeAny(u8, result.stdout, "\n");
-        _ = lines.next();
-        while (lines.next()) |line| {
-            const trimmed = std.mem.trim(u8, line, " \r\n");
-            if (std.mem.startsWith(u8, trimmed, model_name)) return true;
-        }
-        return false;
-    }
-
-    pub fn pullModel(allocator: std.mem.Allocator, model_name: []const u8) !void {
-        const result = try std.process.Child.run(.{
-            .allocator = allocator,
-            .argv = &[_][]const u8{ "ollama", "pull", model_name },
-        });
-        defer allocator.free(result.stdout);
-        defer allocator.free(result.stderr);
-        if (result.term != .Exited or result.term.Exited != 0) {
-            return error.OllamaPullFailed;
-        }
-    }
 
     pub fn init(allocator: std.mem.Allocator, llama_server_path: []const u8, model_path: []const u8, port: u16) !*Self {
         return initWithTimeout(allocator, llama_server_path, model_path, port, 5 * std.time.ns_per_s);
@@ -83,10 +30,7 @@ pub const LlamaAgent = struct {
         self.server_port = port;
         self.connect_timeout_ns = timeout_ns;
 
-        const is_ollama = std.mem.eql(u8, llama_server_path, "ollama");
-        self.is_ollama = is_ollama;
-
-        if (!is_ollama) {
+        {
             // Engine und Modell müssen da sein, sonst stirbt der Server leise nach dem Spawn.
             std.fs.cwd().access(llama_server_path, .{}) catch return error.EngineNotFound;
             std.fs.cwd().access(self.model_path, .{}) catch return error.ModelFileNotFound;
@@ -133,51 +77,6 @@ pub const LlamaAgent = struct {
 
             try proc.spawn();
             self.process = proc;
-        } else {
-            // Ollama auto-start logic
-            self.server_port = 11434;
-            self.process = null;
-
-            if (!try isOllamaInstalled(allocator)) {
-                return error.OllamaNotInstalled;
-            }
-
-            if (!try isOllamaDaemonRunning(allocator)) {
-                std.log.info("Ollama daemon not running, starting...", .{});
-                const argv = &[_][]const u8{ "ollama", "serve" };
-                var proc = std.process.Child.init(argv, allocator);
-                proc.stdin_behavior = .Ignore;
-                proc.stdout_behavior = .Inherit;
-                proc.stderr_behavior = .Inherit;
-                try proc.spawn();
-
-                const p = try allocator.create(std.process.Child);
-                p.* = proc;
-                self.process = p;
-
-                var waited: u64 = 0;
-                while (waited < timeout_ns) : (waited += 100 * std.time.ns_per_ms) {
-                    std.Thread.sleep(100 * std.time.ns_per_ms);
-                    if (try isOllamaDaemonRunning(allocator)) break;
-                }
-                if (!try isOllamaDaemonRunning(allocator)) {
-                    return error.OllamaFailedToStart;
-                }
-                std.log.info("Ollama daemon started", .{});
-            }
-            // Der selbst gestartete Daemon hängt an self.process; scheitert init danach
-            // (z. B. ModelNotInstalled), ruft niemand deinit auf.
-            errdefer if (self.process) |p| allocator.destroy(p);
-
-            // Kein synchroner Pull: das blockierte den UI-Start minutenlang.
-            // Der Chat zeigt stattdessen einen "Pull model"-Knopf (ai_worker.taskOllamaPull).
-            if (!try isModelInstalled(allocator, self.model_path)) {
-                std.log.warn("Model {s} not installed in Ollama", .{self.model_path});
-                return error.ModelNotInstalled;
-            }
-
-            self.device_label = try allocator.dupe(u8, "Ollama");
-            std.log.info("Using Ollama with model {s} on port 11434", .{self.model_path});
         }
 
         return self;
@@ -263,14 +162,6 @@ pub const LlamaAgent = struct {
         try jw.write(messages);
         try jw.objectField("temperature");
         try jw.write(0.7);
-        if (self.is_ollama) {
-            // Denkende Modelle (gemma4) streamen über Ollama erst 20–30 s `reasoning`,
-            // bevor das erste `content`-Delta kommt; der Chat zeigt solange nichts und
-            // Werkzeugaufrufe verzögern sich entsprechend. `think: false` wirkt auf dem
-            // OpenAI-Endpunkt nicht, `reasoning_effort: "none"` schon (Ollama 0.30.7).
-            try jw.objectField("reasoning_effort");
-            try jw.write("none");
-        }
         if (stream) {
             try jw.objectField("stream");
             try jw.write(true);
@@ -367,7 +258,6 @@ pub const LlamaAgent = struct {
             const parsed = try std.json.parseFromSlice(std.json.Value, self.allocator, response_body.items, .{ .ignore_unknown_fields = true });
             defer parsed.deinit();
 
-            // Ollama uses "message.content", standard OpenAI also uses "message.content"
             const choices = parsed.value.object.get("choices") orelse return error.InvalidResponse;
             const msg_obj = choices.array.items[0].object.get("message") orelse return error.InvalidResponse;
             const content = msg_obj.object.get("content") orelse return error.InvalidResponse;
@@ -623,15 +513,3 @@ test "isContextOverflow: nur exceed_context_size_error zählt, andere 400er nich
     try std.testing.expect(!isContextOverflow("<html>Bad Request</html>"));
 }
 
-test "buildPayload: reasoning_effort none nur für Ollama" {
-    const a = std.testing.allocator;
-    var agent = LlamaAgent{ .allocator = a, .process = null, .model_path = "m", .server_port = 11434, .connect_timeout_ns = 0, .is_ollama = true };
-    const ollama = try agent.buildPayload(&.{}, true, null, null);
-    defer a.free(ollama);
-    try std.testing.expect(std.mem.indexOf(u8, ollama, "\"reasoning_effort\":\"none\"") != null);
-
-    agent.is_ollama = false;
-    const llama = try agent.buildPayload(&.{}, true, null, null);
-    defer a.free(llama);
-    try std.testing.expect(std.mem.indexOf(u8, llama, "reasoning_effort") == null);
-}
