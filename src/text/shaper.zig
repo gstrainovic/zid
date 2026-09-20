@@ -40,36 +40,9 @@ pub const Shaper = struct {
 /// Gemeldete ungültige Strings (Obergrenze, sonst eine Zeile pro Frame).
 var invalid_reports: u32 = 0;
 
-/// Nächsten Codepoint ab `i.*` lesen und `i.*` weiterrücken; ein ungültiges Byte oder eine
-/// abgeschnittene Sequenz ergibt U+FFFD und rückt genau ein Byte weiter.
-pub fn decodeLossy(text: []const u8, i: *usize) u21 {
-    const len = std.unicode.utf8ByteSequenceLength(text[i.*]) catch {
-        i.* += 1;
-        return 0xFFFD;
-    };
-    if (i.* + len > text.len) {
-        i.* += 1;
-        return 0xFFFD;
-    }
-    const cp = std.unicode.utf8Decode(text[i.* .. i.* + len]) catch {
-        i.* += 1;
-        return 0xFFFD;
-    };
-    i.* += len;
-    return cp;
-}
-
-test "decodeLossy: gültige Sequenzen, kaputtes Byte und abgeschnittene Sequenz" {
-    var i: usize = 0;
-    const t = "a\xc3\xa4\xff\xe2\x82";
-    try std.testing.expectEqual(@as(u21, 'a'), decodeLossy(t, &i));
-    try std.testing.expectEqual(@as(u21, 0xE4), decodeLossy(t, &i));
-    try std.testing.expectEqual(@as(u21, 0xFFFD), decodeLossy(t, &i));
-    try std.testing.expectEqual(@as(usize, 4), i);
-    try std.testing.expectEqual(@as(u21, 0xFFFD), decodeLossy(t, &i));
-    try std.testing.expectEqual(@as(u21, 0xFFFD), decodeLossy(t, &i));
-    try std.testing.expectEqual(t.len, i);
-}
+/// Nächsten Codepoint lossless lesen — liegt in `text_scan.zig`, weil das
+/// Textsystem denselben Weg braucht und dort getestet wird.
+pub const decodeLossy = @import("text_scan.zig").decodeLossy;
 
 pub const SimpleShaper = struct {
     allocator: std.mem.Allocator,

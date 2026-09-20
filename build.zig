@@ -669,6 +669,15 @@ pub fn build(b: *std.Build) void {
     const run_emoji_font_tests = b.addRunArtifact(emoji_font_tests);
     run_emoji_font_tests.has_side_effects = true;
 
+    // Zeichenweise durch Text, auch durch kaputtes UTF-8.
+    const text_scan_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("src/text/text_scan.zig"),
+        .target = target,
+        .optimize = optimize,
+    }) });
+    const run_text_scan_tests = b.addRunArtifact(text_scan_tests);
+    run_text_scan_tests.has_side_effects = true;
+
     // Farbige Emoji-Bitmaps auf die Textgrösse verkleinern.
     const bitmap_scale_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("src/text/bitmap_scale.zig"),
@@ -926,6 +935,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_font_cache_tests.step);
     test_step.dependOn(&run_emoji_font_tests.step);
     test_step.dependOn(&run_bitmap_scale_tests.step);
+    test_step.dependOn(&run_text_scan_tests.step);
     test_step.dependOn(&run_ai_setup_tests.step);
     test_step.dependOn(&run_ai_download_tests.step);
     test_step.dependOn(&run_ai_install_tests.step);
