@@ -69,6 +69,22 @@ zig build test-text        # nur Textsystem (Glyph-Cache, Atlas; Root src/text_t
 - E2E mit bundled MuPDF: `ZID_BUILD_ARGS=-Dmupdf=bundled python3 scripts/e2e_pdf_pager.py`.
   `ZID_BUILD_ARGS` reicht Build-Optionen an den `zig build`-Aufruf der Suiten durch.
 
+## Windows: Zweige lokal prüfen, bauen in CI
+
+- `zig build -Dtarget=x86_64-windows-gnu` übersetzt hier alle Windows-Zweige und scheitert
+  erst beim Linken (MuPDF-Archive fehlen lokal, und Zig findet `OleAut32`/`Ole32` nur auf
+  einem Dateisystem ohne Gross-/Kleinschreibung). Das reicht, um Tippfehler in Code zu
+  finden, den Linux nie analysiert — so fiel `nativeWindow` auf (HWND ist bei wio optional).
+- Gebaut wird in `.github/workflows/windows-release.yml` auf `windows-latest`, weil MuPDFs
+  Makefile während des Bauens Hilfsprogramme ausführt.
+- Beide Zig-Caches müssen dort im Workspace liegen: das Repo liegt auf `D:`, der globale
+  Cache sonst auf `C:`, und über Laufwerksgrenzen bricht ein Run-Schritt von Zig mit
+  `reached unreachable code` ab (`assert(!isAbsolute(child_cwd_rel))`).
+- `zig build --fetch` läuft dort in drei Anläufen: Zig lädt die Pakete gleichzeitig, und
+  einzelne Verbindungen reissen mit `HttpConnectionClosing` ab.
+- DirectWrite lädt keine Schrift aus dem Speicher. Die Schrift liegt deshalb neben der exe,
+  gesucht wird über `platform/asset_path.zig`.
+
 ## Release-Tarball: `packaging/build-release.sh`
 
 - Baut in einem Debian-12-Container (podman, sonst docker) nach
