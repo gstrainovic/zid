@@ -7,7 +7,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const setup = @import("setup.zig");
-const download = @import("download.zig");
+const download = @import("download");
 
 const log = std.log.scoped(.ai_setup);
 

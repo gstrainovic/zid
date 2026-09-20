@@ -156,6 +156,9 @@ pub const GlyphCache = struct {
 
     /// Grayscale atlas for regular text
     grayscale_atlas: Atlas,
+    /// Farbatlas für Emoji. Getrennt vom Textatlas, weil er vier Byte je Pixel
+    /// braucht und sonst jeder Buchstabe viermal so viel Platz belegen würde.
+    color_atlas: Atlas,
 
     /// Reusable bitmap buffer for rendering
     render_buffer: []u8,
@@ -195,6 +198,8 @@ pub const GlyphCache = struct {
             .free_chain = undefined,
             .next_free = 0,
             .grayscale_atlas = try Atlas.init(allocator, .grayscale),
+            // Klein anfangen: die meisten Sitzungen zeigen nie ein Emoji.
+            .color_atlas = try Atlas.initWithSize(allocator, .rgba, 256),
             .render_buffer = render_buffer,
             .render_buffer_size = buffer_bytes,
             .scale_factor = scale,
@@ -246,6 +251,7 @@ pub const GlyphCache = struct {
 
         // Initialize atlas in-place
         self.grayscale_atlas = try Atlas.init(allocator, .grayscale);
+        self.color_atlas = try Atlas.initWithSize(allocator, .rgba, 256);
 
         std.debug.assert(self.entry_count == 0);
         std.debug.assert(self.next_free == 0);
@@ -263,6 +269,7 @@ pub const GlyphCache = struct {
 
     pub fn deinit(self: *Self) void {
         self.grayscale_atlas.deinit();
+        self.color_atlas.deinit();
         self.allocator.free(self.render_buffer);
         self.* = undefined;
     }
@@ -416,6 +423,40 @@ pub const GlyphCache = struct {
         return try self.reserveOrClearOnSkylineFull(width, height) orelse error.GlyphTooLarge;
     }
 
+    /// Platz im Farbatlas reservieren. Gleiche Stufen wie beim Textatlas:
+    /// erst versuchen, dann wachsen, zuletzt alles verwerfen.
+    fn reserveColorWithEviction(self: *Self, width: u32, height: u32) !Region {
+        std.debug.assert(width > 0);
+        std.debug.assert(height > 0);
+
+        if (self.color_atlas.reserve(width, height) catch null) |region| return region;
+
+        self.color_atlas.grow() catch |err| {
+            if (err != error.AtlasFull) return err;
+            self.clear();
+            if (try self.color_atlas.reserve(width, height)) |region| return region;
+            return error.GlyphTooLarge;
+        };
+        self.updateColorAtlasSizeInCache();
+
+        if (self.color_atlas.reserve(width, height) catch null) |region| return region;
+        return error.GlyphTooLarge;
+    }
+
+    /// Farbglyph in den Farbatlas legen und den Cache-Eintrag bauen.
+    fn storeColorGlyph(self: *Self, rasterized: RasterizedGlyph) !CachedGlyph {
+        const region = try self.reserveColorWithEviction(rasterized.width, rasterized.height);
+        self.color_atlas.set(region, self.render_buffer[0 .. rasterized.width * rasterized.height * 4]);
+        return CachedGlyph{
+            .region = region,
+            .offset_x = rasterized.offset_x,
+            .offset_y = rasterized.offset_y,
+            .advance_x = rasterized.advance_x,
+            .is_color = true,
+            .atlas_size = self.color_atlas.size,
+        };
+    }
+
     /// Update atlas_size in all cached entries after atlas growth.
     /// When the atlas grows, pixel positions are preserved but UV coordinates
     /// change (e.g., x=100 in 512px atlas is UV=0.195, but in 1024px is UV=0.098).
@@ -424,7 +465,18 @@ pub const GlyphCache = struct {
         const new_size = self.grayscale_atlas.size;
 
         for (&self.entries) |*entry| {
-            if (entry.valid) {
+            // Farbglyphen liegen im anderen Atlas und behalten ihre Grösse.
+            if (entry.valid and !entry.glyph.is_color) {
+                entry.glyph.atlas_size = new_size;
+            }
+        }
+    }
+
+    fn updateColorAtlasSizeInCache(self: *Self) void {
+        const new_size = self.color_atlas.size;
+
+        for (&self.entries) |*entry| {
+            if (entry.valid and entry.glyph.is_color) {
                 entry.glyph.atlas_size = new_size;
             }
         }
@@ -491,6 +543,9 @@ pub const GlyphCache = struct {
                 .atlas_size = self.grayscale_atlas.size,
             };
         }
+
+        // Farbige Glyphen (Emoji) liegen im RGBA-Atlas.
+        if (rasterized.is_color) return try self.storeColorGlyph(rasterized);
 
         // Reserve space in atlas with eviction support
         const region = try self.reserveWithEviction(rasterized.width, rasterized.height);
@@ -614,6 +669,9 @@ pub const GlyphCache = struct {
             };
         }
 
+        // Farbige Glyphen (Emoji) liegen im RGBA-Atlas.
+        if (rasterized.is_color) return try self.storeColorGlyph(rasterized);
+
         // Reserve space in atlas with eviction support
         const region = try self.reserveWithEviction(rasterized.width, rasterized.height);
 
@@ -646,6 +704,7 @@ pub const GlyphCache = struct {
 
         self.entry_count = 0;
         self.grayscale_atlas.clear();
+        self.color_atlas.clear();
 
         // Rebuild the free list so every slot is available again.
         self.initFreeList();
@@ -662,6 +721,15 @@ pub const GlyphCache = struct {
     /// Get atlas generation (for detecting changes)
     pub inline fn getGeneration(self: *const Self) u32 {
         return self.grayscale_atlas.generation;
+    }
+
+    /// Farbatlas (Emoji) für den Upload auf die GPU.
+    pub inline fn getColorAtlas(self: *const Self) *const Atlas {
+        return &self.color_atlas;
+    }
+
+    pub inline fn getColorGeneration(self: *const Self) u32 {
+        return self.color_atlas.generation;
     }
 
     /// Get cache statistics for debugging

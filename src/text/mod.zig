@@ -156,6 +156,19 @@ pub const TextRenderer = struct {
         return self.ts_ptr.cache.grayscale_atlas.size;
     }
 
+    /// Farbatlas mit den Emoji-Bildern (RGBA).
+    pub fn getColorAtlasData(self: *Self) []const u8 {
+        return self.ts_ptr.cache.color_atlas.data;
+    }
+
+    pub fn getColorAtlasSize(self: *Self) u32 {
+        return self.ts_ptr.cache.color_atlas.size;
+    }
+
+    pub fn colorAtlasGeneration(self: *const Self) u32 {
+        return self.ts_ptr.color_atlas_generation;
+    }
+
     pub fn cacheGlyph(self: *Self, glyph_id: u16) !?struct { x: u16, y: u16, w: u16, h: u16, advance: f32 } {
         if (self.ts_ptr.current_face) |*face| {
             var buffer: [256 * 256]u8 = undefined;

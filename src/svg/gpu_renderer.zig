@@ -42,9 +42,10 @@ pub const SvgRendererGPU = struct {
     ) !Self {
         log.debug("Initializing GPU SVG renderer", .{});
 
-        // Wir nutzen den gleichen Shader wie für Text, da beide Quads mit Textur rendern.
-        // Falls wir spezielle SVG-Shader brauchen (z.B. für Tinting), können wir sie später hinzufügen.
-        const shader_code = shaders.text_atlas;
+        // Eigener Shader: er zeichnet nur Masken aus einem Einkanal-Atlas. Der
+        // Text-Shader kennt zusätzlich den Farbatlas für Emoji und ein viertes
+        // Vertexfeld, das die Symbole nicht liefern.
+        const shader_code = shaders.svg_atlas;
 
         const shader_module = device.createShaderModule(&wgpu.shaderModuleWGSLDescriptor(.{
             .label = "svg_atlas.wgsl",

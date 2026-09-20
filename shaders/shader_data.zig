@@ -5,3 +5,4 @@ pub const triangle = @embedFile("triangle.wgsl");
 pub const rectangle = @embedFile("rectangle.wgsl");
 pub const texture = @embedFile("texture.wgsl");
 pub const text_atlas = @embedFile("text_atlas.wgsl");
+pub const svg_atlas = @embedFile("svg_atlas.wgsl");
