@@ -149,6 +149,34 @@ def select_in_bubble():
     check(result_json("md_selection")["text"] is None, "Escape hebt die Auswahl auf")
 
 
+def chat_takes_keys_from_explorer():
+    """Explorer-Fokus darf die Tastatur nicht festhalten, sobald der Chat offen ist.
+
+    Vorher gingen alle Sondertasten an den Explorer (`explorer_focused`), der Chat
+    bekam kein Backspace — tippen ging, löschen nicht."""
+    print("--- Chat bekommt die Tastatur trotz Explorer-Fokus")
+    rpc("key_press_mods", ["e", True, True])  # Ctrl+Shift+E: Fokus in den Explorer
+    settle(8)
+    check(ui_state()["explorer_focused"], "Explorer hat den Fokus")
+
+    rpc("open_chat")
+    settle(10)
+    # Klick in die Eingabe holt den Fokus zurück — der Weg, den ein Benutzer geht.
+    b = result_json("element_bounds", ["ai_chat_input"])
+    if not b["found"]:
+        b = {"x": 600, "y": 700, "w": 10, "h": 10}
+    rpc("click", [b["x"] + b["w"] / 2, b["y"] + b["h"] / 2])
+    settle(8)
+    check(not ui_state()["explorer_focused"], "Klick in die Chat-Eingabe nimmt dem Explorer den Fokus")
+
+    rpc("type_text", ["hallo"])
+    settle(5)
+    check(rpc("get_chat_input") == "hallo", "Tippen landet im Chat")
+    rpc("key_press", ["backspace", False])
+    settle(5)
+    check(rpc("get_chat_input") == "hall", f"Backspace löscht im Chat (ist {rpc('get_chat_input')!r})")
+
+
 def run_ai_off():
     print("--- B. --ai=off: Senden erklärt sofort, kein endloses Laden")
     proc, log = start(["--ai=off"], "e2e_ai_chat_off.log")
@@ -165,6 +193,7 @@ def run_ai_off():
         input_newline_and_send()
         shot("e2e_ai_chat_off.ppm")
         select_in_bubble()
+        chat_takes_keys_from_explorer()
     finally:
         stop(proc, log)
 

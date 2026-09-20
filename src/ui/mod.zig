@@ -115,6 +115,8 @@ pub const UI = struct {
 
     root_pane: *pane_mod.Pane,
     active_pane: *pane_mod.Pane,
+    /// Art des zuletzt aktiven Tabs (siehe `focusFollowsActiveTab`).
+    last_active_tab_kind: ?file_types.FileKind = null,
 
     text_renderer: ?*@import("../text/mod.zig").TextRenderer,
     window: ?*wio.Window,
@@ -1083,6 +1085,19 @@ pub const UI = struct {
         self.mouse_pressed_this_frame = (button == .mouse_left);
         self.is_mouse_down = (button == .mouse_left);
 
+        // Klick in die Chat-Eingabe holt den Tastaturfokus aus der Seitenleiste. Ohne das
+        // verschluckt der Explorer-Zweig in `handleKeyPress` jede Sondertaste: Tippen kam
+        // im Chat an (eigener Pfad über `handleChar`), Backspace nicht.
+        if (button == .mouse_left and self.isChatTabActive() and self.ai_chat.input_bounds_valid) {
+            const c = &self.ai_chat;
+            if (x >= c.input_bounds_x and x < c.input_bounds_x + c.input_bounds_w and
+                y >= c.input_bounds_y and y < c.input_bounds_y + c.input_bounds_h)
+            {
+                self.explorer_focused = false;
+                self.sidebar_focus = .none;
+            }
+        }
+
         if (self.shortcuts_dialog_open) {
             if (button == .mouse_left and (clay.pointerOver(clay.ElementId.ID(shortcuts_dialog.CLOSE_ID)) or
                 !clay.pointerOver(clay.ElementId.ID(shortcuts_dialog.BOX_ID))))
@@ -1435,8 +1450,23 @@ pub const UI = struct {
     }
 
     /// UI updaten (pro Frame)
+    /// Wird ein Tab mit eigenem Eingabefeld aktiv (Chat, Terminal), gibt die
+    /// Seitenleiste den Tastaturfokus ab. Sonst schluckt der Explorer-Zweig in
+    /// `handleKeyPress` jede Sondertaste — Tippen kam im Chat an (eigener Pfad über
+    /// `handleChar`), Backspace nicht.
+    fn focusFollowsActiveTab(self: *Self) void {
+        const kind = self.activeTabKind();
+        defer self.last_active_tab_kind = kind;
+        if (kind == null or kind == self.last_active_tab_kind) return;
+        if (kind == .chat or kind == .terminal) {
+            self.explorer_focused = false;
+            self.sidebar_focus = .none;
+        }
+    }
+
     pub fn update(self: *Self, delta_ms: f32) void {
         self.ensureEditorHooks();
+        self.focusFollowsActiveTab();
         self.applyLspGoto();
         self.driveGitDiffs();
         self.timeline_view.update(delta_ms);
