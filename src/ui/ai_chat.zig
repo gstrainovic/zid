@@ -507,10 +507,10 @@ pub const AIChatState = struct {
         const ok = !std.mem.startsWith(u8, result_json, "{\"error\"");
         var disp_buf: [512]u8 = undefined;
         const preview = result_json[0..@min(result_json.len, 300)];
-        // Kein Emoji: die Oberfläche zeichnet mit JetBrains Mono, dort fehlen die Glyphen
-        // und es erscheint ein leeres Kästchen. "ok"/"Fehler" sagt dasselbe.
-        const display = std.fmt.bufPrint(&disp_buf, "{s} **{s}** -> `{s}{s}`", .{
-            if (ok) "ok" else "Fehler", call.name, preview, if (result_json.len > 300) "..." else "",
+        // Emoji zeichnet das Textsystem seit der Rückfall-Kette farbig; unter Windows
+        // fehlen sie noch, deshalb steht das Wort daneben und nicht nur das Zeichen.
+        const display = std.fmt.bufPrint(&disp_buf, "{s} **{s}** → `{s}{s}`", .{
+            if (ok) "✅ ok" else "❌ Fehler", call.name, preview, if (result_json.len > 300) "..." else "",
         }) catch result_json;
         self.addMessageFull("tool", result_json, null, call.id, display) catch {};
         if (self.awaiting_tool_results > 0) self.awaiting_tool_results -= 1;

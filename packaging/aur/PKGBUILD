@@ -4,7 +4,7 @@
 # in der AUR unpraktisch: zid braucht genau Zig 0.15.2, die vendorte MuPDF aus
 # einem Submodul und lädt beim Bauen Abhängigkeiten aus dem Netz.
 pkgname=zid-bin
-pkgver=0.1.0
+pkgver=0.1.1
 pkgrel=1
 pkgdesc="GPU-beschleunigter Editor mit Markdown-Vorschau, PDF-Anzeige und lokaler KI"
 arch=('x86_64')
@@ -17,8 +17,7 @@ depends=('freetype2' 'harfbuzz' 'libpng' 'zlib' 'glib2')
 optdepends=('vulkan-icd-loader: GPU-Rendering'
             'vulkan-radeon: Vulkan-Treiber für AMD'
             'vulkan-intel: Vulkan-Treiber für Intel'
-            'nvidia-utils: Vulkan-Treiber für NVIDIA'
-            'ollama: lokale KI im Chat')
+            'nvidia-utils: Vulkan-Treiber für NVIDIA')
 # Fertiges Binary: nicht nochmal strippen, kein Debug-Paket erzeugen.
 options=('!strip' '!debug')
 provides=('zid')

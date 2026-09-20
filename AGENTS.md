@@ -556,9 +556,9 @@ Drei Regeln aus der Messreihe vom 17.09.2026
   Ziehen markiert `handleMouseMove` die Startnachricht ab dem Anker (`selectFromAnchorToEnd`),
   die dazwischen ganz (`selectAllContent`) und die zuletzt erreichte bis zur Maus
   (`selectFromStartTo`). `selectedText` verkettet alle markierten Nachrichten.
-- **Keine Emoji in der Oberfläche.** Gezeichnet wird mit JetBrains Mono; `🔧`, `✅`, `⛔`
-  fehlen dort und erschienen im Chat als leeres Kästchen. Werkzeugaufrufe stehen jetzt als
-  `-> \`name(...)\``, Ergebnisse als `ok`/`Fehler`.
+- Werkzeugergebnisse stehen als `✅ ok` bzw. `❌ Fehler` vor dem Namen. Das Zeichen allein
+  genügt nicht: unter Windows greift die Emoji-Rückfall-Kette nicht, dort bliebe ein leeres
+  Kästchen ohne Wort daneben.
 - Ganzen Verlauf kopieren: Knopf `ai_copy_all` in der Kopfzeile oder Ctrl+Shift+C
   (`AIChatState.conversationText` als Markdown, `## Du` / `## AI` je Nachricht). Ctrl+C
   bleibt die markierte Bubble. Der Weg läuft über `UI.setClipboard`, damit `ui_state`
