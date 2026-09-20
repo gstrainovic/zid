@@ -6,6 +6,7 @@ const file_types = @import("ui/file_types.zig");
 const wio = @import("wio");
 const platform = @import("platform/mod.zig");
 const display_check = @import("platform/display_check.zig");
+const asset_path = @import("platform/asset_path.zig");
 const env = @import("env");
 const wheel = @import("platform/wheel.zig");
 const pdf_nav = @import("ui/pdf_nav.zig");
@@ -268,8 +269,13 @@ pub fn main() !void {
         }
 
         // 3. Text Renderer initialisieren (DirectWrite/FreeType)
+        // Unter Linux kommt die Schrift aus dem Binary; DirectWrite unter Windows kann
+        // das nicht, dort liegt die Datei neben der exe (siehe platform/asset_path.zig).
+        const font_rel = "fonts/JetBrainsMono-Regular.ttf";
+        const font_file = asset_path.find(allocator, exe_dir, font_rel) catch null;
+        defer if (font_file) |f| allocator.free(f);
         var text_renderer = try text.TextRenderer.init(allocator, .{
-            .font_path = "fonts/JetBrainsMono-Regular.ttf",
+            .font_path = font_file orelse font_rel,
             .size = 24.0,
         });
         defer text_renderer.deinit();
