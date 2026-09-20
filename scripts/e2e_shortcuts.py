@@ -48,7 +48,16 @@ def explorer_row_center(name):
         ex = explorer()
         rows = [e for e in ex["entries"] if e["name"] == name]
         if not rows:
-            raise AssertionError(f"Explorer-Eintrag {name!r} nicht sichtbar")
+            # Der Explorer lädt nach Löschen, Umbenennen und Verschieben neu und klappt
+            # dabei kurz zu. Wer genau dann fragt, sieht nur die Wurzel — also nachfassen,
+            # bevor wir aufgeben. Die Namen stehen in der Meldung, sonst sagt „nicht
+            # sichtbar" nicht, ob der Explorer woanders steht oder der Eintrag fehlt.
+            settle(6)
+            ex = explorer()
+            rows = [e for e in ex["entries"] if e["name"] == name]
+            if not rows:
+                have = [e["name"] for e in ex["entries"]]
+                raise AssertionError(f"Explorer-Eintrag {name!r} nicht sichtbar; sichtbar: {have}")
         vp, rh = ex["viewport"], ex["row_height"]
         y = vp["y"] + rows[0]["index"] * rh + rh / 2 - ex["scroll"]
         if vp["y"] <= y < vp["y"] + vp["h"]:

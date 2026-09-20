@@ -96,6 +96,10 @@ def step_dialog_keyboard_trash():
     sep = "/" if os.sep == "/" else "%5C"
     check("Path=" in info and f"e2e_fx2{sep}alpha.txt" in info, "trashinfo enthält den Originalpfad")
     wait_for(lambda: "alpha.txt" not in names(), "Explorer zeigt alpha.txt nicht mehr")
+    # Nach dem Löschen lädt der Explorer neu; der Ordner muss aufgeklappt bleiben,
+    # sonst verliert man seine Stelle im Baum.
+    e = entry("e2e_fx2")
+    check(e is not None and e["expanded"], f"e2e_fx2 bleibt nach dem Löschen aufgeklappt (entry={e})")
 
 
 def cursor_to(name):

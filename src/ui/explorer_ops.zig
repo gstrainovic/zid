@@ -23,10 +23,64 @@ pub fn EditBuffer(comptime capacity: usize) type {
         /// Gemerkte Spalte für Auf/Ab und der Cursor, bei dem sie gilt
         goal_col: usize = 0,
         goal_cursor: usize = std.math.maxInt(usize),
+        /// Ein Schritt zurück (Ctrl+Z) und wieder vor (Ctrl+Shift+Z). Mehr braucht ein
+        /// Namens- oder Pfadfeld nicht; der volle Editor liegt im CodeEditor.
+        /// Zusammenhängendes Tippen zählt als ein Schritt: der Schnappschuss entsteht
+        /// erst wieder nach einer Cursorbewegung (`group_open`).
+        /// Letzter Klick: Zeitpunkt und Cursorstelle, für die Doppelklick-Erkennung
+        /// in `line_edit.handleClick`.
+        last_click_ms: i64 = 0,
+        last_click_cursor: usize = std.math.maxInt(usize),
+        undo: ?Snapshot = null,
+        redo: ?Snapshot = null,
+        group_open: bool = false,
 
         const Self = @This();
 
         pub const Range = struct { start: usize, end: usize };
+
+        pub const Snapshot = struct { buf: [capacity]u8, len: usize, cursor: usize };
+
+        fn snapshot(self: *const Self) Snapshot {
+            var s: Snapshot = .{ .buf = undefined, .len = self.len, .cursor = self.cursor };
+            @memcpy(s.buf[0..self.len], self.buf[0..self.len]);
+            return s;
+        }
+
+        fn restore(self: *Self, s: Snapshot) void {
+            @memcpy(self.buf[0..s.len], s.buf[0..s.len]);
+            self.len = s.len;
+            self.cursor = @min(s.cursor, s.len);
+            self.anchor = null;
+        }
+
+        /// Vor einer Änderung aufrufen: merkt den Zustand, solange die Gruppe offen ist.
+        fn beginEdit(self: *Self) void {
+            if (self.group_open) return;
+            self.undo = self.snapshot();
+            self.redo = null;
+            self.group_open = true;
+        }
+
+        /// Letzte Änderungsgruppe zurücknehmen. Rückgabe: es gab etwas zurückzunehmen.
+        pub fn undoEdit(self: *Self) bool {
+            const u = self.undo orelse return false;
+            self.redo = self.snapshot();
+            self.restore(u);
+            self.undo = null;
+            self.group_open = false;
+            return true;
+        }
+
+        /// Zurückgenommene Änderung wiederherstellen.
+        pub fn redoEdit(self: *Self) bool {
+            const r = self.redo orelse return false;
+            self.undo = self.snapshot();
+            self.restore(r);
+            self.redo = null;
+            self.group_open = false;
+            return true;
+        }
 
         pub fn init(initial: []const u8) Self {
             var e = Self{};
@@ -85,6 +139,9 @@ pub fn EditBuffer(comptime capacity: usize) type {
         /// Vor einer Cursorbewegung: mit `extend` (Shift) beginnt oder verlängert sie die
         /// Auswahl, sonst hebt sie sie auf.
         pub fn prepareMove(self: *Self, extend: bool) void {
+            // Cursorbewegung beendet die Änderungsgruppe: der nächste Tastendruck
+            // bekommt einen eigenen Schnappschuss.
+            self.group_open = false;
             if (extend) {
                 if (self.anchor == null) self.anchor = self.cursor;
             } else {
@@ -94,6 +151,7 @@ pub fn EditBuffer(comptime capacity: usize) type {
 
         /// Entfernt die Auswahl; true, wenn es eine gab.
         pub fn deleteSelection(self: *Self) bool {
+            self.beginEdit();
             const r = self.selection() orelse {
                 self.anchor = null;
                 return false;
@@ -106,6 +164,7 @@ pub fn EditBuffer(comptime capacity: usize) type {
 
         /// Fügt ein Codepoint an der Cursorposition ein; eine Auswahl wird ersetzt.
         pub fn insertCodepoint(self: *Self, cp: u21) void {
+            self.beginEdit();
             _ = self.deleteSelection();
             var tmp: [4]u8 = undefined;
             const n = std.unicode.utf8Encode(cp, &tmp) catch return;
@@ -120,6 +179,7 @@ pub fn EditBuffer(comptime capacity: usize) type {
         /// Kapazität erreicht ist. '\r' fällt weg; Zeilenumbrüche nur mit `multiline`, sonst
         /// werden sie zu Leerzeichen (einzeilige Felder wie Dateiname oder Filter).
         pub fn insertText(self: *Self, value: []const u8, multiline: bool) void {
+            self.beginEdit();
             _ = self.deleteSelection();
             var view = std.unicode.Utf8View.init(value) catch return;
             var it = view.iterator();
@@ -136,6 +196,7 @@ pub fn EditBuffer(comptime capacity: usize) type {
 
         /// Entfernt die Auswahl, sonst das Codepoint vor dem Cursor (nicht nur das letzte Byte).
         pub fn backspace(self: *Self) void {
+            self.beginEdit();
             if (self.deleteSelection()) return;
             if (self.cursor == 0) return;
             const start = prevBoundary(self.buf[0..self.len], self.cursor);
@@ -145,6 +206,7 @@ pub fn EditBuffer(comptime capacity: usize) type {
 
         /// Entfernt die Auswahl, sonst das Codepoint hinter dem Cursor.
         pub fn delete(self: *Self) void {
+            self.beginEdit();
             if (self.deleteSelection()) return;
             if (self.cursor >= self.len) return;
             const end = nextBoundary(self.buf[0..self.len], self.cursor);
@@ -178,6 +240,27 @@ pub fn EditBuffer(comptime capacity: usize) type {
         }
 
         /// Cursor an den Anfang des Worts davor (Leerraum davor wird übersprungen).
+        /// Wort unter dem Cursor markieren (Doppelklick). Leerraum zählt als eigenes
+        /// „Wort", damit ein Klick zwischen zwei Wörtern nicht ins Leere greift.
+        pub fn selectWordAtCursor(self: *Self) void {
+            const s = self.buf[0..self.len];
+            if (s.len == 0) return;
+            const at = @min(self.cursor, s.len - 1);
+            const class = classOf(s[at]);
+
+            var start = at;
+            while (start > 0) {
+                const prev = prevBoundary(s, start);
+                if (classOf(s[prev]) != class) break;
+                start = prev;
+            }
+            var end = at;
+            while (end < s.len and classOf(s[end]) == class) end = nextBoundary(s, end);
+
+            self.anchor = start;
+            self.cursor = end;
+        }
+
         pub fn moveWordLeft(self: *Self) void {
             const s = self.buf[0..self.len];
             var i = self.cursor;
@@ -366,6 +449,67 @@ pub fn isDirectory(path: []const u8) bool {
     var dir = std.fs.cwd().openDir(path, .{}) catch return false;
     dir.close();
     return true;
+}
+
+test "EditBuffer: Ctrl+Z nimmt zusammenhaengendes Tippen als einen Schritt zurueck" {
+    var e = EditBuffer(64).init("start");
+    e.insertCodepoint('a');
+    e.insertCodepoint('b');
+    try std.testing.expectEqualStrings("startab", e.text());
+
+    try std.testing.expect(e.undoEdit());
+    try std.testing.expectEqualStrings("start", e.text());
+    try std.testing.expect(!e.undoEdit()); // nur ein Schritt
+
+    try std.testing.expect(e.redoEdit());
+    try std.testing.expectEqualStrings("startab", e.text());
+    try std.testing.expect(!e.redoEdit());
+}
+
+test "EditBuffer: Cursorbewegung trennt die Gruppen" {
+    var e = EditBuffer(64).init("ab");
+    e.insertCodepoint('c'); // Gruppe 1
+    e.prepareMove(false);
+    e.moveLeft();
+    e.insertCodepoint('x'); // Gruppe 2
+    try std.testing.expectEqualStrings("abxc", e.text());
+    try std.testing.expect(e.undoEdit());
+    try std.testing.expectEqualStrings("abc", e.text());
+}
+
+test "EditBuffer: Backspace ist zurueckzunehmen, Redo faellt nach neuer Aenderung weg" {
+    var e = EditBuffer(64).init("abc");
+    e.backspace();
+    try std.testing.expectEqualStrings("ab", e.text());
+    try std.testing.expect(e.undoEdit());
+    try std.testing.expectEqualStrings("abc", e.text());
+
+    e.prepareMove(false);
+    e.insertCodepoint('z');
+    try std.testing.expect(!e.redoEdit());
+}
+
+test "EditBuffer: selectWordAtCursor markiert das Wort unter dem Cursor" {
+    var e = EditBuffer(64).init("hallo welt hier");
+    e.cursor = 7; // im Wort "welt"
+    e.selectWordAtCursor();
+    try std.testing.expectEqualStrings("welt", e.selectedText());
+
+    // Leerraum zählt als eigenes Wort, ein Klick dazwischen greift nicht ins Leere
+    e.cursor = 5;
+    e.selectWordAtCursor();
+    try std.testing.expectEqualStrings(" ", e.selectedText());
+
+    // Am Ende des Texts
+    e.cursor = e.len;
+    e.selectWordAtCursor();
+    try std.testing.expectEqualStrings("hier", e.selectedText());
+}
+
+test "EditBuffer: selectWordAtCursor auf leerem Puffer ist harmlos" {
+    var e = EditBuffer(8){};
+    e.selectWordAtCursor();
+    try std.testing.expect(!e.hasSelection());
 }
 
 test "isDirectory: Ordner und Symlink auf Ordner ja, Datei, Symlink auf Datei und Fehlendes nein" {

@@ -945,7 +945,14 @@ fn getActiveTabDebug(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
 }
 
 /// Sichtbare Explorer-Einträge mit Viewport-Bounds, damit Tests Zeilen anklicken können.
+/// Der Explorer baut seinen Baum im Hauptthread neu auf (Löschen, Umbenennen, Refresh).
+/// Direkt aus dem RPC-Thread gelesen, sah der Test den Zwischenzustand: der Baum war kurz
+/// eingeklappt, Einträge fehlten, und die Namen zeigten in gerade freigegebenen Speicher.
 fn explorerEntries(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
+    return onMain(ctx, dc, explorerEntriesMain, .{});
+}
+
+fn explorerEntriesMain(ctx: *E2EContext, dc: *zigjr.DispatchCtx) anyerror![]const u8 {
     const fx = &ctx.ui_system.file_explorer;
     var buf = std.Io.Writer.Allocating.init(dc.arena());
     try buf.writer.print(
