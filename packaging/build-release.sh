@@ -105,8 +105,14 @@ mv "$out" "$stage"
 mkdir -p /src/dist
 tar -C /tmp -cJf "/src/dist/zid-$VERSION-x86_64-linux.tar.xz" "zid-$VERSION-x86_64-linux"
 
+cd /src/dist
+sha256sum "zid-$VERSION-x86_64-linux.tar.xz" > "zid-$VERSION-x86_64-linux.tar.xz.sha256"
+cd /src
+
 echo "== Ergebnis"
 ls -la "/src/dist/zid-$VERSION-x86_64-linux.tar.xz"
+echo "== Prüfsumme (für PKGBUILD und Release)"
+cat "/src/dist/zid-$VERSION-x86_64-linux.tar.xz.sha256"
 echo "== Höchste benötigte glibc-Version"
 objdump -T "$stage/bin/zid" | grep -oE 'GLIBC_[0-9.]+' | sort -V | uniq | tail -1
 echo "== Dynamische Abhängigkeiten"
