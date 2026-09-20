@@ -151,9 +151,19 @@ Danach die beiden Distributionspakete auf die neue Version ziehen — beide
 installieren das Release-Tarball, bauen also nichts nach:
 
 * `packaging/aur/PKGBUILD` — `pkgver` und `sha256sums` (Wert aus der
-  `.sha256`-Datei), dann ins AUR-Repository `zid-bin` pushen.
-* `packaging/rpm/zid.spec` — `Version`, `%changelog`; im COPR-Projekt
-  `gstrainovic/zid` als SCM-Build oder per `copr-cli build`.
+  `.sha256`-Datei) anpassen, `.SRCINFO` neu erzeugen, beides ins AUR-Repository
+  `zid-bin` pushen:
+
+  ```bash
+  git clone ssh://aur@aur.archlinux.org/zid-bin.git
+  cp packaging/aur/PKGBUILD packaging/aur/.SRCINFO zid-bin/
+  cd zid-bin && git commit -am "zid-bin 0.1.0" && git push
+  ```
+
+  `.SRCINFO` erzeugt `makepkg --printsrcinfo > .SRCINFO`; ohne Arch-Rechner:
+  `podman run --rm -v "$PWD/packaging/aur:/b" archlinux bash -c 'pacman -Sy --noconfirm pacman-contrib && useradd -m b && chown -R b /b && su b -c "cd /b && makepkg --printsrcinfo > .SRCINFO"'`
+* `packaging/rpm/zid.spec` — `Version` und `%changelog` anpassen, dann
+  `copr-cli build zid packaging/rpm/zid.spec` im COPR-Projekt `gstrainovic/zid`.
 
 Warum Binärpakete statt Bauen aus den Quellen: zid verlangt exakt Zig 0.15.2,
 die vendorte MuPDF aus einem Submodul und Netzzugang während des Builds. Das
