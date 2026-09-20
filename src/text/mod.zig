@@ -47,9 +47,17 @@ pub const backends = struct {
     pub const directwrite = if (is_windows) @import("backends/directwrite/mod.zig") else struct {};
 };
 
+/// Eingebaute Schrift. zid liest sie aus dem Binary, damit ein installiertes zid
+/// ohne Datenverzeichnis und aus jedem Arbeitsverzeichnis startet.
+pub const builtin_font = @import("builtin_font").data;
+
 // Font config
 pub const FontConfig = struct {
-    font_path: []const u8,
+    /// Pfad zur Schriftdatei. Nur benutzt, wenn `font_data` null ist oder das
+    /// Backend keine Schrift aus dem Speicher laden kann.
+    font_path: []const u8 = "",
+    /// Schrift als Bytes; Voreinstellung ist die eingebaute.
+    font_data: ?[]const u8 = builtin_font,
     size: f32 = 14.0,
     line_height: f32 = 1.5,
 };
@@ -80,9 +88,21 @@ pub const TextRenderer = struct {
         try ts_ptr.initInPlace(allocator, 1.0);
         log.debug("TextSystem created successfully", .{});
 
-        // Font laden (Direkt vom Pfad, KEINE Discovery/Fontconfig!)
-        log.debug("Loading font from path: {s}...", .{config.font_path});
-        try ts_ptr.loadFont(config.font_path, config.size);
+        // Schrift laden: eingebaute Bytes, sonst Pfad. Keine Discovery, kein Fontconfig.
+        var loaded = false;
+        if (config.font_data) |data| {
+            if (ts_ptr.loadFontFromMemory(data, config.size)) {
+                loaded = true;
+                log.debug("Built-in font loaded ({d} bytes)", .{data.len});
+            } else |err| {
+                log.debug("Built-in font unavailable ({s}), falling back to path", .{@errorName(err)});
+            }
+        }
+        if (!loaded) {
+            if (config.font_path.len == 0) return error.NoFont;
+            log.debug("Loading font from path: {s}...", .{config.font_path});
+            try ts_ptr.loadFont(config.font_path, config.size);
+        }
         log.debug("Font loaded successfully", .{});
 
         return Self{

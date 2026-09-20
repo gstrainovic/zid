@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.gstrainovic.zid</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>AGPL-3.0-only</project_license>
+
+  <name>zid</name>
+  <summary>GPU-accelerated editor with Markdown preview and a local AI assistant</summary>
+
+  <description>
+    <p>
+      zid is a text editor written in Zig. It renders through Vulkan, runs on Wayland
+      and X11, and keeps its features in one window instead of an extension market.
+    </p>
+    <p>Features:</p>
+    <ul>
+      <li>Editor with tree-sitter syntax highlighting, split panes and a file explorer</li>
+      <li>Markdown preview, Marp slides and PDF export</li>
+      <li>PDF viewer, image viewer and an integrated terminal</li>
+      <li>Git views: diff, timeline, source control graph and commits</li>
+      <li>AI chat against a local llama-server or Ollama; no data leaves the machine</li>
+    </ul>
+  </description>
+
+  <launchable type="desktop-id">io.github.gstrainovic.zid.desktop</launchable>
+
+  <url type="homepage">https://github.com/gstrainovic/zid</url>
+  <url type="bugtracker">https://github.com/gstrainovic/zid/issues</url>
+
+  <developer id="io.github.gstrainovic">
+    <name>gstrainovic</name>
+  </developer>
+
+  <content_rating type="oars-1.1"/>
+
+  <releases>
+    <release version="0.1.0" date="2026-09-20">
+      <description>
+        <p>First packaged release.</p>
+      </description>
+    </release>
+  </releases>
+</component>

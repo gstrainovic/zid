@@ -623,6 +623,20 @@ pub const TextSystem = struct {
         self.shape_cache.current_font_ptr = 0;
     }
 
+    /// Schrift aus dem Speicher laden (eingebaute Schrift). Nur dort verfügbar, wo
+    /// das Backend es kann — sonst `error.MemoryFontUnsupported`, der Aufrufer nimmt
+    /// dann den Pfad.
+    pub fn loadFontFromMemory(self: *Self, data: []const u8, size: f32) !void {
+        std.debug.assert(data.len > 0);
+        std.debug.assert(size > 0 and size < 1000);
+        if (!@hasDecl(PlatformFace, "initFromMemory")) return error.MemoryFontUnsupported;
+
+        if (self.current_face) |*f| f.deinit();
+        self.current_face = try PlatformFace.initFromMemory(data, size);
+        self.cache.clear();
+        self.shape_cache.current_font_ptr = 0;
+    }
+
     /// Get current font metrics
     pub inline fn getMetrics(self: *const Self) ?Metrics {
         if (self.current_face) |f| return f.metrics;

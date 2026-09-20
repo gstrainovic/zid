@@ -4,6 +4,7 @@
 //! Basierend auf dem TextRendererGPU.
 
 const std = @import("std");
+const shaders = @import("builtin_shaders");
 const wgpu = @import("wgpu");
 const svg = @import("mod.zig");
 const nanosvg = @import("nanosvg");
@@ -43,12 +44,7 @@ pub const SvgRendererGPU = struct {
 
         // Wir nutzen den gleichen Shader wie für Text, da beide Quads mit Textur rendern.
         // Falls wir spezielle SVG-Shader brauchen (z.B. für Tinting), können wir sie später hinzufügen.
-        const shader_code = try std.fs.cwd().readFileAlloc(
-            allocator,
-            "zig-out/share/text_atlas.wgsl",
-            1024 * 1024,
-        );
-        defer allocator.free(shader_code);
+        const shader_code = shaders.text_atlas;
 
         const shader_module = device.createShaderModule(&wgpu.shaderModuleWGSLDescriptor(.{
             .label = "svg_atlas.wgsl",

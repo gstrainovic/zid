@@ -6,6 +6,7 @@
 //! - Test Pattern Generator für Debugging
 
 const std = @import("std");
+const shaders = @import("builtin_shaders");
 const wgpu = @import("wgpu");
 
 const log = std.log.scoped(.image_renderer);
@@ -76,13 +77,7 @@ pub const ImageRenderer = struct {
             .bind_group_layout = undefined,
         };
 
-        // Shader laden
-        const shader_code = try std.fs.cwd().readFileAlloc(
-            allocator,
-            "zig-out/share/texture.wgsl",
-            1024 * 1024,
-        );
-        defer allocator.free(shader_code);
+        const shader_code = shaders.texture;
 
         self.shader_module = device.createShaderModule(&wgpu.shaderModuleWGSLDescriptor(.{
             .label = "texture.wgsl",
@@ -299,12 +294,21 @@ pub const ImageRenderer = struct {
             return self.createTextureFromSvg(allocator, path);
         }
 
-        const zigimg = @import("zigimg");
-
         const file_data = try std.fs.cwd().readFileAlloc(allocator, path, 64 * 1024 * 1024);
         defer allocator.free(file_data);
 
-        var img = try zigimg.Image.fromMemory(allocator, file_data);
+        return self.createTextureFromBytes(allocator, file_data);
+    }
+
+    /// Textur aus Bilddaten im Speicher (eingebettete Assets, heruntergeladene Bilder).
+    pub fn createTextureFromBytes(
+        self: *Self,
+        allocator: std.mem.Allocator,
+        bytes: []const u8,
+    ) !ImageTexture {
+        const zigimg = @import("zigimg");
+
+        var img = try zigimg.Image.fromMemory(allocator, bytes);
         defer img.deinit(allocator);
 
         try img.convert(allocator, .rgba32);
