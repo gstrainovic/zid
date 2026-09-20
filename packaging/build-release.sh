@@ -87,6 +87,19 @@ cd /src
 
 out="/tmp/zid-install"
 rm -rf "$out"
+
+# Erst die Pakete holen, mit Wiederholung: Zig lädt viele gleichzeitig, einzelne
+# Verbindungen reissen mit `HttpConnectionClosing` oder `WriteFailed` ab. Derselbe
+# Grund wie in .github/workflows/windows-release.yml.
+for attempt in 1 2 3; do
+    if zig build --fetch --cache-dir /tmp/zig-cache --global-cache-dir /tmp/zig-global; then
+        break
+    fi
+    [ "$attempt" = 3 ] && { echo "zig build --fetch nach 3 Versuchen fehlgeschlagen" >&2; exit 1; }
+    echo "Versuch $attempt fehlgeschlagen, neuer Anlauf in 20 s"
+    sleep 20
+done
+
 zig build install \
     --cache-dir /tmp/zig-cache --global-cache-dir /tmp/zig-global \
     -Dmupdf=bundled -Dmupdf-lib-dir="libs/fancy-cat/deps/mupdf/$MUPDF_OUT" \
