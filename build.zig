@@ -487,6 +487,15 @@ pub fn build(b: *std.Build) void {
     const run_ai_paths_tests = b.addRunArtifact(ai_paths_tests);
     run_ai_paths_tests.has_side_effects = true;
 
+    // Selbsteinrichtung der KI (Datenverzeichnis, Download, Auspacken) als Modul,
+    // damit UI und Chat dieselben Pfade sehen wie die Tests.
+    const ai_selfsetup_mod = b.createModule(.{
+        .root_source_file = b.path("src/ai/selfsetup.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    exe_mod.addImport("ai_selfsetup", ai_selfsetup_mod);
+
     const ai_history_mod = b.createModule(.{
         .root_source_file = b.path("src/ai/history.zig"),
         .target = target,
@@ -597,6 +606,15 @@ pub fn build(b: *std.Build) void {
     }) });
     const run_ai_setup_tests = b.addRunArtifact(ai_setup_tests);
     run_ai_setup_tests.has_side_effects = true;
+
+    // Selbsteinrichtung als Vorgang (Zustand, Fortschritt, Hintergrundthread).
+    const ai_selfsetup_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("src/ai/selfsetup.zig"),
+        .target = target,
+        .optimize = optimize,
+    }) });
+    const run_ai_selfsetup_tests = b.addRunArtifact(ai_selfsetup_tests);
+    run_ai_selfsetup_tests.has_side_effects = true;
 
     // Engine und Modell auspacken.
     const ai_install_tests = b.addTest(.{ .root_module = b.createModule(.{
@@ -874,6 +892,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_ai_setup_tests.step);
     test_step.dependOn(&run_ai_download_tests.step);
     test_step.dependOn(&run_ai_install_tests.step);
+    test_step.dependOn(&run_ai_selfsetup_tests.step);
     test_step.dependOn(&run_wheel_tests.step);
     test_step.dependOn(&run_pdf_nav_tests.step);
     test_step.dependOn(&run_context_menu_tests.step);

@@ -18,6 +18,8 @@ const ai_history = @import("ai_history");
 /// 8000-Token-Prompt dauerte auf der P1000 123 s. 12 000 Zeichen ≈ 3–4 k Tokens.
 pub const history_budget_chars: usize = 12_000;
 
+const ai_selfsetup = @import("ai_selfsetup");
+
 const log = std.log.scoped(.ai_chat);
 
 pub const AgentStatus = enum { none, model_missing, initializing, ready, failed };
@@ -70,6 +72,11 @@ pub const AIChatState = struct {
     tool_rounds: u32 = 0,
 
     is_loading: bool = false,
+    /// Selbsteinrichtung: Engine und Modell ins Datenverzeichnis holen, wenn zid
+    /// ohne Quellbaum läuft (installierte Fassung). Null = nicht verfügbar.
+    self_setup: ?*ai_selfsetup.SelfSetup = null,
+    /// Nach abgeschlossener Einrichtung einmalig den Agenten neu verbinden.
+    self_setup_applied: bool = false,
     is_downloading: bool = false,
     is_initializing: bool = false,
     download_progress: f32 = 0,
@@ -325,6 +332,37 @@ pub const AIChatState = struct {
         var buf: [320]u8 = undefined;
         const msg = std.fmt.bufPrint(&buf, "AI agent failed to start: {s}", .{payload}) catch "AI agent failed to start.";
         self.addMessage("assistant", msg) catch {};
+    }
+
+    /// Selbsteinrichtung anbieten? Nur wenn ein Vorgang bereitsteht, der Agent nicht
+    /// läuft und im Datenverzeichnis noch etwas fehlt.
+    pub fn needsSelfSetup(self: *Self) bool {
+        const st = self.self_setup orelse return false;
+        // Läuft oder startet gerade ein Agent (Repo-Build, Ollama), gibt es nichts
+        // einzurichten. Erst wenn das scheitert oder nie kam, ist der Knopf richtig.
+        if (self.agent_status == .ready or self.agent_status == .initializing) return false;
+        return st.missing() != .ready;
+    }
+
+    /// Einrichtung starten (Knopf im Chat).
+    pub fn startSelfSetup(self: *Self) void {
+        const st = self.self_setup orelse return;
+        st.start() catch |err| log.err("Einrichtung startet nicht: {s}", .{@errorName(err)});
+    }
+
+    /// Jeden Frame: ist die Einrichtung fertig, wird der Agent einmalig verbunden.
+    pub fn pollSelfSetup(self: *Self) void {
+        const st = self.self_setup orelse return;
+        if (st.currentState() != .done or self.self_setup_applied) return;
+        self.self_setup_applied = true;
+
+        const engine = ai_selfsetup.setup.enginePath(self.allocator, st.root) catch return;
+        defer self.allocator.free(engine);
+        const model = ai_selfsetup.setup.modelPath(self.allocator, st.root) catch return;
+        defer self.allocator.free(model);
+        self.initAgent(engine, model) catch |err| {
+            log.err("Agent nach der Einrichtung nicht startbar: {s}", .{@errorName(err)});
+        };
     }
 
     /// Erklärung, warum gerade nicht gesendet werden kann (null = bereit).
@@ -866,6 +904,60 @@ pub fn renderAIChat(
             })({});
             clay.text(state.statusText(), .{ .font_size = 12, .color = .{ 150, 150, 150, 255 } });
         });
+
+        // ── Selbsteinrichtung: Engine und Modell ins Datenverzeichnis ────
+        // Ein installiertes zid hat kein engines/ und models/ neben sich. Statt den
+        // Nutzer das nachbauen zu lassen, lädt zid beides selbst — auf einen Klick,
+        // weil 2,7 GB niemand ungefragt geschickt bekommen will.
+        state.pollSelfSetup();
+        if (state.self_setup) |st| {
+            const running = st.currentState() == .running;
+            if (state.needsSelfSetup() or running) {
+                const setup_id = clay.ElementId.ID("ai_setup_btn");
+                const hovered = clay.pointerOver(setup_id);
+                if (hovered and mouse_pressed and !running) state.startSelfSetup();
+
+                var label_buf: [96]u8 = undefined;
+                const label: []const u8 = if (running)
+                    std.fmt.bufPrint(&label_buf, "{s} laden … {d} %", .{
+                        switch (st.currentStep()) {
+                            .engine => "Engine",
+                            .model => "Modell",
+                        },
+                        st.percent(),
+                    }) catch "laden …"
+                else if (st.currentState() == .failed)
+                    std.fmt.bufPrint(&label_buf, "Einrichtung fehlgeschlagen ({s}) — erneut versuchen", .{st.detail()}) catch "Erneut versuchen"
+                else
+                    "KI einrichten (Engine 30 MB + Modell 2,7 GB laden)";
+
+                clay.UI()(.{
+                    .id = setup_id,
+                    .layout = .{
+                        .sizing = .{ .w = .fit, .h = .fit },
+                        .padding = .{ .left = 8, .right = 8, .top = 4, .bottom = 4 },
+                    },
+                    .background_color = if (running) .{ 100, 100, 100, 255 } else if (hovered) theme.primary else theme.border,
+                    .corner_radius = .all(4),
+                })({
+                    clay.text(label, .{ .font_size = 12, .color = .{ 255, 255, 255, 255 } });
+                });
+
+                if (running) {
+                    clay.UI()(.{
+                        .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(6) } },
+                        .background_color = .{ 40, 40, 45, 255 },
+                        .corner_radius = .all(3),
+                    })({
+                        clay.UI()(.{
+                            .layout = .{ .sizing = .{ .w = .percent(@as(f32, @floatFromInt(st.percent())) / 100.0), .h = .grow } },
+                            .background_color = theme.primary,
+                            .corner_radius = .all(3),
+                        })({});
+                    });
+                }
+            }
+        }
 
         // ── Download button / progress ───────────────────────────────────
         if (!state.model_exists and state.isOllama()) {

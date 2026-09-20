@@ -49,7 +49,6 @@ pub fn toFile(
     else
         try std.fs.cwd().createFile(part, .{});
     defer file.close();
-    if (have > 0) try file.seekFromEnd(0);
     progress.received.store(have, .monotonic);
 
     var range_buf: [64]u8 = undefined;
@@ -68,6 +67,10 @@ pub fn toFile(
     // tut, meldet nie Fortschritt und `fetch` dreht sich endlos.
     var buf: [256 * 1024]u8 = undefined;
     var fw = file.writer(&buf);
+    // `File.Writer` schreibt positional und beginnt bei 0. Ohne diese Zeile
+    // überschreibt eine fortgesetzte Übertragung die schon geladenen Bytes von
+    // vorn, und die Teildatei wächst nie über ihren alten Stand hinaus.
+    fw.pos = have;
 
     const res = client.fetch(.{
         .location = .{ .url = url },
