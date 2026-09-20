@@ -171,6 +171,8 @@ pub const UI = struct {
     pending_dialog_result: ?dialog_mod.DialogResult = null,
     /// Ausgeklapptes Header-Menü (Index in shortcuts.menus), null = keins
     open_menu: ?usize = null,
+    /// Menüwechsel per Hover, angewendet zu Beginn des nächsten Frames (siehe renderMenuBar).
+    pending_menu_switch: ?usize = null,
     /// Help → Keyboard Shortcuts offen
     shortcuts_dialog_open: bool = false,
     /// Agent-Aufruf, der auf die Antwort des Bestätigungsdialogs wartet
@@ -3415,10 +3417,18 @@ pub const UI = struct {
     /// Menü als Dropdown mit Label links und Kürzel rechts. Bei offenem Menü
     /// wechselt Hover über einen anderen Titel das Menü (wie in Zed/VS Code).
     fn renderMenuBar(self: *Self, t: Theme) void {
+        // Gemerkten Wechsel anwenden, bevor gezeichnet wird. Wer `open_menu` mitten in
+        // der Schleife umsetzt, zeichnet das alte Dropdown und das neue im selben Frame:
+        // beide heissen `menu_dropdown`, Clay meldet `duplicate_id`, und `getElementData`
+        // trifft das falsche der beiden.
+        if (self.pending_menu_switch) |i| {
+            self.open_menu = i;
+            self.pending_menu_switch = null;
+        }
         inline for (shortcuts.menus, 0..) |menu, i| {
             const title_id = menuTitleId(menu);
             const hover = clay.pointerOver(title_id);
-            if (hover and self.open_menu != null and self.open_menu.? != i) self.open_menu = i;
+            if (hover and self.open_menu != null and self.open_menu.? != i) self.pending_menu_switch = i;
             const active = self.open_menu != null and self.open_menu.? == i;
             clay.UI()(.{
                 .id = title_id,

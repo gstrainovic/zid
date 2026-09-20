@@ -119,7 +119,36 @@ def step_shortcuts_scroll():
     check(not ui_state()["shortcuts_open"], "F1 schließt wieder")
 
 
-STEPS = [step_theme_zoom, step_autosave_toast, step_menu_keyboard, step_shortcuts_scroll]
+def step_menu_hover_switch():
+    """Bei offenem Menü über einen anderen Titel fahren wechselt das Menü — ohne dass
+    zwei Dropdowns im selben Frame stehen.
+
+    `renderMenuBar` setzte `open_menu` mitten in der Zeichenschleife: das alte Dropdown
+    war schon gezeichnet, das neue kam dazu, beide mit der ID `menu_dropdown`. Clay
+    meldete `duplicate_id`, und `getElementData` traf das falsche der beiden."""
+    print("--- Menüwechsel per Hover erzeugt kein zweites Dropdown")
+    f = bounds("menu_file")
+    v = bounds("menu_view")
+    before = errors()
+
+    rpc("click", [f["x"] + f["w"] / 2, f["y"] + f["h"] / 2])
+    settle(8)
+    check(ui_state()["open_menu"] == "File", "File-Menü offen")
+
+    rpc("move_mouse", [v["x"] + v["w"] / 2, v["y"] + v["h"] / 2])
+    settle(10)
+    check(ui_state()["open_menu"] == "View", f"Hover wechselt zum View-Menü (ist {ui_state()['open_menu']!r})")
+    check(errors() == before, f"kein Clay-Fehler beim Wechsel ({errors() - before} neu)")
+    key("escape")
+
+
+def errors():
+    """Clay-Fehlerzeilen im Log dieses Laufs."""
+    with open(os.path.join(ROOT, "tmp", "e2e_ui_misc.log"), encoding="utf-8", errors="replace") as f:
+        return f.read().count("error(ui): Clay:")
+
+
+STEPS = [step_theme_zoom, step_autosave_toast, step_menu_keyboard, step_shortcuts_scroll, step_menu_hover_switch]
 
 
 def main():
