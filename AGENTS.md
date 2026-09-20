@@ -69,12 +69,30 @@ zig build test-text        # nur Textsystem (Glyph-Cache, Atlas; Root src/text_t
 - E2E mit bundled MuPDF: `ZID_BUILD_ARGS=-Dmupdf=bundled python3 scripts/e2e_pdf_pager.py`.
   `ZID_BUILD_ARGS` reicht Build-Optionen an den `zig build`-Aufruf der Suiten durch.
 
+## Release-Tarball: `packaging/build-release.sh`
+
+- Baut in einem Debian-12-Container (podman, sonst docker) nach
+  `dist/zid-<version>-x86_64-linux.tar.xz`. Grund ist die glibc: auf Fedora 43 gebaut
+  verlangt zid `GLIBC_2.38`, aus Debian 12 nur `GLIBC_2.35`, damit läuft es auch auf
+  Ubuntu 22.04. Auf altem System gebaut läuft auf neuem, nie umgekehrt.
+- `--security-opt label=disable` ist Pflicht: unter SELinux scheitert der Container sonst
+  am gemounteten Repo (`make: stat: Makefile: Permission denied`). Ein `:z`-Mount würde
+  stattdessen das ganze Repo auf dem Host umlabeln.
+- Der Container baut MuPDF nach `build/release-deb12` und **löscht das Verzeichnis vorher**:
+  `make` sieht geänderte Flags nicht, ein OUT aus einem Lauf mit `USE_SYSTEM_LIBJPEG=yes`
+  behielt sein leeres `jmemcust.o` und der Link scheiterte an `undefined symbol: jpeg_mem_init`.
+- libjpeg gehört ins Binary, nicht ans System: Debian und Fedora liefern `libjpeg.so.62`,
+  Ubuntu und Arch `libjpeg.so.8`. Mit System-libjpeg gebaut startete das Tarball auf
+  Ubuntu 22.04 nicht (`libjpeg.so.62: cannot open shared object file`).
+- Im Tarball liegt `packaging/install.sh` (Vorgabe `~/.local`, `--uninstall`, beliebiges
+  Präfix als Argument).
+
 ## Release-Binary (Linux, `-Dmupdf=bundled -Doptimize=ReleaseSafe`)
 
 - Größe: 212 MB, gestrippt 172 MB. Davon 22 MB MuPDF-Fonts (ohne `TOFU_CJK` gebaut, also
   inklusive CJK); der Rest verteilt sich auf wgpu_native, die tree-sitter-Parser und MuPDF.
-- `ldd` zeigt 13 Bibliotheken: libc, libm, libz, libjpeg, freetype, harfbuzz, png, brotli,
-  bz2, glib, graphite2, pcre2. Wayland, X11, EGL und Vulkan fehlen dort, weil wio und wgpu
+- `ldd` zeigt 12 Bibliotheken: libc, libm, libz, freetype, harfbuzz, png, brotli (2x),
+  graphite2, glib, pcre2. Wayland, X11, EGL und Vulkan fehlen dort, weil wio und wgpu
   sie per `dlopen` laden — die `linkSystemLibrary`-Einträge in build.zig braucht nur der
   Debug-Build wegen der extern-Deklarationen im Debug-Info.
 - Höchste benötigte Symbolversion ist `GLIBC_2.38`. Ein hier gebautes Binary läuft damit auf

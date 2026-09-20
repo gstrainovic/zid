@@ -45,3 +45,4 @@ tmp/
 # Lokaler Zig Package-Cache
 zig-pkg/
 __pycache__/
+dist/

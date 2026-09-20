@@ -16,6 +16,13 @@ pub fn build(b: *std.Build) void {
         "mupdf",
         "MuPDF beziehen: system (Vorgabe) oder bundled (statisch aus libs/fancy-cat/deps/mupdf)",
     ) orelse .system;
+    // Wo `make libs` die Archive abgelegt hat. Der Release-Build im Container baut nach
+    // einem eigenen OUT, damit er die Archive der Entwicklungsmaschine nicht überschreibt.
+    const mupdf_lib_dir = b.option(
+        []const u8,
+        "mupdf-lib-dir",
+        "Verzeichnis mit libmupdf.a und libmupdf-third.a (Vorgabe: libs/fancy-cat/deps/mupdf/build/release)",
+    ) orelse "libs/fancy-cat/deps/mupdf/build/release";
 
     // wio Dependency - Wayland und X11; wio wählt beim Start das passende Backend
     const wio_dep = b.dependency("wio", .{
@@ -255,12 +262,13 @@ pub fn build(b: *std.Build) void {
                 exe.root_module.addIncludePath(b.path("libs/fancy-cat/deps/mupdf/include"));
                 // Die Archive direkt angeben: `linkSystemLibrary("mupdf")` liefe über
                 // Fedoras defekte mupdf.pc und suchte dann nach einem Verzeichnis '-lmupdf'.
-                exe.root_module.addObjectFile(b.path("libs/fancy-cat/deps/mupdf/build/release/libmupdf.a"));
-                exe.root_module.addObjectFile(b.path("libs/fancy-cat/deps/mupdf/build/release/libmupdf-third.a"));
-                // mupdf-third ist mit USE_SYSTEM_* gebaut: diese Teile kommen vom System
-                // (ABI-stabil und überall vorhanden, anders als libmupdf selbst).
+                exe.root_module.addObjectFile(b.path(b.fmt("{s}/libmupdf.a", .{mupdf_lib_dir})));
+                exe.root_module.addObjectFile(b.path(b.fmt("{s}/libmupdf-third.a", .{mupdf_lib_dir})));
+                // mupdf-third ist mit USE_SYSTEM_* gebaut: FreeType, HarfBuzz und zlib
+                // kommen vom System, weil sie ABI-stabil sind und auf jedem Desktop liegen.
+                // libjpeg gehört NICHT dazu: Debian linkt libjpeg.so.62, Ubuntu und Arch
+                // liefern libjpeg.so.8 — deshalb baut MuPDF sie mit (USE_SYSTEM_LIBJPEG=no).
                 exe.root_module.linkSystemLibrary("z", .{});
-                exe.root_module.linkSystemLibrary("jpeg", .{});
                 exe.root_module.linkSystemLibrary("m", .{});
             },
         }
