@@ -61,11 +61,15 @@ jobs:
           make -j4 libs CC="zig cc" AR="zig ar" HAVE_X11=no HAVE_GLUT=no HAVE_OBJCOPY=no \
                tools=no apps=no XCFLAGS="-w -msse4.1 -DTOFU -DTOFU_CJK"
 
-      # Der globale Zig-Cache mit allen geholten Paketen.
+      # Beide Zig-Caches liegen im Workspace, also auf demselben Laufwerk wie das Repo.
+      # Der globale Cache liegt sonst unter C:\Users\..., das Repo auf D: — über
+      # Laufwerksgrenzen gibt es keinen relativen Pfad, und ein Run-Schritt von Zig
+      # bricht mit `reached unreachable code` in Run.zig ab
+      # (assert(!isAbsolute(child_cwd_rel))).
       - name: Zig-Pakete aus dem Cache
         uses: actions/cache@v6
         with:
-          path: ~\AppData\Local\zig\p
+          path: .zig-global
           key: zigpkg-${{ runner.os }}-${{ env.ZIG_VERSION }}-${{ hashFiles('**/build.zig.zon') }}
           restore-keys: zigpkg-${{ runner.os }}-${{ env.ZIG_VERSION }}-
 
@@ -76,7 +80,7 @@ jobs:
         shell: pwsh
         run: |
           for ($i = 1; $i -le 3; $i++) {
-            zig build --fetch
+            zig build --fetch --cache-dir .zig-cache --global-cache-dir .zig-global
             if ($LASTEXITCODE -eq 0) { exit 0 }
             Write-Host "Versuch $i fehlgeschlagen, neuer Anlauf in 20 s"
             Start-Sleep -Seconds 20
@@ -85,7 +89,9 @@ jobs:
 
       - name: zid bauen
         shell: pwsh
-        run: zig build -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseSafe --prefix out
+        run: >
+          zig build --cache-dir .zig-cache --global-cache-dir .zig-global
+          -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseSafe --prefix out
 
       # Rauchtest: startet die exe überhaupt und findet sie ihre DLLs?
       - name: Version prüfen
