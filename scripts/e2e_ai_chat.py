@@ -177,6 +177,25 @@ def chat_takes_keys_from_explorer():
     check(rpc("get_chat_input") == "hall", f"Backspace löscht im Chat (ist {rpc('get_chat_input')!r})")
 
 
+def copy_conversation():
+    """Ganzen Verlauf kopieren: Knopf in der Kopfzeile und Ctrl+Shift+C.
+    Ctrl+C kopiert weiterhin nur die markierte Bubble."""
+    print("--- Verlauf kopieren")
+    b = result_json("element_bounds", ["ai_copy_all"])
+    check(b["found"], "Knopf zum Kopieren des Verlaufs ist da")
+    rpc("click", [b["x"] + b["w"] / 2, b["y"] + b["h"] / 2])
+    settle(8)
+    text = ui_state()["clipboard_text"]
+    check(text.startswith("## Du"), f"Verlauf beginnt mit der Frage ({text[:20]!r})")
+    check("## AI" in text, "Antwort steht auch drin")
+
+    rpc("type_text", ["zweite frage"])
+    settle(4)
+    rpc("key_press_mods", ["c", True, True])
+    settle(8)
+    check(ui_state()["clipboard_text"].startswith("## Du"), "Ctrl+Shift+C kopiert denselben Verlauf")
+
+
 def run_ai_off():
     print("--- B. --ai=off: Senden erklärt sofort, kein endloses Laden")
     proc, log = start(["--ai=off"], "e2e_ai_chat_off.log")
@@ -194,6 +213,7 @@ def run_ai_off():
         shot("e2e_ai_chat_off.ppm")
         select_in_bubble()
         chat_takes_keys_from_explorer()
+        copy_conversation()
     finally:
         stop(proc, log)
 

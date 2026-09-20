@@ -948,6 +948,11 @@ pub const UI = struct {
         // If a chat tab is active, handle chat input. Ctrl+C mit markiertem Bubble-Text
         // kopiert diesen statt aus dem Eingabefeld.
         if (self.isChatTabActive()) {
+            // Ctrl+Shift+C: ganzer Verlauf. Ctrl+C bleibt die markierte Bubble.
+            if (self.is_ctrl_down and self.is_shift_down and key == .c) {
+                self.ai_chat.copyConversation(self);
+                return;
+            }
             if (self.is_ctrl_down and key == .c) {
                 if (self.ai_chat.selectedText(self.allocator)) |text| {
                     defer self.allocator.free(text);

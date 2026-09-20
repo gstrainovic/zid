@@ -48,6 +48,39 @@ fn executeInner(ui: *UI, alloc: std.mem.Allocator, call: *const ai_tools.ToolCal
         return .{ .done = try std.fmt.allocPrint(alloc, "{{\"ok\":true,\"command\":\"{s}\",\"label\":\"{s}\"}}", .{ name, shortcuts.label(cmd) }) };
     }
 
+    // Die Kürzel stehen bewusst nicht im Prompt (das kostete 1000 Token, siehe AGENTS.md).
+    // Der Agent holt sie sich hier, wenn jemand danach fragt.
+    if (std.mem.eql(u8, call.name, "list_shortcuts")) {
+        const filter = strArg(args, "filter") orelse "";
+        var out: std.Io.Writer.Allocating = .init(alloc);
+        errdefer out.deinit();
+        var jw: std.json.Stringify = .{ .writer = &out.writer, .options = .{} };
+        try jw.beginArray();
+        inline for (@typeInfo(shortcuts.Command).@"enum".fields) |f| {
+            const cmd: shortcuts.Command = @enumFromInt(f.value);
+            const key = shortcuts.shortcutText(cmd);
+            if (key.len > 0) {
+                const lbl = shortcuts.label(cmd);
+                const hit = filter.len == 0 or
+                    std.ascii.indexOfIgnoreCase(f.name, filter) != null or
+                    std.ascii.indexOfIgnoreCase(lbl, filter) != null;
+                if (hit) {
+                    try jw.beginObject();
+                    try jw.objectField("command");
+                    try jw.write(f.name);
+                    try jw.objectField("label");
+                    try jw.write(lbl);
+                    try jw.objectField("key");
+                    try jw.write(key);
+                    try jw.endObject();
+                }
+            }
+        }
+        try jw.endArray();
+        log.info("agent: list_shortcuts filter='{s}'", .{filter});
+        return .{ .done = try out.toOwnedSlice() };
+    }
+
     if (std.mem.eql(u8, call.name, "open_file")) {
         const rel = strArg(args, "path") orelse return .{ .done = errorJson(alloc, "missing 'path'", .{}) };
         const path = (try ai_tools.resolveInProject(alloc, root, rel)) orelse return .{ .done = outsideJson(alloc, rel) };

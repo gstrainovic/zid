@@ -107,6 +107,13 @@ pub const tools = [_]Tool{
         ,
     },
     .{
+        .name = "list_shortcuts",
+        .description = "List zid's keyboard shortcuts (command name, label, key). Call this before answering questions about keys; the shortcuts are not in your prompt.",
+        .parameters =
+        \\{"type":"object","properties":{"filter":{"type":"string","description":"Optional: only commands whose name or label contains this text"}}}
+        ,
+    },
+    .{
         .name = "find_in_editor",
         .description = "Open the find bar in the active editor and jump to the first match.",
         .parameters =

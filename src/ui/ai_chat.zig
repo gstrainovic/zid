@@ -799,6 +799,38 @@ pub const AIChatState = struct {
         return null;
     }
 
+    /// Verlauf in die Zwischenablage (Knopf in der Kopfzeile, Ctrl+Shift+C).
+    /// Läuft über `UI.setClipboard`, damit es headless prüfbar bleibt (ui_state).
+    pub fn copyConversation(self: *Self, ui_ptr: *ui_mod.UI) void {
+        const text = self.conversationText(self.allocator) catch return;
+        defer self.allocator.free(text);
+        ui_ptr.setClipboard(text);
+        log.info("Verlauf kopiert ({d} Zeichen)", .{text.len});
+    }
+
+    /// Der ganze Verlauf als Markdown, zum Kopieren. Gehört dem Aufrufer.
+    /// Rollen als Überschrift, damit man Frage und Antwort auseinanderhält.
+    pub fn conversationText(self: *Self, alloc: std.mem.Allocator) ![]u8 {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        var out: std.ArrayListUnmanaged(u8) = .empty;
+        errdefer out.deinit(alloc);
+        for (self.messages.items) |msg| {
+            const who: []const u8 = if (std.mem.eql(u8, msg.role, "user"))
+                "Du"
+            else if (std.mem.eql(u8, msg.role, "assistant"))
+                "AI"
+            else
+                msg.role;
+            try out.appendSlice(alloc, "## ");
+            try out.appendSlice(alloc, who);
+            try out.appendSlice(alloc, "\n\n");
+            try out.appendSlice(alloc, msg.content);
+            try out.appendSlice(alloc, "\n\n");
+        }
+        return out.toOwnedSlice(alloc);
+    }
+
     pub fn hasSelection(self: *Self) bool {
         self.mutex.lock();
         defer self.mutex.unlock();
@@ -924,6 +956,26 @@ pub fn renderAIChat(
             },
         })({
             clay.text(state.agentTitle(), .{ .font_size = 20, .color = theme.primary, .wrap_mode = .none });
+
+            // Ganzen Verlauf kopieren. Ctrl+C kopiert nur die markierte Bubble; für
+            // „alles" gab es bisher keinen Weg.
+            if (state.messages.items.len > 0) {
+                const copy_id = clay.ElementId.ID("ai_copy_all");
+                const copy_hovered = overElement(copy_id, ui_ptr.mouse_x, ui_ptr.mouse_y);
+                if (copy_hovered and mouse_pressed) state.copyConversation(ui_ptr);
+                clay.UI()(.{
+                    .id = copy_id,
+                    .layout = .{
+                        .sizing = .{ .w = .fit, .h = .fit },
+                        .padding = .{ .left = 8, .right = 8, .top = 2, .bottom = 2 },
+                        .child_alignment = .{ .x = .center, .y = .center },
+                    },
+                    .background_color = if (copy_hovered) theme.border else .{ 0, 0, 0, 0 },
+                    .corner_radius = .all(4),
+                })({
+                    clay.text("Verlauf kopieren", .{ .font_size = 12, .color = theme.subtext, .wrap_mode = .none });
+                });
+            }
 
             const status_color: clay.Color = switch (state.agent_status) {
                 .ready => .{ 100, 255, 100, 255 },
