@@ -77,13 +77,34 @@ pub const FreeTypeFace = struct {
         return initFromPath(library, path_z, path.len, size);
     }
 
+    /// Schrift aus dem Speicher laden. `data` muss die Face überleben; für die
+    /// eingebaute Schrift ist das der eingebettete Puffer im Binary.
+    pub fn initFromMemory(data: []const u8, size: f32) !Self {
+        const library = try ensureLibraryInit();
+        var ft_face: ft.FT_Face = undefined;
+        const err = ft.FT_New_Memory_Face(library, data.ptr, @intCast(data.len), 0, &ft_face);
+        if (err != 0) {
+            std.log.err("FreeType memory face load error: {s}", .{ft.ftErrorString(err)});
+            return error.FontLoadFailed;
+        }
+        errdefer _ = ft.FT_Done_Face(ft_face);
+        return finishFace(ft_face, "<eingebaute Schrift>", size);
+    }
+
     fn initFromPath(library: ft.FT_Library, path: [:0]const u8, path_len: usize, size: f32) !Self {
+        _ = path_len;
         var ft_face: ft.FT_Face = undefined;
         const err = ft.FT_New_Face(library, path.ptr, 0, &ft_face);
         if (err != 0) {
             std.log.err("FreeType face load error: {s}", .{ft.ftErrorString(err)});
             return error.FontLoadFailed;
         }
+        errdefer _ = ft.FT_Done_Face(ft_face);
+        return finishFace(ft_face, path, size);
+    }
+
+    /// Größe setzen, HarfBuzz-Font bauen, Metriken rechnen — für beide Ladewege gleich.
+    fn finishFace(ft_face: ft.FT_Face, name: []const u8, size: f32) !Self {
         errdefer _ = ft.FT_Done_Face(ft_face);
 
         // Set character size (in 1/64th points at 72 DPI for 1:1 point-to-pixel)
@@ -110,12 +131,12 @@ pub const FreeTypeFace = struct {
             .metrics = undefined,
             .point_size = size,
             .font_path_buf = undefined,
-            .font_path_len = @min(path_len, 511),
+            .font_path_len = @min(name.len, 511),
             .advance_cache = [_]f32{ADVANCE_UNCACHED} ** ADVANCE_CACHE_SIZE,
         };
 
-        // Store path for debugging
-        @memcpy(self.font_path_buf[0..self.font_path_len], path[0..self.font_path_len]);
+        // Store name for debugging
+        @memcpy(self.font_path_buf[0..self.font_path_len], name[0..self.font_path_len]);
         self.font_path_buf[self.font_path_len] = 0;
 
         // Compute metrics

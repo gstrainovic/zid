@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=zid
+GenericName=Text Editor
+Comment=GPU-accelerated editor with Markdown preview, PDF viewer and a local AI assistant
+Exec=zid %F
+TryExec=zid
+Icon=io.github.gstrainovic.zid
+Terminal=false
+Categories=Development;IDE;TextEditor;
+Keywords=editor;markdown;pdf;zig;
+StartupNotify=true
+StartupWMClass=zid
+MimeType=text/plain;text/markdown;text/x-markdown;text/x-zig;text/x-csrc;text/x-chdr;text/x-c++src;text/x-python;application/json;application/x-yaml;text/xml;application/pdf;

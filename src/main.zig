@@ -142,6 +142,14 @@ pub fn main() !void {
         } else if (std.mem.eql(u8, args[i], "--ai=off")) {
             ai_disabled = true;
             log.info("AI disabled via --ai=off", .{});
+        } else if (std.mem.eql(u8, args[i], "--version") or std.mem.eql(u8, args[i], "-V")) {
+            var buf: [64]u8 = undefined;
+            var stdout_f = std.fs.File.stdout();
+            var stdout_writer = stdout_f.writer(&buf);
+            const w = &stdout_writer.interface;
+            try w.print("zid {s}\n", .{@import("build_info").version});
+            try w.flush();
+            return;
         } else if (std.mem.eql(u8, args[i], "--help") or std.mem.eql(u8, args[i], "-h")) {
             var buf: [4096]u8 = undefined;
             var stdout_f = std.fs.File.stdout();
@@ -154,6 +162,7 @@ pub fn main() !void {
             try w.writeAll("  --headless            Headless mode (no window, screenshots via RPC on port 9999)\n");
             try w.writeAll("  --interactive         Interactive mode (stdin/stdout command interface)\n");
             try w.writeAll("  --ai=off              Disable AI chat (llama-server)\n");
+            try w.writeAll("  --version, -V         Show version\n");
             try w.writeAll("  --help, -h            Show this help\n");
             try w.writeAll("\nEnvironment:\n");
             try w.writeAll("  ZID_DEBUG=1     Enable debug log lines\n");
@@ -384,7 +393,7 @@ pub fn main() !void {
         ui_system.image_renderer = &image_rdr;
 
         // Logo der Kopfzeile
-        var logo_texture = image_rdr.createTextureFromPath(allocator, "assets/ziglang_logo.png") catch |err| blk: {
+        var logo_texture = image_rdr.createTextureFromBytes(allocator, @import("builtin_assets").logo_png) catch |err| blk: {
             log.err("Failed to load logo: {}. Falling back to test pattern.", .{err});
             break :blk try image_rdr.createTestPattern(64, 64);
         };

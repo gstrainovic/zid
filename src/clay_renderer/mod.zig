@@ -4,6 +4,7 @@
 //! Unterstützt: Rectangle (farbige Boxen)
 
 const std = @import("std");
+const shaders = @import("builtin_shaders");
 const wgpu = @import("wgpu");
 const clay = @import("clay");
 
@@ -56,13 +57,7 @@ pub const ClayRenderer = struct {
             .scale_factor = scale_factor,
         };
 
-        // Shader laden (zur Runtime)
-        const shader_code = try std.fs.cwd().readFileAlloc(
-            allocator,
-            "zig-out/share/rectangle.wgsl",
-            1024 * 1024,
-        );
-        defer allocator.free(shader_code);
+        const shader_code = shaders.rectangle;
 
         self.shader_module = device.createShaderModule(&wgpu.shaderModuleWGSLDescriptor(.{
             .label = "rectangle.wgsl",

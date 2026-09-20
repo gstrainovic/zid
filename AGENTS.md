@@ -35,6 +35,25 @@ zig build test-text        # nur Textsystem (Glyph-Cache, Atlas; Root src/text_t
   DISPLAY=:0 ./zig-out/bin/zid --e2e --ai=off <datei>`, dann Screenshot per RPC. Xwayland
   reicht dafür. Headless berührt kein Backend, deckt das also nicht ab.
 
+## Eingebettete Daten und Installation
+
+- Schrift (`fonts/font_data.zig`), Logo (`assets/asset_data.zig`) und die WGSL-Shader
+  (`shaders/shader_data.zig`) liegen im Binary. `build.zig` reicht sie als anonyme Module
+  `builtin_font`, `builtin_assets` und `builtin_shaders` herein. Vorher las zid `fonts/…`,
+  `assets/…` und `zig-out/share/*.wgsl` relativ zum Arbeitsverzeichnis und brach ausserhalb
+  des Repos mit `FileNotFound` ab.
+- Neue Laufzeitdaten deshalb einbetten, nicht über einen relativen Pfad lesen.
+  `python3 scripts/e2e_installed_run.py` startet das Binary in einem leeren Ordner und
+  prüft Glyphen, Screenshot und ein Log ohne `FileNotFound`.
+- Schriftladen: `TextRenderer` nimmt `font_data` (Voreinstellung: eingebaute Schrift) und
+  fällt nur auf `font_path` zurück, wenn das Backend keine Schrift aus dem Speicher kann
+  (DirectWrite unter Windows).
+- `zig build install --prefix <dir>` legt zusätzlich Starter, Icon und AppStream-Datei unter
+  `share/` ab (`packaging/io.github.gstrainovic.zid.*`). Die App-ID ist
+  `io.github.gstrainovic.zid`. Prüfen mit `desktop-file-validate` und `appstreamcli validate`.
+- Die Version steht in `build.zig.zon` und kommt über die Build-Option `build_info.version`
+  ins Binary (`zid --version`); AppStream-`<release>` von Hand nachziehen.
+
 ## Headless / Interactive Mode
 
 ### Interactive Mode (stdin/stdout)

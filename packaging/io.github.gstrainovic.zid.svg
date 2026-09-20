@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <title>zid</title>
+  <rect x="8" y="8" width="112" height="112" rx="24" fill="#24273a"/>
+  <rect x="8" y="8" width="112" height="112" rx="24" fill="none" stroke="#8aadf4" stroke-width="4"/>
+  <!-- Monogramm: z über einer Schreibmarke -->
+  <path d="M40 44 H88 L40 84 H88" fill="none" stroke="#8aadf4" stroke-width="10"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="38" y="94" width="52" height="8" rx="4" fill="#c6a0f6"/>
+</svg>

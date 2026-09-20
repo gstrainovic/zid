@@ -1,5 +1,8 @@
 const std = @import("std");
 
+/// Version aus build.zig.zon: eine Quelle für Paket, `--version` und AppStream.
+const zid_version = @import("build.zig.zon").version;
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -128,6 +131,16 @@ pub fn build(b: *std.Build) void {
     });
     ai_tools_mod.addImport("shortcuts", shortcuts_mod);
     exe_mod.addImport("ai_tools", ai_tools_mod);
+    // Version ins Binary (`zid --version`, AppStream, Paketnamen)
+    const build_info = b.addOptions();
+    build_info.addOption([]const u8, "version", zid_version);
+    exe_mod.addOptions("build_info", build_info);
+
+    // Eingebettete Daten (Schrift, Logo): zid startet damit aus jedem Arbeitsverzeichnis
+    // und braucht nach der Installation kein Datenverzeichnis.
+    exe_mod.addAnonymousImport("builtin_font", .{ .root_source_file = b.path("fonts/font_data.zig") });
+    exe_mod.addAnonymousImport("builtin_assets", .{ .root_source_file = b.path("assets/asset_data.zig") });
+    exe_mod.addAnonymousImport("builtin_shaders", .{ .root_source_file = b.path("shaders/shader_data.zig") });
     exe_mod.addImport("wio", wio_dep.module("wio"));
     exe_mod.addImport("wgpu", wgpu_dep.module("wgpu"));
     exe_mod.addImport("zigimg", zigimg_dep.module("zigimg"));
@@ -145,25 +158,32 @@ pub fn build(b: *std.Build) void {
     })) |ghostty_dep| {
         exe_mod.addImport("ghostty-vt", ghostty_dep.module("ghostty-vt"));
     }
-    // Shader als Resource-File installieren
-    const shader_install_triangle = b.addInstallFileWithDir(b.path("shaders/triangle.wgsl"), .{ .custom = "share" }, "triangle.wgsl");
-    b.getInstallStep().dependOn(&shader_install_triangle.step);
-    const shader_install_rectangle = b.addInstallFileWithDir(b.path("shaders/rectangle.wgsl"), .{ .custom = "share" }, "rectangle.wgsl");
-    b.getInstallStep().dependOn(&shader_install_rectangle.step);
-    const shader_install_text = b.addInstallFileWithDir(b.path("shaders/text.wgsl"), .{ .custom = "share" }, "text.wgsl");
-    b.getInstallStep().dependOn(&shader_install_text.step);
-    const shader_install_text_color = b.addInstallFileWithDir(b.path("shaders/text_color.wgsl"), .{ .custom = "share" }, "text_color.wgsl");
-    b.getInstallStep().dependOn(&shader_install_text_color.step);
-    const shader_install_text_atlas = b.addInstallFileWithDir(b.path("shaders/text_atlas.wgsl"), .{ .custom = "share" }, "text_atlas.wgsl");
-    b.getInstallStep().dependOn(&shader_install_text_atlas.step);
-    const shader_install_texture = b.addInstallFileWithDir(b.path("shaders/texture.wgsl"), .{ .custom = "share" }, "texture.wgsl");
-    b.getInstallStep().dependOn(&shader_install_texture.step);
-
     // Test-Daten installieren (app.log wird standardmäßig im Editor geladen)
     const app_log_install = b.addInstallFileWithDir(b.path("test_data/app.log"), .{ .custom = "share" }, "app.log");
     b.getInstallStep().dependOn(&app_log_install.step);
     const syntax_test_install = b.addInstallFileWithDir(b.path("test_data/syntax_test.md"), .{ .custom = "share" }, "syntax_test.md");
     b.getInstallStep().dependOn(&syntax_test_install.step);
+
+    // Desktop-Integration: Starter, Icon und AppStream-Metadaten landen unter <prefix>/share.
+    // Damit taucht zid in Menüs und Software-Centern auf und kann Dateien zugeordnet bekommen.
+    const desktop_install = b.addInstallFileWithDir(
+        b.path("packaging/io.github.gstrainovic.zid.desktop"),
+        .{ .custom = "share/applications" },
+        "io.github.gstrainovic.zid.desktop",
+    );
+    b.getInstallStep().dependOn(&desktop_install.step);
+    const icon_install = b.addInstallFileWithDir(
+        b.path("packaging/io.github.gstrainovic.zid.svg"),
+        .{ .custom = "share/icons/hicolor/scalable/apps" },
+        "io.github.gstrainovic.zid.svg",
+    );
+    b.getInstallStep().dependOn(&icon_install.step);
+    const metainfo_install = b.addInstallFileWithDir(
+        b.path("packaging/io.github.gstrainovic.zid.metainfo.xml"),
+        .{ .custom = "share/metainfo" },
+        "io.github.gstrainovic.zid.metainfo.xml",
+    );
+    b.getInstallStep().dependOn(&metainfo_install.step);
 
     const exe = b.addExecutable(.{
         .name = "zid",

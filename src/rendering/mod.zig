@@ -6,6 +6,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const wgpu = @import("wgpu");
 const clay = @import("clay");
+const shaders = @import("builtin_shaders");
 const NativeWindow = @import("../platform/native_window.zig").NativeWindow;
 
 const log = std.log.scoped(.rendering);
@@ -119,9 +120,7 @@ pub var g_viewport_height: u32 = 800;
             return error.NoQueue;
         };
 
-        // Shader-Datei laden (zur Runtime)
-        const shader_code = try std.fs.cwd().readFileAlloc(allocator, triangle_shader_path, 1024 * 1024);
-        defer allocator.free(shader_code);
+        const shader_code = shaders.triangle;
 
         // Shader-Modul laden (WGSL)
         const shader_module = device.createShaderModule(&wgpu.shaderModuleWGSLDescriptor(.{
