@@ -358,14 +358,37 @@ pub const UI = struct {
             const default_model = try ai_paths.defaultModel(allocator, repo_root);
             defer allocator.free(default_model);
 
+            // Zweite Quelle: das Datenverzeichnis, das zid sich selbst einrichtet
+            // (installierte Fassung ohne Quellbaum). Reihenfolge: Repo, dann
+            // Datenverzeichnis, dann Ollama.
+            const ai_selfsetup = @import("ai_selfsetup");
+            const self_setup = try allocator.create(ai_selfsetup.SelfSetup);
+            self_setup.* = try ai_selfsetup.SelfSetup.init(allocator);
+            ai_chat.self_setup = self_setup;
+            const own_ready = self_setup.missing() == .ready;
+            const own_engine = try ai_selfsetup.setup.enginePath(allocator, self_setup.root);
+            defer allocator.free(own_engine);
+            const own_model = try ai_selfsetup.setup.modelPath(allocator, self_setup.root);
+            defer allocator.free(own_model);
+
             const server_path = std.process.getEnvVarOwned(allocator, "LLAMA_SERVER_PATH") catch |err| blk: {
-                if (err == error.EnvironmentVariableNotFound) break :blk try allocator.dupe(u8, if (engine_available) default_engine else "ollama");
+                if (err == error.EnvironmentVariableNotFound) break :blk try allocator.dupe(u8, if (engine_available)
+                    default_engine
+                else if (own_ready)
+                    own_engine
+                else
+                    "ollama");
                 return err;
             };
             defer allocator.free(server_path);
             const use_ollama = std.mem.eql(u8, server_path, "ollama");
             const model_path = std.process.getEnvVarOwned(allocator, "LLAMA_MODEL_PATH") catch |err| blk: {
-                if (err == error.EnvironmentVariableNotFound) break :blk try allocator.dupe(u8, if (use_ollama) "gemma4:e2b" else default_model);
+                if (err == error.EnvironmentVariableNotFound) break :blk try allocator.dupe(u8, if (use_ollama)
+                    "gemma4:e2b"
+                else if (!engine_available and own_ready)
+                    own_model
+                else
+                    default_model);
                 return err;
             };
             defer allocator.free(model_path);
