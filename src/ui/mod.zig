@@ -273,10 +273,65 @@ pub const UI = struct {
     /// verloren ging.
     pub var clay_error_count: std.atomic.Value(u32) = std.atomic.Value(u32).init(0);
 
+    /// Beim ersten `duplicate_id` einer Sitzung: den nächsten Frame anweisen, die
+    /// doppelt vergebenen IDs mit Box und Text zu nennen (siehe `logDuplicateIds`).
+    var dump_duplicates_next_frame: bool = false;
+    var duplicates_dumped: bool = false;
+
     fn clayError(data: clay.ErrorData) callconv(.c) void {
         _ = clay_error_count.fetchAdd(1, .monotonic);
         log.err("Clay: {s} ({s})", .{ data.error_text.chars[0..@intCast(data.error_text.length)], @tagName(data.error_type) });
-        if (data.error_type == .duplicate_id) logDuplicateParent();
+        if (data.error_type == .duplicate_id) {
+            logDuplicateParent();
+            if (!duplicates_dumped) dump_duplicates_next_frame = true;
+        }
+    }
+
+    /// Nach `endLayout`: jede ID, die mehr als ein Element bekommen hat, mit Typ, Box und
+    /// Textanfang ausgeben. `duplicate_id` nennt nur das Elternelement; erst diese Liste
+    /// zeigt, welches Element doppelt ist. Einmal je Sitzung, höchstens 40 Zeilen — der
+    /// Fehler wiederholt sich sonst in jedem Frame und flutet das Log.
+    fn logDuplicateIds(commands: []clay.RenderCommand) void {
+        duplicates_dumped = true;
+        const limit = @min(commands.len, 4096);
+        var printed: usize = 0;
+        log.err("Clay: doppelte IDs in diesem Frame ({d} Commands):", .{commands.len});
+
+        for (commands[0..limit], 0..) |cmd, i| {
+            // Zeigt diese ID schon weiter oben? Dann wurde sie dort gemeldet.
+            var seen_before = false;
+            for (commands[0..i]) |prev| {
+                if (prev.id == cmd.id) {
+                    seen_before = true;
+                    break;
+                }
+            }
+            if (seen_before) continue;
+
+            var count: usize = 0;
+            for (commands[0..limit]) |other| {
+                if (other.id == cmd.id) count += 1;
+            }
+            if (count < 2) continue;
+
+            for (commands[0..limit]) |c| {
+                if (c.id != cmd.id) continue;
+                if (printed >= 40) {
+                    log.err("Clay: … weitere Treffer ausgelassen", .{});
+                    return;
+                }
+                printed += 1;
+                const bb = c.bounding_box;
+                if (c.command_type == .text) {
+                    const sc = c.render_data.text.string_contents;
+                    const len: usize = @intCast(@max(sc.length, 0));
+                    log.err("  id={d} text box=({d:.0},{d:.0} {d:.0}x{d:.0}) \"{s}\"", .{ c.id, bb.x, bb.y, bb.width, bb.height, sc.chars[0..@min(len, 40)] });
+                } else {
+                    log.err("  id={d} {s} box=({d:.0},{d:.0} {d:.0}x{d:.0})", .{ c.id, @tagName(c.command_type), bb.x, bb.y, bb.width, bb.height });
+                }
+            }
+        }
+        if (printed == 0) log.err("Clay: keine doppelte ID in den Render-Commands (das Element zeichnet nichts)", .{});
     }
 
     /// duplicate_id nennt das Element nicht. Zur Eingrenzung einmal je Elternelement dessen
@@ -294,7 +349,7 @@ pub const UI = struct {
             Seen.ids[Seen.count] = parent;
             Seen.count += 1;
         }
-        log.err("Clay: duplicate_id unter Elternelement id={d}", .{parent});
+        log.err("Clay: duplicate_id id={d} unter Elternelement id={d}", .{ clay.cdefs.Clay__zidLastDuplicateElementId, parent });
     }
 
     pub fn init(allocator: std.mem.Allocator, config: UIConfig, default_file_path: ?[]const u8) !Self {
@@ -3265,6 +3320,10 @@ pub const UI = struct {
     pub fn endLayout(self: *Self) []clay.RenderCommand {
         const commands = clay.endLayout();
         self.mouse_pressed_this_frame = false;
+        if (dump_duplicates_next_frame) {
+            dump_duplicates_next_frame = false;
+            logDuplicateIds(commands);
+        }
         return commands;
     }
 
