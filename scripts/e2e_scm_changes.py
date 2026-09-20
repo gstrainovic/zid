@@ -254,6 +254,11 @@ def step_publish_push_multiline():
     check(h3 > h1 + 30, f"Feld wächst mit den Zeilen ({h1:.0f} → {h3:.0f})")
     key("up"); key("home"); rpc("type_text", ["> "]); settle(4)
     wait(lambda s: s["changes"]["message"] == "feat: vier\n> Zweite Zeile\nDritte", "↑ und Pos1 bewegen in der Zeile, Tippen fügt dort ein")
+    # Seit das Feld der CodeEditor ist (statt line_edit mit festem Puffer): Ctrl+Z
+    rpc("key_press", ["z", True]); settle(4)
+    wait(lambda s: s["changes"]["message"] != "feat: vier\n> Zweite Zeile\nDritte", "Ctrl+Z nimmt die Eingabe zurück")
+    rpc("key_press_mods", ["z", True, True]); settle(4)
+    wait(lambda s: s["changes"]["message"] == "feat: vier\n> Zweite Zeile\nDritte", "Ctrl+Shift+Z stellt sie wieder her")
     key("enter", ctrl=True)
     wait(lambda s: s["changes"]["dialog"] is not None, "Ctrl+Enter: Rückfrage ohne Staged Changes")
     key("enter")

@@ -310,8 +310,8 @@ fn writeScmChangesJson(ui: *ui_mod.UI, w: *std.Io.Writer) !void {
     var label_buf: [64]u8 = undefined;
     try w.print(", \"ahead\": {d}, \"behind\": {d}, \"button\": ", .{ v.ahead(), v.behind() });
     try std.json.Stringify.value(v.buttonLabel(&label_buf), .{}, w);
-    try w.print(", \"lines\": {d}, \"message\": ", .{ui.scm_changes.message.lineCount()});
-    try std.json.Stringify.value(ui.scm_changes.message.text(), .{}, w);
+    try w.print(", \"lines\": {d}, \"message\": ", .{ui.scm_changes.editor.lineCount()});
+    try std.json.Stringify.value(ui.scm_changes.messageText(), .{}, w);
     try w.writeAll(", \"validation\": ");
     try std.json.Stringify.value(ui.scm_changes.validation, .{}, w);
     try w.writeAll(", \"groups\": {");
