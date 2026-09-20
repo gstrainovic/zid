@@ -78,6 +78,10 @@ pub const AIChatState = struct {
     self_setup: ?*ai_selfsetup.SelfSetup = null,
     /// Nach abgeschlossener Einrichtung einmalig den Agenten neu verbinden.
     self_setup_applied: bool = false,
+    /// Die Frage nach der Einrichtung steht einmal im Verlauf, nicht in jedem Frame.
+    setup_prompted: bool = false,
+    /// „Später" gedrückt: bis zum nächsten Start keine Antwortknöpfe mehr.
+    setup_dismissed: bool = false,
     is_downloading: bool = false,
     is_initializing: bool = false,
     download_progress: f32 = 0,
@@ -349,11 +353,33 @@ pub const AIChatState = struct {
         st.start() catch |err| log.err("Einrichtung startet nicht: {s}", .{@errorName(err)});
     }
 
-    /// Jeden Frame: ist die Einrichtung fertig, wird der Agent einmalig verbunden.
+    /// Jeden Frame: Frage stellen, Abschluss melden, Agenten verbinden.
     pub fn pollSelfSetup(self: *Self) void {
         const st = self.self_setup orelse return;
+
+        // Der Chat sagt selbst, was ihm fehlt — als Nachricht im Verlauf, nicht als
+        // Leiste über dem Fenster. Antworten kann man mit den Knöpfen darunter.
+        if (!self.setup_prompted and self.needsSelfSetup()) {
+            self.setup_prompted = true;
+            self.addMessage("assistant",
+                \\Ich bin noch nicht eingerichtet: mir fehlen der lokale Server und das Sprachmodell.
+                \\
+                \\Soll ich beides jetzt laden? Das sind **llama-server** (30 MB) und **gemma-4-E2B** (2,7 GB).
+                \\Beides landet in deinem Benutzerverzeichnis, und nichts davon verlässt diesen Rechner.
+            ) catch {};
+        }
+
+        if (st.currentState() == .failed and !self.self_setup_applied) {
+            self.self_setup_applied = true;
+            var buf: [320]u8 = undefined;
+            const msg = std.fmt.bufPrint(&buf, "Die Einrichtung ist fehlgeschlagen: {s}. Mit „Erneut versuchen\" geht es weiter, schon geladene Teile bleiben erhalten.", .{st.detail()}) catch "Die Einrichtung ist fehlgeschlagen.";
+            self.addMessage("assistant", msg) catch {};
+            return;
+        }
+
         if (st.currentState() != .done or self.self_setup_applied) return;
         self.self_setup_applied = true;
+        self.addMessage("assistant", "Fertig eingerichtet. Frag mich etwas.") catch {};
 
         const engine = ai_selfsetup.setup.enginePath(self.allocator, st.root) catch return;
         defer self.allocator.free(engine);
@@ -841,6 +867,16 @@ const scrollbar_width: f32 = 8.0;
 const splitter_height: f32 = 6.0;
 const splitter_hit_height: f32 = 12.0;
 
+/// Zeiger über dem Element? Über die Box aus dem letzten Layout gerechnet, nicht
+/// über `clay.pointerOver`: im Frame des RPC-Klicks kennt Clay die neue Zeigerposition
+/// noch nicht, der Klick ginge verloren (dasselbe Problem wie in `pdf_view.zig`).
+fn overElement(id: clay.ElementId, mouse_x: f32, mouse_y: f32) bool {
+    const data = clay.getElementData(id);
+    if (!data.found) return false;
+    const b = data.bounding_box;
+    return mouse_x >= b.x and mouse_x < b.x + b.width and mouse_y >= b.y and mouse_y < b.y + b.height;
+}
+
 /// Farbe aufhellen (Hover-Zustand der Schaltflächen).
 fn brighten(c: clay.Color, amount: f32) clay.Color {
     return .{
@@ -903,75 +939,7 @@ pub fn renderAIChat(
             clay.text(state.statusText(), .{ .font_size = 12, .color = .{ 150, 150, 150, 255 } });
         });
 
-        // ── Selbsteinrichtung: Engine und Modell ins Datenverzeichnis ────
-        // Ein installiertes zid hat kein engines/ und models/ neben sich. Statt den
-        // Nutzer das nachbauen zu lassen, lädt zid beides selbst — auf einen Klick,
-        // weil 2,7 GB niemand ungefragt geschickt bekommen will.
         state.pollSelfSetup();
-        if (state.self_setup) |st| {
-            const running = st.currentState() == .running;
-            if (state.needsSelfSetup() or running) {
-                const setup_id = clay.ElementId.ID("ai_setup_btn");
-                const hovered = clay.pointerOver(setup_id);
-                if (hovered and mouse_pressed and !running) state.startSelfSetup();
-
-                var label_buf: [96]u8 = undefined;
-                const label: []const u8 = if (running)
-                    std.fmt.bufPrint(&label_buf, "{s} laden … {d} %", .{
-                        switch (st.currentStep()) {
-                            .engine => "Engine",
-                            .model => "Modell",
-                        },
-                        st.percent(),
-                    }) catch "laden …"
-                else if (st.currentState() == .failed)
-                    std.fmt.bufPrint(&label_buf, "Einrichtung fehlgeschlagen ({s}) — erneut versuchen", .{st.detail()}) catch "Erneut versuchen"
-                else
-                    "KI einrichten (Engine 30 MB + Modell 2,7 GB laden)";
-
-                // Auffällig genug, um als Schaltfläche gelesen zu werden: Akzentfarbe,
-                // Rahmen, grosszügige Polsterung. Grau auf Grau sah aus wie Beschriftung.
-                clay.UI()(.{
-                    .id = setup_id,
-                    .layout = .{
-                        .sizing = .{ .w = .fit, .h = .fit },
-                        .padding = .{ .left = 16, .right = 16, .top = 10, .bottom = 10 },
-                        .child_alignment = .{ .x = .center, .y = .center },
-                    },
-                    .background_color = if (running)
-                        theme.surface
-                    else if (hovered)
-                        brighten(theme.primary, 30)
-                    else
-                        theme.primary,
-                    .corner_radius = .all(6),
-                    .border = .{
-                        .width = .all(2),
-                        .color = if (running) theme.border else if (hovered) theme.border_focus else theme.accent,
-                    },
-                })({
-                    clay.text(label, .{
-                        .font_size = 15,
-                        .color = if (running) theme.text else theme.text_on_primary,
-                        .wrap_mode = .none,
-                    });
-                });
-
-                if (running) {
-                    clay.UI()(.{
-                        .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(6) } },
-                        .background_color = .{ 40, 40, 45, 255 },
-                        .corner_radius = .all(3),
-                    })({
-                        clay.UI()(.{
-                            .layout = .{ .sizing = .{ .w = .percent(@as(f32, @floatFromInt(st.percent())) / 100.0), .h = .grow } },
-                            .background_color = theme.primary,
-                            .corner_radius = .all(3),
-                        })({});
-                    });
-                }
-            }
-        }
 
         // Fortschritt des alten Modell-Downloads (Repo-Pfad).
         if (state.is_downloading) {
@@ -1144,6 +1112,108 @@ pub fn renderAIChat(
             state.scroll_offset_y = max_scroll;
         } else if (state.scroll_offset_y > max_scroll) {
             state.scroll_offset_y = max_scroll;
+        }
+
+        // ── Antwortknöpfe zur Einrichtungsfrage ─────────────────────────
+        // Stehen direkt über der Eingabe, wo man im Chat antwortet. Läuft der Download,
+        // zeigt dieselbe Zeile Schritt, Prozent und Balken.
+        if (state.self_setup) |st| {
+            const running = st.currentState() == .running;
+            const failed = st.currentState() == .failed;
+            const show = running or ((state.needsSelfSetup() or failed) and !state.setup_dismissed);
+            if (show) {
+                clay.UI()(.{
+                    .layout = .{
+                        .sizing = .{ .w = .grow, .h = .fit },
+                        .padding = .{ .left = 12, .right = 12, .top = 8, .bottom = 8 },
+                        .direction = .top_to_bottom,
+                        .child_gap = 8,
+                    },
+                })({
+                    clay.UI()(.{
+                        .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .left_to_right, .child_gap = 8 },
+                    })({
+                        const yes_id = clay.ElementId.ID("ai_setup_btn");
+                        const yes_hovered = overElement(yes_id, ui_ptr.mouse_x, ui_ptr.mouse_y);
+                        if (yes_hovered and mouse_pressed and !running) state.startSelfSetup();
+
+                        // Text in den Frame-Arena, nicht auf den Stack: Clay hält den
+                        // Zeiger bis zum Zeichnen, ein Stack-Puffer ist bis dahin
+                        // ungültig und die Schaltfläche zeigte Ersatzzeichen.
+                        const yes_label: []const u8 = if (running)
+                            std.fmt.allocPrint(arena, "{s} laden … {d} %", .{
+                                switch (st.currentStep()) {
+                                    .engine => "Server",
+                                    .model => "Modell",
+                                },
+                                st.percent(),
+                            }) catch "laden …"
+                        else if (failed)
+                            "Erneut versuchen"
+                        else
+                            "Ja, laden";
+
+                        clay.UI()(.{
+                            .id = yes_id,
+                            .layout = .{
+                                .sizing = .{ .w = .fit, .h = .fit },
+                                .padding = .{ .left = 16, .right = 16, .top = 10, .bottom = 10 },
+                                .child_alignment = .{ .x = .center, .y = .center },
+                            },
+                            .background_color = if (running)
+                                theme.surface
+                            else if (yes_hovered)
+                                brighten(theme.primary, 30)
+                            else
+                                theme.primary,
+                            .corner_radius = .all(6),
+                            .border = .{
+                                .width = .all(2),
+                                .color = if (running) theme.border else if (yes_hovered) theme.border_focus else theme.accent,
+                            },
+                        })({
+                            clay.text(yes_label, .{
+                                .font_size = 15,
+                                .color = if (running) theme.text else theme.text_on_primary,
+                                .wrap_mode = .none,
+                            });
+                        });
+
+                        if (!running) {
+                            const later_id = clay.ElementId.ID("ai_setup_later_btn");
+                            const later_hovered = overElement(later_id, ui_ptr.mouse_x, ui_ptr.mouse_y);
+                            if (later_hovered and mouse_pressed) state.setup_dismissed = true;
+                            clay.UI()(.{
+                                .id = later_id,
+                                .layout = .{
+                                    .sizing = .{ .w = .fit, .h = .fit },
+                                    .padding = .{ .left = 16, .right = 16, .top = 10, .bottom = 10 },
+                                    .child_alignment = .{ .x = .center, .y = .center },
+                                },
+                                .background_color = if (later_hovered) theme.border else theme.surface,
+                                .corner_radius = .all(6),
+                                .border = .{ .width = .all(2), .color = theme.border },
+                            })({
+                                clay.text("Später", .{ .font_size = 15, .color = theme.text, .wrap_mode = .none });
+                            });
+                        }
+                    });
+
+                    if (running) {
+                        clay.UI()(.{
+                            .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(6) } },
+                            .background_color = .{ 40, 40, 45, 255 },
+                            .corner_radius = .all(3),
+                        })({
+                            clay.UI()(.{
+                                .layout = .{ .sizing = .{ .w = .percent(@as(f32, @floatFromInt(st.percent())) / 100.0), .h = .grow } },
+                                .background_color = theme.primary,
+                                .corner_radius = .all(3),
+                            })({});
+                        });
+                    }
+                });
+            }
         }
 
         // ── Splitter (draggable) ────────────────────────────────────────
