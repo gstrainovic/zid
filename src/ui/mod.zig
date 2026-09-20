@@ -3354,7 +3354,9 @@ pub const UI = struct {
                             .sizing = .{ .w = .fixed(32), .h = .fixed(32) },
                         },
                         .image = .{ .image_data = ptr },
-                        .background_color = .{ 0, 0, 0, 0 },
+                        // Weiß = ungefärbt durchreichen; der Renderer nimmt die
+                        // Hintergrundfarbe als Tint (siehe ImageViewState).
+                        .background_color = .{ 255, 255, 255, 255 },
                     })({});
                 }
 

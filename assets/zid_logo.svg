@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Kopfzeilen-Logo: dasselbe Monogramm wie das App-Icon, aber ohne Kachel,
+     damit es auf hellem wie dunklem Menüband sitzt. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <title>zid</title>
+  <path d="M28 34 H100 L28 90 H100" fill="none" stroke="#8aadf4" stroke-width="14"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="26" y="104" width="76" height="12" rx="6" fill="#c6a0f6"/>
+</svg>
