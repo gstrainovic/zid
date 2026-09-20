@@ -7,14 +7,20 @@ const ui = @import("mod.zig");
 const Theme = ui.Theme;
 const file_types = @import("file_types.zig");
 
-pub fn render(arena: std.mem.Allocator, path: []const u8, theme: Theme) void {
+/// ID eines Elements dieser Ansicht. Ein Split kopiert die Tabs, dieselbe Datei
+/// steht dann in beiden Panes: ohne Salz meldet Clay `duplicate_id`.
+pub fn idi(name: []const u8, salt: u32) clay.ElementId {
+    return clay.ElementId.IDI(name, salt);
+}
+
+pub fn render(arena: std.mem.Allocator, path: []const u8, theme: Theme, salt: u32) void {
     const size_text = blk: {
         const st = std.fs.cwd().statFile(path) catch break :blk "";
         break :blk file_types.formatFileSize(arena, st.size) catch "";
     };
 
     clay.UI()(.{
-        .id = clay.ElementId.ID("binary_view_container"),
+        .id = idi("binary_view_container", salt),
         .layout = .{
             .sizing = .grow,
             .child_alignment = .{ .x = .center, .y = .center },

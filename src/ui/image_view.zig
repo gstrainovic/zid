@@ -5,17 +5,24 @@ const Theme = ui.Theme;
 const ImageTexture = @import("../clay_renderer/image_renderer.zig").ImageTexture;
 
 pub const ImageViewState = struct {
+    /// ID eines Elements dieser Ansicht. Ein Split kopiert die Tabs, dasselbe Bild
+    /// steht dann in beiden Panes: ohne Salz meldet Clay `duplicate_id`.
+    pub fn idi(name: []const u8, salt: u32) clay.ElementId {
+        return clay.ElementId.IDI(name, salt);
+    }
+
     pub fn render(
         arena: std.mem.Allocator,
         path: []const u8,
         theme: Theme,
+        salt: u32,
         open_images: *std.StringHashMap(*anyopaque),
     ) void {
         _ = arena;
         const maybe_texture = open_images.get(path);
 
         clay.UI()(.{
-            .id = clay.ElementId.ID("image_view_container"),
+            .id = idi("image_view_container", salt),
             .layout = .{
                 .sizing = .grow,
                 .child_alignment = .{ .x = .center, .y = .center },
@@ -36,7 +43,7 @@ pub const ImageViewState = struct {
                     1.0;
 
                 clay.UI()(.{
-                    .id = clay.ElementId.ID("image_display"),
+                    .id = idi("image_display", salt),
                     .layout = .{
                         .sizing = .{ .w = .grow, .h = .fit },
                     },
@@ -47,7 +54,7 @@ pub const ImageViewState = struct {
             } else {
                 // Platzhalter / Laden
                 clay.UI()(.{
-                    .id = clay.ElementId.ID("image_placeholder"),
+                    .id = idi("image_placeholder", salt),
                     .layout = .{
                         .sizing = .{ .w = .grow, .h = .grow },
                         .child_alignment = .{ .x = .center, .y = .center },

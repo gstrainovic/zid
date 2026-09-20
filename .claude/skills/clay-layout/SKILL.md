@@ -114,6 +114,13 @@ Editors laufen deshalb über `CodeEditor.idi(name, index)`, das den Editor-Zeige
 addiert (unit-getestet). E2E: `element_bounds(_i)` sucht erst global, dann über die aktive
 Vorschau und den aktiven Editor, Skripte dürfen weiter `element_bounds_i("code", zeile)` fragen.
 
+PDF-, Bild- und Binäransicht (`PdfViewState.idi`, `ImageViewState.idi`, `binary_view.idi`) sind
+zustandslos und bekommen das Salz als Parameter: `UI.renderPane` reicht `paneSalt(pane)` durch.
+Ohne das meldete ein Split mit offenem PDF über 200 `duplicate_id`, und der Treffertest der
+Blätter-Schaltflächen las die Box der ersten Pane. Treffertests außerhalb von `renderPane`
+(Hand-Cursor in `getDesiredCursor`) nehmen `UI.activePaneSalt`, E2E-Abfragen über
+`lookupElement` in `src/e2e_server.zig` probieren dasselbe Salz als Fallback.
+
 Die Markdown-Vorschau (`MarkdownView.idi`) salzt mit Instanz **und** Pane (`pane_salt`, setzt
 `UI.renderPane`): Views hängen am Pfad, ein Split kopiert die Tabs, dieselbe Ansicht steht dann
 in zwei Panes. Chat und Terminal kopiert `TabBarState.cloneFrom` gar nicht erst, ihr Zustand
