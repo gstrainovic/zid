@@ -253,13 +253,8 @@ pub fn main() !void {
             try plat.createWindow();
             plat.setTextInput(true);
 
-            // Surface vom Window erstellen
-            if (builtin.os.tag == .linux) {
-                try renderer.setWindow(plat.getWaylandDisplay(), plat.getWaylandSurface());
-            } else {
-                // Auf Windows nimmt WGPU das HWND direkt (wio window handle)
-                try renderer.setWindow(null, plat.window.?.backend.window);
-            }
+            // Surface vom Window erstellen (Wayland, X11 oder HWND — je nach Backend)
+            try renderer.setWindow(plat.nativeWindow() orelse return error.NoWindow);
             try renderer.configureSwapChain(plat.getSize().width, plat.getSize().height);
         }
 

@@ -12,6 +12,9 @@ const is_linux = builtin.os.tag == .linux;
 // Platform-spezifische Backend-Importe
 const unix = if (is_linux) wio.backend else struct {};
 const wayland = if (is_linux) unix.wayland else struct {};
+const x11 = if (is_linux) unix.x11 else struct {};
+
+pub const NativeWindow = @import("native_window.zig").NativeWindow;
 
 const log = std.log.scoped(.platform);
 
@@ -142,6 +145,23 @@ pub const Platform = struct {
         const win = self.window.?;
         // wio.Window.backend ist unix.Window (union), .wayland gibt *wayland.Window
         return @ptrCast(win.backend.wayland.surface);
+    }
+
+    /// Handles des aktuellen Fensters, passend zu dem Backend, das wio beim Start
+    /// aus der Umgebung gewählt hat (`XDG_SESSION_TYPE`, sonst Probieren).
+    pub fn nativeWindow(self: *const Self) ?NativeWindow {
+        const win = self.window orelse return null;
+        if (!is_linux) return .{ .win32 = win.backend.window };
+        return switch (unix.active) {
+            .wayland => .{ .wayland = .{
+                .display = @ptrCast(wayland.display),
+                .surface = @ptrCast(win.backend.wayland.surface),
+            } },
+            .x11 => .{ .xlib = .{
+                .display = @ptrCast(x11.display),
+                .window = win.backend.x11.window,
+            } },
+        };
     }
 
     /// Event Loop starten (blocking)

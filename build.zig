@@ -4,11 +4,11 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    // wio Dependency - nur Wayland Backend
+    // wio Dependency - Wayland und X11; wio wählt beim Start das passende Backend
     const wio_dep = b.dependency("wio", .{
         .target = target,
         .optimize = optimize,
-        .unix_backends = "wayland",
+        .unix_backends = "x11,wayland",
         .enable_vulkan = true,
         .enable_opengl = false,
     });
@@ -190,7 +190,11 @@ pub fn build(b: *std.Build) void {
             .flags = &[_][]const u8{ "-std=c99", "-w" },
         });
     } else if (target.result.os.tag == .linux) {
-        // wio (Wayland Backend) benötigt diese Libraries
+        // wio (Wayland- und X11-Backend) benötigt diese Libraries. wio lädt sie zur
+        // Laufzeit per dlopen, die extern-Deklarationen der Import-Tabellen stehen aber
+        // im Debug-Info und der Linker verlangt sie trotzdem.
+        exe.root_module.linkSystemLibrary("X11", .{});
+        exe.root_module.linkSystemLibrary("Xcursor", .{});
         exe.root_module.linkSystemLibrary("wayland-client", .{});
         exe.root_module.linkSystemLibrary("wayland-egl", .{});
         exe.root_module.linkSystemLibrary("xkbcommon", .{});
@@ -800,6 +804,8 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_chat_markdown_tests.step);
 
     if (target.result.os.tag == .linux) {
+        code_editor_tests.root_module.linkSystemLibrary("X11", .{});
+        code_editor_tests.root_module.linkSystemLibrary("Xcursor", .{});
         code_editor_tests.root_module.linkSystemLibrary("wayland-client", .{});
         code_editor_tests.root_module.linkSystemLibrary("wayland-egl", .{});
         code_editor_tests.root_module.linkSystemLibrary("xkbcommon", .{});

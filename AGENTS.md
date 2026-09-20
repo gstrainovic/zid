@@ -19,6 +19,22 @@ zig build -Doptimize=ReleaseSafe  # Release build
 zig build test-text        # nur Textsystem (Glyph-Cache, Atlas; Root src/text_tests.zig)
 ```
 
+## Fenster-Backends: Wayland und X11
+
+- `build.zig` baut wio mit `unix_backends = "x11,wayland"`. wio wählt beim Start selbst:
+  `XDG_SESSION_TYPE` entscheidet, sonst probiert es beide (`libs/wio/src/unix.zig`).
+- Die WGPU-Surface braucht je Backend andere Handles. `Platform.nativeWindow` liefert sie als
+  `NativeWindow` (`src/platform/native_window.zig`), `Renderer.setWindow` baut daraus den
+  Deskriptor: Wayland-Surface, Xlib-Window oder HWND.
+- wio lädt libX11, libXcursor und die Wayland-Libs per `dlopen`; `build.zig` linkt sie trotzdem,
+  weil die extern-Deklarationen der Import-Tabellen im Debug-Info stehen und der Linker sie
+  sonst als undefiniert meldet. Dasselbe gilt für `code_editor_tests`.
+- Der vendorte wio-Patch `fix(x11): GLX-Importe nur mit enable_opengl deklarieren` hält libGL
+  aus einem reinen Vulkan-Build heraus.
+- X11 von einer Wayland-Sitzung aus prüfen: `env -u WAYLAND_DISPLAY XDG_SESSION_TYPE=x11
+  DISPLAY=:0 ./zig-out/bin/zid --e2e --ai=off <datei>`, dann Screenshot per RPC. Xwayland
+  reicht dafür. Headless berührt kein Backend, deckt das also nicht ab.
+
 ## Headless / Interactive Mode
 
 ### Interactive Mode (stdin/stdout)

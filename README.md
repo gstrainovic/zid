@@ -22,6 +22,7 @@ Fedora/RHEL:
 ```bash
 sudo dnf install mupdf mupdf-devel \
                  wayland-devel libxkbcommon-devel libdecor-devel \
+                 libX11-devel libXcursor-devel \
                  mesa-libEGL-devel vulkan-loader-devel \
                  freetype-devel harfbuzz-devel libpng-devel
 ```
@@ -31,6 +32,7 @@ Debian/Ubuntu (Paketnamen können leicht abweichen):
 ```bash
 sudo apt install libmupdf-dev \
                  libwayland-dev libxkbcommon-dev libdecor-0-dev \
+                 libx11-dev libxcursor-dev \
                  libegl1-mesa-dev libvulkan-dev \
                  libfreetype-dev libharfbuzz-dev libpng-dev
 ```
