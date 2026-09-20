@@ -6,6 +6,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const wgpu = @import("wgpu");
 const clay = @import("clay");
+const NativeWindow = @import("../platform/native_window.zig").NativeWindow;
 
 const log = std.log.scoped(.rendering);
 
@@ -208,23 +209,26 @@ pub var g_viewport_height: u32 = 800;
         if (self.instance) |instance| instance.release();
     }
 
-    /// Surface vom wio Window erstellen (Linux/Wayland oder Windows)
-    pub fn setWindow(self: *Self, display: ?*anyopaque, surface_handle: ?*anyopaque) !void {
+    /// Surface vom wio Window erstellen. Welches Handle kommt, entscheidet das
+    /// Backend, das wio beim Start gewählt hat (Wayland oder X11), unter Windows
+    /// das HWND.
+    pub fn setWindow(self: *Self, native: NativeWindow) !void {
         if (self.instance == null) return error.NoInstance;
-        if (surface_handle == null) return error.NoSurfaceHandle;
 
-        const descriptor = if (builtin.os.tag == .linux)
-            wgpu.surfaceDescriptorFromWaylandSurface(.{
-                .display = display orelse return error.NoWaylandDisplay,
-                .surface = surface_handle.?,
-            })
-        else if (builtin.os.tag == .windows)
-            wgpu.surfaceDescriptorFromWindowsHWND(.{
+        const descriptor = switch (native) {
+            .wayland => |w| wgpu.surfaceDescriptorFromWaylandSurface(.{
+                .display = w.display,
+                .surface = w.surface,
+            }),
+            .xlib => |x| wgpu.surfaceDescriptorFromXlibWindow(.{
+                .display = x.display,
+                .window = x.window,
+            }),
+            .win32 => |hwnd| if (builtin.os.tag == .windows) wgpu.surfaceDescriptorFromWindowsHWND(.{
                 .hinstance = @ptrCast(std.os.windows.kernel32.GetModuleHandleW(null) orelse return error.NoHinstance),
-                .hwnd = surface_handle.?,
-            })
-        else
-            @compileError("Unsupported platform for surface creation");
+                .hwnd = hwnd,
+            }) else return error.UnsupportedWindowHandle,
+        };
 
         self.surface = self.instance.?.createSurface(&descriptor);
         if (self.surface == null) return error.NoSurface;
