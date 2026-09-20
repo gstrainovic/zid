@@ -25,9 +25,13 @@ die `~/.bashrc`. Systemweit: `sudo ./install.sh /usr/local`. Wieder weg:
 ### Arch, Manjaro, EndeavourOS
 
 ```bash
-git clone https://aur.archlinux.org/zid-bin.git && cd zid-bin && makepkg -si
-# oder mit einem AUR-Helfer:  paru -S zid-bin
+mkdir zid-bin && cd zid-bin
+curl -LO https://github.com/gstrainovic/zid/releases/latest/download/PKGBUILD
+makepkg -si
 ```
+
+Das PKGBUILD hängt am Release, ein AUR-Konto braucht es dafür nicht. Sobald das
+Paket in der AUR steht, geht auch `paru -S zid-bin`.
 
 ### Fedora
 
