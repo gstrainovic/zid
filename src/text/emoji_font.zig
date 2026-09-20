@@ -42,14 +42,11 @@ pub const file_name = "NotoColorEmoji.ttf";
 /// Grösse der Datei bei dieser Fassung; dient nur der Anzeige im Log.
 pub const download_bytes: u64 = 10_643_852;
 
-/// Erster vorhandener Kandidat des Systems, sonst null. Ob die Schrift auch
-/// brauchbar ist (Farbbilder statt Malanweisungen), entscheidet erst das
-/// Textsystem beim Laden.
-pub fn findSystem() ?[]const u8 {
-    for (candidates) |path| {
-        if (std.fs.cwd().access(path, .{})) |_| return path else |_| {}
-    }
-    return null;
+/// Liegt dort eine Datei? Vor dem Laden geprüft, damit FreeType nicht für jeden
+/// Kandidaten „cannot open resource" ins Log schreibt.
+pub fn exists(path: []const u8) bool {
+    std.fs.cwd().access(path, .{}) catch return false;
+    return true;
 }
 
 /// Pfad der selbst geladenen Schrift im Datenverzeichnis. Aufrufer gibt ihn frei.
@@ -60,10 +57,9 @@ pub fn cachedPath(allocator: std.mem.Allocator) ![]u8 {
 /// Liegt die selbst geladene Schrift schon da? Aufrufer gibt den Pfad frei.
 pub fn findCached(allocator: std.mem.Allocator) ?[]u8 {
     const path = cachedPath(allocator) catch return null;
-    if (std.fs.cwd().access(path, .{})) |_| return path else |_| {
-        allocator.free(path);
-        return null;
-    }
+    if (exists(path)) return path;
+    allocator.free(path);
+    return null;
 }
 
 /// Variantenwähler (U+FE00–U+FE0F) steuern nur, ob ein Zeichen als Text oder als
