@@ -1,0 +1,25 @@
+pkgbase = zid-bin
+	pkgdesc = GPU-beschleunigter Editor mit Markdown-Vorschau, PDF-Anzeige und lokaler KI
+	pkgver = 0.1.0
+	pkgrel = 1
+	url = https://github.com/gstrainovic/zid
+	arch = x86_64
+	license = AGPL-3.0-only
+	depends = freetype2
+	depends = harfbuzz
+	depends = libpng
+	depends = zlib
+	depends = glib2
+	optdepends = vulkan-icd-loader: GPU-Rendering
+	optdepends = vulkan-radeon: Vulkan-Treiber für AMD
+	optdepends = vulkan-intel: Vulkan-Treiber für Intel
+	optdepends = nvidia-utils: Vulkan-Treiber für NVIDIA
+	optdepends = ollama: lokale KI im Chat
+	provides = zid
+	conflicts = zid
+	options = !strip
+	options = !debug
+	source = https://github.com/gstrainovic/zid/releases/download/v0.1.0/zid-0.1.0-x86_64-linux.tar.xz
+	sha256sums = 714a06d2a2fe6097f9c2d50aced40d0945b08a353f6e0cfd826a9ef3e950326e
+
+pkgname = zid-bin
