@@ -51,8 +51,9 @@ der proprietäre Treiber.
 Das Binary verlangt `GLIBC_2.35` oder neuer. Das deckt Ubuntu 22.04 LTS,
 Debian 12, Fedora 37 und alles Jüngere ab.
 
-Die KI-Funktionen sind optional und brauchen einen lokalen `llama-server` oder
-Ollama (siehe „KI-Setup"). Ohne die läuft der Editor normal, der Chat bleibt leer.
+Für die KI lädt zid beim ersten Gebrauch selbst, was es braucht: der Chat zeigt
+einen Knopf, der llama-server (30 MB) und das Modell gemma-4-E2B (2,7 GB) ins
+Benutzerverzeichnis holt. Ohne das läuft der Editor normal, nur der Chat bleibt leer.
 
 ## Build
 

@@ -7,7 +7,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 /// Unter Windows heisst die Datei `llama-server.exe`; ohne Endung schlägt der
-/// Existenztest in agent.zig fehl und zid fällt still auf Ollama zurück.
+/// Existenztest in agent.zig fehl und zid hält die Engine für nicht vorhanden.
 pub const engine_rel = "engines/llama.cpp-vulkan/build/bin/llama-server" ++ exe_suffix;
 pub const exe_suffix = if (builtin.os.tag == .windows) ".exe" else "";
 /// gemma4-E2B Q4_0 (ggml-org) auf allen Plattformen: gleiche Werkzeugwahl wie Qwen3-4B

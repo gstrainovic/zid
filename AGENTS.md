@@ -441,16 +441,17 @@ liegen in `src/ui/mod.zig`, das Virtualisierungsmuster in
   F2/Entf, Tabs, Ansicht, Menüleiste, Kontextmenü, Shortcut-Dialog, Suchleiste) und legt
   Screenshots unter `tmp/e2e_*.ppm` ab.
 
-## KI-Chat (llama-server / Ollama)
+## KI-Chat (llama-server)
 
 Details in der Skill `.claude/skills/llm-local/SKILL.md`: Backend- und Gerätewahl,
 llama-server-Argumente, Streaming und `AgentStatus`, Chat-Eingabe als CodeEditor,
 gepinnte Engines unter `engines/`, Modellablage und die Messregeln aus `llm-bench/`.
 
-Kurz: Standard ist `engines/llama.cpp-vulkan/build/bin/llama-server` (unter Windows
-`.exe`, sonst fällt zid still auf Ollama zurück) mit
-`models/gemma-4-E2B-it-Q4_0.gguf` auf allen Plattformen (`src/ai/paths.zig`). Fallback Ollama.
-`LLAMA_SERVER_PATH` und `LLAMA_MODEL_PATH` überschreiben. zid nutzt nur lokale Backends; Cloud-
+Kurz: zid spricht ausschliesslich mit llama-server. Quellen in dieser Reihenfolge:
+`engines/llama.cpp-vulkan/build/bin/llama-server` samt `models/gemma-4-E2B-it-Q4_0.gguf`
+im Quellbaum (`src/ai/paths.zig`), sonst das Datenverzeichnis, das zid sich selbst
+einrichtet (`src/ai/selfsetup.zig`). Fehlt beides, zeigt der Chat einen Knopf, der
+Engine und Modell lädt. `LLAMA_SERVER_PATH` und `LLAMA_MODEL_PATH` überschreiben. zid nutzt nur lokale Backends; Cloud-
 Anbieter (Claude, OpenAI) sind eine Entscheidung des Projektinhabers dagegen. RPC `chat_state`,
 E2E `python3 scripts/e2e_ai_chat.py` und `scripts/e2e_ai_tools.py`.
 
@@ -458,8 +459,8 @@ Drei Regeln aus der Messreihe vom 17.09.2026
 (`llm-bench/results/windows-i5-13500T-gemma4-vs-qwen3.md`, Laptop-Gegenprobe
 `linux-p1000-gemma4-vs-qwen3.md`):
 
-- **Thinking aus.** llama-server bekommt `--chat-template-kwargs {"enable_thinking":false}`,
-  Ollama-Requests `reasoning_effort: "none"`. Denkende Modelle (gemma4) streamen sonst
+- **Thinking aus.** llama-server bekommt `--chat-template-kwargs {"enable_thinking":false}`.
+  Denkende Modelle (gemma4) streamen sonst
   20–30 s `reasoning`, bevor das erste `content`-Delta kommt. `--reasoning-budget 0` und
   `think: false` wirken nicht.
 - **Werkzeug-Prompt klein halten.** Das `command`-Werkzeug trägt die Kommandos nur als
@@ -469,7 +470,22 @@ Drei Regeln aus der Messreihe vom 17.09.2026
   `prompt_ms`) — vor Prompt-Änderungen vorher/nachher ablesen.
 - **Enum-Wert als Werkzeugname** (`toggle_explorer` statt `command{name}`) führt
   `agent_actions` als Kommando aus (`ai_tools.commandFromToolName`), statt „unknown tool"
-  zu melden; kleine Modelle über Ollama tun das.
+  zu melden; kleine Modelle tun das.
+
+## Selbsteinrichtung der KI (`src/ai/setup.zig`, `download.zig`, `install.zig`, `selfsetup.zig`)
+
+- Ein installiertes zid hat kein `engines/` und `models/` neben sich. Fehlt beides, lädt der
+  Chat auf Knopfdruck llama-server (gepinnt auf `b11062`, Vulkan-Build) und
+  `gemma-4-E2B-it-Q4_0.gguf` von ggml-org in `<AppData>/zid` bzw. `~/.local/share/zid`.
+- Geladen wird in `<ziel>.part`, umbenannt erst am Schluss; eine abgebrochene Übertragung
+  setzt per Range-Header auf. **`File.Writer` schreibt positional ab 0**: ohne `fw.pos = have`
+  überschreibt die Fortsetzung die schon geladenen Bytes und die Datei wächst nie.
+- Kein eigener zählender Writer: der müsste Zigs Pufferprotokoll bedienen (erst
+  `w.buffer[0..w.end]`, dann `data`, Rückgabe = aus `data` verbrauchte Bytes). Ein Writer, der
+  das nicht tut, meldet nie Fortschritt und `fetch` dreht sich endlos. Der Fortschritt kommt
+  deshalb aus der Grösse der `.part`-Datei.
+- Die Release-Archive sind unterschiedlich gebaut: Windows-ZIP flach, Linux-Tar mit
+  `llama-<tag>/` davor (`install.stripComponents`).
 
 ## Engines und Modelle (`engines/`, `models/`, `llm-bench/`)
 
