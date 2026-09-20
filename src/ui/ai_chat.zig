@@ -74,6 +74,7 @@ pub const AIChatState = struct {
     is_loading: bool = false,
     /// Selbsteinrichtung: Engine und Modell ins Datenverzeichnis holen, wenn zid
     /// ohne Quellbaum läuft (installierte Fassung). Null = nicht verfügbar.
+    /// Eigentum des Chats: `deinit` gibt ihn frei.
     self_setup: ?*ai_selfsetup.SelfSetup = null,
     /// Nach abgeschlossener Einrichtung einmalig den Agenten neu verbinden.
     self_setup_applied: bool = false,
@@ -167,6 +168,15 @@ pub const AIChatState = struct {
 
     pub fn deinit(self: *Self) void {
         self.stop_flag.store(true, .seq_cst);
+
+        // Der Vorgang gehört dem Chat, sobald er ihm übergeben wurde (UI.init legt ihn
+        // an). `deinit` wartet auf den Ladethread, sonst schriebe er in freigegebenen
+        // Speicher weiter.
+        if (self.self_setup) |st| {
+            st.deinit();
+            self.allocator.destroy(st);
+            self.self_setup = null;
+        }
 
         for (self.messages.items) |*msg| {
             msg.md.deinit();
@@ -831,6 +841,16 @@ const scrollbar_width: f32 = 8.0;
 const splitter_height: f32 = 6.0;
 const splitter_hit_height: f32 = 12.0;
 
+/// Farbe aufhellen (Hover-Zustand der Schaltflächen).
+fn brighten(c: clay.Color, amount: f32) clay.Color {
+    return .{
+        @min(255, c[0] + amount),
+        @min(255, c[1] + amount),
+        @min(255, c[2] + amount),
+        c[3],
+    };
+}
+
 pub fn renderAIChat(
     arena: std.mem.Allocator,
     state: *AIChatState,
@@ -909,16 +929,32 @@ pub fn renderAIChat(
                 else
                     "KI einrichten (Engine 30 MB + Modell 2,7 GB laden)";
 
+                // Auffällig genug, um als Schaltfläche gelesen zu werden: Akzentfarbe,
+                // Rahmen, grosszügige Polsterung. Grau auf Grau sah aus wie Beschriftung.
                 clay.UI()(.{
                     .id = setup_id,
                     .layout = .{
                         .sizing = .{ .w = .fit, .h = .fit },
-                        .padding = .{ .left = 8, .right = 8, .top = 4, .bottom = 4 },
+                        .padding = .{ .left = 16, .right = 16, .top = 10, .bottom = 10 },
+                        .child_alignment = .{ .x = .center, .y = .center },
                     },
-                    .background_color = if (running) .{ 100, 100, 100, 255 } else if (hovered) theme.primary else theme.border,
-                    .corner_radius = .all(4),
+                    .background_color = if (running)
+                        theme.surface
+                    else if (hovered)
+                        brighten(theme.primary, 30)
+                    else
+                        theme.primary,
+                    .corner_radius = .all(6),
+                    .border = .{
+                        .width = .all(2),
+                        .color = if (running) theme.border else if (hovered) theme.border_focus else theme.accent,
+                    },
                 })({
-                    clay.text(label, .{ .font_size = 12, .color = .{ 255, 255, 255, 255 } });
+                    clay.text(label, .{
+                        .font_size = 15,
+                        .color = if (running) theme.text else theme.text_on_primary,
+                        .wrap_mode = .none,
+                    });
                 });
 
                 if (running) {
