@@ -764,6 +764,7 @@ pub const TextSystem = struct {
         self.emoji_tried = true;
 
         for (emoji_font.candidates) |path| {
+            if (!emoji_font.exists(path)) continue;
             if (self.tryEmojiFace(path, size)) return &self.emoji_face.?;
         }
 
