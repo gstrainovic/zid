@@ -40,6 +40,25 @@ sudo dnf copr enable gstrainovic/zid
 sudo dnf install zid
 ```
 
+## Installation (Windows)
+
+Am Release hängt `zid-0.1.1-x86_64-windows.zip` (gebaut von GitHub Actions).
+Entpacken, `zid.exe` starten — daneben braucht es nichts, Schrift und Shader
+stecken im Binary.
+
+Emoji bleiben unter Windows leere Kästchen: dort läuft der Text über DirectWrite,
+und die Rückfall-Kette auf eine Emoji-Schrift gibt es bisher nur unter Linux.
+
+Die Manifeste für Scoop (`packaging/scoop/zid.json`) und WinGet
+(`packaging/winget/`) hängen an denselben Release-Dateien. Eingereicht sind sie
+noch nicht: Scoop braucht einen eigenen Bucket, WinGet einen Pull Request nach
+`microsoft/winget-pkgs`. Prüfen lassen sie sich vorher lokal:
+
+```powershell
+scoop install packaging\scoop\zid.json
+winget validate --manifest packaging\winget
+```
+
 ### Voraussetzungen
 
 Eine GPU mit Vulkan-Treiber und die üblichen Desktop-Bibliotheken (freetype,

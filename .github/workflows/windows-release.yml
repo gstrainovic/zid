@@ -12,6 +12,11 @@ on:
 env:
   ZIG_VERSION: 0.15.2
 
+# Das Standardtoken darf nur lesen; ohne das Recht bricht der letzte Schritt mit
+# `HTTP 403: Resource not accessible by integration` ab, nachdem alles gebaut ist.
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-latest

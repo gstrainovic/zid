@@ -1,0 +1,31 @@
+{
+    "version": "0.1.1",
+    "description": "GPU-beschleunigter Editor mit Markdown-Vorschau, PDF-Anzeige und lokaler KI",
+    "homepage": "https://github.com/gstrainovic/zid",
+    "license": "AGPL-3.0-only",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/gstrainovic/zid/releases/download/v0.1.1/zid-0.1.1-x86_64-windows.zip",
+            "hash": "2fa9bc3b7d3b50b8059515de656250f465638564ec6cddc4eb7515a82fbceb5e",
+            "extract_dir": "zid-0.1.1-x86_64-windows"
+        }
+    },
+    "bin": "zid.exe",
+    "shortcuts": [
+        [
+            "zid.exe",
+            "zid"
+        ]
+    ],
+    "checkver": {
+        "github": "https://github.com/gstrainovic/zid"
+    },
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/gstrainovic/zid/releases/download/v$version/zid-$version-x86_64-windows.zip",
+                "extract_dir": "zid-$version-x86_64-windows"
+            }
+        }
+    }
+}
