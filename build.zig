@@ -589,6 +589,33 @@ pub fn build(b: *std.Build) void {
     const run_asset_path_tests = b.addRunArtifact(asset_path_tests);
     run_asset_path_tests.has_side_effects = true;
 
+    // Selbsteinrichtung der KI: Pfade im Datenverzeichnis, fehlende Teile, Quellen.
+    const ai_setup_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("src/ai/setup.zig"),
+        .target = target,
+        .optimize = optimize,
+    }) });
+    const run_ai_setup_tests = b.addRunArtifact(ai_setup_tests);
+    run_ai_setup_tests.has_side_effects = true;
+
+    // Engine und Modell auspacken.
+    const ai_install_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("src/ai/install.zig"),
+        .target = target,
+        .optimize = optimize,
+    }) });
+    const run_ai_install_tests = b.addRunArtifact(ai_install_tests);
+    run_ai_install_tests.has_side_effects = true;
+
+    // Download mit Fortschritt (Teildatei, Wiederaufnahme).
+    const ai_download_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("src/ai/download.zig"),
+        .target = target,
+        .optimize = optimize,
+    }) });
+    const run_ai_download_tests = b.addRunArtifact(ai_download_tests);
+    run_ai_download_tests.has_side_effects = true;
+
     // Entpacken der eingebauten Schrift ins Datenverzeichnis (Windows-Pfad).
     const font_cache_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("src/text/font_cache.zig"),
@@ -844,6 +871,9 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_display_check_tests.step);
     test_step.dependOn(&run_asset_path_tests.step);
     test_step.dependOn(&run_font_cache_tests.step);
+    test_step.dependOn(&run_ai_setup_tests.step);
+    test_step.dependOn(&run_ai_download_tests.step);
+    test_step.dependOn(&run_ai_install_tests.step);
     test_step.dependOn(&run_wheel_tests.step);
     test_step.dependOn(&run_pdf_nav_tests.step);
     test_step.dependOn(&run_context_menu_tests.step);
