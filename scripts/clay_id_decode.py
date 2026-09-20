@@ -3,7 +3,7 @@
 
 Port von Clay__HashString; probiert alle ID-Namen aus src/ mit Index 0..LIMIT (IDI) durch.
 Zeiger-gesalzene IDs (IDI(name, @intFromPtr(...))) sind nicht rückrechenbar und werden als
-„unbekannt“ gemeldet. Aufruf: python3 scripts/clay_id_decode.py <id> [<id> ...]
+„unbekannt“ gemeldet. Aufruf: python3 scripts/clay_id_decode.py <id> [<id> ...] [--parent <eltern-id>]
 """
 import os, re, subprocess, sys
 
@@ -28,8 +28,13 @@ def clay_hash(key: bytes, offset: int, seed: int = 0) -> int:
 
 
 def id_names():
-    out = subprocess.run(["rg", "-o", "-h", "--no-filename", r'ElementId\.(ID|IDI|localID|localIDI)\("[A-Za-z0-9_]+"', "src"],
-                         cwd=ROOT, capture_output=True, text=True).stdout
+    # Kein "-h": das ist bei ripgrep --help. Mit dem Flag gab rg die Hilfe aus, die
+    # Namensliste blieb leer und jede ID galt als „unbekannt".
+    res = subprocess.run(["rg", "-o", "--no-filename", r'ElementId\.(ID|IDI|localID|localIDI)\("[A-Za-z0-9_]+"', "src"],
+                         cwd=ROOT, capture_output=True, text=True)
+    if res.returncode not in (0, 1):
+        print(f"rg fehlgeschlagen ({res.returncode}): {res.stderr.strip()[:200]}", file=sys.stderr)
+    out = res.stdout
     names = set(re.findall(r'"([A-Za-z0-9_]+)"', out))
     # Dynamische Präfixe (allocPrint "md_run_…", "ai_msg_…", "menu_item_…") grob abdecken
     names |= {"md_run", "ai_msg", "menu_item_", "tab_menu_", "editor_menu_", "md_menu_", "term_menu_", "fx_menu_"}
@@ -37,18 +42,33 @@ def id_names():
 
 
 def main():
-    targets = {int(a) for a in sys.argv[1:]}
-    if not targets:
+    args = [a for a in sys.argv[1:]]
+    if not args:
         print(__doc__)
         return
+
+    # `--parent N`: Clay salzt jede ID mit dem Elternelement (Clay__HashString(name, i, parent)).
+    # Ohne den Wert lassen sich nur IDs unter der Wurzel zurückrechnen; das Log nennt beide
+    # Zahlen ("duplicate_id id=… unter Elternelement id=…").
+    parents = [0]
+    if "--parent" in args:
+        i = args.index("--parent")
+        parents = [int(args[i + 1]), 0]
+        del args[i:i + 2]
+
+    targets = {int(a) for a in args}
     names = id_names()
     found = {}
     for name in names:
         key = name.encode()
-        for idx in range(LIMIT):
-            h = clay_hash(key, idx)
-            if h in targets:
-                found.setdefault(h, []).append(f'{name}' if idx == 0 else f'IDI("{name}", {idx})')
+        for parent in parents:
+            for idx in range(LIMIT):
+                h = clay_hash(key, idx, parent)
+                if h in targets:
+                    label = name if idx == 0 else f'IDI("{name}", {idx})'
+                    if parent:
+                        label += f" (unter Elternelement {parent})"
+                    found.setdefault(h, []).append(label)
     for t in sorted(targets):
         print(f"{t}: {', '.join(found.get(t, ['unbekannt (zeiger-gesalzen oder dynamischer Name)']))}")
 

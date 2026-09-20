@@ -127,7 +127,12 @@ in zwei Panes. Chat und Terminal kopiert `TabBarState.cloneFrom` gar nicht erst,
 (Chat-Eingabe ist ein CodeEditor) kann nur einmal je Frame gezeichnet werden; sie bleiben in der
 ersten Hälfte, die die ursprüngliche Tab-Leiste übernimmt.
 
-`duplicate_id` nennt das Element nicht. `UI.clayError` loggt je Elternelement einmal dessen ID;
+Seit dem Clay-Patch nennt das Log die doppelte ID selbst:
+`duplicate_id id=… unter Elternelement id=…`, dazu beim ersten Auftreten einer Sitzung
+eine Liste aller mehrfach vergebenen IDs mit Box und Text (`UI.logDuplicateIds`).
+`python3 scripts/clay_id_decode.py <id> [--parent <eltern-id>]` löst beide auf.
+
+Historisch: `duplicate_id` nannte das Element nicht. `UI.clayError` loggt je Elternelement einmal dessen ID;
 `python3 scripts/clay_id_decode.py <id>` rechnet sie auf einen Namen zurück (nur ungesalzene IDs).
 Zuverlässiger: headless mit `ZID_DEBUG=1` einen Screenshot ziehen und im Command-Dump nach
 mehrfach vorkommenden `id=` suchen, Box und Text zeigen dann das Element.
