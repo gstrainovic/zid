@@ -270,9 +270,11 @@ pub fn build(b: *std.Build) void {
         });
     }
 
-    // MuPDF-Font-Ressourcen mitkompilieren, wenn MuPDF statisch dazukommt.
-    // Mit System-libmupdf stecken die Fonts schon in der .so.
-    if (target.result.os.tag == .windows or mupdf_source == .bundled) {
+    // MuPDF-Font-Ressourcen nur unter Windows mitkompilieren: dort baut das
+    // Makefile mit TOFU und lässt sie aus dem Archiv. Der Linux-Build der Archive
+    // (siehe README) hat sie drin, ein zweites Mal übersetzt gäbe
+    // `duplicate symbol: _binary_Dingbats_cff`. Mit System-libmupdf stecken sie in der .so.
+    if (target.result.os.tag == .windows) {
         if (std.fs.cwd().openDir("libs/fancy-cat/deps/mupdf/generated/resources/fonts/urw", .{ .iterate = true })) |mut_dir| {
             var dir = mut_dir;
             defer dir.close();
