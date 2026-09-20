@@ -108,7 +108,6 @@ jobs:
           $name = "zid-$version-x86_64-windows"
           New-Item -ItemType Directory -Path $name | Out-Null
           Copy-Item out\bin\zid.exe $name\
-          Copy-Item -Recurse out\bin\fonts $name\fonts
           Copy-Item README.md, LICENSE $name\
           Compress-Archive -Path $name -DestinationPath "$name.zip"
           "zip=$name.zip" | Out-File -FilePath $env:GITHUB_OUTPUT -Append

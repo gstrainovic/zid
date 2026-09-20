@@ -301,18 +301,6 @@ pub fn build(b: *std.Build) void {
         }
     }
 
-    // Windows lädt die Schrift aus einer Datei (DirectWrite kennt keine Schrift aus
-    // dem Speicher): sie muss neben der exe liegen, sonst startet ein installiertes
-    // zid ohne Text. Unter Linux steckt sie im Binary.
-    if (target.result.os.tag == .windows) {
-        const font_install = b.addInstallFileWithDir(
-            b.path("fonts/JetBrainsMono-Regular.ttf"),
-            .{ .custom = "bin/fonts" },
-            "JetBrainsMono-Regular.ttf",
-        );
-        b.getInstallStep().dependOn(&font_install.step);
-    }
-
     b.installArtifact(exe);
 
     // Run the app
@@ -601,6 +589,15 @@ pub fn build(b: *std.Build) void {
     const run_asset_path_tests = b.addRunArtifact(asset_path_tests);
     run_asset_path_tests.has_side_effects = true;
 
+    // Entpacken der eingebauten Schrift ins Datenverzeichnis (Windows-Pfad).
+    const font_cache_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("src/text/font_cache.zig"),
+        .target = target,
+        .optimize = optimize,
+    }) });
+    const run_font_cache_tests = b.addRunArtifact(font_cache_tests);
+    run_font_cache_tests.has_side_effects = true;
+
     // Mausrad → Zeilen-Delta: reine Funktion, damit das Vorzeichen testbar ist.
     const wheel_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("src/platform/wheel.zig"),
@@ -846,6 +843,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_wio_keysym_tests.step);
     test_step.dependOn(&run_display_check_tests.step);
     test_step.dependOn(&run_asset_path_tests.step);
+    test_step.dependOn(&run_font_cache_tests.step);
     test_step.dependOn(&run_wheel_tests.step);
     test_step.dependOn(&run_pdf_nav_tests.step);
     test_step.dependOn(&run_context_menu_tests.step);

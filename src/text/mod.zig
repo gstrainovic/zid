@@ -50,6 +50,9 @@ pub const backends = struct {
 /// Eingebaute Schrift. zid liest sie aus dem Binary, damit ein installiertes zid
 /// ohne Datenverzeichnis und aus jedem Arbeitsverzeichnis startet.
 pub const builtin_font = @import("builtin_font").data;
+/// Dateiname der entpackten Schrift im Datenverzeichnis (siehe font_cache.zig).
+pub const builtin_font_name = "JetBrainsMono-Regular.ttf";
+const font_cache = @import("font_cache.zig");
 
 // Font config
 pub const FontConfig = struct {
@@ -96,6 +99,23 @@ pub const TextRenderer = struct {
                 log.debug("Built-in font loaded ({d} bytes)", .{data.len});
             } else |err| {
                 log.debug("Built-in font unavailable ({s}), falling back to path", .{@errorName(err)});
+            }
+        }
+        if (!loaded) {
+            // Backend ohne Speicher-Schrift (DirectWrite): die eingebaute Schrift einmalig
+            // ins Datenverzeichnis schreiben und von dort laden. Der Nutzer bekommt damit
+            // eine einzelne Programmdatei, keinen fonts-Ordner daneben.
+            if (config.font_data) |data| {
+                if (font_cache.ensure(allocator, builtin_font_name, data)) |path| {
+                    defer allocator.free(path);
+                    ts_ptr.loadFont(path, config.size) catch |err| {
+                        log.warn("Eingebaute Schrift aus {s} nicht ladbar: {s}", .{ path, @errorName(err) });
+                    };
+                    loaded = ts_ptr.current_face != null;
+                    if (loaded) log.debug("Built-in font unpacked to {s}", .{path});
+                } else |err| {
+                    log.warn("Eingebaute Schrift nicht entpackbar: {s}", .{@errorName(err)});
+                }
             }
         }
         if (!loaded) {
