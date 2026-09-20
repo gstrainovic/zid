@@ -1,0 +1,104 @@
+# Windows-Binary bauen. Nativ auf einem Windows-Runner, nicht per Cross-Build:
+# MuPDFs Makefile führt während des Bauens Hilfsprogramme aus, und Zig findet die
+# mingw-Bibliotheken (OleAut32, Ole32) nur auf einem Dateisystem ohne
+# Gross-/Kleinschreibung. Beides scheitert beim Cross-Build von Linux aus.
+name: windows-release
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+env:
+  ZIG_VERSION: 0.15.2
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      # Der tree-sitter-Tarball enthält Symlinks; ohne Entwicklermodus bricht
+      # `zig build` mit `unable to create symlink ... PermissionDenied` ab.
+      - name: Symlinks erlauben
+        shell: pwsh
+        run: |
+          reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock" `
+            /t REG_DWORD /f /v AllowDevelopmentWithoutDevLicense /d 1
+
+      - name: Zig ${{ env.ZIG_VERSION }}
+        shell: pwsh
+        run: |
+          $url = "https://ziglang.org/download/$env:ZIG_VERSION/zig-x86_64-windows-$env:ZIG_VERSION.zip"
+          Invoke-WebRequest -Uri $url -OutFile zig.zip
+          Expand-Archive zig.zip -DestinationPath C:\zig
+          "C:\zig\zig-x86_64-windows-$env:ZIG_VERSION" | Out-File -FilePath $env:GITHUB_PATH -Append
+      - run: zig version
+        shell: pwsh
+
+      - name: make bereitstellen
+        shell: pwsh
+        run: choco install make --no-progress -y
+
+      # MuPDF ändert sich nur, wenn das Submodul wechselt.
+      - name: MuPDF-Archive aus dem Cache
+        id: mupdf-cache
+        uses: actions/cache@v6
+        with:
+          path: libs/fancy-cat/deps/mupdf/build/release
+          key: mupdf-${{ runner.os }}-${{ env.ZIG_VERSION }}-${{ hashFiles('.gitmodules') }}-1.26.5
+
+      # Flags wie in der README: zig cc, damit CRT-Header und Import-Bibliotheken zum
+      # Ziel x86_64-windows-gnu passen; TOFU lässt die Fonts aus dem Archiv, build.zig
+      # kompiliert die URW-Schriften separat dazu.
+      - name: MuPDF bauen
+        if: steps.mupdf-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          cd libs/fancy-cat/deps/mupdf
+          make -j4 libs CC="zig cc" AR="zig ar" HAVE_X11=no HAVE_GLUT=no HAVE_OBJCOPY=no \
+               tools=no apps=no XCFLAGS="-w -msse4.1 -DTOFU -DTOFU_CJK"
+
+      - name: zid bauen
+        shell: pwsh
+        run: zig build -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseSafe --prefix out
+
+      # Rauchtest: startet die exe überhaupt und findet sie ihre DLLs?
+      - name: Version prüfen
+        shell: pwsh
+        run: |
+          .\out\bin\zid.exe --version
+          if ($LASTEXITCODE -ne 0) { throw "zid.exe --version fehlgeschlagen" }
+
+      - name: Paket schnüren
+        id: package
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path build.zig.zon -Pattern '\.version = "([^"]+)"').Matches[0].Groups[1].Value
+          $name = "zid-$version-x86_64-windows"
+          New-Item -ItemType Directory -Path $name | Out-Null
+          Copy-Item out\bin\zid.exe $name\
+          Copy-Item -Recurse out\bin\fonts $name\fonts
+          Copy-Item README.md, LICENSE $name\
+          Compress-Archive -Path $name -DestinationPath "$name.zip"
+          "zip=$name.zip" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: zid-windows-${{ steps.package.outputs.version }}
+          path: ${{ steps.package.outputs.zip }}
+
+      # Nur bei einem Tag: ans zugehörige Release hängen.
+      # Werte über env statt direkt in die Kommandozeile: ein Tag-Name ist Eingabe
+      # von aussen und hat in einer Shell-Zeile nichts verloren.
+      - name: Ans Release hängen
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          ZIP: ${{ steps.package.outputs.zip }}
+        run: gh release upload "$env:TAG" "$env:ZIP" --clobber
