@@ -2,20 +2,20 @@
 # MuPDFs Makefile führt während des Bauens Hilfsprogramme aus, und Zig findet die
 # mingw-Bibliotheken (OleAut32, Ole32) nur auf einem Dateisystem ohne
 # Gross-/Kleinschreibung. Beides scheitert beim Cross-Build von Linux aus.
+#
+# Läuft als Teil von release.yml (Tag v*) oder einzeln von Hand; das Zip landet als
+# Artefakt `zid-windows`, ans Release hängt es erst release.yml.
 name: windows-release
 
 on:
   workflow_dispatch:
-  push:
-    tags: ['v*']
+  workflow_call:
 
 env:
   ZIG_VERSION: 0.15.2
 
-# Das Standardtoken darf nur lesen; ohne das Recht bricht der letzte Schritt mit
-# `HTTP 403: Resource not accessible by integration` ab, nachdem alles gebaut ist.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -129,17 +129,5 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          name: zid-windows-${{ steps.package.outputs.version }}
+          name: zid-windows
           path: ${{ steps.package.outputs.zip }}
-
-      # Nur bei einem Tag: ans zugehörige Release hängen.
-      # Werte über env statt direkt in die Kommandozeile: ein Tag-Name ist Eingabe
-      # von aussen und hat in einer Shell-Zeile nichts verloren.
-      - name: Ans Release hängen
-        if: startsWith(github.ref, 'refs/tags/v')
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
-          ZIP: ${{ steps.package.outputs.zip }}
-        run: gh release upload "$env:TAG" "$env:ZIP" --clobber

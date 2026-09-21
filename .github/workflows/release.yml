@@ -1,0 +1,129 @@
+# Veröffentlichen, sobald packaging/release.sh einen Tag v* pusht:
+#   1. Linux-Tarball (Debian-12-Container, packaging/build-release.sh) und Windows-Zip
+#      (windows-release.yml) bauen
+#   2. Release als Entwurf anlegen, beides anhängen, dann veröffentlichen — erst dann
+#      sieht Scoops Excavator die Version, nie ein Release ohne Zip
+#   3. COPR (Fedora) und AUR anstossen, sofern die Zugangsdaten als Secret da sind
+# Scoop braucht hier nichts: der Excavator im Bucket gstrainovic/scoop-zid prüft alle
+# 4 Stunden das neueste Release (checkver/autoupdate im Manifest).
+#
+# Von Hand (workflow_dispatch) baut er nur, ohne zu veröffentlichen.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - name: Tarball bauen (Debian 12)
+        run: packaging/build-release.sh --engine docker
+      - uses: actions/upload-artifact@v7
+        with:
+          name: zid-linux
+          path: dist/zid-*-x86_64-linux.tar.xz*
+
+  windows:
+    uses: ./.github/workflows/windows-release.yml
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [linux, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      # Tag, build.zig.zon und Dateinamen müssen zusammenpassen, sonst zeigt das Release
+      # auf Archive mit anderer Version (release.sh setzt alles in einem Commit).
+      - name: Version prüfen
+        id: version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="$(sed -n 's/.*\.version = "\([^"]*\)".*/\1/p' build.zig.zon | head -1)"
+          [ "v$version" = "$TAG" ] || { echo "Tag $TAG passt nicht zu build.zig.zon ($version)"; exit 1; }
+          ls -la dist
+          test -f "dist/zid-$version-x86_64-linux.tar.xz"
+          test -f "dist/zid-$version-x86_64-windows.zip"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Release anlegen und veröffentlichen
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # Text aus dem neuesten AppStream-Eintrag (release.sh schreibt ihn)
+          python3 - > notes.md <<'PY'
+          import re
+          xml = open("packaging/io.github.gstrainovic.zid.metainfo.xml", encoding="utf-8").read()
+          first = re.search(r"<release [^>]*>(.*?)</release>", xml, re.S).group(1)
+          for p in re.findall(r"<p>(.*?)</p>", first, re.S):
+              print("- " + p.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&"))
+          PY
+          gh release create "$TAG" dist/* --draft --verify-tag --title "zid $VERSION" --notes-file notes.md
+          gh release edit "$TAG" --draft=false --latest
+
+  copr:
+    needs: publish
+    runs-on: ubuntu-latest
+    container: registry.fedoraproject.org/fedora:latest
+    env:
+      COPR_CONFIG: ${{ secrets.COPR_CONFIG }}
+      VERSION: ${{ needs.publish.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Ohne Secret COPR_CONFIG überspringen
+        if: env.COPR_CONFIG == ''
+        run: echo "::warning::Secret COPR_CONFIG fehlt, COPR nicht gebaut (Inhalt von ~/.config/copr)"
+      # copr-cli nimmt ein SRPM, keine Spec; Source0 kommt aus dem gerade
+      # veröffentlichten Release.
+      - name: SRPM bauen und an COPR schicken
+        if: env.COPR_CONFIG != ''
+        run: |
+          dnf install -y -q rpm-build copr-cli
+          mkdir -p ~/.config sources
+          printf '%s\n' "$COPR_CONFIG" > ~/.config/copr
+          curl -sSLf -o "sources/zid-$VERSION-x86_64-linux.tar.xz" \
+            "https://github.com/${GITHUB_REPOSITORY}/releases/download/v$VERSION/zid-$VERSION-x86_64-linux.tar.xz"
+          rpmbuild -bs --define "_topdir $PWD/rpm" --define "_sourcedir $PWD/sources" packaging/rpm/zid.spec
+          copr-cli build gstrainovic/zid rpm/SRPMS/zid-"$VERSION"-*.src.rpm
+
+  aur:
+    needs: publish
+    runs-on: ubuntu-latest
+    env:
+      AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Ohne Secret AUR_SSH_PRIVATE_KEY überspringen
+        if: env.AUR_SSH_PRIVATE_KEY == ''
+        run: echo "::warning::Secret AUR_SSH_PRIVATE_KEY fehlt, AUR nicht aktualisiert"
+      # updpkgsums setzt die Prüfsumme aus dem veröffentlichten Tarball, .SRCINFO
+      # erzeugt die Action neu.
+      - name: PKGBUILD nach zid-bin pushen
+        if: env.AUR_SSH_PRIVATE_KEY != ''
+        uses: KSXGitHub/github-actions-deploy-aur@v4.2.0
+        with:
+          pkgname: zid-bin
+          pkgbuild: packaging/aur/PKGBUILD
+          updpkgsums: true
+          commit_username: gstrainovic
+          commit_email: g.strainovic@gmail.com
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: zid-bin ${{ needs.publish.outputs.version }}

@@ -85,3 +85,21 @@ Aus AGENTS.md hierher verschoben (21.09.2026), Wortlaut unverändert.
 - Höchste benötigte Symbolversion ist `GLIBC_2.38`. Ein hier gebautes Binary läuft damit auf
   Fedora 39+, Ubuntu 24.04 und Debian 13, aber nicht auf Ubuntu 22.04 (2.35). Wer weiter
   zurück will, baut auf einer älteren Distribution oder gegen musl.
+
+## Veröffentlichen: `packaging/release.sh` + `release.yml`
+
+- `packaging/release.sh <x.y.z> "notes | more notes"` setzt die Version in allen Dateien
+  (Python, kein sed: freier Text mit `&`, `<`, `|`), committet, taggt und pusht.
+  `--dry-run` ändert nur Dateien; ausprobieren in einer Kopie außerhalb des Repos.
+- Der Tag startet `.github/workflows/release.yml`: `linux` (build-release.sh mit docker)
+  und `windows` (ruft `windows-release.yml` per `workflow_call`) laufen parallel, `publish`
+  legt das Release als Entwurf an, hängt beides an und veröffentlicht erst dann — Scoops
+  Excavator sieht so nie ein Release ohne Zip. `copr` und `aur` folgen, jeweils nur mit
+  Secret (`COPR_CONFIG`, `AUR_SSH_PRIVATE_KEY`), sonst Warnung und weiter.
+- `workflow_dispatch` von `release.yml` baut nur (Artefakte `zid-linux`, `zid-windows`),
+  ohne zu veröffentlichen — so lässt sich der Bau ohne Tag prüfen.
+- COPR baut aus einem SRPM (`rpmbuild -bs`, Source0 aus dem veröffentlichten Release);
+  mit der Spec direkt baute COPR 0.1.1 nicht.
+- Scoop: `bucket/zid.json` im Repo gstrainovic/scoop-zid ist die einzige Kopie des
+  Manifests. Dessen Excavator (`.github/workflows/excavator.yml`, ScoopInstaller/GithubActions)
+  läuft alle 4 Stunden, `gh workflow run excavator.yml -R gstrainovic/scoop-zid` sofort.
