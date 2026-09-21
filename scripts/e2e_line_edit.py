@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Headless-E2E für die Auswahl in den kleinen Editierfeldern (line_edit / EditBuffer):
-Commit-Nachricht (mehrzeilig) und Umbenennen im Explorer. Shift+Pfeile, Ctrl+Shift+Pfeile,
-Ctrl+A/C/X/V, Tippen ersetzt die Auswahl, Shift+Klick und Ziehen mit der Maus, Markierung
-als Element `<feld>_sel`. Aufruf: python3 scripts/e2e_line_edit.py
+"""Headless-E2E für die Auswahl in Editierfeldern: Commit-Nachricht (ein CodeEditor, Auswahl
+über `scm_state.changes.selected_text`) und Umbenennen im Explorer (line_edit / EditBuffer,
+Markierung als Element `<feld>_sel`). Shift+Pfeile, Ctrl+Shift+Pfeile, Ctrl+A/C/X/V, Tippen
+ersetzt die Auswahl, Shift+Klick und Ziehen mit der Maus. Aufruf: python3 scripts/e2e_line_edit.py
 """
-import os, sys
+import os, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from e2e_open_folder import ROOT, rpc, result_json, wait_port, settle, start_zid, stop_zid, check, bounds  # noqa: E402
@@ -17,6 +17,12 @@ def key(name, ctrl=False, shift=False):
 
 def msg():
     return result_json("scm_state")["changes"]["message"]
+
+
+def selected():
+    """Markierter Text im Commit-Feld. Es ist ein CodeEditor, die Auswahl hat kein eigenes
+    Element mehr (früher `sc_input_sel` aus line_edit)."""
+    return result_json("scm_state")["changes"]["selected_text"]
 
 
 def clip():
@@ -57,8 +63,7 @@ def step_commit_message():
     key("delete")
     check(msg() == "hall", f"Auswahl über den Umbruch gelöscht: {msg()!r}")
     key("a", ctrl=True)
-    b = sel_box("sc_input_sel", 0)
-    check(b["found"] and b["w"] > 10, f"Markierung als Rechteck im Feld: {b}")
+    check(selected() == "hall", f"Ctrl+A markiert alles: {selected()!r}")
     # Einfügen einzeilig in mehrzeiliges Feld: Umbruch bleibt erhalten
     rpc("type_text", ["a"]); settle(2)
     key("enter")
@@ -78,25 +83,23 @@ def step_commit_mouse():
     ib = bounds("sc_input_box")
     y = ib["y"] + 12
     rpc("click", [ib["x"] + 8, y]); settle(3)
-    # „Element ist weg“ ist in Clay nicht prüfbar (alte Geometrie bleibt): ohne Auswahl
-    # schneidet Ctrl+X nichts aus
-    key("x", ctrl=True)
-    check(msg() == "hallo welt", f"Klick hebt die Auswahl auf (Ctrl+X ändert nichts): {msg()!r}")
+    # Nicht über Ctrl+X prüfen: im CodeEditor schneidet es ohne Auswahl die Zeile aus (VS Code)
+    check(selected() == "" and msg() == "hallo welt", f"Klick hebt die Auswahl auf: {selected()!r}")
     rpc("click_mods", [ib["x"] + 200, y, False, True]); settle(3)
-    b = sel_box("sc_input_sel", 0)
-    check(b["found"] and b["w"] > 60, f"Shift+Klick markiert bis zum Klick: {b}")
+    check(selected() == "hallo welt", f"Shift+Klick markiert bis zum Klick: {selected()!r}")
     key("c", ctrl=True)
     check(clip() == "hallo welt", f"Shift+Klick-Auswahl kopiert: {clip()!r}")
+    # sonst zählt der Druck als Doppelklick auf den vorigen Klick und markiert das Wort
+    time.sleep(0.6)
     rpc("mouse_down", [ib["x"] + 8, y])
     rpc("move_mouse", [ib["x"] + 40, y]); settle(3)
-    b1 = sel_box("sc_input_sel", 0)
+    s1 = selected()
     rpc("move_mouse", [ib["x"] + 70, y]); settle(3)
-    b2 = sel_box("sc_input_sel", 0)
+    s2 = selected()
     rpc("mouse_up", [ib["x"] + 70, y]); settle(3)
-    check(b1["found"] and b2["found"] and b2["w"] > b1["w"], f"Ziehen erweitert die Markierung: {b1['w']:.0f} → {b2['w']:.0f}")
+    check(s1 and len(s2) > len(s1), f"Ziehen erweitert die Markierung: {s1!r} → {s2!r}")
     rpc("move_mouse", [ib["x"] + 20, y]); settle(3)
-    b3 = sel_box("sc_input_sel", 0)
-    check(abs(b3["w"] - b2["w"]) < 1, "nach dem Loslassen zieht Bewegen nicht weiter")
+    check(selected() == s2, "nach dem Loslassen zieht Bewegen nicht weiter")
 
 
 def step_rename():

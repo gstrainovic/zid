@@ -232,6 +232,9 @@ pub const CodeEditor = struct {
     /// Sprung zur Definition über einen Language Server (gesetzt vom UI); liefert true,
     /// wenn die Anfrage unterwegs ist — dann kein lokaler Textmuster-Sprung.
     definition_hook: ?DefinitionHook = null,
+    /// Zwischenablage der UI (gesetzt in `UI.ensureEditorHooks`): Fenster plus headless-Merker.
+    /// Ohne Hook nur das Fenster; headless blieb Ctrl+C im Commit-Feld und Chat dann leer.
+    clipboard_hook: ?ClipboardHook = null,
     /// Zeilennummernspalte (aus für Eingabefelder wie den KI-Chat)
     show_gutter: bool = true,
     /// Kontextmenü nur Cut/Copy/Paste (Eingabefeld: kein MD-Preview, kein Split)
@@ -1272,10 +1275,14 @@ pub const CodeEditor = struct {
                     self.cursor.col = 0;
                 }
             },
+            // Pos1/Ende heben die Auswahl auf wie jede andere Bewegung; sonst ersetzte das
+            // nächste Tippen oder Einfügen den noch markierten Text.
             .MoveLineStart => {
+                self.clearSelection();
                 self.cursor.move_begin();
             },
             .MoveLineEnd => {
+                self.clearSelection();
                 self.cursor.move_end(self.buffer.root, m);
             },
             .SelectLineStart => {
@@ -1537,9 +1544,7 @@ pub const CodeEditor = struct {
                 if (self.getSelectedText(self.allocator)) |text_opt| {
                     if (text_opt) |text| {
                         defer self.allocator.free(text);
-                        if (self.window) |win| {
-                            win.setClipboardText(text);
-                        }
+                        self.clipboardSet(text);
                     }
                 } else |err| {
                     std.log.err("Failed to copy text: {}", .{err});
@@ -1549,9 +1554,7 @@ pub const CodeEditor = struct {
                 if (self.getSelectedText(self.allocator)) |text_opt| {
                     if (text_opt) |text| {
                         defer self.allocator.free(text);
-                        if (self.window) |win| {
-                            win.setClipboardText(text);
-                        }
+                        self.clipboardSet(text);
                         _ = self.deleteSelection();
                     } else {
                         // Ohne Auswahl schneidet Ctrl+X die ganze Zeile aus (VS Code, Zed).
@@ -1561,11 +1564,9 @@ pub const CodeEditor = struct {
                             .end = .{ .row = row, .col = self.lineWidth(row) },
                         }) catch "";
                         defer if (line_text.len > 0) self.allocator.free(line_text);
-                        if (self.window) |win| {
-                            const with_eol = std.mem.concat(self.allocator, u8, &.{ line_text, "\n" }) catch line_text;
-                            defer if (with_eol.ptr != line_text.ptr) self.allocator.free(with_eol);
-                            win.setClipboardText(with_eol);
-                        }
+                        const with_eol = std.mem.concat(self.allocator, u8, &.{ line_text, "\n" }) catch line_text;
+                        defer if (with_eol.ptr != line_text.ptr) self.allocator.free(with_eol);
+                        self.clipboardSet(with_eol);
                         self.dispatchAction(.DeleteLine);
                     }
                 } else |err| {
@@ -1573,14 +1574,11 @@ pub const CodeEditor = struct {
                 }
             },
             .Paste => {
-                // Try window clipboard first
-                if (self.window) |win| {
-                    if (win.getClipboardText(self.allocator)) |text| {
-                        defer self.allocator.free(text);
-                        self.insertString(text) catch |err| {
-                            std.log.err("Failed to paste text: {}", .{err});
-                        };
-                    }
+                if (self.clipboardGet()) |text| {
+                    defer self.allocator.free(text);
+                    self.insertString(text) catch |err| {
+                        std.log.err("Failed to paste text: {}", .{err});
+                    };
                 }
             },
             .ShowContextMenu => {
@@ -2435,6 +2433,24 @@ pub const CodeEditor = struct {
         ctx: *anyopaque,
         func: *const fn (ctx: *anyopaque, editor: *CodeEditor, row: usize, col: usize) bool,
     };
+
+    pub const ClipboardHook = struct {
+        ctx: *anyopaque,
+        copy: *const fn (ctx: *anyopaque, text: []const u8) void,
+        /// Kopie des Inhalts, Aufrufer gibt mit dem übergebenen Allocator frei
+        paste: *const fn (ctx: *anyopaque, allocator: std.mem.Allocator) ?[]u8,
+    };
+
+    fn clipboardSet(self: *Self, text: []const u8) void {
+        if (self.clipboard_hook) |h| return h.copy(h.ctx, text);
+        if (self.window) |win| win.setClipboardText(text);
+    }
+
+    fn clipboardGet(self: *Self) ?[]u8 {
+        if (self.clipboard_hook) |h| return h.paste(h.ctx, self.allocator);
+        if (self.window) |win| return win.getClipboardText(self.allocator);
+        return null;
+    }
 
     pub fn gotoDefinition(self: *Self, row: usize, col: usize) void {
         if (self.definition_hook) |h| {

@@ -3,6 +3,7 @@
 //! Payload-Format ist plain-text (human readable + maschinell parsbar).
 
 const std = @import("std");
+const builtin = @import("builtin");
 const scheduler = @import("scheduler");
 const git_diff = @import("git_diff");
 const git_timeline = @import("git_timeline");
@@ -608,21 +609,42 @@ fn runGitCaptureStdin(alloc: std.mem.Allocator, cwd: []const u8, args: []const [
 /// wie `~/projects` nur mit Exit 128 zurückkamen.
 pub fn isInsideRepo(path: []const u8) bool {
     var buf: [std.fs.max_path_bytes]u8 = undefined;
-    var dir: []const u8 = std.fs.cwd().realpath(path, &buf) catch return false;
+    return repoTopLevel(path, &buf) != null;
+}
+
+/// Wurzel des Repos, in dem `path` liegt (Ordner mit `.git`), in `buf`; null ohne Repo.
+pub fn repoTopLevel(path: []const u8, buf: *[std.fs.max_path_bytes]u8) ?[]const u8 {
+    var dir: []const u8 = std.fs.cwd().realpath(path, buf) catch return null;
 
     while (true) {
         var candidate_buf: [std.fs.max_path_bytes]u8 = undefined;
-        const candidate = std.fmt.bufPrint(&candidate_buf, "{s}/.git", .{dir}) catch return false;
+        const candidate = std.fmt.bufPrint(&candidate_buf, "{s}/.git", .{dir}) catch return null;
         // access statt statFile: `.git` ist ein Ordner (statFile scheitert daran
         // unter Windows) oder bei Worktrees/Submodulen eine Datei — beides zählt.
         if (std.fs.cwd().access(candidate, .{})) |_| {
-            return true;
+            return dir;
         } else |_| {}
 
-        const parent = std.fs.path.dirname(dir) orelse return false;
-        if (parent.len == dir.len) return false;
+        const parent = std.fs.path.dirname(dir) orelse return null;
+        if (parent.len == dir.len) return null;
         dir = parent;
     }
+}
+
+/// Gleicher Pfad trotz `/` gegen `\` und (unter Windows) Groß/Klein: die Repo-Wurzel kommt
+/// von git, der Projektordner vom Dateisystem.
+pub fn samePath(a: []const u8, b: []const u8) bool {
+    const ta = std.mem.trimRight(u8, a, "/\\");
+    const tb = std.mem.trimRight(u8, b, "/\\");
+    if (ta.len != tb.len) return false;
+    for (ta, tb) |x, y| {
+        const nx: u8 = if (x == '\\') '/' else x;
+        const ny: u8 = if (y == '\\') '/' else y;
+        if (nx == ny) continue;
+        if (builtin.os.tag == .windows and std.ascii.toLower(nx) == std.ascii.toLower(ny)) continue;
+        return false;
+    }
+    return true;
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -636,6 +658,15 @@ test "isInsideRepo erkennt das eigene Repo und Unterordner" {
     const sub = try std.fs.path.join(alloc, &.{ cwd, "src", "git" });
     defer alloc.free(sub);
     try std.testing.expect(isInsideRepo(sub));
+
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    try std.testing.expect(samePath(repoTopLevel(sub, &buf).?, cwd));
+}
+
+test "samePath: Trenner und Endstrich egal, sonst genau" {
+    try std.testing.expect(samePath("C:/x/repo", "C:\\x\\repo\\"));
+    try std.testing.expect(!samePath("/x/repo", "/x/repo/sub"));
+    try std.testing.expect(!samePath("/x/repo", "/x/rep"));
 }
 
 test "isInsideRepo lehnt Ordner ohne Repo ab" {

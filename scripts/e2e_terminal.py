@@ -29,7 +29,9 @@ def step_scrollbar():
     print("--- Scrollbalken: Lage, Blättern, Ziehen, Pfeil-Cursor, gezeichnet")
     rpc("open_terminal"); settle(10)
     wait_for(lambda: term() is not None and term()["visible_rows"] > 5, "Terminal-Tab offen")
-    rpc("type_text", ["seq 1 400"]); key("enter")
+    # Windows-Shell ist cmd.exe (COMSPEC), dort gibt es kein seq
+    count_cmd = "for /L %i in (1,1,400) do @echo %i" if os.name == "nt" else "seq 1 400"
+    rpc("type_text", [count_cmd]); key("enter")
     wait_for(lambda: term()["total_rows"] > 400, "Ausgabe länger als der Bildschirm")
     settle(10)
     st = term()

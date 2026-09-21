@@ -312,6 +312,11 @@ fn writeScmChangesJson(ui: *ui_mod.UI, w: *std.Io.Writer) !void {
     try std.json.Stringify.value(v.buttonLabel(&label_buf), .{}, w);
     try w.print(", \"lines\": {d}, \"message\": ", .{ui.scm_changes.editor.lineCount()});
     try std.json.Stringify.value(ui.scm_changes.messageText(), .{}, w);
+    // Markierter Text im Commit-Feld (CodeEditor zeichnet die Auswahl ohne eigenes Element)
+    try w.writeAll(", \"selected_text\": ");
+    const selected = ui.scm_changes.editor.getSelectedText(ui.allocator) catch null;
+    defer if (selected) |s| ui.allocator.free(s);
+    try std.json.Stringify.value(@as([]const u8, selected orelse ""), .{}, w);
     try w.writeAll(", \"validation\": ");
     try std.json.Stringify.value(ui.scm_changes.validation, .{}, w);
     try w.writeAll(", \"groups\": {");
@@ -1259,9 +1264,11 @@ fn terminalState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     var pane = ui.active_pane;
     while (pane.data == .split) pane = pane.data.split.children[0];
     const pane_index: u32 = @truncate(@intFromPtr(pane));
+    // Bildschirmtext (ohne Scrollback): zeigt, ob die Shell überhaupt antwortet
+    const screen = term.getScreenText(dc.arena()) catch "";
     return std.fmt.allocPrint(dc.arena(),
-        \\{{"view_row": {d}, "total_rows": {d}, "visible_rows": {d}, "pane_index": {d}}}
-    , .{ term.view_row, term.totalRows(), term.visibleLineCount(), pane_index });
+        \\{{"view_row": {d}, "total_rows": {d}, "visible_rows": {d}, "pane_index": {d}, "exited": {}, "screen": {f}}}
+    , .{ term.view_row, term.totalRows(), term.visibleLineCount(), pane_index, term.exited, std.json.fmt(screen, .{}) });
 }
 
 fn uiState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
