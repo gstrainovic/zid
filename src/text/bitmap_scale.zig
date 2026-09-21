@@ -66,7 +66,53 @@ pub fn downscaleBgraToRgba(
     }
 }
 
+/// Eine Farbschicht über ein RGBA-Bild legen (Porter-Duff „over“, ohne Vormultiplikation):
+/// `coverage` ist die Graustufen-Deckung der Schicht je Pixel, `color` ihre Farbe (0..1, mit
+/// Alpha). DirectWrite liefert Farb-Emoji (COLR) als Folge solcher Schichten, jede ein
+/// einfarbiger Umriss (`TranslateColorGlyphRun`); übereinandergelegt ergibt das das Bild.
+pub fn blendLayer(dst: []u8, coverage: []const u8, color: [4]f32) void {
+    std.debug.assert(dst.len >= coverage.len * 4);
+    for (coverage, 0..) |cov, i| {
+        if (cov == 0) continue;
+        const a = @as(f32, @floatFromInt(cov)) / 255.0 * color[3];
+        if (a <= 0) continue;
+        const d = i * 4;
+        const da = @as(f32, @floatFromInt(dst[d + 3])) / 255.0;
+        const out_a = a + da * (1 - a);
+        inline for (0..3) |c| {
+            const dc = @as(f32, @floatFromInt(dst[d + c])) / 255.0;
+            const v = (color[c] * a + dc * da * (1 - a)) / out_a;
+            dst[d + c] = @intFromFloat(@round(std.math.clamp(v, 0, 1) * 255));
+        }
+        dst[d + 3] = @intFromFloat(@round(std.math.clamp(out_a, 0, 1) * 255));
+    }
+}
+
 const testing = std.testing;
+
+test "blendLayer: volle Deckung übernimmt die Farbe, keine lässt alles stehen" {
+    var dst = [_]u8{ 0, 0, 0, 0, 10, 20, 30, 255 };
+    blendLayer(&dst, &.{ 255, 0 }, .{ 1, 0, 0, 1 });
+    try testing.expectEqualSlices(u8, &.{ 255, 0, 0, 255 }, dst[0..4]);
+    try testing.expectEqualSlices(u8, &.{ 10, 20, 30, 255 }, dst[4..8]);
+}
+
+test "blendLayer: obere Schicht deckt die untere, halbe Deckung mischt" {
+    var dst = [_]u8{ 0, 0, 0, 0 };
+    blendLayer(&dst, &.{255}, .{ 1, 0, 0, 1 }); // rot
+    blendLayer(&dst, &.{255}, .{ 0, 0, 1, 1 }); // blau darüber
+    try testing.expectEqualSlices(u8, &.{ 0, 0, 255, 255 }, &dst);
+    blendLayer(&dst, &.{128}, .{ 1, 1, 1, 1 }); // halb weiss darüber
+    try testing.expectEqual(@as(u8, 255), dst[3]);
+    try testing.expect(dst[0] > 120 and dst[0] < 135);
+    try testing.expectEqual(@as(u8, 255), dst[2]);
+}
+
+test "blendLayer: halbe Deckung auf leerem Grund ergibt halbes Alpha in voller Farbe" {
+    var dst = [_]u8{ 0, 0, 0, 0 };
+    blendLayer(&dst, &.{255}, .{ 0, 1, 0, 0.5 });
+    try testing.expectEqualSlices(u8, &.{ 0, 255, 0, 128 }, &dst);
+}
 
 test "vier Pixel werden zu einem gemittelt" {
     // 2x2 deckend: Blau, Grün, Rot, Weiss (BGRA).

@@ -1079,6 +1079,8 @@ fn editorStateMain(ctx: *E2EContext, dc: *zigjr.DispatchCtx) anyerror![]const u8
         .begin = .{ .row = 0, .col = 0 },
         .end = .{ .row = last, .col = 100_000 },
     }) catch "";
+    // getTextInRange gibt eine eigene Kopie (leer: Literal) — sonst Leck je Abfrage
+    defer if (text.len > 0) ed.allocator.free(text);
     var buf = std.Io.Writer.Allocating.init(dc.arena());
     try buf.writer.print("{{\"lines\": {d}, \"row\": {d}, \"col\": {d}, \"view_row\": {d}, \"view_col\": {d}, \"view_cols\": {d}, \"find_open\": {}, \"find_not_found\": {}, \"find_query\": ", .{ lines, ed.cursor.row, ed.cursor.col, ed.view.row, ed.view.col, ed.view.cols, ed.find.active, ed.find.not_found });
     try std.json.Stringify.value(ed.find.text(), .{}, &buf.writer);

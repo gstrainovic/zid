@@ -6,12 +6,22 @@
 const std = @import("std");
 const dw = @import("bindings.zig");
 const types = @import("../../types.zig");
+const bitmap_scale = @import("../../bitmap_scale.zig");
 const font_face_mod = @import("../../font_face.zig");
 const windows = std.os.windows;
 
 const Metrics = types.Metrics;
 const GlyphMetrics = types.GlyphMetrics;
 const RasterizedGlyph = types.RasterizedGlyph;
+const ShapedGlyph = types.ShapedGlyph;
+const ShapedRun = types.ShapedRun;
+
+/// HarfBuzz aus MuPDFs Drittbibliothek, über `emoji_hb.c` (nur Windows gebaut).
+const HbGlyph = extern struct { glyph: c_uint, cluster: c_uint, x_advance: c_int, x_offset: c_int, y_offset: c_int };
+extern fn zid_hb_open(path: [*:0]const u8) ?*anyopaque;
+extern fn zid_hb_upem(h: *anyopaque) c_uint;
+extern fn zid_hb_shape(h: *anyopaque, text: [*]const u8, len: c_int, out: [*]HbGlyph, max: c_int) c_int;
+extern fn zid_hb_close(h: ?*anyopaque) void;
 const FontFace = font_face_mod.FontFace;
 
 const log = std.log.scoped(.text_dw);
@@ -28,6 +38,31 @@ fn ensureFactory() !*anyopaque {
     global_dw_factory = factory;
     return factory.?;
 }
+
+var global_dw_factory2: ?*anyopaque = null;
+
+/// IDWriteFactory2 für Farbschriften (Windows 8.1+), aus der vorhandenen Factory erfragt.
+fn ensureFactory2() !*anyopaque {
+    if (global_dw_factory2) |f| return f;
+    const factory = try ensureFactory();
+    var f2: ?*anyopaque = null;
+    const hr = dw.vtable(dw.IUnknown_VTable, factory).QueryInterface(factory, &dw.IID_IDWriteFactory2, &f2);
+    if (hr < 0 or f2 == null) return error.DWriteFactory2Unavailable;
+    global_dw_factory2 = f2;
+    return f2.?;
+}
+
+/// Kantenlänge der GDI-Bitmap, in die Glyphen gerastert werden, und Rand darin.
+const rt_size: u32 = 256;
+const rt_padding: f32 = 8.0;
+
+/// Deckung einer Schicht, Zwischenpuffer für `renderColorGlyph`. Gerastert wird unter der
+/// Sperre des Glyph-Caches, nie gleichzeitig.
+var layer_coverage: [rt_size * rt_size]u8 = undefined;
+
+/// Farbe für Schichten ohne eigene Farbe (Palette 0xFFFF = Textfarbe). Der Farbatlas kennt
+/// keine Textfarbe; hell, weil zid standardmässig dunkel ist.
+const foreground_color = [4]f32{ 0.85, 0.85, 0.85, 1 };
 
 fn ensureGdiInterop() !*anyopaque {
     if (global_gdi_interop) |i| return i;
@@ -47,6 +82,19 @@ pub const DirectWriteFace = struct {
     
     // Cache common objects
     render_target: ?*anyopaque = null,
+    /// HarfBuzz-Schrift für Emoji-Folgen (`enableShaping`), sonst null
+    hb: ?*anyopaque = null,
+    hb_upem: u32 = 0,
+    /// Gemerkte Antworten von `hasCodepoint` für die BMP (auf dem Heap, damit Kopien der Face
+    /// ihn teilen). Ohne ihn kostete jedes Formen ohne Cache-Treffer einen COM-Aufruf je
+    /// Zeichen über ASCII; die Vorschau von AGENTS.md wurde so langsam, dass e2e_md_preview
+    /// mitten im Scrollen mass.
+    cp_cache: ?*CodepointCache = null,
+
+    const CodepointCache = struct {
+        known: std.StaticBitSet(0x10000) = .initEmpty(),
+        has: std.StaticBitSet(0x10000) = .initEmpty(),
+    };
 
     const Self = @This();
 
@@ -95,11 +143,14 @@ pub const DirectWriteFace = struct {
             .cell_width = 0,
         };
 
+        const cp_cache = std.heap.page_allocator.create(CodepointCache) catch null;
+        if (cp_cache) |c| c.* = .{};
         return Self{
             .factory = factory,
             .font_face = face_ptr,
             .metrics = metrics,
             .point_size = size,
+            .cp_cache = cp_cache,
         };
     }
 
@@ -107,6 +158,8 @@ pub const DirectWriteFace = struct {
         if (self.render_target) |rt| {
             _ = dw.Release(rt);
         }
+        if (self.hb) |h| zid_hb_close(h);
+        if (self.cp_cache) |c| std.heap.page_allocator.destroy(c);
         _ = dw.Release(self.font_face);
         self.* = undefined;
     }
@@ -146,6 +199,230 @@ pub const DirectWriteFace = struct {
         };
     }
 
+    // ---- Emoji-Rückfall (Farbschrift, `TextSystem.ensureEmojiFace`) ----------------------
+
+    /// Hat die Schrift einen Glyph für dieses Zeichen?
+    pub fn hasCodepoint(self: *const Self, codepoint: u21) bool {
+        const c = self.cp_cache orelse return self.glyphIndex(codepoint) != 0;
+        if (codepoint >= 0x10000) return self.glyphIndex(codepoint) != 0;
+        if (c.known.isSet(codepoint)) return c.has.isSet(codepoint);
+        const has = self.glyphIndex(codepoint) != 0;
+        c.known.set(codepoint);
+        c.has.setValue(codepoint, has);
+        return has;
+    }
+
+    /// Zeiger, über den der Glyph-Cache Rückfall-Glyphen dieser Schrift rastert
+    /// (`GlyphCache.renderFallbackGlyph` → `renderColorGlyph`). Die Schrift liegt im
+    /// TextSystem und wandert nicht.
+    pub fn rawFace(self: *const Self) *anyopaque {
+        return @ptrCast(@constCast(self));
+    }
+
+    /// Emoji-Folgen formen können (nur die Emoji-Schrift, `TextSystem.tryEmojiFace`):
+    /// HarfBuzz lädt dieselbe Datei, die Glyph-IDs passen also zu DirectWrite.
+    pub fn enableShaping(self: *Self, path: []const u8) void {
+        var buf: [512:0]u8 = undefined;
+        if (path.len >= buf.len) return;
+        @memcpy(buf[0..path.len], path);
+        buf[path.len] = 0;
+        const h = zid_hb_open(&buf) orelse return;
+        self.hb = h;
+        self.hb_upem = zid_hb_upem(h);
+    }
+
+    /// Lauf mit HarfBuzz formen: ZWJ-Folgen, Hautton, Tasten und Flaggen werden zu einem
+    /// Glyph (GSUB-Ligaturen), was `SimpleShaper` nicht kann. null ohne HarfBuzz.
+    pub fn shapeRun(self: *const Self, text: []const u8, allocator: std.mem.Allocator) !?ShapedRun {
+        const h = self.hb orelse return null;
+        if (text.len == 0 or self.hb_upem == 0) return null;
+        // Nie mehr Glyphen als Bytes: jedes Zeichen ist mindestens ein Byte
+        const raw = try allocator.alloc(HbGlyph, text.len);
+        defer allocator.free(raw);
+        const n = zid_hb_shape(h, text.ptr, @intCast(text.len), raw.ptr, @intCast(raw.len));
+        if (n <= 0) return null;
+
+        const scale = self.point_size / @as(f32, @floatFromInt(self.hb_upem));
+        const glyphs = try allocator.alloc(ShapedGlyph, @intCast(n));
+        var width: f32 = 0;
+        for (raw[0..@intCast(n)], glyphs) |g, *out| {
+            const adv = @as(f32, @floatFromInt(g.x_advance)) * scale;
+            out.* = .{
+                .glyph_id = @intCast(g.glyph),
+                .x_offset = @as(f32, @floatFromInt(g.x_offset)) * scale,
+                .y_offset = @as(f32, @floatFromInt(g.y_offset)) * scale,
+                .x_advance = adv,
+                .y_advance = 0,
+                .cluster = g.cluster,
+            };
+            width += adv;
+        }
+        return ShapedRun{ .glyphs = glyphs, .width = width, .owned = true };
+    }
+
+    /// Vorschub eines Glyphs; der Emoji-Pfad fragt, wenn der Shaper 0 meldet.
+    pub fn strikeAdvance(self: *const Self, glyph_id: u16) f32 {
+        return self.glyphMetrics(glyph_id).advance_x;
+    }
+
+    /// Liefert DirectWrite für diese Schrift Farbschichten? Name wie beim FreeType-Backend
+    /// (dort Bitmap-Emoji); hier heisst es COLR, etwa Segoe UI Emoji. Geprüft an 😀.
+    pub fn isColorBitmapFont(self: *const Self) bool {
+        const glyph = self.glyphIndex(0x1F600);
+        if (glyph == 0) return false;
+        const factory2 = ensureFactory2() catch return false;
+        var ids = [_]u16{glyph};
+        var advances = [_]f32{0};
+        const run = dw.DWRITE_GLYPH_RUN{
+            .fontFace = self.font_face,
+            .fontEmSize = self.point_size,
+            .glyphCount = 1,
+            .glyphIndices = &ids,
+            .glyphAdvances = &advances,
+            .glyphOffsets = null,
+            .isSideways = windows.FALSE,
+            .bidiLevel = 0,
+        };
+        var layers: ?*anyopaque = null;
+        const hr = dw.vtable(dw.IDWriteFactory2_VTable, factory2).TranslateColorGlyphRun(factory2, 0, 0, &run, null, .NATURAL, null, 0, &layers);
+        if (hr < 0 or layers == null) return false;
+        _ = dw.Release(layers.?);
+        return true;
+    }
+
+    /// Farb-Emoji: DirectWrite zerlegt den Glyph in einfarbige Schichten
+    /// (`TranslateColorGlyphRun`), jede wird wie ein normaler Glyph in Graustufen gerastert
+    /// und mit ihrer Farbe über das Bild gelegt (`bitmap_scale.blendLayer`). Ergebnis RGBA ohne
+    /// Vormultiplikation wie beim FreeType-Pfad. Die Masse kommen aus der Em-Box: der
+    /// Grundglyph einer Farbschrift muss keinen eigenen Umriss haben.
+    pub fn renderColorGlyph(
+        self: *Self,
+        glyph_id: u16,
+        font_size: f32,
+        scale: f32,
+        subpixel_x: f32,
+        buffer: []u8,
+        buffer_size: u32,
+    ) !RasterizedGlyph {
+        const factory2 = try ensureFactory2();
+        const rt = try self.ensureRenderTarget();
+        const vt_rt = dw.vtable(dw.IDWriteBitmapRenderTarget_VTable, rt);
+        const hdc = vt_rt.GetMemoryDC(rt);
+
+        const ratio = font_size * scale / self.point_size;
+        const gm = self.glyphMetrics(glyph_id);
+        const ascent_px = @ceil(self.metrics.ascender * ratio);
+        const descent_px = @ceil(self.metrics.descender * ratio);
+        const width: u32 = @as(u32, @intFromFloat(@ceil(gm.advance_x * ratio))) + 2;
+        const height: u32 = @as(u32, @intFromFloat(ascent_px + descent_px)) + 2;
+        const pad: u32 = @intFromFloat(rt_padding);
+        if (width + pad > rt_size or height + pad > rt_size) return error.GlyphTooLarge;
+        if (width * height * 4 > buffer_size or width * height * 4 > buffer.len) return error.BufferTooSmall;
+
+        var ids = [_]u16{glyph_id};
+        var advances = [_]f32{0};
+        const run = dw.DWRITE_GLYPH_RUN{
+            .fontFace = self.font_face,
+            .fontEmSize = font_size * scale,
+            .glyphCount = 1,
+            .glyphIndices = &ids,
+            .glyphAdvances = &advances,
+            .glyphOffsets = null,
+            .isSideways = windows.FALSE,
+            .bidiLevel = 0,
+        };
+        const origin_x = rt_padding + subpixel_x;
+        const origin_y = rt_padding + ascent_px;
+        var layers: ?*anyopaque = null;
+        const hr = dw.vtable(dw.IDWriteFactory2_VTable, factory2).TranslateColorGlyphRun(
+            factory2,
+            origin_x,
+            origin_y,
+            &run,
+            null,
+            .NATURAL,
+            null,
+            0,
+            &layers,
+        );
+        if (hr < 0 and hr != dw.DWRITE_E_NOCOLOR) return error.ColorGlyphFailed;
+        defer if (layers) |l| {
+            _ = dw.Release(l);
+        };
+
+        var params: ?*anyopaque = null;
+        if (dw.vtable(dw.IDWriteFactory_VTable, self.factory).CreateRenderingParams(self.factory, &params) < 0) return error.RenderingParamsFailed;
+        defer _ = dw.Release(params.?);
+
+        const out = buffer[0 .. width * height * 4];
+        @memset(out, 0);
+        const cov = layer_coverage[0 .. width * height];
+
+        // Glyph ohne Farbschichten (Textform wie ⚠, Bausteine einer Folge wie der
+        // Zero-Width-Joiner): einfarbig in Vordergrundfarbe (else-Zweig unten). Ein
+        // Fehler hier liesse sonst das Zeichnen des ganzen Frames abbrechen.
+        if (layers) |en| {
+            const vt_en = dw.vtable(dw.IDWriteColorGlyphRunEnumerator_VTable, en);
+            while (true) {
+                var has_run: dw.BOOL = windows.FALSE;
+                if (vt_en.MoveNext(en, &has_run) < 0 or has_run == windows.FALSE) break;
+                var layer: *const dw.DWRITE_COLOR_GLYPH_RUN = undefined;
+                if (vt_en.GetCurrentRun(en, &layer) < 0) break;
+
+                _ = dw.PatBlt(hdc, 0, 0, @intCast(rt_size), @intCast(rt_size), 0x00000042); // BLACKNESS
+                if (vt_rt.DrawGlyphRun(rt, layer.baselineOriginX, layer.baselineOriginY, .NATURAL, &layer.glyphRun, params, 0x00FFFFFF, null) < 0) continue;
+                readCoverage(hdc, width, height, cov);
+                const color: [4]f32 = if (layer.paletteIndex == 0xFFFF)
+                    foreground_color
+                else
+                    .{ layer.runColor.r, layer.runColor.g, layer.runColor.b, layer.runColor.a };
+                bitmap_scale.blendLayer(out, cov, color);
+            }
+        } else {
+            _ = dw.PatBlt(hdc, 0, 0, @intCast(rt_size), @intCast(rt_size), 0x00000042); // BLACKNESS
+            if (vt_rt.DrawGlyphRun(rt, origin_x, origin_y, .NATURAL, &run, params, 0x00FFFFFF, null) >= 0) {
+                readCoverage(hdc, width, height, cov);
+                bitmap_scale.blendLayer(out, cov, foreground_color);
+            }
+        }
+
+        return RasterizedGlyph{
+            .width = width,
+            .height = height,
+            .offset_x = 0,
+            .offset_y = @intFromFloat(ascent_px),
+            .advance_x = gm.advance_x * (font_size / self.point_size),
+            .is_color = true,
+        };
+    }
+
+    /// GDI-Bitmap zum Rastern, einmal je Schrift angelegt (Graustufen-Kantenglättung).
+    fn ensureRenderTarget(self: *Self) !*anyopaque {
+        if (self.render_target) |rt| return rt;
+        const interop = try ensureGdiInterop();
+        var rt: ?*anyopaque = null;
+        const hr = dw.vtable(dw.IDWriteGdiInterop_VTable, interop).CreateBitmapRenderTarget(interop, null, rt_size, rt_size, &rt);
+        if (hr < 0 or rt == null) return error.RenderTargetCreationFailed;
+        _ = dw.vtable(dw.IDWriteBitmapRenderTarget_VTable, rt.?).SetTextAntialiasMode(rt.?, .GRAYSCALE);
+        self.render_target = rt;
+        return rt.?;
+    }
+
+    /// Deckung (Rotkanal, weiss auf schwarz gezeichnet) des Bereichs ab dem Rand lesen.
+    fn readCoverage(hdc: windows.HDC, width: u32, height: u32, out: []u8) void {
+        const dib = dw.GetCurrentObject(hdc, 7); // OBJ_BITMAP
+        var bitmap: dw.BITMAP = undefined;
+        _ = dw.GetObjectW(dib, @sizeOf(dw.BITMAP), &bitmap);
+        const pixels: [*]u8 = @ptrCast(bitmap.bmBits.?);
+        const pad: usize = @intFromFloat(@floor(rt_padding));
+        for (0..height) |y| {
+            for (0..width) |x| {
+                const src_idx = (y + pad) * @as(usize, @intCast(bitmap.bmWidthBytes)) + (x + pad) * 4;
+                out[y * width + x] = pixels[src_idx + 2];
+            }
+        }
+    }
+
     pub fn renderGlyphSubpixel(
         self: *Self,
         glyph_id: u16,
@@ -159,20 +436,7 @@ pub const DirectWriteFace = struct {
         _ = buffer_size;
         _ = subpixel_y;
 
-        const interop = try ensureGdiInterop();
-        
-        // Ensure render target is large enough (max glyph size 256x256)
-        if (self.render_target == null) {
-            var rt: ?*anyopaque = null;
-            const hr = dw.vtable(dw.IDWriteGdiInterop_VTable, interop).CreateBitmapRenderTarget(interop, null, 256, 256, &rt);
-            if (hr < 0) return error.RenderTargetCreationFailed;
-            self.render_target = rt;
-            
-            // Set grayscale antialiasing
-            _ = dw.vtable(dw.IDWriteBitmapRenderTarget_VTable, rt.?).SetTextAntialiasMode(rt.?, .GRAYSCALE);
-        }
-        
-        const rt = self.render_target.?;
+        const rt = try self.ensureRenderTarget();
         const vt_rt = dw.vtable(dw.IDWriteBitmapRenderTarget_VTable, rt);
 
         // Clear target to black

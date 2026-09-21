@@ -436,7 +436,9 @@ pub const UI = struct {
             const own_model = try ai_selfsetup.setup.modelPath(allocator, self_setup.root);
             defer allocator.free(own_model);
 
+            var engine_overridden = true;
             const server_path = std.process.getEnvVarOwned(allocator, "LLAMA_SERVER_PATH") catch |err| blk: {
+                engine_overridden = false;
                 if (err == error.EnvironmentVariableNotFound) break :blk try allocator.dupe(u8, if (engine_available)
                     default_engine
                 else
@@ -453,7 +455,9 @@ pub const UI = struct {
             };
             defer allocator.free(model_path);
             // Fehlt noch etwas, bleibt der Chat ohne Agent und zeigt den Einrichtungsknopf.
-            if (engine_available or own_ready) {
+            // LLAMA_SERVER_PATH allein genügt: vorher startete der Agent trotz Überschreibung
+            // nicht, wenn weder Repo noch Datenverzeichnis eine Engine hatten (Status „none“).
+            if (engine_available or own_ready or engine_overridden) {
                 ai_chat.initAgent(server_path, model_path) catch |err| {
                     log.err("AI agent init failed: {}. Chat will explain when used.", .{err});
                 };
