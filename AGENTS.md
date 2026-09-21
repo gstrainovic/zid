@@ -581,9 +581,11 @@ Drei Regeln aus der Messreihe vom 17.09.2026
 
 ## Engines und Modelle (`engines/`, `models/`, `llm-bench/`)
 
-Alles liegt im Repo. Layout, gepinnte Submodule, `fix-rpath.sh` und die Messregeln stehen in
-`.claude/skills/llm-local/SKILL.md`. Kurz: `engines/llama.cpp-vulkan` ist die einzige Engine
-(gepinnt, CPU und GPU in einem Build), `models/` hält GGUFs flach und ignoriert (nie committen),
+Keine Engine im Repo. Layout, `fix-rpath.sh` und die Messregeln stehen in
+`.claude/skills/llm-local/SKILL.md`. Kurz: `engines/` ist ignoriert; ein lokaler Build unter
+`engines/llama.cpp-vulkan` hat beim Start Vorrang, fehlt er, richtet zid die Engine selbst ein
+(siehe oben). Das Submodul fiel am 20.09.2026 weg (`6295283` benannte es nach `_engines/` um,
+`905fa9e` nahm es heraus). `models/` hält GGUFs flach und ignoriert (nie committen),
 `llm-bench/` ist ein `git subtree` mit historischen Protokollen, die nicht angefasst werden. Die
 BitNet-Engine und ihr Modell liegen nicht im Repo; `llm-bench/setup/linux.sh` holt und baut sie
 für Nachmessungen.

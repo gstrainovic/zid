@@ -114,9 +114,10 @@ RPC `chat_state`: Status, Detail, Titel, loading/initializing/downloading,
 
 ## Engines und Modelle
 
-**Layout:** `engines/llama.cpp-vulkan` (Submodul `9ee9fc0` = b10524, Build mit
-`GGML_VULKAN=ON`) ist die einzige Engine; derselbe Build läuft auf GPU und CPU. Der Build
-liegt unbeobachtet in `engines/llama.cpp-vulkan/build/`. `models/` hält alle GGUFs flach
+**Layout:** `engines/` ist ignoriert, kein Submodul mehr (seit 20.09.2026). Ein lokaler
+Build unter `engines/llama.cpp-vulkan/build/` (bisher b10524 = `9ee9fc0`, `GGML_VULKAN=ON`,
+derselbe Build für GPU und CPU) hat Vorrang; fehlt er, lädt die Selbsteinrichtung das
+Release `b11062`. Wer lokal baut, klont llama.cpp selbst dorthin. `models/` hält alle GGUFs flach
 (per `*.gguf` ignoriert, **nie committen**).
 
 **BitNet ist nicht im Repo.** zid nutzt es nicht (braucht eine eigene gepinnte Engine ohne
