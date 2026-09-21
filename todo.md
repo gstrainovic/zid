@@ -17,13 +17,13 @@ KI-Punkte: Wirkung vorab schätzen, vorher/nachher messen (`scripts/e2e_ai_read_
 4. **PDF-Auflösung uneinheitlich:** 1.5 beim Öffnen, 2.0 beim Blättern, fest statt aus der
    Pane-Größe; bei Größenänderung neu rendern.
 5. **Unicode-Fallfaltung fehlerhaft** (`libs/flow-core/src/buffer/unicode.zig`: × → ÷, ß → ÿ,
-   Σ/Τ, Č/Š/Ž und Kyrillisch fehlen). Heute ungenutzt; vor Groß-/Kleinschreibung (4.3) auf uucode
+   Σ/Τ, Č/Š/Ž und Kyrillisch fehlen). Heute ungenutzt; vor Groß-/Kleinschreibung (4.2) auf uucode
    umstellen wie flow.
 6. **Suche ignoriert Groß/Klein nur für ASCII** (`find_ops.zig` `eqlIgnoreCase`): „Ä“ findet
    kein „ä“.
-7. **KI-Download-Zweig veraltet:** `model_filename` und URL in `ai_chat.zig` zeigen auf
-   `gemma-4-E2B-it-Q4_K_M` (unsloth), das Standardmodell ist `gemma-4-E2B-it-Q4_0` (ggml-org,
-   `src/ai/paths.zig`); der Knopf erscheint nur für Ollama. Umstellen oder Zweig entfernen.
+7. **Toter KI-Download-Zweig:** `triggerDownload` in `ai_chat.zig` ruft niemand mehr auf (seit
+   `selfsetup.zig` lädt); `model_filename` (`Q4_K_M`, unsloth), `model_exists` und
+   `is_downloading` hängen noch daran, `chat_state` meldet sie. Entfernen.
 8. **Windows: Watcher folgt Symlink-Ordnern nicht.** `src/async/file_watcher_win.zig` hält ein
    `ReadDirectoryChangesW`-Handle auf die Wurzel mit `bWatchSubtree=TRUE`; Windows folgt dabei
    keinen Reparse-Points. Linux ist seit `bc6872c` behoben (`scripts/e2e_external_change.py`).
@@ -69,16 +69,13 @@ KI-Punkte: Wirkung vorab schätzen, vorher/nachher messen (`scripts/e2e_ai_read_
 ## 4. Komfort
 
 1. **Leerzeichen am Zeilenende beim Speichern entfernen** (abschaltbar, wie Autosave gemerkt).
-2. **Undo/Redo in einzeiligen Feldern** (`line_edit.zig`: Suche, Picker, Umbenennen,
-   Commit-Nachricht, Ordnerauswahl), schnelle Eingaben zu einem Schritt zusammenfassen (gooey
-   `widgets/edit_history.zig`).
-3. **Editier-Befehle:** Zeile darunter/darüber einfügen (Ctrl+Enter, Ctrl+Shift+Enter), Zeile
+2. **Editier-Befehle:** Zeile darunter/darüber einfügen (Ctrl+Enter, Ctrl+Shift+Enter), Zeile
    markieren (Ctrl+L), alle Vorkommen markieren (Ctrl+Shift+L), Groß-/Kleinschreibung (braucht
    2.5).
-4. **Editier-Komfort aus flow:** Smart Home (erst Codeanfang, dann Spalte 0), Smart Backspace (eine
+3. **Editier-Komfort aus flow:** Smart Home (erst Codeanfang, dann Spalte 0), Smart Backspace (eine
    Einrückstufe), Auswahl nach Syntaxbaum vergrößern/verkleinern, zur passenden Klammer springen,
    Zeilen verbinden, letzten Mehrfach-Cursor zurücknehmen, Cursor an alle Zeilenenden.
-5. **PDF-Ansicht** (Ideen aus fancy-cat, `src/ui/pdf_view.zig`, `src/ui/pdf_nav.zig`,
+4. **PDF-Ansicht** (Ideen aus fancy-cat, `src/ui/pdf_view.zig`, `src/ui/pdf_nav.zig`,
    `src/rendering/pdf_handler.zig`):
    1. Umschalten ganze Seite / volle Breite (heute immer volle Breite).
    2. Dunkelmodus: Seite in Theme-Farben umfärben (`fz_tint_pixmap`).
@@ -87,12 +84,12 @@ KI-Punkte: Wirkung vorab schätzen, vorher/nachher messen (`scripts/e2e_ai_read_
       freigeben.
    5. Zoom und Verschieben innerhalb der Seite (z. B. Ctrl+Rad), ohne das Blättern per Rad zu
       brechen.
-6. **IME:** wio liefert `preview_reset`/`preview_char`/`preview_cursor`, `platform/mod.zig` wirft
+5. **IME:** wio liefert `preview_reset`/`preview_char`/`preview_cursor`, `platform/mod.zig` wirft
    sie weg; Vorschautext unterstrichen zeichnen, Cursor-Rechteck an `enableTextInput` geben.
-7. **Schatten** für Dialoge, Menüs, Tooltips, Picker (gleicher Shader wie 2.2, `PRIM_SHADOW`).
-8. **Debug:** Clays eingebauten Debug-Modus (`setDebugModeEnabled`) per Kürzel schaltbar; später
+6. **Schatten** für Dialoge, Menüs, Tooltips, Picker (gleicher Shader wie 2.2, `PRIM_SHADOW`).
+7. **Debug:** Clays eingebauten Debug-Modus (`setDebugModeEnabled`) per Kürzel schaltbar; später
    Profiler-Overlay mit Zeiten je Phase (Layout, Render, Atlas-Upload).
-9. **Weiches Scrollen:** Pixel-Versatz statt ganzer Zeilen, Feder-Physik (gooey
+8. **Weiches Scrollen:** Pixel-Versatz statt ganzer Zeilen, Feder-Physik (gooey
    `animation/spring.zig`); `src/ui/animation.zig` wird bisher nirgends benutzt.
 
 ## Aufräumen
