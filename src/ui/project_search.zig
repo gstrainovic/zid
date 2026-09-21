@@ -339,6 +339,15 @@ pub const Results = struct {
         for (self.files.items, 0..) |f, i| try self.index.put(self.gpa, f.path, @intCast(i));
     }
 
+    /// Mindestens ein Treffer ohne Ersatztext von rg. rg vor 14.0 schreibt `replacement`
+    /// nicht ins JSON; bei Regex mit Gruppen (`$1`) wäre der Rückfall auf den Rohtext falsch.
+    pub fn missingReplacement(self: *const Self) bool {
+        for (self.files.items) |f| for (f.lines.items) |l| for (l.subs) |s| {
+            if (s.replacement == null) return true;
+        };
+        return false;
+    }
+
     /// Ersetzungen eines Treffers bzw. aller Treffer einer Datei (aufsteigend). `fallback`
     /// gilt, wenn rg keinen Ersatztext geliefert hat (Suche lief ohne `-r`).
     pub fn matchEdit(self: *const Self, ref: MatchRef, fallback: []const u8) Edit {
@@ -964,6 +973,17 @@ test "Results: Verwerfen von Treffer und Datei" {
     // nach dem Verwerfen findet add eine neue Datei desselben Namens korrekt
     try r.add(testLine("a.zig", 0, 0, "foo foo", &s1));
     try testing.expectEqual(@as(usize, 1), r.files.items.len);
+}
+
+test "Results: fehlender Ersatztext von rg wird erkannt (rg < 14 kennt kein replacement im JSON)" {
+    var r = Results.init(testing.allocator);
+    defer r.deinit();
+    var s1 = [_]Sub{.{ .start = 0, .end = 3, .replacement = "X" }};
+    var s2 = [_]Sub{.{ .start = 0, .end = 3 }};
+    try r.add(testLine("a.zig", 0, 0, "foo", &s1));
+    try testing.expect(!r.missingReplacement());
+    try r.add(testLine("b.zig", 0, 0, "foo", &s2));
+    try testing.expect(r.missingReplacement());
 }
 
 test "Results: Ersetzungen mit Ersatztext von rg oder Rückfall" {

@@ -1,7 +1,6 @@
 # .deb und .rpm aus dem fertigen Release-Tarball, ohne neu zu bauen:
 #   STAGE=<entpacktes Tarball> VERSION=<x.y.z> nfpm package -f packaging/nfpm.yaml -p deb|rpm
-# Aufgerufen von .github/workflows/release.yml. ripgrep kommt hier aus der
-# Distribution, das rg unter libexec/zid im Tarball bleibt draussen.
+# Aufgerufen von .github/workflows/release.yml.
 name: zid
 arch: amd64
 platform: linux
@@ -37,6 +36,17 @@ contents:
   - src: ${STAGE}/LICENSE
     dst: /usr/share/licenses/zid/LICENSE
     expand: true
+  # rg aus dem Tarball (15.x, statisch) statt ripgrep der Distribution: Debian 12,
+  # Ubuntu 22.04 und Leap 15.6 haben rg 13, das kein `replacement` ins JSON schreibt.
+  # zid findet es über ../libexec/zid/rg relativ zum Binary.
+  - src: ${STAGE}/libexec/zid/rg
+    dst: /usr/libexec/zid/rg
+    expand: true
+    file_info:
+      mode: 0755
+  - src: ${STAGE}/libexec/zid/ripgrep-LICENSE-MIT
+    dst: /usr/share/licenses/zid/ripgrep-LICENSE-MIT
+    expand: true
 
 # Das Binary linkt freetype, harfbuzz, libpng, zlib und glib dynamisch (glibc >= 2.35,
 # gebaut auf Debian 12); Vulkan, Wayland und X11 lädt es per dlopen.
@@ -52,7 +62,6 @@ overrides:
       - zlib1g
       - libglib2.0-0 | libglib2.0-0t64
       - libvulkan1
-      - ripgrep
     recommends:
       - mesa-vulkan-drivers
   rpm:
@@ -65,7 +74,6 @@ overrides:
       - libz.so.1()(64bit)
       - libglib-2.0.so.0()(64bit)
       - libvulkan.so.1()(64bit)
-      - ripgrep
 
 rpm:
   summary: GPU-beschleunigter Editor mit Markdown-Vorschau, PDF-Anzeige und lokaler KI
