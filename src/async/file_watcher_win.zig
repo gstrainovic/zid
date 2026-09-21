@@ -2,6 +2,15 @@
 //! Ein Verzeichnis-Handle auf die Wurzel (ganzer Baum), überlappende I/O mit Event,
 //! damit der Thread alle 100 ms `should_stop` prüfen kann. Gleiche Schnittstelle und
 //! gleiche Ergebnisse wie `file_watcher_linux.zig`.
+//!
+//! `bWatchSubtree` folgt keinen Reparse-Points: Änderungen hinter einem Symlink- oder
+//! Junction-Ordner, dessen Ziel außerhalb der Wurzel liegt, meldet das Wurzel-Handle nie.
+//! Der Thread sucht deshalb beim Start solche Ordner und öffnet für jedes Ziel ein
+//! eigenes Handle; dessen Ereignisse kommen unter dem Link-Pfad heraus, also so, wie die
+//! Datei im Editor geöffnet wurde. Ziele innerhalb der Wurzel braucht es nicht: deren
+//! Ereignisse meldet das Wurzel-Handle unter dem echten Pfad, und `bufferKeyForPath`
+//! findet den Buffer über realpath. Links, die erst nach dem Start entstehen, und Links
+//! innerhalb eines Link-Ziels werden nicht beobachtet.
 
 const std = @import("std");
 const scheduler_mod = @import("scheduler");
@@ -22,10 +31,78 @@ const notify_filter = windows.FileNotifyChangeFilter{
     .last_write = true,
 };
 
+/// Ein beobachteter Baum: Handle, Event und Puffer der laufenden Abfrage.
+/// Liegt auf dem Heap, weil die überlappende I/O Adressen von `overlapped` und `buf` hält.
+const Watch = struct {
+    handle: windows.HANDLE,
+    event: windows.HANDLE,
+    /// Pfad, unter dem Ereignisse gemeldet werden (Wurzel bzw. Link-Pfad).
+    prefix: []u8,
+    overlapped: windows.OVERLAPPED = std.mem.zeroes(windows.OVERLAPPED),
+    pending: bool = false,
+    buf: [64 * 1024]u8 align(@alignOf(windows.FILE_NOTIFY_INFORMATION)) = undefined,
+
+    fn open(allocator: std.mem.Allocator, dir_path: []const u8, prefix: []const u8) !*Watch {
+        const path_w = try std.unicode.wtf8ToWtf16LeAllocZ(allocator, dir_path);
+        defer allocator.free(path_w);
+
+        const handle = kernel32.CreateFileW(
+            path_w.ptr,
+            windows.FILE_LIST_DIRECTORY,
+            windows.FILE_SHARE_READ | windows.FILE_SHARE_WRITE | windows.FILE_SHARE_DELETE,
+            null,
+            windows.OPEN_EXISTING,
+            windows.FILE_FLAG_BACKUP_SEMANTICS | windows.FILE_FLAG_OVERLAPPED,
+            null,
+        );
+        if (handle == windows.INVALID_HANDLE_VALUE) return error.WatchCreationFailed;
+        errdefer windows.CloseHandle(handle);
+
+        const event = kernel32.CreateEventExW(null, null, CREATE_EVENT_MANUAL_RESET, EVENT_ALL_ACCESS) orelse
+            return error.WatchCreationFailed;
+        errdefer windows.CloseHandle(event);
+
+        const w = try allocator.create(Watch);
+        errdefer allocator.destroy(w);
+        w.* = .{ .handle = handle, .event = event, .prefix = try allocator.dupe(u8, prefix) };
+        return w;
+    }
+
+    /// Nächste Abfrage starten. false, wenn Windows sie ablehnt.
+    fn arm(self: *Watch) bool {
+        self.overlapped = std.mem.zeroes(windows.OVERLAPPED);
+        self.overlapped.hEvent = self.event;
+        _ = ResetEvent(self.event);
+        if (kernel32.ReadDirectoryChangesW(self.handle, &self.buf, self.buf.len, windows.TRUE, notify_filter, null, &self.overlapped, null) == 0) {
+            log.err("ReadDirectoryChangesW failed for {s}: {}", .{ self.prefix, windows.GetLastError() });
+            return false;
+        }
+        self.pending = true;
+        return true;
+    }
+
+    /// Laufende Abfrage abbrechen und ihr Ende abwarten, bevor der Puffer freigegeben wird.
+    fn cancel(self: *Watch) void {
+        if (!self.pending) return;
+        _ = kernel32.CancelIoEx(self.handle, &self.overlapped);
+        var ignored: windows.DWORD = 0;
+        _ = kernel32.GetOverlappedResult(self.handle, &self.overlapped, &ignored, windows.TRUE);
+        self.pending = false;
+    }
+
+    fn close(self: *Watch, allocator: std.mem.Allocator) void {
+        windows.CloseHandle(self.event);
+        windows.CloseHandle(self.handle);
+        allocator.free(self.prefix);
+        allocator.destroy(self);
+    }
+};
+
 pub const FileWatcher = struct {
     allocator: std.mem.Allocator,
-    dir_handle: windows.HANDLE,
-    event: windows.HANDLE,
+    /// [0] ist die Wurzel, danach je ein Link-Ziel außerhalb. Nur der Watcher-Thread
+    /// ändert die Liste; `cleanup` läuft erst nach dem join.
+    watches: std.ArrayList(*Watch) = .empty,
     should_stop: std.atomic.Value(bool),
     scheduler: *scheduler_mod.Scheduler,
     thread: std.Thread,
@@ -40,37 +117,20 @@ pub const FileWatcher = struct {
         const self = try allocator.create(FileWatcher);
         errdefer allocator.destroy(self);
 
-        const path_w = try std.unicode.wtf8ToWtf16LeAllocZ(allocator, watch_path);
-        defer allocator.free(path_w);
-
-        const dir_handle = kernel32.CreateFileW(
-            path_w.ptr,
-            windows.FILE_LIST_DIRECTORY,
-            windows.FILE_SHARE_READ | windows.FILE_SHARE_WRITE | windows.FILE_SHARE_DELETE,
-            null,
-            windows.OPEN_EXISTING,
-            windows.FILE_FLAG_BACKUP_SEMANTICS | windows.FILE_FLAG_OVERLAPPED,
-            null,
-        );
-        if (dir_handle == windows.INVALID_HANDLE_VALUE) return error.WatchCreationFailed;
-        errdefer windows.CloseHandle(dir_handle);
-
-        const event = kernel32.CreateEventExW(null, null, CREATE_EVENT_MANUAL_RESET, EVENT_ALL_ACCESS) orelse
-            return error.WatchCreationFailed;
-        errdefer windows.CloseHandle(event);
+        const root_watch = try Watch.open(allocator, watch_path, watch_path);
+        errdefer root_watch.close(allocator);
 
         const root_path = try allocator.dupe(u8, watch_path);
         errdefer allocator.free(root_path);
 
         self.* = .{
             .allocator = allocator,
-            .dir_handle = dir_handle,
-            .event = event,
             .should_stop = std.atomic.Value(bool).init(false),
             .scheduler = scheduler_ptr,
             .thread = undefined,
             .root_path = root_path,
         };
+        try self.watches.append(allocator, root_watch);
 
         self.thread = std.Thread.spawn(.{}, runLoop, .{self}) catch |err| {
             self.cleanup();
@@ -91,48 +151,118 @@ pub const FileWatcher = struct {
     }
 
     fn cleanup(self: *Self) void {
-        windows.CloseHandle(self.event);
-        windows.CloseHandle(self.dir_handle);
+        for (self.watches.items) |w| w.close(self.allocator);
+        self.watches.deinit(self.allocator);
         self.allocator.free(self.root_path);
         self.allocator.free(self.last_path);
         self.allocator.destroy(self);
     }
 
     fn runLoop(self: *Self) void {
-        var buf: [64 * 1024]u8 align(@alignOf(windows.FILE_NOTIFY_INFORMATION)) = undefined;
+        defer for (self.watches.items) |w| w.cancel();
 
+        // Wurzel zuerst scharf schalten, dann in Ruhe nach Links suchen (grosse Bäume).
+        if (!self.watches.items[0].arm()) return;
+        self.addLinkWatches();
+
+        var events: [windows.MAXIMUM_WAIT_OBJECTS]windows.HANDLE = undefined;
         while (!self.should_stop.load(.acquire)) {
-            var overlapped = std.mem.zeroes(windows.OVERLAPPED);
-            overlapped.hEvent = self.event;
-            _ = ResetEvent(self.event);
-
-            if (kernel32.ReadDirectoryChangesW(self.dir_handle, &buf, buf.len, windows.TRUE, notify_filter, null, &overlapped, null) == 0) {
-                log.err("ReadDirectoryChangesW failed: {}", .{windows.GetLastError()});
-                return;
+            for (self.watches.items, 0..) |w, i| {
+                if (!w.pending and !w.arm() and i == 0) return;
+                events[i] = w.event;
             }
 
-            // Auf Ereignisse warten, dabei regelmäßig das Stop-Flag prüfen
-            while (true) {
-                const rc = kernel32.WaitForSingleObject(self.event, 100);
-                if (rc == windows.WAIT_OBJECT_0) break;
-                if (rc != windows.WAIT_TIMEOUT or self.should_stop.load(.acquire)) {
-                    // Laufende Abfrage abbrechen und ihr Ende abwarten, bevor der Puffer vom Stack geht
-                    _ = kernel32.CancelIoEx(self.dir_handle, &overlapped);
-                    var ignored: windows.DWORD = 0;
-                    _ = kernel32.GetOverlappedResult(self.dir_handle, &overlapped, &ignored, windows.TRUE);
+            _ = windows.WaitForMultipleObjectsEx(events[0..self.watches.items.len], false, 100, false) catch |err| switch (err) {
+                error.WaitTimeOut => continue,
+                else => {
+                    log.err("WaitForMultipleObjects failed: {}", .{err});
                     return;
-                }
-            }
+                },
+            };
 
-            var bytes: windows.DWORD = 0;
-            if (kernel32.GetOverlappedResult(self.dir_handle, &overlapped, &bytes, windows.FALSE) == 0) continue;
-            // 0 Bytes: Puffer übergelaufen, Einzelereignisse sind verloren
-            if (bytes == 0) continue;
-            self.processEvents(buf[0..bytes]);
+            // Alle fertigen Abfragen abholen, nicht nur die erste: sonst verhungern hintere.
+            for (self.watches.items) |w| {
+                if (!w.pending or kernel32.WaitForSingleObject(w.event, 0) != windows.WAIT_OBJECT_0) continue;
+                w.pending = false;
+                var bytes: windows.DWORD = 0;
+                if (kernel32.GetOverlappedResult(w.handle, &w.overlapped, &bytes, windows.FALSE) == 0) continue;
+                // 0 Bytes: Puffer übergelaufen, Einzelereignisse sind verloren
+                if (bytes == 0) continue;
+                self.processEvents(w, w.buf[0..bytes]);
+            }
         }
     }
 
-    fn processEvents(self: *Self, data: []align(@alignOf(windows.FILE_NOTIFY_INFORMATION)) u8) void {
+    /// Baum unter der Wurzel nach Symlink-/Junction-Ordnern mit Ziel außerhalb durchsuchen
+    /// und je Ziel ein Handle öffnen. Versteckte und ignorierte Ordner werden übersprungen,
+    /// Links selbst nicht betreten.
+    fn addLinkWatches(self: *Self) void {
+        const root_real = std.fs.realpathAlloc(self.allocator, self.root_path) catch return;
+        defer self.allocator.free(root_real);
+
+        var stack: std.ArrayList([]u8) = .empty;
+        defer {
+            for (stack.items) |p| self.allocator.free(p);
+            stack.deinit(self.allocator);
+        }
+        stack.append(self.allocator, self.allocator.dupe(u8, self.root_path) catch return) catch return;
+
+        while (stack.pop()) |dir_path| {
+            defer self.allocator.free(dir_path);
+            if (self.should_stop.load(.acquire)) return;
+
+            var dir = std.fs.openDirAbsolute(dir_path, .{ .iterate = true }) catch continue;
+            defer dir.close();
+            var it = dir.iterate();
+            while (it.next() catch null) |entry| {
+                if (entry.kind != .directory and entry.kind != .sym_link) continue;
+                if (isIgnoredName(entry.name)) continue;
+                const child = std.fs.path.join(self.allocator, &.{ dir_path, entry.name }) catch continue;
+
+                if (!isReparsePoint(self.allocator, child)) {
+                    if (entry.kind == .directory) {
+                        stack.append(self.allocator, child) catch self.allocator.free(child);
+                    } else self.allocator.free(child);
+                    continue;
+                }
+                defer self.allocator.free(child);
+
+                const target = std.fs.realpathAlloc(self.allocator, child) catch continue;
+                defer self.allocator.free(target);
+                if (!isOutside(root_real, target)) continue;
+                if (self.watches.items.len >= windows.MAXIMUM_WAIT_OBJECTS) {
+                    log.warn("too many linked folders, not watching {s}", .{child});
+                    continue;
+                }
+                const w = Watch.open(self.allocator, target, child) catch |err| {
+                    log.warn("cannot watch linked folder {s}: {}", .{ child, err });
+                    continue;
+                };
+                self.watches.append(self.allocator, w) catch {
+                    w.close(self.allocator);
+                    continue;
+                };
+                log.debug("watching linked folder {s} -> {s}", .{ child, target });
+            }
+        }
+    }
+
+    fn isReparsePoint(allocator: std.mem.Allocator, path: []const u8) bool {
+        const path_w = std.unicode.wtf8ToWtf16LeAllocZ(allocator, path) catch return false;
+        defer allocator.free(path_w);
+        const attrs = windows.GetFileAttributesW(path_w.ptr) catch return false;
+        return attrs & windows.FILE_ATTRIBUTE_REPARSE_POINT != 0;
+    }
+
+    /// Liegt `target` ausserhalb von `root`? Beide sind realpaths; Windows-Pfade ohne
+    /// Rücksicht auf Gross-/Kleinschreibung, Grenze an einem Trenner.
+    fn isOutside(root: []const u8, target: []const u8) bool {
+        const r = std.mem.trimRight(u8, root, "\\/");
+        if (target.len < r.len or !std.ascii.eqlIgnoreCase(target[0..r.len], r)) return true;
+        return target.len > r.len and target[r.len] != '\\' and target[r.len] != '/';
+    }
+
+    fn processEvents(self: *Self, w: *const Watch, data: []align(@alignOf(windows.FILE_NOTIFY_INFORMATION)) u8) void {
         var offset: usize = 0;
         var name_buf: [std.fs.max_path_bytes]u8 = undefined;
         while (offset + @sizeOf(windows.FILE_NOTIFY_INFORMATION) <= data.len) {
@@ -148,12 +278,18 @@ pub const FileWatcher = struct {
                 // bytesAsSlice ist nicht u16-ausgerichtet: kopieren
                 for (name_w, 0..) |c, i| w_copy[i] = c;
                 const len = std.unicode.wtf16LeToWtf8(&name_buf, w_copy[0..name_w.len]);
-                self.handleEvent(name_buf[0..len], info.Action);
+                self.handleEvent(w.prefix, name_buf[0..len], info.Action);
             }
 
             if (info.NextEntryOffset == 0) break;
             offset += info.NextEntryOffset;
         }
+    }
+
+    fn isIgnoredName(part: []const u8) bool {
+        if (part.len == 0) return false;
+        if (part[0] == '.') return true;
+        return std.mem.eql(u8, part, "zig-out") or std.mem.eql(u8, part, "node_modules");
     }
 
     /// Wie unter Linux: versteckte Einträge (auch in versteckten Ordnern), Build-Ausgaben
@@ -162,13 +298,12 @@ pub const FileWatcher = struct {
         if (std.mem.endsWith(u8, rel, ".gguf")) return true;
         var it = std.mem.tokenizeAny(u8, rel, "\\/");
         while (it.next()) |part| {
-            if (part[0] == '.') return true;
-            if (std.mem.eql(u8, part, "zig-out") or std.mem.eql(u8, part, "node_modules")) return true;
+            if (isIgnoredName(part)) return true;
         }
         return false;
     }
 
-    fn handleEvent(self: *Self, rel: []const u8, action: windows.DWORD) void {
+    fn handleEvent(self: *Self, prefix: []const u8, rel: []const u8, action: windows.DWORD) void {
         if (rel.len == 0 or isIgnored(rel)) return;
 
         const tag: scheduler_mod.ResultTag = switch (action) {
@@ -177,7 +312,7 @@ pub const FileWatcher = struct {
             else => .file_changed,
         };
 
-        const full_path = std.fs.path.join(self.allocator, &.{ self.root_path, rel }) catch return;
+        const full_path = std.fs.path.join(self.allocator, &.{ prefix, rel }) catch return;
 
         // Ein Schreibvorgang liefert mehrere MODIFIED für dieselbe Datei: identische
         // Ereignisse innerhalb von 100 ms nur einmal melden (wie file_watcher_linux.zig).
@@ -208,4 +343,13 @@ test "isIgnored: versteckte Pfadteile, Build-Ausgaben, Modelle" {
     try std.testing.expect(FileWatcher.isIgnored("zig-out\\bin\\zid.exe"));
     try std.testing.expect(FileWatcher.isIgnored("models\\x.gguf"));
     try std.testing.expect(!FileWatcher.isIgnored("src\\main.zig"));
+}
+
+test "isOutside: Grenze am Trenner, Gross/Klein egal" {
+    try std.testing.expect(!FileWatcher.isOutside("C:\\p\\zid", "C:\\p\\zid"));
+    try std.testing.expect(!FileWatcher.isOutside("C:\\p\\zid", "c:\\P\\ZID\\tmp\\real"));
+    try std.testing.expect(!FileWatcher.isOutside("C:\\p\\zid\\", "C:\\p\\zid\\a"));
+    try std.testing.expect(FileWatcher.isOutside("C:\\p\\zid", "C:\\p\\zid2\\a"));
+    try std.testing.expect(FileWatcher.isOutside("C:\\p\\zid", "C:\\Temp\\out"));
+    try std.testing.expect(FileWatcher.isOutside("C:\\p\\zid", "C:\\p"));
 }
