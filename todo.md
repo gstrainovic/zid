@@ -88,15 +88,13 @@ KI-Punkte: Wirkung vorab schätzen, vorher/nachher messen (`scripts/e2e_ai_read_
 Hängt an Konten und einem Windows-Rechner, nicht am Code. Stand: v0.1.1 liegt als
 Release (Linux-Tarball, Windows-Zip, PKGBUILD), COPR hat 0.1.1-1 gebaut.
 
-1. **Windows-Zip gegenprüfen:** `zid-0.1.1-x86_64-windows.zip` vom Release auf einem
-   echten Windows starten. Gebaut und rauchgetestet (`zid.exe --version`) hat es die CI,
-   gezeichnet hat es dort niemand.
-2. **Scoop:** `packaging/scoop/zid.json` liegt fertig mit Prüfsumme. Es fehlt ein eigener
+1. **Scoop:** `packaging/scoop/zid.json` liegt fertig mit Prüfsumme; `scoop install
+   .\packaging\scoop\zid.json` installiert es (21.09.2026 geprüft). Es fehlt ein eigener
    Bucket (eigenes Repo `scoop-zid`), dann `scoop bucket add`.
-3. **WinGet:** `packaging/winget/` (drei Manifeste, Schema 1.6) als Pull Request nach
-   `microsoft/winget-pkgs`. Vorher lokal `winget validate --manifest packaging\winget`.
-4. **AUR:** `packaging/aur/PKGBUILD` und `.SRCINFO` stehen auf 0.1.1. Registrierung bei
+2. **WinGet:** `packaging/winget/` (drei Manifeste, Schema 1.6) als Pull Request nach
+   `microsoft/winget-pkgs`. `winget validate --manifest packaging\winget` ist grün (21.09.2026).
+3. **AUR:** `packaging/aur/PKGBUILD` und `.SRCINFO` stehen auf 0.1.1. Registrierung bei
    `aur.archlinux.org` war zuletzt eingefroren (503); danach nach `ssh://aur@aur.archlinux.org/zid-bin.git`
    pushen.
-5. **Binärgröße:** 155 MB entpackt, davon 109 MB tree-sitter-Parsetabellen. Strippen bringt
+4. **Binärgröße:** 155 MB entpackt, davon 109 MB tree-sitter-Parsetabellen. Strippen bringt
    1 MB, der Hebel wäre eine Auswahl an Grammatiken (`syntax`-Dependency).

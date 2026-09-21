@@ -27,8 +27,12 @@ pub const PdfHandler = struct {
 
         c.fz_register_document_handlers(ctx);
         
-        // Use the wrapper to open document (handles setjmp/longjmp)
-        const doc = c.fz_open_document_z(ctx, path_c.ptr) orelse {
+        // Aus einer Kopie im Speicher öffnen, nicht über den Pfad: mupdf hielte die Datei
+        // sonst offen, und unter Windows scheitert dann jedes Ersetzen per Rename durch ein
+        // anderes Programm (LaTeX, Typst, Export) mit „Zugriff verweigert“.
+        const bytes = std.fs.cwd().readFileAlloc(allocator, path, 1 << 30) catch return error.FailedToOpenDocument;
+        defer allocator.free(bytes);
+        const doc = c.fz_open_document_from_bytes_z(ctx, path_c.ptr, bytes.ptr, bytes.len) orelse {
             return error.FailedToOpenDocument;
         };
         errdefer c.fz_drop_document(ctx, doc);

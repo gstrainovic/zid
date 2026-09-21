@@ -7,6 +7,29 @@ fz_document *fz_open_document_z(fz_context *ctx, const char *filename) {
   return doc;
 }
 
+/* Dokument aus einer Kopie im Speicher öffnen. Das Dokument hält Stream und Puffer
+   selbst; die Datei bleibt dadurch nicht offen. Unter Windows könnte ein anderes
+   Programm eine offene Datei sonst nicht per Rename ersetzen (Zugriff verweigert).
+   `magic` ist der Dateiname, mupdf wählt daran den Handler. */
+fz_document *fz_open_document_from_bytes_z(fz_context *ctx, const char *magic, const unsigned char *data, size_t size) {
+  fz_document *doc = NULL;
+  fz_buffer *buf = NULL;
+  fz_stream *stm = NULL;
+  fz_var(buf);
+  fz_var(stm);
+  fz_try(ctx) {
+    buf = fz_new_buffer_from_copied_data(ctx, data, size);
+    stm = fz_open_buffer(ctx, buf);
+    doc = fz_open_document_with_stream(ctx, magic, stm);
+  }
+  fz_always(ctx) {
+    fz_drop_stream(ctx, stm);
+    fz_drop_buffer(ctx, buf);
+  }
+  fz_catch(ctx) { doc = NULL; }
+  return doc;
+}
+
 int fz_count_pages_z(fz_context *ctx, fz_document *doc) {
   int count = 0;
   fz_try(ctx) { count = fz_count_pages(ctx, doc); }
