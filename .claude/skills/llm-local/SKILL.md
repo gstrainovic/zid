@@ -3,8 +3,10 @@ name: llm-local
 description: >
   Lokales LLM in zid: KI-Chat über llama-server, Selbsteinrichtung von Engine und
   Modell, Engine- und Modellwahl, gepinnte Engines unter engines/, Messregeln aus
-  llm-bench/.
-  Use when working on the AI chat, `src/ai/*`, llama-server startup, model or device
+  llm-bench/, Agent-Werkzeuge (Tool-Calling, Bestätigung, Kontextgrenze), Kürzel-Werkzeug
+  und Verlauf kopieren.
+  Use when working on the AI chat, `src/ai/*`, `src/ui/agent_actions.zig`, agent tools,
+  scripts/e2e_ai_*.py, llama-server startup, model or device
   selection, streaming replies, `engines/`, `models/`, `llm-bench/`, or when
   benchmarking or comparing local models.
 ---
@@ -164,3 +166,131 @@ aufgebaut ist.
   Modelle der Messreihen sind gelöscht; ein erneuter Vergleich braucht den Download, Quelle und
   sha256 stehen in `llm-bench/results/` (Qwen3-4B-Instruct-2507: unsloth,
   `3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597`).
+
+## Chat: Kürzel-Werkzeug und Verlauf kopieren
+
+- Die Tastenkürzel stehen **nicht** im Prompt (das kostete 1000 Token). Der Agent holt sie
+  über das Werkzeug `list_shortcuts` (`agent_actions.zig`), optional mit `filter`. Gemessen:
+  gemma-4-E2B ruft es von selbst auf und beantwortet „Which key opens quick_open?" mit
+  `Ctrl+P`; bei einer umschreibenden Frage („Datei-Schnellsuche") rät es trotz Liste
+  gelegentlich daneben — das Werkzeug liefert `command`, `label` und `key`, das Übersetzen
+  bleibt Sache des Modells.
+- Markieren geht über Bubble-Grenzen: jede Nachricht ist eine eigene `MarkdownView`, beim
+  Ziehen markiert `handleMouseMove` die Startnachricht ab dem Anker (`selectFromAnchorToEnd`),
+  die dazwischen ganz (`selectAllContent`) und die zuletzt erreichte bis zur Maus
+  (`selectFromStartTo`). `selectedText` verkettet alle markierten Nachrichten.
+- Werkzeugergebnisse stehen als `✅ ok` bzw. `❌ Fehler` vor dem Namen. Das Zeichen allein
+  genügt nicht: unter Windows greift die Emoji-Rückfall-Kette nicht, dort bliebe ein leeres
+  Kästchen ohne Wort daneben.
+- Ganzen Verlauf kopieren: Knopf `ai_copy_all` in der Kopfzeile oder Ctrl+Shift+C
+  (`AIChatState.conversationText` als Markdown, `## Du` / `## AI` je Nachricht). Ctrl+C
+  bleibt die markierte Bubble. Der Weg läuft über `UI.setClipboard`, damit `ui_state`
+  ihn headless prüfen kann.
+
+## Selbsteinrichtung der KI (`src/ai/setup.zig`, `download.zig`, `install.zig`, `selfsetup.zig`)
+
+- Ein installiertes zid hat kein `engines/` und `models/` neben sich. Fehlt beides, lädt der
+  Chat auf Knopfdruck llama-server (gepinnt auf `b11062`, Vulkan-Build) und
+  `gemma-4-E2B-it-Q4_0.gguf` von ggml-org in `<AppData>/zid` bzw. `~/.local/share/zid`.
+- Geladen wird in `<ziel>.part`, umbenannt erst am Schluss; eine abgebrochene Übertragung
+  setzt per Range-Header auf. **`File.Writer` schreibt positional ab 0**: ohne `fw.pos = have`
+  überschreibt die Fortsetzung die schon geladenen Bytes und die Datei wächst nie.
+- Kein eigener zählender Writer: der müsste Zigs Pufferprotokoll bedienen (erst
+  `w.buffer[0..w.end]`, dann `data`, Rückgabe = aus `data` verbrauchte Bytes). Ein Writer, der
+  das nicht tut, meldet nie Fortschritt und `fetch` dreht sich endlos. Der Fortschritt kommt
+  deshalb aus der Grösse der `.part`-Datei.
+- Die Release-Archive sind unterschiedlich gebaut: Windows-ZIP flach, Linux-Tar mit
+  `llama-<tag>/` davor (`install.stripComponents`).
+
+## Engines und Modelle (`engines/`, `models/`, `llm-bench/`)
+
+Keine Engine im Repo. Layout, `fix-rpath.sh` und die Messregeln stehen in
+`.claude/skills/llm-local/SKILL.md`. Kurz: `engines/` ist ignoriert; ein lokaler Build unter
+`engines/llama.cpp-vulkan` hat beim Start Vorrang, fehlt er, richtet zid die Engine selbst ein
+(siehe oben). Das Submodul fiel am 20.09.2026 weg (`6295283` benannte es nach `_engines/` um,
+`905fa9e` nahm es heraus). `models/` hält GGUFs flach und ignoriert (nie committen),
+`llm-bench/` ist ein `git subtree` mit historischen Protokollen, die nicht angefasst werden. Die
+BitNet-Engine und ihr Modell liegen nicht im Repo; `llm-bench/setup/linux.sh` holt und baut sie
+für Nachmessungen.
+
+## Agent-Werkzeuge: der Agent kann, was der Editor kann
+
+- **Natives Tool-Calling** (OpenAI `tools`-Feld, `tool_calls` in der Antwort, `role: tool` zurück).
+  Geprüft mit llama-server b10524 + Qwen3-4B + `--jinja`: funktioniert nicht-streamend
+  und streamend (`delta.tool_calls` je Index zusammensetzen), das Modell nutzt Tool-Ergebnisse.
+  Das alte JSON-im-Text-Verfahren (`tryExecuteToolCall`) ist entfernt. Kein MCP, kein RPC:
+  Agent und Editor sind derselbe Prozess; MCP wäre nur für externe Agenten interessant.
+- **Definitionen** in `src/ai/tools.zig` (Modul `ai_tools`, unit-getestet): `command` (Enum aus
+  `shortcuts.Command`, Beschreibung mit Label + Kürzel jedes Kommandos → jedes Menü/Kürzel ist
+  automatisch Agent-Werkzeug), `open_file`, `read_file` (≤ 200 KB), `write_file`, `replace_text`,
+  `list_files` (≤ 200 Einträge), `open_folder`, `find_in_editor`. `toolsJson` liefert das Schema,
+  `parseEnvelope` die Aufrufe aus dem Worker-Ergebnis `{"content","tool_calls"}`.
+- **Ausführung** auf dem Main-Thread in `src/ui/agent_actions.zig` (`UI.driveAgentTools` in
+  `update()`): `command` → `executeCommand`; Dateien nur innerhalb von `current_directory`
+  (`ai_tools.resolveInProject`, `..` und fremde absolute Pfade → `{"error": "outside the project"}`).
+  Ergebnisse gehen als JSON in `tool`-Nachrichten.
+- **Regeln in Code, nicht im Prompt** (Qwen3-4B hält Prompt-Regeln unzuverlässig ein, siehe
+  replace_text-Umweg). Der Systemprompt nennt nur Rolle und "Pfade relativ zum Projekt".
+  `ai_tools.choosePaneForFile` (unit-getestet) entscheidet für `open_file`: Chat nicht im
+  aktiven Pane → dort öffnen; Chat aktiv und zweites Pane vorhanden → dort; sonst vertikal
+  splitten (Chat oben, Datei unten). Danach geht der Fokus zurück zum Chat-Pane, man kann
+  weiterschreiben. Dafür lädt main.zig Tab-Wechsel jetzt für **alle** Leaves
+  (`UI.leavesWithPendingSwitch`; der Block biegt `active_pane` pro Leaf kurz um), vorher nur
+  für das aktive Pane.
+- `write_file`/`replace_text` auf eine offene Datei laden den Buffer und alle Editoren darauf
+  neu (`UI.reloadFileFromDisk`: `setText`, `setLanguageFromPath`, `last_save = root`, Tabs
+  gelten als gespeichert). Zed/VS Code lösen das Sichtbarkeitsproblem mit einem Chat-Dock
+  neben den Editor-Panes; das bleibt eine Option, der Split reicht vorerst.
+- **Bestätigung** über den normalen Dialog ("AI agent", Allow/Deny): `write_file` auf bestehende
+  Datei; `replace_text`, wenn `old` ≥ halbe Datei ist (`replaceCountsAsRewrite`; Qwen umging so
+  die write_file-Regel). Antwort wird in `update()` verarbeitet, nie im Dialog-Callback. Deny →
+  `{"error":"the user denied this action"}` ans Modell. `close_tab`/`delete_entry` fragen über
+  ihre bestehenden Dialoge. Max. 8 Werkzeugrunden pro Frage (`max_tool_rounds`).
+- Anzeige: Assistant-Aufrufe als `🔧 name(args)`, Ergebnisse als `✅/⚠️ name → JSON…`.
+- Kein `run_shell` (bewusst, erst mit Sandbox). Kein Diff-Review vor dem Schreiben (Zed zeigt
+  Agent-Änderungen erst als Vorschlag); wäre der nächste Schritt nach dem Dock.
+- **Kontextgrenze:** llama-server (`-c 8192`) kürzt nicht still, sondern antwortet HTTP 400
+  `exceed_context_size_error` (gemessen: 24 017 Tokens abgelehnt; ein 8014-Token-Prompt
+  brauchte auf der P1000 123 s). `agent.zig` macht daraus `error.ContextTooLong`, der Chat zeigt
+  einen verständlichen Hinweis. Vorbeugend schickt `submitCompletion` nur das jüngste Stück der
+  Historie, das in `history_budget_chars` (12 000 Zeichen) passt: `src/ai/history.zig` (`keepFrom`,
+  unit-getestet) behält die laufende Runde (letzte Frage, Aufrufe, Ergebnisse) immer ganz, auch über
+  dem Budget, und beginnt nie mit einem verwaisten `tool`-Ergebnis. Ein Ergebnis ohne Frage und
+  Aufruf verwirft das Chat-Template, das Modell antwortet dann ohne jeden Kontext („What would you
+  like to do?"). Die Anzeige im Chat bleibt vollständig.
+- **`read_file` liefert den rohen Dateiinhalt, ohne JSON und ohne Kopf.** Als JSON-String sah das
+  Modell `\n` und `\"` statt echter Zeilen (das gemma4-Template reicht den String unverändert
+  durch); ein Kopf wie `path: …` galt ihm als erste Dateizeile (erste Zeile 0/3 statt 3/3). Roh
+  spart 6–7 % Prompt-Token beim Ergebnis. Fehler bleiben `{"error":…}`, daran erkennt
+  `pushToolResult` sie (Präfix, nicht Teilstring: Dateien dürfen `"error"` enthalten).
+- **Zu große Werkzeugergebnisse werden erst nach der Ablehnung gekürzt:** `handleError` kürzt bei
+  `ContextTooLong` das größte `tool`-Ergebnis der Runde (`ai_tools.shrinkToolResult`: Anfang auf
+  zwei Drittel, höchstens 24 000 Bytes, an einer Zeilengrenze; am Ende die Zeile
+  `[zid: file truncated: N bytes total, first M shown]`; JSON mit `content`-Feld wird im Feld
+  gekürzt) und sendet neu, bis es passt. Was passt, geht ungekürzt raus; eine feste Grenze in
+  `read_file` hätte Dateien gekappt, die ganz ins Fenster passen. Die Ablehnung kostet kaum Zeit.
+  Messwerte P1000 (`python3 scripts/e2e_ai_read_limits.py`, erste/letzte Zeile aus N Bytes Zig-Code):
+  Grundlast 1 366 Prompt-Token, 4 KB 2 628 Token und 20 s, 12 KB 4 974 Token und 47 s, 28 KB nach
+  dem Kürzen 75 s (20 KB passte noch ungekürzt: 7 511 Token, 87 s, gemessen mit JSON-Ergebnis). Die „letzte Zeile" streut ab 12 KB bei gleichem
+  Prompt (Temperatur 0.7); Fälle wiederholen.
+- **Gemessene Grenzen (Bench `~/projects/bitnet-colibri-bench`, Engine b10524 Commit 9ee9fc0,
+  Qwen3-4B-Instruct-2507-Q4_K_M sha256 3605803b982cb64a…):** Ein-Datei-Fix gelingt; Ursachen über
+  einen Import hinweg scheitern (Qwen3 bricht gefahrlos ab, Llama-3.2-3B schrieb destruktiv). Der
+  Agent soll nur in Git-Repos ändern: nur die Bestätigungsdialoge sichern, eine Warnung außerhalb
+  eines Repos ist eine offene Produktentscheidung. Prompt-Verarbeitung auf der P1000 ~96 tok/s.
+- **Temperatur bleibt 0.7, auch mit Tools** (negatives Ergebnis): `bench/agent_eval.py`
+  Werkzeugwahl bei 0.7 dreimal 10/10, bei 0.0 ebenfalls 10/10 — kein Unterschied, keine Sonderregel.
+- **CPU ohne `-tb`** (negatives Ergebnis, `-dev none -ngl 0`, Prompt 6×-Absatz):
+  `-t 8` prompt 52,9 tok/s / gen 10,8 tok/s; `-t 8 -tb 12` prompt 50,6 / gen 11,5 — im Rauschen,
+  `agent.zig` bleibt bei `-t min(Kerne, 8)`.
+- Nach jeder Änderung an `agent.zig` muss `python3 scripts/e2e_ai_tools.py` grün bleiben; Messzahlen
+  immer mit Engine-Commit und Modell-sha256 notieren, Referenz
+  `bitnet-colibri-bench/results/linux-i7-8850H-gpu-und-neue-modelle.md`.
+- RPCs: `focus_chat` (Chat-Tab in irgendeinem Pane aktivieren), `file_text(path)` (Inhalt des
+  offenen Buffers), `ui_state.pane_count`,
+  `ui_state.all_tabs`, `ui_state.agent_confirm_pending`, `chat_state.tool_rounds/pending_tools`,
+  Nachrichten mit `tool_calls`/`tool_call_id`.
+- E2E `python3 scripts/e2e_ai_tools.py`: Explorer per Chat aus/ein, Datei anlegen+öffnen ohne
+  zweites Pane → Split, Fokus bleibt im Chat, Buffer im Nachbar-Pane geladen; lesen; kleine
+  replace_text-Änderung ohne Dialog mit Tab-Reload; Überschreiben → Dialog → Deny → unverändert;
+  `/etc/hostname` abgelehnt. Messung: erste Runde nach Warmup 13–14 s, danach 3–9 s je Frage.
