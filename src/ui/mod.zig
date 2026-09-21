@@ -2200,6 +2200,11 @@ pub const UI = struct {
             self.startProjectSearch();
             return false;
         }
+        // rg < 14 liefert keinen Ersatztext: bei Regex wäre der Rohtext ("$1") falsch
+        if (v.opts.regex and v.results.missingReplacement()) {
+            self.showToast("Regex replace needs ripgrep 14 or newer (rg = {s})", .{self.rgPath()});
+            return false;
+        }
         return true;
     }
 
