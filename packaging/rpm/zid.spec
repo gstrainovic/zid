@@ -8,7 +8,7 @@
 %global __brp_check_rpaths %{nil}
 
 Name:           zid
-Version:        0.1.1
+Version:        0.1.2
 Release:        1%{?dist}
 Summary:        GPU-beschleunigter Editor mit Markdown-Vorschau, PDF-Anzeige und lokaler KI
 
@@ -68,6 +68,14 @@ appstreamcli validate --no-net \
 %{_datadir}/metainfo/%{appid}.metainfo.xml
 
 %changelog
+* Mon Sep 21 2026 gstrainovic <g.strainovic@gmail.com> - 0.1.2-1
+- Search and replace across the project (Ctrl+Shift+F / Ctrl+Shift+H), powered by ripgrep.
+- Find (Ctrl+F) in the Markdown preview.
+- Color emoji on Windows.
+- New packages: .deb, .rpm and Snap.
+- Release binaries run on every x86-64 CPU again (0.1.1 needed AVX2).
+- Files with CRLF line endings no longer count as modified after opening; invalid UTF-8 no longer crashes zid.
+
 * Sun Sep 20 2026 gstrainovic <g.strainovic@gmail.com> - 0.1.1-1
 - Farbige Emoji, KI richtet Engine und Modell selbst ein, Ollama entfernt
 
