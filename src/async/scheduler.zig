@@ -48,8 +48,6 @@ pub const ResultTag = enum {
     ai_chat_tool_calls,
     ai_warmup_done,
     ai_warmup_error,
-    ai_download_done,
-    ai_download_error,
 };
 
 pub const TaskResult = struct {

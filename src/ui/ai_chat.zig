@@ -85,10 +85,7 @@ pub const AIChatState = struct {
     setup_dismissed: bool = false,
     /// Nachricht, in der die bubble-übergreifende Auswahl gerade endet.
     sel_end_msg: ?usize = null,
-    is_downloading: bool = false,
     is_initializing: bool = false,
-    download_progress: f32 = 0,
-    model_exists: bool = false,
     last_copy_time: i64 = 0,
     /// Textauswahl in einer Nachrichten-Bubble: Index der Nachricht, deren MarkdownView den
     /// Anker hält (unter `mutex`, weil der Worker Nachrichten anhängt).
@@ -97,7 +94,6 @@ pub const AIChatState = struct {
     pending_copy_msg: ?usize = null,
 
     mutex: std.Thread.Mutex = .{},
-    stop_flag: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
 
     scroll_offset_y: f32 = 0,
     viewport_height: f32 = 0,
@@ -133,14 +129,7 @@ pub const AIChatState = struct {
 
     const Self = @This();
 
-    const model_filename = "models/gemma-4-E2B-it-Q4_K_M.gguf";
-
     pub fn init(allocator: std.mem.Allocator) !Self {
-        var exists = false;
-        if (std.fs.cwd().access(model_filename, .{})) |_| {
-            exists = true;
-        } else |_| {}
-
         const input_buf = try flow_core.Buffer.create(allocator);
         errdefer input_buf.deinit();
 
@@ -149,7 +138,6 @@ pub const AIChatState = struct {
             .messages = .empty,
             .input_editor = CodeEditor.init(allocator, input_buf),
             .input_buffer = input_buf,
-            .model_exists = exists,
         };
         state.input_editor.show_gutter = false;
         state.input_editor.show_minimap = false;
@@ -174,8 +162,6 @@ pub const AIChatState = struct {
     }
 
     pub fn deinit(self: *Self) void {
-        self.stop_flag.store(true, .seq_cst);
-
         // Der Vorgang gehört dem Chat, sobald er ihm übergeben wurde (UI.init legt ihn
         // an). `deinit` wartet auf den Ladethread, sonst schriebe er in freigegebenen
         // Speicher weiter.
@@ -300,7 +286,6 @@ pub const AIChatState = struct {
             self.setStatus(.failed, detail);
             return err;
         };
-        self.model_exists = true;
 
         self.setStatus(.initializing, "");
         self.is_initializing = true;
@@ -642,47 +627,6 @@ pub const AIChatState = struct {
         self.allocator.free(msg.content);
         msg.content = shrunk;
         return true;
-    }
-
-    pub fn triggerDownload(self: *Self) !void {
-        if (self.is_downloading or self.model_exists) return;
-        const sched = self.scheduler orelse return error.NoScheduler;
-
-        const url = "https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-Q4_K_M.gguf";
-
-        const sink: ai_worker.ProgressSink = .{
-            .value = &self.download_progress,
-            .mutex = &self.mutex,
-            .stop_flag = &self.stop_flag,
-        };
-        const params = try ai_worker.DownloadParams.init(self.allocator, url, model_filename, sink);
-        if (!sched.submit(.{ .func = ai_worker.taskDownload, .data = params })) {
-            params.deinit();
-            return error.SchedulerQueueFull;
-        }
-        self.is_downloading = true;
-    }
-
-    pub fn handleDownloadDone(self: *Self) void {
-        self.mutex.lock();
-        self.model_exists = true;
-        self.is_downloading = false;
-
-        self.mutex.unlock();
-
-        if (self.server_path.len > 0 and self.model_path.len > 0) {
-            self.initAgent(self.server_path, self.model_path) catch |err| {
-                log.err("initAgent after download failed: {}", .{err});
-            };
-        }
-        log.info("Download complete.", .{});
-    }
-
-    pub fn handleDownloadError(self: *Self, payload: []const u8) void {
-        log.err("AI download failed: {s}", .{payload});
-        self.mutex.lock();
-        defer self.mutex.unlock();
-        self.is_downloading = false;
     }
 
     pub fn handleKeyPress(self: *Self, key: wio.Button) bool {
@@ -1038,21 +982,6 @@ pub fn renderAIChat(
         });
 
         state.pollSelfSetup();
-
-        // Fortschritt des alten Modell-Downloads (Repo-Pfad).
-        if (state.is_downloading) {
-            clay.UI()(.{
-                .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(6) } },
-                .background_color = .{ 40, 40, 45, 255 },
-                .corner_radius = .all(3),
-            })({
-                clay.UI()(.{
-                    .layout = .{ .sizing = .{ .w = .percent(state.download_progress), .h = .grow } },
-                    .background_color = theme.primary,
-                    .corner_radius = .all(3),
-                })({});
-            });
-        }
 
         // ── Messages area (clip + scrollbar) ────────────────────────────
         const viewport_id = clay.ElementId.ID("ai_chat_viewport");

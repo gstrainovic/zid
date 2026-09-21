@@ -109,7 +109,7 @@ Antworten streuen (Temperatur 0.7): Vorher/Nachher nie an einem Lauf entscheiden
 denselben Fall mehrmals wiederholen und die Prompt-Token vergleichen. Gleiche Token heißen
 gleiche Eingabe, dann ist ein anderer Ausgang Zufall.
 
-RPC `chat_state`: Status, Detail, Titel, loading/initializing/downloading,
+RPC `chat_state`: Status, Detail, Titel, loading/initializing,
 `streaming_len`, alle Nachrichten.
 
 ## Engines und Modelle

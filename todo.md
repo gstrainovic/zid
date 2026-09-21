@@ -21,10 +21,7 @@ KI-Punkte: Wirkung vorab schätzen, vorher/nachher messen (`scripts/e2e_ai_read_
    umstellen wie flow.
 6. **Suche ignoriert Groß/Klein nur für ASCII** (`find_ops.zig` `eqlIgnoreCase`): „Ä“ findet
    kein „ä“.
-7. **Toter KI-Download-Zweig:** `triggerDownload` in `ai_chat.zig` ruft niemand mehr auf (seit
-   `selfsetup.zig` lädt); `model_filename` (`Q4_K_M`, unsloth), `model_exists` und
-   `is_downloading` hängen noch daran, `chat_state` meldet sie. Entfernen.
-8. **Windows: Watcher folgt Symlink-Ordnern nicht.** `src/async/file_watcher_win.zig` hält ein
+7. **Windows: Watcher folgt Symlink-Ordnern nicht.** `src/async/file_watcher_win.zig` hält ein
    `ReadDirectoryChangesW`-Handle auf die Wurzel mit `bWatchSubtree=TRUE`; Windows folgt dabei
    keinen Reparse-Points. Linux ist seit `bc6872c` behoben (`scripts/e2e_external_change.py`).
    1. Skript auf dem Windows-PC laufen lassen. Erwartung: `inplace`, `atomic`, `symlink` grün,
@@ -35,7 +32,7 @@ KI-Punkte: Wirkung vorab schätzen, vorher/nachher messen (`scripts/e2e_ai_read_
       Link-Pfad melden.
    3. AGENTS.md-Satz „Der Windows-Watcher folgt Symlink-Ordnern nicht“ danach streichen.
 
-9. **mupdf stürzt bei manchen kaputten PDFs ab** (System-Bibliothek 1.27.2; `mutool draw` auf
+8. **mupdf stürzt bei manchen kaputten PDFs ab** (System-Bibliothek 1.27.2; `mutool draw` auf
     einem zu 40 % geschriebenen PDF: Segfault, in zid „double free“). Der Reload wartet deshalb
     auf eine ruhende Datei; eine dauerhaft kaputte Datei öffnen reißt zid aber weiter mit.
     Rendern in einen Kindprozess auslagern oder mupdf-Version prüfen.
