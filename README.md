@@ -59,12 +59,10 @@ scoop install zid/zid
 Das Manifest wird in diesem Repo gepflegt (`packaging/scoop/zid.json`) und bei
 jedem Release nach `bucket/zid.json` im Repo
 [gstrainovic/scoop-zid](https://github.com/gstrainovic/scoop-zid) kopiert.
-Für WinGet liegen Manifeste unter `packaging/winget/`, eingereicht sind sie
-nicht (Pull Request nach `microsoft/winget-pkgs`). Lokal prüfen:
+Lokal prüfen:
 
 ```powershell
 scoop install packaging\scoop\zid.json
-winget validate --manifest packaging\winget
 ```
 
 ### Voraussetzungen
