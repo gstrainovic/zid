@@ -49,10 +49,18 @@ stecken im Binary.
 Emoji bleiben unter Windows leere Kästchen: dort läuft der Text über DirectWrite,
 und die Rückfall-Kette auf eine Emoji-Schrift gibt es bisher nur unter Linux.
 
-Die Manifeste für Scoop (`packaging/scoop/zid.json`) und WinGet
-(`packaging/winget/`) hängen an denselben Release-Dateien. Eingereicht sind sie
-noch nicht: Scoop braucht einen eigenen Bucket, WinGet einen Pull Request nach
-`microsoft/winget-pkgs`. Prüfen lassen sie sich vorher lokal:
+Mit Scoop:
+
+```powershell
+scoop bucket add zid https://github.com/gstrainovic/scoop-zid
+scoop install zid/zid
+```
+
+Das Manifest wird in diesem Repo gepflegt (`packaging/scoop/zid.json`) und bei
+jedem Release nach `bucket/zid.json` im Repo
+[gstrainovic/scoop-zid](https://github.com/gstrainovic/scoop-zid) kopiert.
+Für WinGet liegen Manifeste unter `packaging/winget/`, eingereicht sind sie
+nicht (Pull Request nach `microsoft/winget-pkgs`). Lokal prüfen:
 
 ```powershell
 scoop install packaging\scoop\zid.json
