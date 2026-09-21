@@ -889,8 +889,8 @@ fn chatState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     , .{@tagName(chat.agent_status)});
     try std.json.Stringify.value(chat.statusDetail(), .{}, &buf.writer);
     try buf.writer.print(
-        \\, "loading": {}, "initializing": {}, "downloading": {}, "model_exists": {}, "streaming_len": {d}, "tool_rounds": {d}, "pending_tools": {d}, "title":
-    , .{ chat.is_loading, chat.is_initializing, chat.is_downloading, chat.model_exists, chat.stream_text.items.len, chat.tool_rounds, chat.pending_tools.items.len });
+        \\, "loading": {}, "initializing": {}, "streaming_len": {d}, "tool_rounds": {d}, "pending_tools": {d}, "title":
+    , .{ chat.is_loading, chat.is_initializing, chat.stream_text.items.len, chat.tool_rounds, chat.pending_tools.items.len });
     try std.json.Stringify.value(chat.agentTitle(), .{}, &buf.writer);
     try buf.writer.print(", \"input_bounds\": [{d:.1}, {d:.1}, {d:.1}, {d:.1}], \"input_cursor\": [{d}, {d}]", .{ chat.input_bounds_x, chat.input_bounds_y, chat.input_bounds_w, chat.input_bounds_h, chat.input_editor.cursor.row, chat.input_editor.cursor.col });
     try buf.writer.writeAll(", \"messages\": [");

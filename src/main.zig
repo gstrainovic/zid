@@ -510,8 +510,6 @@ pub fn main() !void {
                         .ai_chat_tool_calls => ui_system.handleAIToolCalls(result.payload),
                         .ai_warmup_done => ui_system.handleAIWarmupDone(),
                         .ai_warmup_error => ui_system.handleAIWarmupError(result.payload),
-                        .ai_download_done => ui_system.handleAIDownloadDone(),
-                        .ai_download_error => ui_system.handleAIDownloadError(result.payload),
                         .lsp_definition => ui_system.handleLspDefinition(result.payload),
                         .file_changed, .file_created, .file_deleted => {
                             log.debug("file event: {} for {s}", .{ result.tag, result.payload });
