@@ -40,13 +40,9 @@ pub fn Finder(comptime Source: type) type {
 
         /// Wie find, mit Optionen. Ungültige Regex → null.
         pub fn findOpts(src: Source, query: []const u8, from: Pos, forward: bool, opts: Options) ?Match {
-            if (query.len == 0) return null;
             const n = src.lineCount();
             if (n == 0) return null;
-            var re: ?tiny_regex.Regex = null;
-            if (opts.regex) {
-                re = tiny_regex.compile(query, opts.case_sensitive) catch return null;
-            }
+            const pat = Pattern.init(query, opts) orelse return null;
             var row = @min(from.row, n - 1);
             var i: usize = 0;
             while (i <= n) : (i += 1) {
@@ -55,12 +51,12 @@ pub fn Finder(comptime Source: type) type {
                 if (forward) {
                     // In der Startzeile erst nach `from.col` suchen, danach ab Spalte 0
                     const start_col: usize = if (i == 0) @min(from.col + 1, cols) else 0;
-                    if (matchFrom(line, query, start_col, true, opts, if (re) |*r| r else null)) |m| return mk(row, m);
+                    if (matchFrom(line, start_col, true, &pat)) |m| return mk(row, m);
                     row = (row + 1) % n;
                 } else {
                     const start_col: ?usize = if (i == 0) (if (from.col == 0) null else from.col - 1) else cols;
                     if (start_col) |sc| {
-                        if (matchFrom(line, query, sc, false, opts, if (re) |*r| r else null)) |m| return mk(row, m);
+                        if (matchFrom(line, sc, false, &pat)) |m| return mk(row, m);
                     }
                     row = if (row == 0) n - 1 else row - 1;
                 }
@@ -74,35 +70,92 @@ pub fn Finder(comptime Source: type) type {
     };
 }
 
+/// Suchbegriff mit Optionen, einmal übersetzt (Regex). Der Editor sucht damit schrittweise
+/// (`Finder`), die Markdown-Vorschau zählt und markiert damit alle Treffer einer Zeile.
+pub const Pattern = struct {
+    query: []const u8,
+    opts: Options,
+    re: ?tiny_regex.Regex = null,
+
+    /// null bei leerem Begriff oder ungültiger Regex.
+    pub fn init(query: []const u8, opts: Options) ?Pattern {
+        if (query.len == 0) return null;
+        var p = Pattern{ .query = query, .opts = opts };
+        if (opts.regex) p.re = tiny_regex.compile(query, opts.case_sensitive) catch return null;
+        return p;
+    }
+
+    /// Erster Treffer mit Beginn ab Byte `from` als Byte-Bereich; Ganzwort ist geprüft.
+    pub fn next(self: *const Pattern, line: []const u8, from: usize) ?[2]usize {
+        var byte = from;
+        while (byte <= line.len) {
+            var hit: ?[2]usize = null;
+            if (self.re) |*r| {
+                const m = r.find(line, byte) orelse return null;
+                hit = .{ m.start, m.end };
+            } else if (byte < line.len and startsWith(line[byte..], self.query, self.opts.case_sensitive)) {
+                hit = .{ byte, byte + self.query.len };
+            }
+            if (hit) |h| {
+                if (!self.opts.whole_word or (isBoundary(line, h[0], true) and isBoundary(line, h[1], false))) return h;
+                byte = self.resumeAt(line, h);
+                continue;
+            }
+            if (byte >= line.len) return null;
+            byte += std.unicode.utf8ByteSequenceLength(line[byte]) catch 1;
+        }
+        return null;
+    }
+
+    /// Wo nach Treffer `h` weitergesucht wird: Regex hinter dem Treffer, sonst ein Zeichen
+    /// weiter (der Editor findet so auch überlappende Vorkommen).
+    fn resumeAt(self: *const Pattern, line: []const u8, h: [2]usize) usize {
+        if (self.re != null) return if (h[1] > h[0]) h[1] else h[0] + 1;
+        return h[0] + (std.unicode.utf8ByteSequenceLength(line[h[0]]) catch 1);
+    }
+
+    /// Nicht überlappende Treffer einer Zeile nacheinander (Suche über Fließtext):
+    /// `var it = pat.iterate(line); while (it.next()) |h| …`.
+    pub fn iterate(self: *const Pattern, line: []const u8) Iterator {
+        return .{ .pat = self, .line = line };
+    }
+
+    pub const Iterator = struct {
+        pat: *const Pattern,
+        line: []const u8,
+        byte: usize = 0,
+
+        pub fn next(it: *Iterator) ?[2]usize {
+            if (it.byte > it.line.len) return null;
+            const h = it.pat.next(it.line, it.byte) orelse return null;
+            it.byte = if (h[1] > h[0]) h[1] else h[0] + 1;
+            return h;
+        }
+    };
+
+    /// Anzahl nicht überlappender Treffer im Text.
+    pub fn count(self: *const Pattern, text: []const u8) u32 {
+        var it = self.iterate(text);
+        var n: u32 = 0;
+        while (it.next() != null) n += 1;
+        return n;
+    }
+};
+
 /// Treffer der Zeile als Spaltenpaar: erster ab `start_col` (vorwärts) bzw. letzter mit
 /// Beginn ≤ `start_col` (rückwärts).
-fn matchFrom(line: []const u8, query: []const u8, start_col: usize, forward: bool, opts: Options, re: ?*const tiny_regex.Regex) ?[2]usize {
+fn matchFrom(line: []const u8, start_col: usize, forward: bool, pat: *const Pattern) ?[2]usize {
     var best: ?[2]usize = null;
     var byte: usize = 0;
     while (byte <= line.len) {
-        var hit: ?[2]usize = null; // Byte-Bereich
-        if (re) |r| {
-            const m = r.find(line, byte) orelse break;
-            hit = .{ m.start, m.end };
-        } else if (byte < line.len and startsWith(line[byte..], query, opts.case_sensitive)) {
-            hit = .{ byte, byte + query.len };
+        const h = pat.next(line, byte) orelse break;
+        const cols = [2]usize{ colOfByte(line, h[0]), colOfByte(line, h[1]) };
+        if (forward) {
+            if (cols[0] >= start_col) return cols;
+        } else {
+            if (cols[0] <= start_col) best = cols else break;
         }
-        if (hit) |h| {
-            const ok_word = !opts.whole_word or (isBoundary(line, h[0], true) and isBoundary(line, h[1], false));
-            if (ok_word) {
-                const cols = [2]usize{ colOfByte(line, h[0]), colOfByte(line, h[1]) };
-                if (forward) {
-                    if (cols[0] >= start_col) return cols;
-                } else {
-                    if (cols[0] <= start_col) best = cols else break;
-                }
-            }
-            byte = if (h[1] > h[0]) h[1] else h[0] + 1;
-            if (re == null) byte = h[0] + (std.unicode.utf8ByteSequenceLength(line[h[0]]) catch 1);
-            continue;
-        }
-        if (byte >= line.len) break;
-        byte += std.unicode.utf8ByteSequenceLength(line[byte]) catch 1;
+        byte = pat.resumeAt(line, h);
     }
     return best;
 }
@@ -204,4 +257,18 @@ test "find: leere Suche oder kein Treffer liefert null; Spalten sind Codepoints"
     try testing.expect(F.find(src, "nope", .{ .row = 0, .col = 0 }, true) == null);
     const m = F.find(src, "foo", .{ .row = 1, .col = 0 }, true).?;
     try testing.expectEqual(@as(usize, 4), m.begin.col);
+}
+
+test "Pattern.iterate: alle Treffer einer Zeile als Bytes, nicht überlappend, mit Optionen" {
+    const plain = Pattern.init("aa", .{}).?;
+    var it = plain.iterate("äaaaA");
+    try testing.expectEqual([2]usize{ 2, 4 }, it.next().?); // ä = 2 Bytes
+    try testing.expectEqual([2]usize{ 4, 6 }, it.next().?); // "aA" ohne Groß/Klein
+    try testing.expect(it.next() == null);
+    const word = Pattern.init("cat", .{ .whole_word = true }).?;
+    try testing.expectEqual(@as(u32, 2), word.count("cat concat cat"));
+    const re = Pattern.init("c[ao]t", .{ .regex = true }).?;
+    try testing.expectEqual(@as(u32, 3), re.count("cat cot concat"));
+    try testing.expect(Pattern.init("", .{}) == null);
+    try testing.expect(Pattern.init("(", .{ .regex = true }) == null);
 }

@@ -595,6 +595,7 @@ pub fn createDispatcher(alloc: std.mem.Allocator, ctx: *E2EContext) !*zigjr.RpcD
     try rpc_dispatcher.addWithCtx("editor_lines", ctx, editorLines);
     try rpc_dispatcher.addWithCtx("editor_state", ctx, editorState);
     try rpc_dispatcher.addWithCtx("md_selection", ctx, mdSelection);
+    try rpc_dispatcher.addWithCtx("md_find_state", ctx, mdFindState);
     try rpc_dispatcher.addWithCtx("chat_line_bounds", ctx, chatLineBounds);
     try rpc_dispatcher.addWithCtx("save_file", ctx, saveFile);
     try rpc_dispatcher.addWithCtx("get_state", ctx, getState);
@@ -1116,6 +1117,33 @@ fn mdSelection(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     }
     try buf.writer.writeAll("}");
     return buf.written();
+}
+
+/// Suchleiste der aktiven Vorschau: offen, Begriff, Optionen, Treffer, aktueller Treffer
+/// (Index, Block, Nummer im Block), Zeile des aktuellen Treffers im letzten Frame, Bildlauf.
+fn mdFindState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
+    return onMain(ctx, dc, mdFindStateMain, .{});
+}
+
+fn mdFindStateMain(ctx: *E2EContext, dc: *zigjr.DispatchCtx) anyerror![]const u8 {
+    const v = ctx.ui_system.activeMarkdownView() orelse return "{\"preview\": false}";
+    const cur_hit = if (v.find_current) |c| v.find_hits.items[c] else null;
+    return std.json.Stringify.valueAlloc(dc.arena(), .{
+        .preview = true,
+        .open = v.find.active,
+        .query = v.find.text(),
+        .not_found = v.find.not_found,
+        .case_sensitive = v.find.case_sensitive,
+        .whole_word = v.find.whole_word,
+        .regex = v.find.use_regex,
+        .total = v.find_hits.items.len,
+        .current = v.find_current,
+        .current_block = if (cur_hit) |h| @as(?u32, h.block) else null,
+        .current_nth = if (cur_hit) |h| @as(?u32, h.nth) else null,
+        .current_line = if (v.find_cur_for == v.find_current) v.find_cur_line else null,
+        .scroll_y = v.scroll_offset_y,
+        .viewport_height = v.viewport_height,
+    }, .{});
 }
 
 /// Clay-Box einer Textzeile (`md_line`) in der Bubble der Chat-Nachricht `msg`.

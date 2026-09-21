@@ -211,7 +211,8 @@ echo -e "open ./README.md\nget-state\nshutdown" | zig build run -- --interactive
   `element_bounds_i(id, index)` geben Clay-Bounding-Boxen für Klicks; für "existiert das Element
   gerade?" sind sie unzuverlässig (Clay behält Daten verschwundener Elemente), dafür `ui_state`.
   Fixtures unter `tmp/` anlegen (gitignored, im Explorer sichtbar). Keine Suite liest aus
-  `test_data/` außer der dort getrackten `syntax_test.md` (Startdatei): eingecheckte Vorlagen
+  `test_data/`, und zid öffnet beim Start nur eine Datei von der Kommandozeile (früher
+  automatisch `test_data/syntax_test.md`): eingecheckte Vorlagen
   liegen unter `scripts/fixtures/`, PDF und PNG erzeugt `scripts/e2e_fixtures.py` ohne
   Fremdbibliothek (`write_pdf`, `write_png`; Selbsttest per Direktaufruf).
 
@@ -382,7 +383,21 @@ liegen in `src/ui/mod.zig`, das Virtualisierungsmuster in
   stimmen dann nicht mehr). Andere Tasten und Buchstaben erreichen den unsichtbaren Editor
   hinter Vorschau, Bild, PDF und Binär-Tab nicht (`UI.handleKeyPress`/`handleChar` prüfen
   `activeTabKind() == .text`); Ctrl+F über der Vorschau öffnete dort eine unsichtbare
-  Suchleiste, die alles Getippte schluckte. Die Vorschau hat keine eigene Suche.
+  Suchleiste, die alles Getippte schluckte.
+- **Suche in der Vorschau (Ctrl+F)** nimmt die Bausteine des Editors, nichts nachgebaut:
+  Zustand, Leiste und Tasten aus `src/editor/find_bar.zig` (`FindState`, `render`; auch der
+  Editor zeichnet damit), Treffer aus `find_ops.Pattern` (Aa/W/.* wie im Editor, Alt+C/W/R).
+  Nur die Vorschau-Teile stehen in `src/ui/md_find.zig` (unit-getestet): Weil virtualisiert
+  gezeichnet wird, zählt `refreshFind` die Treffer über den Klartext jedes Blocks (`Hit` =
+  Block, n-tes Vorkommen), `lineMarks` zählt beim Zeichnen je Zeile in derselben Reihenfolge
+  mit; so weiß die Zeile, ob sie den aktuellen Treffer trägt. Sprung: liegt der Block außerhalb
+  des gezeichneten Fensters, erst über die Blockhöhe, dann rückt `applyFindReveal` einige Frames
+  lang über die gezeichnete Zeile nach (senkrecht, ohne Umbruch auch waagrecht; Boxen gelten
+  mit dem Bildlauf des Vorframes, `drawn_scroll_*`). Markierung in `textSel` über
+  `md_find.segments` (`md_hit`, `md_hit_cur`, Auswahl `md_sel` hat Vorrang). Grenze: ein
+  Begriff über einen weichen Umbruch hinweg zählt im Klartext, wird in den Zeilen aber nicht
+  gefunden. Speichern baut die Vorschau neu und übernimmt die Suche (`adoptFind`). Im Deck keine
+  Suche. RPC `md_find_state`, E2E `scripts/e2e_find_preview.py`.
   RPC `md_selection` (`open`, `lines`, `text`), E2E in `scripts/e2e_md_preview.py`
   (`step_selection`).
   **Deck (Marp):** dieselbe Auswahl auf der Folie (`beginSelection("md_slide", …)`, Block 0);
@@ -441,7 +456,8 @@ liegen in `src/ui/mod.zig`, das Virtualisierungsmuster in
   Paste, Select All, Delete Line Ctrl+Shift+K, Find Ctrl+F).
 - Globale Kürzel greifen vor Terminal/Chat: Ctrl+W, Ctrl+N, Ctrl+O, Ctrl+B, Ctrl+` und
   Ctrl+Tab kommen im Terminal nicht mehr an der Shell an (bewusst, wie in Zed).
-- Suchleiste (`CodeEditor.find`, Logik in `src/editor/find_ops.zig`): inkrementell beim Tippen,
+- Suchleiste (`CodeEditor.find` = `find_bar.FindState`, Leiste `find_bar.render`, gemeinsam mit
+  der Markdown-Vorschau; Logik in `src/editor/find_ops.zig`): inkrementell beim Tippen,
   Enter/Shift+Enter weiter/zurück mit Umbruch, Escape schließt, markierter Text wird Suchbegriff.
   Ctrl+F bei offener Leiste markiert den Begriff neu (Tippen ersetzt ihn), Ctrl+H schaltet
   Ersetzen dazu. Die Widget-IDs (`find_widget`, `find_input`, `replace_*`, `goto_*`) tragen das
@@ -1321,7 +1337,11 @@ blieb Text ungemessen. `Clay__ResetMeasureTextCacheWhenFull` leert den Cache in
   notfalls in Zeilenbereiche schneiden, bevor eine Theorie entsteht. Ein Test muss den Effekt an
   dem prüfen, was der User sieht (Fliesstext), nicht nur an einem Sonderfall (Codeblock).
 - Verwaiste Headless-Prozesse: Linux `pkill -f '[v]ulkan-ed --headless'` — ohne die Klammer trifft
-  das Muster die eigene Shell, die den Befehl enthält. Windows `taskkill /F /IM zid.exe`.
+  das Muster die eigene Shell, die den Befehl enthält. Windows: **nie** `taskkill /IM zid.exe` —
+  das beendet auch die Fenster des Users samt ungespeicherter Änderungen (21.09.2026 so passiert).
+  Nur Headless-Instanzen gezielt per PID:
+  `Get-CimInstance Win32_Process -Filter "Name='zid.exe'" | ? CommandLine -match '--headless' |
+  % { Stop-Process -Id $_.ProcessId -Force }`.
 - **Windows:** Die Suiten laufen headless genauso (`python scripts/e2e_*.py`, kein Fenster).
   RPC-Antworten mit Pfaden immer über `std.json.fmt`/`Stringify` bauen, nie `"{s}"`: Backslashes
   ergeben sonst ungültiges JSON und jede Suite scheitert beim ersten `ui_state`. Die Text-Probe

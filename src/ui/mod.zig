@@ -1017,8 +1017,12 @@ pub const UI = struct {
         }
         // Markdown-Vorschau: Ctrl+C kopiert die Textauswahl, Escape hebt sie auf. Beides
         // darf nicht im unsichtbaren Editor dahinter landen.
+        // Ctrl+F öffnet die Suchleiste der Vorschau (dieselbe wie im Editor, `find_bar.zig`);
+        // ist sie offen, gehen die Tasten dorthin.
         if (self.activeMarkdownView()) |v| {
             if (self.is_ctrl_down and key == .c) return self.copyPreviewSelection(v);
+            if (v.find.active) return v.handleFindKey(key, .{ .ctrl = self.is_ctrl_down, .shift = self.is_shift_down, .alt = self.is_alt_down });
+            if (self.is_ctrl_down and !self.is_alt_down and key == .f) return v.openFind();
             if (key == .escape and v.hasSelection()) return v.clearSelection();
         }
         // Vorschau, Bild, PDF, Binär, Commit: kein Editor sichtbar, also erreicht keine Taste den
@@ -1089,6 +1093,10 @@ pub const UI = struct {
             var buf: [4]u8 = undefined;
             const len = std.unicode.utf8Encode(char_code, &buf) catch return;
             term.sendInput(buf[0..len]) catch {};
+            return;
+        }
+        if (self.activeMarkdownView()) |v| {
+            if (v.find.active and !self.is_ctrl_down and !self.is_alt_down) v.handleFindChar(char_code);
             return;
         }
         // kein Text in den unsichtbaren Editor hinter Vorschau, Bild, PDF, Binär
@@ -3103,6 +3111,7 @@ pub const UI = struct {
         new_v.scroll_offset_y = old.scroll_offset_y;
         if (new_v.slideCount() > 0) new_v.current_slide = @min(old.current_slide, new_v.slideCount() - 1);
         new_v.font_size = old.font_size;
+        new_v.adoptFind(old);
         old.deinit();
         self.allocator.destroy(old);
         entry.value_ptr.* = new_v;

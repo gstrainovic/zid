@@ -175,12 +175,6 @@ pub fn build(b: *std.Build) void {
     })) |ghostty_dep| {
         exe_mod.addImport("ghostty-vt", ghostty_dep.module("ghostty-vt"));
     }
-    // Test-Daten installieren (app.log wird standardmäßig im Editor geladen)
-    const app_log_install = b.addInstallFileWithDir(b.path("test_data/app.log"), .{ .custom = "share" }, "app.log");
-    b.getInstallStep().dependOn(&app_log_install.step);
-    const syntax_test_install = b.addInstallFileWithDir(b.path("test_data/syntax_test.md"), .{ .custom = "share" }, "syntax_test.md");
-    b.getInstallStep().dependOn(&syntax_test_install.step);
-
     // Desktop-Integration: Starter, Icon und AppStream-Metadaten landen unter <prefix>/share.
     // Damit taucht zid in Menüs und Software-Centern auf und kann Dateien zugeordnet bekommen.
     const desktop_install = b.addInstallFileWithDir(
@@ -787,6 +781,14 @@ pub fn build(b: *std.Build) void {
     const run_md_select_tests = b.addRunArtifact(md_select_tests);
     run_md_select_tests.has_side_effects = true;
 
+    const md_find_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("src/ui/md_find.zig"),
+        .target = target,
+        .optimize = optimize,
+    }) });
+    const run_md_find_tests = b.addRunArtifact(md_find_tests);
+    run_md_find_tests.has_side_effects = true;
+
     const fuzzy_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("src/ui/fuzzy.zig"),
         .target = target,
@@ -969,6 +971,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_edit_ops_tests.step);
     test_step.dependOn(&run_fuzzy_tests.step);
     test_step.dependOn(&run_md_select_tests.step);
+    test_step.dependOn(&run_md_find_tests.step);
     test_step.dependOn(&run_user_state_tests.step);
     test_step.dependOn(&run_backup_tests.step);
     test_step.dependOn(&run_tiny_regex_tests.step);
