@@ -14,7 +14,7 @@ abgestürzt ❌. Danach: Rakete 🚀 und Feierabend 🎉.
 - ✅ Rückfall auf die Emoji-Schrift
 - 🎨 Farbatlas neben dem Textatlas
 - 📦 Schrift wird bei Bedarf nachgeladen
-- 🐧 Linux zuerst, Windows bleibt einfarbig
+- 🐧 Linux über FreeType, 🪟 Windows über DirectWrite
 
 ## Tabelle
 

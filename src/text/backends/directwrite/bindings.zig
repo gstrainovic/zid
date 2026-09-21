@@ -129,6 +129,56 @@ pub const IDWriteFactory_VTable = extern struct {
     CreateGlyphRunAnalysis: *const anyopaque,
 };
 
+/// IDWriteFactory2 (Windows 8.1+): Farbschriften. Die Methoden von IDWriteFactory und
+/// IDWriteFactory1 stehen davor, in dieser Reihenfolge (dwrite_2.h).
+pub const IID_IDWriteFactory2 = GUID{ .Data1 = 0x0439fc60, .Data2 = 0xca44, .Data3 = 0x4994, .Data4 = .{ 0x8d, 0xee, 0x3a, 0x9a, 0xf7, 0xb7, 0x32, 0xec } };
+
+pub const IDWriteFactory2_VTable = extern struct {
+    base: IDWriteFactory_VTable,
+    // IDWriteFactory1
+    GetEudcFontCollection: *const anyopaque,
+    CreateCustomRenderingParams1: *const anyopaque,
+    // IDWriteFactory2
+    GetSystemFontFallback: *const anyopaque,
+    CreateFontFallbackBuilder: *const anyopaque,
+    TranslateColorGlyphRun: *const fn (
+        *anyopaque,
+        f32, // baselineOriginX
+        f32, // baselineOriginY
+        *const DWRITE_GLYPH_RUN,
+        ?*const anyopaque, // DWRITE_GLYPH_RUN_DESCRIPTION
+        DWRITE_MEASURING_MODE,
+        ?*const anyopaque, // DWRITE_MATRIX (worldToDeviceTransform)
+        u32, // colorPaletteIndex
+        *?*anyopaque, // IDWriteColorGlyphRunEnumerator**
+    ) callconv(.winapi) HRESULT,
+    CreateCustomRenderingParams2: *const anyopaque,
+    CreateGlyphRunAnalysis2: *const anyopaque,
+};
+
+/// Rückgabe von TranslateColorGlyphRun, wenn der Glyph keine Farbschichten hat.
+pub const DWRITE_E_NOCOLOR: HRESULT = @bitCast(@as(u32, 0x8898500C));
+
+pub const DWRITE_COLOR_F = extern struct { r: f32, g: f32, b: f32, a: f32 };
+
+pub const DWRITE_COLOR_GLYPH_RUN = extern struct {
+    glyphRun: DWRITE_GLYPH_RUN,
+    glyphRunDescription: ?*anyopaque,
+    baselineOriginX: f32,
+    baselineOriginY: f32,
+    runColor: DWRITE_COLOR_F,
+    /// 0xFFFF: Schicht in Textfarbe (runColor gilt dann nicht)
+    paletteIndex: u16,
+};
+
+pub const IDWriteColorGlyphRunEnumerator_VTable = extern struct {
+    QueryInterface: *const fn (*anyopaque, *const GUID, *?*anyopaque) callconv(.winapi) HRESULT,
+    AddRef: *const fn (*anyopaque) callconv(.winapi) u32,
+    Release: *const fn (*anyopaque) callconv(.winapi) u32,
+    MoveNext: *const fn (*anyopaque, *BOOL) callconv(.winapi) HRESULT,
+    GetCurrentRun: *const fn (*anyopaque, **const DWRITE_COLOR_GLYPH_RUN) callconv(.winapi) HRESULT,
+};
+
 pub const IDWriteFontFace_VTable = extern struct {
     // IUnknown
     QueryInterface: *const fn (*anyopaque, *const GUID, *?*anyopaque) callconv(.winapi) HRESULT,

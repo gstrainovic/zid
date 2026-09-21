@@ -641,8 +641,19 @@ pub const GlyphCache = struct {
                 self.render_buffer,
                 self.render_buffer_size,
             );
-        } else if (builtin.os.tag == .windows) {
-            return error.FallbackNotSupported;
+        } else if (builtin.os.tag == .windows) blk: {
+            // Rückfall ist die Farbschrift (Segoe UI Emoji), `font_ptr` die DirectWriteFace
+            // (`rawFace`); gerastert werden ihre Farbschichten.
+            const DirectWriteFace = @import("backends/directwrite/face.zig").DirectWriteFace;
+            const face: *DirectWriteFace = @ptrCast(@alignCast(font_ptr));
+            break :blk try face.renderColorGlyph(
+                glyph_id,
+                font_size,
+                self.scale_factor,
+                subpixel_shift_x,
+                self.render_buffer,
+                self.render_buffer_size,
+            );
         } else blk: {
             const CoreTextFace = @import("backends/coretext/face.zig").CoreTextFace;
             break :blk try CoreTextFace.renderGlyphFromFont(

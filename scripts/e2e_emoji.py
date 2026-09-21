@@ -35,6 +35,7 @@ def font_path(env):
 def wait_font(env, timeout=300):
     """Auf die Emoji-Schrift warten: entweder liegt eine im System oder zid lädt sie."""
     system = [
+        r"C:\Windows\Fonts\seguiemj.ttf",  # Windows: COLR, über DirectWrite gerastert
         "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
         "/usr/share/fonts/noto/NotoColorEmoji.ttf",
         "/usr/share/fonts/google-noto-emoji/NotoColorEmoji.ttf",
@@ -106,11 +107,6 @@ def step_markdown():
 
 
 def main():
-    if os.name == "nt":
-        # DirectWrite reicht keine rohe FT_Face heraus, der Emoji-Rückfall ist unter Windows
-        # nicht umgesetzt (`emoji_fallback_supported` in text_system.zig, Skill `emoji`).
-        print("SKIP: farbige Emoji gibt es unter Windows nicht (kein FreeType-Rückfall)")
-        return 0
     setup()
     env = isolated_env("e2e_emoji")
     os.makedirs(os.path.join(ROOT, "tmp"), exist_ok=True)

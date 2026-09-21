@@ -220,6 +220,12 @@ pub fn build(b: *std.Build) void {
             .file = b.path("src/rendering/mupdf_wrapper/fitz-z.c"),
             .flags = &[_][]const u8{ "-std=c99", "-w" },
         });
+        // Emoji-Folgen formen mit MuPDFs HarfBuzz (fzhb_*, steckt in mupdf-third)
+        exe.root_module.addIncludePath(b.path("libs/fancy-cat/deps/mupdf/thirdparty/harfbuzz/src"));
+        exe.addCSourceFile(.{
+            .file = b.path("src/text/backends/directwrite/emoji_hb.c"),
+            .flags = &[_][]const u8{ "-std=c99", "-w" },
+        });
     } else if (target.result.os.tag == .linux) {
         // wio (Wayland- und X11-Backend) benötigt diese Libraries. wio lädt sie zur
         // Laufzeit per dlopen, die extern-Deklarationen der Import-Tabellen stehen aber

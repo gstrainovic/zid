@@ -499,9 +499,10 @@ else if (is_windows)
 else
     backend.CoreTextFace;
 
-/// Rückfall auf eine Emoji-Schrift gibt es nur dort, wo die Face eine rohe
-/// FT_Face herausgibt: `GlyphCache.getOrRenderFallback` rastert damit direkt.
-/// DirectWrite und CoreText zeichnen weiter ein leeres Kästchen.
+/// Rückfall auf eine Emoji-Schrift gibt es dort, wo die Face ihn anbietet
+/// (`hasCodepoint`, `rawFace`): FreeType (CBDT-Bitmaps) und DirectWrite (COLR-Schichten
+/// von Segoe UI Emoji). `GlyphCache.getOrRenderFallback` rastert über `rawFace`.
+/// CoreText zeichnet weiter ein leeres Kästchen.
 const emoji_fallback_supported = @hasDecl(PlatformFace, "hasCodepoint") and @hasDecl(PlatformFace, "rawFace");
 
 /// Platform-specific shaper type
@@ -774,8 +775,10 @@ pub const TextSystem = struct {
             if (self.tryEmojiFace(path, size)) return &self.emoji_face.?;
         }
 
-        // Nichts Brauchbares auf dem System: Schrift einmalig selbst holen.
-        if (!emoji_font.fetchRunning()) emoji_font.startFetch();
+        // Nichts Brauchbares auf dem System: Schrift einmalig selbst holen. Nicht unter
+        // Windows: dort rastert DirectWrite nur COLR-Schichten, die geladene Noto-Fassung
+        // (CBDT-Bitmaps) brächte nichts; Segoe UI Emoji liegt jedem Windows bei.
+        if (!is_windows and !emoji_font.fetchRunning()) emoji_font.startFetch();
         return null;
     }
 
@@ -788,6 +791,9 @@ pub const TextSystem = struct {
             return false;
         }
         std.log.scoped(.text).info("Emoji-Schrift: {s}", .{path});
+        // Backends ohne eigenen Shaper für Ligaturen (DirectWrite) formen Emoji-Folgen
+        // mit HarfBuzz aus derselben Datei.
+        if (@hasDecl(PlatformFace, "enableShaping")) face.enableShaping(path);
         self.emoji_face = face;
         return true;
     }
@@ -903,14 +909,21 @@ pub const TextSystem = struct {
     ) !void {
         if (run.len == 0) return;
         const use_face: *const PlatformFace = if (is_emoji) emoji else face;
-        var shaped = try self.shaper.?.shape(use_face, run, self.allocator);
+        const own_shaped: ?ShapedRun = if (comptime @hasDecl(PlatformFace, "shapeRun"))
+            (if (is_emoji) try emoji.shapeRun(run, self.allocator) else null)
+        else
+            null;
+        var shaped = own_shaped orelse try self.shaper.?.shape(use_face, run, self.allocator);
         defer shaped.deinit(self.allocator);
 
         for (shaped.glyphs) |g| {
             var copy = g;
             // Der Variantenwähler ist unsichtbar. Beide Schriften bilden ihn auf ein
             // Ersatzzeichen mit Vorschub ab, das eine Lücke im Satz hinterliesse.
-            if (emoji_font.isVariationSelector(codepointAt(run, copy.cluster))) continue;
+            // Ebenso der Zero-Width-Joiner: ohne Ligatur in der Schrift (Windows formt ohne
+            // GSUB, `SimpleShaper`) stünde er als Strich zwischen den Teilen von 👩‍💻.
+            const run_cp = codepointAt(run, copy.cluster);
+            if (emoji_font.isVariationSelector(run_cp) or run_cp == 0x200D) continue;
             if (is_emoji) {
                 copy.font_ref = emoji.rawFace();
                 copy.is_color = true;
