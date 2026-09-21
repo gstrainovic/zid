@@ -853,6 +853,9 @@ fn testRepo(alloc: std.mem.Allocator, tmp: *std.testing.TmpDir) ![]u8 {
         &.{ "init", "-q", "-b", "main" },
         &.{ "config", "user.email", "t@example.com" },
         &.{ "config", "user.name", "Test" },
+        // Git for Windows setzt systemweit core.autocrlf=true: checkout und diff lieferten
+        // dann "\r\n", und die Vergleiche gegen "\n" scheiterten nur unter Windows.
+        &.{ "config", "core.autocrlf", "false" },
     }) |args| alloc.free(try runGit(alloc, path, args));
     try tmp.dir.writeFile(.{ .sub_path = "a.txt", .data = "eins\nzwei\n" });
     alloc.free(try runGit(alloc, path, &.{ "add", "a.txt" }));
