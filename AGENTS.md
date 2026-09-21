@@ -160,6 +160,10 @@ echo -e "open ./README.md\nget-state\nshutdown" | zig build run -- --interactive
 - Bestätigt → `UI.pending_open_folder`; `main.zig` holt es per `takePendingOpenFolder` und
   ruft `openProjectFolder` (auch beim Start): Explorer-Root, `current_directory`,
   Git-Branch/-Status und File-Watcher wechseln. Offene Tabs bleiben erhalten.
+- **Veraltete git-status-Ergebnisse verwirft `UI.updateGitStatus`:** der Status trägt
+  `root:<toplevel>`, angenommen wird er nur, wenn das zur Repo-Wurzel des aktuellen Projekts
+  passt (`git_worker.repoTopLevel`, `samePath`). Sonst überschrieb der Status des Start-Projekts,
+  der erst nach `open_project` ankam, den des neuen (Fixture unter dem zid-Repo: leere Changes).
 - **Ordner ohne Repo bekommen keine git-Tasks.** `git_worker.isInsideRepo` (unit-getestet) sucht
   `.git` aufwärts; schlägt das fehl, bleibt `git_repo_path` null und weder Branch noch Status
   werden eingereiht. `runGitCwd` loggt bei Fehlern Befehl, Ordner und stderr — „git exited 128"
@@ -292,6 +296,13 @@ liegen in `src/ui/mod.zig`, das Virtualisierungsmuster in
 - Jeder eingebettete `CodeEditor` braucht die Modifier: `UI.setCtrlState`/`setAltState`/
   `setShiftState` reichen sie an Chat **und** Commit-Feld weiter. Ohne das greift die
   Keymap des Editors nicht und Ctrl+Z tut nichts.
+- Ebenso Uhr und Zwischenablage: `time_ms` bekommt in `UI.update` der aktive Editor, der Chat
+  (`updateTimeMs`) und das Commit-Feld. Ohne Uhr galt jeder zweite Klick in dieselbe Zeile als
+  Doppelklick (bis 21.09.2026 im Commit-Feld). Copy/Cut/Paste laufen über `clipboard_hook`
+  (gesetzt in `ensureEditorHooks` für Panes, Chat und Commit-Feld) → `UI.setClipboard`; vorher
+  nur ans Fenster, headless kam nichts an. Neuer eingebetteter Editor: beides mitverdrahten.
+- Die Auswahl eines `CodeEditor` hat kein eigenes Clay-Element (anders als `line_edit`,
+  `<feld>_sel`). E2E prüfen den Text: `scm_state.changes.selected_text`, `editor_state.selection`.
 
 ## KI-Chat (llama-server)
 
@@ -824,6 +835,11 @@ blieb Text ungemessen. `Clay__ResetMeasureTextCacheWhenFull` leert den Cache in
   die MuPDF-Archive prüfen, bevor Code angefasst wird (README, Abschnitt Windows).
 - Ein langsamer Test lässt sich unter Windows nicht mit `timeout` aus Git Bash begrenzen (dort
   teils gesperrt, `Permission denied`); Runner in Python mit `subprocess.run(timeout=)`.
+- **Terminal unter Windows (ConPTY, `src/terminal/conpty.zig`):** die Shell (`cmd.exe` aus
+  COMSPEC) startet mit `STARTF_USESTDHANDLES` und leeren Std-Handles. Ohne das erbte sie zids
+  stdout, sobald der umgeleitet war (Log-Datei der E2E, Pipe), schrieb Prompt und Ausgabe dorthin
+  und der Terminal-Tab blieb leer. `terminal_state.screen` zeigt den Bildschirmtext; Suiten
+  nehmen unter Windows cmd-Befehle (`for /L`), kein `seq`.
 - Windows-Build der Engine: clang + ninja, `-DGGML_VULKAN=OFF`, dazu
   `-D_WIN32_WINNT=0x0A00` in C- und CXX-Flags (cpp-httplib verlangt Windows 10).
 - Pfade in Git-Status (`/`) und LSP-URIs (`file:///C:/…`) werden auf Windows-Trenner umgesetzt

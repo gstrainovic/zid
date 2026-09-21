@@ -1640,6 +1640,9 @@ pub const UI = struct {
         self.driveAgentTools();
         self.anim_manager.update(delta_ms);
         self.getActiveEditor().time_ms += delta_ms;
+        // Das Commit-Feld ist ein eigener CodeEditor. Ohne Uhr blieb time_ms stehen, und jeder
+        // zweite Klick in dieselbe Zeile galt als Doppel- oder Dreifachklick (Wort/Zeile markiert).
+        self.scm_changes.editor.time_ms += delta_ms;
         self.file_explorer.now_ms += delta_ms;
         self.ui_time_ms += delta_ms;
         self.ai_chat.updateTimeMs(delta_ms);
@@ -2394,15 +2397,20 @@ pub const UI = struct {
     const LspPending = struct { editor: *editor_mod.CodeEditor, row: usize, col: usize };
     const LspGoto = struct { path: []u8, row: usize, col: usize, frames_left: u32 };
 
-    /// Jeder Editor bekommt den Definition-Hook (UI-Zeiger ist erst nach init stabil, deshalb hier).
+    /// Jeder Editor bekommt Definition- und Zwischenablage-Hook (UI-Zeiger ist erst nach init
+    /// stabil, deshalb hier). Die Eingabefelder (Chat, Commit) sind auch CodeEditoren.
     fn ensureEditorHooks(self: *Self) void {
         var buf: [32]*pane_mod.Pane = undefined;
         var n: usize = 0;
         collectLeaves(self.root_pane, &buf, &n);
+        const clip: editor_mod.CodeEditor.ClipboardHook = .{ .ctx = self, .copy = clipCopy, .paste = clipPaste };
         for (buf[0..n]) |p| {
             const e = p.data.leaf.code_editor;
             if (e.definition_hook == null) e.definition_hook = .{ .ctx = self, .func = lspDefinitionHookFn };
+            if (e.clipboard_hook == null) e.clipboard_hook = clip;
         }
+        if (self.ai_chat.input_editor.clipboard_hook == null) self.ai_chat.input_editor.clipboard_hook = clip;
+        if (self.scm_changes.editor.clipboard_hook == null) self.scm_changes.editor.clipboard_hook = clip;
     }
 
     fn lspDefinitionHookFn(ctx: *anyopaque, editor: *editor_mod.CodeEditor, row: usize, col: usize) bool {
@@ -4417,6 +4425,20 @@ pub const UI = struct {
     pub fn updateGitStatus(self: *Self, payload: []const u8) void {
         const repo_root = self.current_directory orelse return;
         const parts = git_worker.splitStatusPayload(payload);
+        // Ein Status, der vor einem Projektwechsel eingereiht wurde, kann danach ankommen und
+        // überschrieb dann den des neuen Projekts (e2e_scm_changes: Fixture unter dem zid-Repo,
+        // Changes-Liste leer, Upstream des zid-Repos). Nur annehmen, wenn die Wurzel passt.
+        if (std.mem.startsWith(u8, parts.explorer, "root:")) {
+            const end = std.mem.indexOfScalar(u8, parts.explorer, '\n') orelse parts.explorer.len;
+            const root = parts.explorer["root:".len..end];
+            var buf: [std.fs.max_path_bytes]u8 = undefined;
+            if (git_worker.repoTopLevel(repo_root, &buf)) |want| {
+                if (!git_worker.samePath(root, want)) {
+                    log.debug("git status für '{s}' verworfen, Projekt ist '{s}'", .{ root, want });
+                    return;
+                }
+            }
+        }
         self.file_explorer.updateGitStatus(parts.explorer, repo_root);
         // Repo-Wurzel für Source-Control-Aktionen (Pfade im Status sind relativ dazu)
         if (self.scm_repo_root) |r| self.allocator.free(r);

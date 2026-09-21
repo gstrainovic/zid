@@ -30,6 +30,7 @@ Aus AGENTS.md hierher verschoben (21.09.2026), Wortlaut unverändert.
   Vertexspalte liess die `svg_pipeline` beim Erzeugen abstürzen.
 - Windows (DirectWrite) und macOS (CoreText) reichen keine rohe FT_Face heraus; dort
   greift der Rückfall nicht (`emoji_fallback_supported`) und Emoji bleiben leer.
+  `scripts/e2e_emoji.py` überspringt Windows deshalb mit `SKIP`.
 - Zusammengesetzte Zeichen dürfen nie getrennt geformt werden: U+FE0F verlangt die farbige
   Form (⚠️ gegen ⚠), U+20E3 macht eine Taste (1️⃣), ZWJ verbindet (👩‍💻), dazu Hautton und
   Tag-Zeichen. `emoji_font.continuesCluster` nennt sie; die Zerlegung hält sie beim

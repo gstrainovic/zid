@@ -82,6 +82,7 @@ const WindowsPty = struct {
     const PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE: usize = 0x00020016; // (22 | 0x00020000)
     const EXTENDED_STARTUPINFO_PRESENT: u32 = 0x00080000;
     const CREATE_UNICODE_ENVIRONMENT: u32 = 0x00000400;
+    const STARTF_USESTDHANDLES: u32 = 0x00000100;
 
     const STARTUPINFOEX = extern struct {
         StartupInfo: windows.STARTUPINFOW,
@@ -190,6 +191,10 @@ const WindowsPty = struct {
         var startup_info_ex: STARTUPINFOEX = undefined;
         @memset(std.mem.asBytes(&startup_info_ex), 0);
         startup_info_ex.StartupInfo.cb = @sizeOf(STARTUPINFOEX);
+        // Leere Std-Handles ausdrücklich setzen: ist zids stdout umgeleitet (Log-Datei, Pipe von
+        // `zig build run`), erbt die Shell sonst diese Handles und schreibt Prompt und Ausgabe
+        // dorthin statt in die ConPTY — der Terminal-Tab blieb leer (e2e_terminal unter Windows).
+        startup_info_ex.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
         startup_info_ex.lpAttributeList = attr_list_buf.ptr;
 
         var process_info: windows.PROCESS_INFORMATION = undefined;
