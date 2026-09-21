@@ -112,7 +112,9 @@ cmd_status() {
 
 cmd_pull() {
     echo "=== Pull: Superproject ==="
-    git fetch origin
+    # Ohne Rekursion: fetch holt sonst die Submodul-Commits der ganzen neuen
+    # Historie, darunter alte fancy-cat-Staende mit unerreichbarem mupdf-Pin.
+    git fetch --no-recurse-submodules origin
     local BEHIND
     BEHIND=$(git rev-list --count HEAD..origin/main 2>/dev/null || echo "0")
     if [[ "$BEHIND" != "0" ]]; then
@@ -126,6 +128,8 @@ cmd_pull() {
     echo "=== Pull: Submodule ==="
     # Top-Level Submodule (NICHT --recursive: fancy-cat pinnt einen mupdf-Commit
     # der im upstream force-pushed/gelöscht wurde — würde rekursiv fehlschlagen).
+    # sync zuerst: geaenderte URLs aus .gitmodules (fancy-cat -> Fork) uebernehmen.
+    git submodule sync
     git submodule update --init
     cmd_mupdf
     ok "All submodules updated"
