@@ -22,23 +22,38 @@ Liegt `~/.local/bin` nicht im PATH, sagt `install.sh` es und nennt die Zeile fü
 die `~/.bashrc`. Systemweit: `sudo ./install.sh /usr/local`. Wieder weg:
 `./install.sh --uninstall` (bzw. mit demselben Präfix).
 
-### Arch, Manjaro, EndeavourOS
-
-```bash
-mkdir zid-bin && cd zid-bin
-curl -LO https://github.com/gstrainovic/zid/releases/latest/download/PKGBUILD
-makepkg -si
-```
-
-Das PKGBUILD hängt am Release, ein AUR-Konto braucht es dafür nicht. Sobald das
-Paket in der AUR steht, geht auch `paru -S zid-bin`.
-
 ### Fedora
 
 ```bash
 sudo dnf copr enable gstrainovic/zid
 sudo dnf install zid
 ```
+
+Updates kommen mit `dnf upgrade`.
+
+### Debian, Ubuntu, Mint
+
+```bash
+curl -LO https://github.com/gstrainovic/zid/releases/latest/download/zid_0.1.1-1_amd64.deb
+sudo apt install ./zid_0.1.1-1_amd64.deb
+```
+
+Braucht Debian 12 oder Ubuntu 22.04 und neuer. Updates: neue `.deb` vom Release.
+
+### openSUSE und andere RPM-Distributionen
+
+```bash
+sudo zypper install https://github.com/gstrainovic/zid/releases/latest/download/zid-0.1.1-1.x86_64.rpm
+```
+
+### Snap
+
+```bash
+sudo snap install zid --classic
+```
+
+`--classic` wie bei VS Code: Terminal, git und die Suche laufen auf dem System, nicht in
+einer Sandbox. Updates holt snapd selbst.
 
 ## Installation (Windows)
 
@@ -167,21 +182,23 @@ Ein Befehl, von `main` mit sauberem Arbeitsbaum:
 packaging/release.sh 0.1.2 "Search and replace across the project (Ctrl+Shift+F)."
 ```
 
-Das Skript setzt die Version in `build.zig.zon`, AppStream, RPM-Spec, PKGBUILD,
-`.SRCINFO` und README, committet, taggt `v0.1.2` und pusht. Der Text geht englisch
+Das Skript setzt die Version in `build.zig.zon`, AppStream, RPM-Spec und README,
+committet, taggt `v0.1.2` und pusht. Der Text geht englisch
 in AppStream und Release-Notiz; mehrere Punkte mit ` | ` trennen. `--dry-run`
 ändert nur die Dateien.
 
 Den Rest erledigt `.github/workflows/release.yml`:
 
 * Linux-Tarball (`packaging/build-release.sh`, Debian-12-Container) und Windows-Zip
-  (`windows-release.yml`) bauen, beide mit ripgrep.
-* Release als Entwurf anlegen, beides anhängen, dann veröffentlichen.
+  (`windows-release.yml`) bauen, beide mit ripgrep. Aus dem Tarball ohne neuen Bau:
+  `.deb` und `.rpm` (`packaging/nfpm.yaml`) und der Snap (`snap/snapcraft.yaml`).
+* Release als Entwurf anlegen, alles anhängen, dann veröffentlichen.
 * **Fedora:** SRPM bauen und an COPR `gstrainovic/zid` schicken. Braucht das Secret
   `COPR_CONFIG` (Inhalt von `~/.config/copr`, Token von
   <https://copr.fedorainfracloud.org/api/>, läuft nach 180 Tagen ab).
-* **Arch:** PKGBUILD samt neuer Prüfsumme nach `zid-bin` im AUR pushen. Braucht das
-  Secret `AUR_SSH_PRIVATE_KEY`.
+* **Snap Store:** Upload in den Kanal `stable`. Braucht das Secret
+  `SNAPCRAFT_STORE_CREDENTIALS` (`snapcraft export-login -`) und einmalig die Freigabe
+  für Classic-Confinement.
 * **Scoop:** nichts zu tun, der Excavator im Bucket zieht innerhalb von 4 Stunden nach
   (sofort: `gh workflow run excavator.yml -R gstrainovic/scoop-zid`).
 
@@ -190,7 +207,7 @@ Fortschritt: `gh run watch`.
 
 Warum Binärpakete statt Bauen aus den Quellen: zid verlangt exakt Zig 0.15.2,
 die vendorte MuPDF aus einem Submodul und Netzzugang während des Builds. Das
-passt weder zu einem AUR-Build auf fremden Rechnern noch zu mock in COPR.
+passt nicht zu mock in COPR.
 
 ### KI & Automatisierung (Abhängigkeiten)
 

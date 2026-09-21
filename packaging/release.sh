@@ -3,10 +3,10 @@
 #
 #   packaging/release.sh 0.1.2 "Search and replace across the project (Ctrl+Shift+F)."
 #
-# Setzt die Version überall (build.zig.zon, AppStream, RPM-Spec, PKGBUILD, .SRCINFO,
-# README), committet, taggt v<version> und pusht. Den Rest macht
-# .github/workflows/release.yml: Linux-Tarball und Windows-Zip bauen, Release anlegen,
-# COPR und AUR anstossen. Scoop zieht über den Excavator im Bucket nach (alle 4 h).
+# Setzt die Version überall (build.zig.zon, AppStream, RPM-Spec, README), committet,
+# taggt v<version> und pusht. Den Rest macht .github/workflows/release.yml: Tarball,
+# .deb, .rpm, Snap und Windows-Zip bauen, Release anlegen, COPR und Snap Store
+# anstossen. Scoop zieht über den Excavator im Bucket nach (alle 4 h).
 #
 # Mehrere Punkte im Text: mit " | " trennen, jeder wird ein eigener Absatz.
 # --dry-run ändert nur die Dateien, ohne Commit, Tag und Push.
@@ -96,12 +96,8 @@ def spec(t):
 
 edit("packaging/rpm/zid.spec", spec)
 
-# AUR: Version; die Prüfsumme setzt die Release-CI (updpkgsums), wenn das Tarball steht
-edit("packaging/aur/PKGBUILD", lambda t: sub1(r"^pkgrel=\d+$", "pkgrel=1", sub1(rf"^pkgver={re.escape(old)}$", f"pkgver={new}", t)))
-edit("packaging/aur/.SRCINFO", lambda t: t.replace(f"pkgver = {old}", f"pkgver = {new}").replace(f"v{old}/zid-{old}-", f"v{new}/zid-{new}-"))
-
 # README: Dateinamen und Beispiele
-edit("README.md", lambda t: t.replace(f"zid-{old}-", f"zid-{new}-").replace(f"v{old}", f"v{new}").replace(f"zid {old}", f"zid {new}").replace(f"zid-bin {old}", f"zid-bin {new}"))
+edit("README.md", lambda t: t.replace(f"zid-{old}-", f"zid-{new}-").replace(f"zid_{old}-", f"zid_{new}-").replace(f"v{old}", f"v{new}").replace(f"zid {old}", f"zid {new}"))
 PY
 
 if [ "$dry" = yes ]; then

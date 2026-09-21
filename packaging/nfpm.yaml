@@ -1,0 +1,76 @@
+# .deb und .rpm aus dem fertigen Release-Tarball, ohne neu zu bauen:
+#   STAGE=<entpacktes Tarball> VERSION=<x.y.z> nfpm package -f packaging/nfpm.yaml -p deb|rpm
+# Aufgerufen von .github/workflows/release.yml. ripgrep kommt hier aus der
+# Distribution, das rg unter libexec/zid im Tarball bleibt draussen.
+name: zid
+arch: amd64
+platform: linux
+version: ${VERSION}
+release: 1
+section: editors
+maintainer: gstrainovic <g.strainovic@gmail.com>
+description: |
+  GPU-beschleunigter Editor mit Markdown-Vorschau, PDF-Anzeige und lokaler KI
+  zid ist ein in Zig geschriebener Editor. Er rendert über Vulkan, läuft unter
+  Wayland und X11 und bringt Markdown-Vorschau, Marp-Folien, PDF-Anzeige, ein
+  eingebettetes Terminal, Git-Ansichten und Suche im Projekt mit.
+vendor: gstrainovic
+homepage: https://github.com/gstrainovic/zid
+license: AGPL-3.0-only
+
+# expand: nfpm ersetzt ${STAGE} in src nur mit diesem Schalter
+contents:
+  - src: ${STAGE}/bin/zid
+    dst: /usr/bin/zid
+    expand: true
+    file_info:
+      mode: 0755
+  - src: ${STAGE}/share/applications/io.github.gstrainovic.zid.desktop
+    dst: /usr/share/applications/io.github.gstrainovic.zid.desktop
+    expand: true
+  - src: ${STAGE}/share/icons/hicolor/scalable/apps/io.github.gstrainovic.zid.svg
+    dst: /usr/share/icons/hicolor/scalable/apps/io.github.gstrainovic.zid.svg
+    expand: true
+  - src: ${STAGE}/share/metainfo/io.github.gstrainovic.zid.metainfo.xml
+    dst: /usr/share/metainfo/io.github.gstrainovic.zid.metainfo.xml
+    expand: true
+  - src: ${STAGE}/LICENSE
+    dst: /usr/share/licenses/zid/LICENSE
+    expand: true
+
+# Das Binary linkt freetype, harfbuzz, libpng, zlib und glib dynamisch (glibc >= 2.35,
+# gebaut auf Debian 12); Vulkan, Wayland und X11 lädt es per dlopen.
+overrides:
+  deb:
+    depends:
+      # höchste Symbolversion im Binary (objdump -T), obwohl auf Debian 12 gebaut
+      - libc6 (>= 2.35)
+      - libfreetype6
+      - libharfbuzz0b
+      # Ubuntu 24.04 und Debian 13 haben die Bibliotheken für time64 umbenannt
+      - libpng16-16 | libpng16-16t64
+      - zlib1g
+      - libglib2.0-0 | libglib2.0-0t64
+      - libvulkan1
+      - ripgrep
+    recommends:
+      - mesa-vulkan-drivers
+  rpm:
+    # Nach SONAME statt Paketnamen: dieselbe .rpm passt so auf Fedora und openSUSE,
+    # deren Pakete verschieden heissen (freetype vs. libfreetype6)
+    depends:
+      - libfreetype.so.6()(64bit)
+      - libharfbuzz.so.0()(64bit)
+      - libpng16.so.16()(64bit)
+      - libz.so.1()(64bit)
+      - libglib-2.0.so.0()(64bit)
+      - libvulkan.so.1()(64bit)
+      - ripgrep
+
+rpm:
+  summary: GPU-beschleunigter Editor mit Markdown-Vorschau, PDF-Anzeige und lokaler KI
+  compression: zstd
+
+deb:
+  # xz statt zstd: dpkg älterer Debian/Ubuntu-Versionen kennt zstd nicht
+  compression: xz

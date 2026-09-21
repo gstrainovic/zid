@@ -3,7 +3,7 @@
 #      (windows-release.yml) bauen
 #   2. Release als Entwurf anlegen, beides anhängen, dann veröffentlichen — erst dann
 #      sieht Scoops Excavator die Version, nie ein Release ohne Zip
-#   3. COPR (Fedora) und AUR anstossen, sofern die Zugangsdaten als Secret da sind
+#   3. COPR (Fedora) anstossen, sofern die Zugangsdaten als Secret da sind
 # Scoop braucht hier nichts: der Excavator im Bucket gstrainovic/scoop-zid prüft alle
 # 4 Stunden das neueste Release (checkver/autoupdate im Manifest).
 #
@@ -27,17 +27,56 @@ jobs:
           submodules: recursive
       - name: Tarball bauen (Debian 12)
         run: packaging/build-release.sh --engine docker
+      # Aus demselben Binary: .deb (Debian, Ubuntu, Mint) und .rpm (Fedora, openSUSE).
+      # nfpm fest gepinnt, Prüfsumme aus dem GitHub-Release.
+      - name: .deb und .rpm
+        run: |
+          curl -sSLf -o nfpm.tgz https://github.com/goreleaser/nfpm/releases/download/v2.47.0/nfpm_2.47.0_Linux_x86_64.tar.gz
+          echo "0660ca602b2d2d2ae4781a06c692b3eeb9d437ffea05b831d76e41f4a3188783  nfpm.tgz" | sha256sum -c -
+          tar -xzf nfpm.tgz nfpm
+          export VERSION="$(sed -n 's/.*\.version = "\([^"]*\)".*/\1/p' build.zig.zon | head -1)"
+          tar -xJf "dist/zid-$VERSION-x86_64-linux.tar.xz" -C "$RUNNER_TEMP"
+          export STAGE="$RUNNER_TEMP/zid-$VERSION-x86_64-linux"
+          for p in deb rpm; do ./nfpm package -f packaging/nfpm.yaml -p "$p" -t dist/; done
+          ls -la dist
       - uses: actions/upload-artifact@v7
         with:
           name: zid-linux
-          path: dist/zid-*-x86_64-linux.tar.xz*
+          path: |
+            dist/zid-*-x86_64-linux.tar.xz*
+            dist/*.deb
+            dist/*.rpm
 
   windows:
     uses: ./.github/workflows/windows-release.yml
 
+  # Snap aus dem Tarball (snap/snapcraft.yaml). --destructive-mode baut direkt auf dem
+  # Runner, dafür muss er zu base core24 passen: Ubuntu 24.04.
+  snap:
+    needs: linux
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: zid-linux
+          path: dist
+      - name: Snap packen
+        run: |
+          version="$(sed -n 's/.*\.version = "\([^"]*\)".*/\1/p' build.zig.zon | head -1)"
+          mkdir snap-src
+          tar -xJf "dist/zid-$version-x86_64-linux.tar.xz" -C snap-src --strip-components=1
+          sudo snap install snapcraft --classic
+          sudo snapcraft pack --destructive-mode
+          ls -la ./*.snap
+      - uses: actions/upload-artifact@v7
+        with:
+          name: zid-snap
+          path: ./*.snap
+
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [linux, windows]
+    needs: [linux, windows, snap]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -61,6 +100,8 @@ jobs:
           ls -la dist
           test -f "dist/zid-$version-x86_64-linux.tar.xz"
           test -f "dist/zid-$version-x86_64-windows.zip"
+          test -f "dist/zid_${version}_amd64.snap"
+          ls dist/*.deb dist/*.rpm
           echo "version=$version" >> "$GITHUB_OUTPUT"
       - name: Release anlegen und veröffentlichen
         env:
@@ -104,26 +145,24 @@ jobs:
           rpmbuild -bs --define "_topdir $PWD/rpm" --define "_sourcedir $PWD/sources" packaging/rpm/zid.spec
           copr-cli build gstrainovic/zid rpm/SRPMS/zid-"$VERSION"-*.src.rpm
 
-  aur:
+  # Snap Store, Kanal stable. Solange die Classic-Freigabe fehlt, lehnt der Store den
+  # Upload ab (manuelle Prüfung); das hält das Release nicht auf.
+  snapstore:
     needs: publish
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    continue-on-error: true
     env:
-      AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+      SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
     steps:
-      - uses: actions/checkout@v7
-      - name: Ohne Secret AUR_SSH_PRIVATE_KEY überspringen
-        if: env.AUR_SSH_PRIVATE_KEY == ''
-        run: echo "::warning::Secret AUR_SSH_PRIVATE_KEY fehlt, AUR nicht aktualisiert"
-      # updpkgsums setzt die Prüfsumme aus dem veröffentlichten Tarball, .SRCINFO
-      # erzeugt die Action neu.
-      - name: PKGBUILD nach zid-bin pushen
-        if: env.AUR_SSH_PRIVATE_KEY != ''
-        uses: KSXGitHub/github-actions-deploy-aur@v4.2.0
+      - name: Ohne Secret SNAPCRAFT_STORE_CREDENTIALS überspringen
+        if: env.SNAPCRAFT_STORE_CREDENTIALS == ''
+        run: echo "::warning::Secret SNAPCRAFT_STORE_CREDENTIALS fehlt, Snap nicht hochgeladen (snapcraft export-login)"
+      - uses: actions/download-artifact@v8
+        if: env.SNAPCRAFT_STORE_CREDENTIALS != ''
         with:
-          pkgname: zid-bin
-          pkgbuild: packaging/aur/PKGBUILD
-          updpkgsums: true
-          commit_username: gstrainovic
-          commit_email: g.strainovic@gmail.com
-          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
-          commit_message: zid-bin ${{ needs.publish.outputs.version }}
+          name: zid-snap
+      - name: In den Snap Store laden
+        if: env.SNAPCRAFT_STORE_CREDENTIALS != ''
+        run: |
+          sudo snap install snapcraft --classic
+          snapcraft upload --release=stable ./*.snap

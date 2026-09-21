@@ -1,0 +1,60 @@
+# Snap aus dem fertigen Release-Tarball, nicht neu gebaut: release.yml entpackt das
+# Tarball nach snap-src/ und ruft `snapcraft pack --destructive-mode` auf einem
+# Ubuntu-24.04-Runner (passt zu core24).
+#
+# Classic wie VS Code: Terminal, git, rg, zls und llama-server laufen auf dem System,
+# eine strikte Sandbox würde sie abschneiden. Der Snap Store verlangt dafür einmal eine
+# Freigabe (forum.snapcraft.io, Kategorie store-requests).
+#
+# Kein patchelf: zid nutzt wie beim Tarball die System-Bibliotheken (freetype, harfbuzz,
+# glib, Vulkan-Loader) und die GPU-Treiber des Hosts. Gegen die Bibliotheken von core24
+# umgebogen liefen Host-Vulkan-Treiber mit neuerer glibc nicht. rg liegt statisch (musl)
+# unter usr/libexec/zid/rg, zid findet es relativ zum Binary.
+name: zid
+base: core24
+adopt-info: zid
+summary: GPU-accelerated editor with Markdown preview, PDF viewer and local AI
+description: |
+  zid is an editor written in Zig. It renders through Vulkan, runs on Wayland and X11
+  and comes with Markdown preview, Marp slides, a PDF viewer, an embedded terminal,
+  Git views, project-wide search and replace, and a chat with a local model.
+license: AGPL-3.0-only
+website: https://github.com/gstrainovic/zid
+issues: https://github.com/gstrainovic/zid/issues
+grade: stable
+confinement: classic
+platforms:
+  amd64:
+
+lint:
+  ignore:
+    # Absichtlich die Bibliotheken des Hosts, siehe oben
+    - classic
+    - library
+
+apps:
+  zid:
+    command: usr/bin/zid
+    desktop: usr/share/applications/io.github.gstrainovic.zid.desktop
+    common-id: io.github.gstrainovic.zid
+
+parts:
+  zid:
+    plugin: dump
+    source: snap-src/
+    organize:
+      bin/zid: usr/bin/zid
+      libexec: usr/libexec
+      share: usr/share
+    stage:
+      - usr/bin/zid
+      - usr/libexec/zid/*
+      - usr/share/*
+      - LICENSE
+    override-build: |
+      craftctl default
+      craftctl set version="$(sed -n 's/.*\.version = "\([^"]*\)".*/\1/p' "$CRAFT_PROJECT_DIR/build.zig.zon" | head -1)"
+      # Icon im Starter: im Snap liegt es unter $SNAP, nicht im Icon-Theme des Systems.
+      # organize läuft erst nach diesem Schritt, deshalb noch share/ statt usr/share/.
+      sed -i 's|^Icon=.*|Icon=${SNAP}/usr/share/icons/hicolor/scalable/apps/io.github.gstrainovic.zid.svg|' \
+        "$CRAFT_PART_INSTALL/share/applications/io.github.gstrainovic.zid.desktop"

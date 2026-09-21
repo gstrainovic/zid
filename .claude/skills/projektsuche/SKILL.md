@@ -52,8 +52,8 @@ wie VS Code: `--hidden --glob=!.git --no-require-git --crlf`, Groß/Klein Unicod
 - Suchreihenfolge (`UI.rgPath`, im Log `search: rg = …`): `ZID_RG_PATH`, neben dem Binary
   (Windows-Zip), `../libexec/zid/rg` (Linux-Tarball), sonst PATH.
 - Tarball (`packaging/build-release.sh`) und Windows-Zip (`windows-release.yml`) laden
-  ripgrep 15.2.0 mit fester Prüfsumme und legen `ripgrep-LICENSE-MIT` dazu. COPR und AUR
-  hängen stattdessen an `ripgrep` der Distribution.
+  ripgrep 15.2.0 mit fester Prüfsumme und legen `ripgrep-LICENSE-MIT` dazu. COPR, .deb und
+  .rpm hängen stattdessen an `ripgrep` der Distribution.
 
 ## Testen
 

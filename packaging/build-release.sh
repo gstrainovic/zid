@@ -105,10 +105,20 @@ for attempt in 1 2 3; do
     sleep 20
 done
 
+# -Dcpu=baseline: ohne baut Zig für die CPU des Build-Rechners. Das Tarball aus der CI
+# enthielt so AVX-512-Befehle und stürzte auf einem i7-8850H mit "Illegal instruction" ab.
 zig build install \
     --cache-dir /tmp/zig-cache --global-cache-dir /tmp/zig-global \
     -Dmupdf=bundled -Dmupdf-lib-dir="libs/fancy-cat/deps/mupdf/$MUPDF_OUT" \
-    -Doptimize=ReleaseSafe --prefix "$out"
+    -Doptimize=ReleaseSafe -Dcpu=baseline --prefix "$out"
+
+# Gegenprobe: kein AVX-512 und kein AVX2 im Binary. Zählen statt grep -q: das bricht
+# die Pipe ab, objdump stirbt an SIGPIPE und pipefail machte den Treffer unsichtbar.
+avx="$(objdump -d --no-show-raw-insn "$out/bin/zid" | grep -cE '%zmm|%ymm' || true)"
+if [ "$avx" != 0 ]; then
+    echo "bin/zid enthält $avx AVX-Befehle, -Dcpu=baseline wirkt nicht" >&2
+    exit 1
+fi
 
 strip -s "$out/bin/zid"
 
@@ -137,7 +147,7 @@ cd /src
 
 echo "== Ergebnis"
 ls -la "/src/dist/zid-$VERSION-x86_64-linux.tar.xz"
-echo "== Prüfsumme (für PKGBUILD und Release)"
+echo "== Prüfsumme"
 cat "/src/dist/zid-$VERSION-x86_64-linux.tar.xz.sha256"
 echo "== Höchste benötigte glibc-Version"
 objdump -T "$stage/bin/zid" | grep -oE 'GLIBC_[0-9.]+' | sort -V | uniq | tail -1

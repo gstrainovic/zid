@@ -93,11 +93,8 @@ KI-Punkte: Wirkung vorab schätzen, vorher/nachher messen (`scripts/e2e_ai_read_
 
 ## Verteilung
 
-Stand: v0.1.1 liegt als Release (Linux-Tarball, Windows-Zip, PKGBUILD), COPR hat 0.1.1-1
+Stand: v0.1.1 liegt als Release (Linux-Tarball, Windows-Zip), COPR hat 0.1.1-1
 gebaut, Windows installiert über den Scoop-Bucket `gstrainovic/scoop-zid`.
 
-1. **AUR:** `packaging/aur/PKGBUILD` und `.SRCINFO` stehen auf 0.1.1. Registrierung bei
-   `aur.archlinux.org` war zuletzt eingefroren (503); danach nach `ssh://aur@aur.archlinux.org/zid-bin.git`
-   pushen.
-2. **Binärgröße:** 155 MB entpackt, davon 109 MB tree-sitter-Parsetabellen. Strippen bringt
+1. **Binärgröße:** 155 MB entpackt, davon 109 MB tree-sitter-Parsetabellen. Strippen bringt
    1 MB, der Hebel wäre eine Auswahl an Grammatiken (`syntax`-Dependency).
