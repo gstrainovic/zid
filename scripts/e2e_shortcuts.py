@@ -128,6 +128,10 @@ def item3_tabs():
     print("--- 3. Tabs: Ctrl+N neue Datei, Ctrl+Tab/Ctrl+Shift+Tab wechseln, Ctrl+W schließen")
     rpc("click", [1100, 400])  # Fokus in den Editor-Bereich
     settle()
+    # Ältester Tab für Ctrl+Shift+Tab, der weder New File noch README ist
+    # (zid startet ohne Datei nicht mehr mit einem Tab).
+    rpc("explorer_open", [os.path.join(ROOT, "AGENTS.md")])
+    settle(10)
     n0 = ui_state()["tab_count"]
     key("n", ctrl=True)
     st = ui_state()

@@ -177,37 +177,12 @@ pub fn main() !void {
         }
     }
 
-    // Falls keine Datei angegeben: test_data/app.log als Default laden
-    // Suchstrategie: (1) CLI-Pfad → (2) CWD (Dev) → (3) installiert (share/)
     const exe_dir = std.fs.selfExeDirPathAlloc(allocator) catch null;
     defer if (exe_dir) |d| allocator.free(d);
 
-    const resolved_file_path: ?[]const u8 = if (default_file_path) |p|
-        p
-    else blk: {
-        // 1) Dev-Modus: test_data/syntax_test.md im CWD
-        if (std.fs.cwd().access("test_data/syntax_test.md", .{}) catch null) |_| {
-            break :blk try std.fs.path.resolve(allocator, &.{"test_data/syntax_test.md"});
-        }
-        // 2) Installiert: <exe_dir>/../share/README.md (zig-out/bin -> zig-out/share)
-        if (exe_dir) |dir| {
-            const sp = try std.fs.path.join(allocator, &.{ dir, "..", "share", "test_data/syntax_test.md" });
-            defer allocator.free(sp);
-            if (std.fs.accessAbsolute(sp, .{}) catch null) |_| {
-                break :blk try std.fs.path.resolve(allocator, &.{sp});
-            }
-        }
-        break :blk null;
-    };
-    defer if (resolved_file_path) |p| {
-        if (default_file_path == null) allocator.free(p);
-    };
-
-    if (resolved_file_path) |p| {
-        log.info("Default file: {s}", .{p});
-    } else {
-        log.info("No default file — using built-in content", .{});
-    }
+    // Nur eine auf der Kommandozeile genannte Datei wird beim Start geöffnet.
+    const resolved_file_path: ?[]const u8 = default_file_path;
+    if (resolved_file_path) |p| log.info("Start file: {s}", .{p});
 
     log.info("=== zid starting ===", .{});
     log.info("Platform: {s}-{s}", .{

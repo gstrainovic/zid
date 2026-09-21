@@ -106,8 +106,6 @@ zig build install \
     -Doptimize=ReleaseSafe --prefix "$out"
 
 strip -s "$out/bin/zid"
-# Testdaten aus dem Entwicklungsbaum gehören nicht ins Paket.
-rm -f "$out/share/app.log" "$out/share/syntax_test.md"
 cp packaging/install.sh "$out/install.sh"
 cp README.md LICENSE "$out/"
 chmod +x "$out/install.sh"
