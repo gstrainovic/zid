@@ -59,7 +59,7 @@ chown_back=no
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq --no-install-recommends \
-    build-essential git curl ca-certificates xz-utils python3 pkg-config \
+    build-essential git curl ca-certificates xz-utils python3 pkg-config unzip \
     libwayland-dev libxkbcommon-dev libdecor-0-dev libegl1-mesa-dev libvulkan-dev \
     libx11-dev libxcursor-dev libfreetype-dev libharfbuzz-dev libpng-dev \
     libjpeg-dev zlib1g-dev > /dev/null
