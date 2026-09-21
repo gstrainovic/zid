@@ -114,6 +114,15 @@ jobs:
           New-Item -ItemType Directory -Path $name | Out-Null
           Copy-Item out\bin\zid.exe $name\
           Copy-Item README.md, LICENSE $name\
+          # ripgrep für die Suche im Projekt (Ctrl+Shift+F) neben zid.exe, fest gepinnt.
+          # Prüfsumme aus dem GitHub-Release (Asset-Digest).
+          $rgName = "ripgrep-15.2.0-x86_64-pc-windows-msvc"
+          Invoke-WebRequest -Uri "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/$rgName.zip" -OutFile rg.zip
+          $rgHash = (Get-FileHash rg.zip -Algorithm SHA256).Hash.ToLower()
+          if ($rgHash -ne "71b2fef860abe467217a538ff31de02f5258807c0129f771846f87bd029aafc5") { throw "ripgrep-Prüfsumme falsch: $rgHash" }
+          Expand-Archive rg.zip -DestinationPath rg
+          Copy-Item "rg\$rgName\rg.exe" $name\
+          Copy-Item "rg\$rgName\LICENSE-MIT" "$name\ripgrep-LICENSE-MIT.txt"
           Compress-Archive -Path $name -DestinationPath "$name.zip"
           "zip=$name.zip" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append

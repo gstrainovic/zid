@@ -134,6 +134,9 @@ pub const Command = enum {
     timeline_toggle_pin,
     /// Sidebar zeigt Source Control mit dem Graphen (VS Code workbench.view.scm)
     view_source_control,
+    /// Sidebar zeigt die Suche im Projekt (VS Code workbench.view.search), Ersetzen aufgeklappt
+    find_in_files,
+    replace_in_files,
     graph_open_changes,
     graph_copy_commit_hash,
     graph_copy_commit_message,
@@ -234,6 +237,8 @@ pub const bindings = [_]Binding{
     .{ .command = .show_shortcuts, .key = .f1 },
     // Diff-Editor: VS Code workbench.action.compareEditor.nextChange / previousChange
     .{ .command = .view_source_control, .key = .g, .mods = .{ .ctrl = true, .shift = true } },
+    .{ .command = .find_in_files, .key = .f, .mods = .{ .ctrl = true, .shift = true } },
+    .{ .command = .replace_in_files, .key = .h, .mods = .{ .ctrl = true, .shift = true } },
     .{ .command = .diff_next_change, .key = .f5, .mods = .{ .alt = true } },
     .{ .command = .diff_prev_change, .key = .f5, .mods = .{ .alt = true, .shift = true } },
 };
@@ -275,7 +280,7 @@ pub const Menu = struct { title: []const u8, items: []const Command };
 /// Menüleiste im Header, in dieser Reihenfolge.
 pub const menus = [_]Menu{
     .{ .title = "File", .items = &.{ .new_file, .quick_open, .save, .toggle_autosave, .open_folder, .close_tab, .close_all_tabs, .reopen_closed_tab } },
-    .{ .title = "Edit", .items = &.{ .undo, .redo, .cut, .copy, .paste, .select_all, .delete_line, .duplicate_line, .move_line_up, .move_line_down, .toggle_comment, .find, .replace, .goto_line, .goto_definition, .select_next_occurrence, .add_cursor_above, .add_cursor_below } },
+    .{ .title = "Edit", .items = &.{ .undo, .redo, .cut, .copy, .paste, .select_all, .delete_line, .duplicate_line, .move_line_up, .move_line_down, .toggle_comment, .find, .replace, .find_in_files, .replace_in_files, .goto_line, .goto_definition, .select_next_occurrence, .add_cursor_above, .add_cursor_below } },
     .{ .title = "View", .items = &.{ .toggle_explorer, .focus_explorer, .toggle_hidden_files, .split_vertical, .split_horizontal, .md_preview, .md_export_pdf, .new_terminal, .toggle_terminal, .new_chat, .toggle_theme, .zoom_in, .zoom_out, .zoom_reset, .toggle_minimap, .toggle_whitespace, .toggle_indent_guides, .toggle_word_wrap, .view_source_control } },
     .{ .title = "Help", .items = &.{ .command_palette, .show_shortcuts } },
 };
@@ -394,6 +399,8 @@ pub fn label(command: Command) []const u8 {
         .timeline_refresh => "Refresh Timeline",
         .timeline_toggle_pin => "Pin the Current Timeline",
         .view_source_control => "Source Control",
+        .find_in_files => "Find in Files",
+        .replace_in_files => "Replace in Files",
         .graph_open_changes => "Open Changes",
         .graph_copy_commit_hash => "Copy Commit Hash",
         .graph_copy_commit_message => "Copy Commit Message",
@@ -594,4 +601,14 @@ test "Kontextmenüs: Tab-Kopf hat Markdown Preview, jede Liste hat Labels, Termi
     try testing.expectEqualStrings("", shortcutText(.terminal_copy));
     try testing.expectEqualStrings("", shortcutText(.terminal_paste));
     try testing.expectEqual(Command.md_preview, editor_menu_items[3]);
+}
+
+test "Suche im Projekt wie VS Code: Ctrl+Shift+F / Ctrl+Shift+H, im Edit-Menü" {
+    try testing.expectEqual(Command.find_in_files, lookup(.f, .{ .ctrl = true, .shift = true }, .global).?);
+    try testing.expectEqual(Command.replace_in_files, lookup(.h, .{ .ctrl = true, .shift = true }, .global).?);
+    try testing.expectEqualStrings("Find in Files", label(.find_in_files));
+    try testing.expectEqualStrings("Replace in Files", label(.replace_in_files));
+    try testing.expectEqualStrings("Ctrl+Shift+F", shortcutText(.find_in_files));
+    try testing.expect(std.mem.indexOfScalar(Command, menus[1].items, .find_in_files) != null);
+    try testing.expect(std.mem.indexOfScalar(Command, menus[1].items, .replace_in_files) != null);
 }

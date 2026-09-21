@@ -31,6 +31,7 @@ Bereichs, nicht hierher.
 - `explorer`: Fokus, Tastatur, Auswahl, Papierkorb, Anlegen/Umbenennen, .gitignore, Tab-Nachführung
 - `editor`: Bearbeiten, Maus, Mehrfach-Cursor, Word-Wrap, Suche, Panes, externe Änderungen, Textfelder
 - `schnelloeffner`: Ctrl+P und Command Palette (Fuzzy, Datei-Scan, Zeilenlayout)
+- `projektsuche`: Ctrl+Shift+F/H, ripgrep, Ersetzen im Projekt, rg in den Paketen
 - `tableiste`: Neu-Menü, Ctrl+Tab (MRU), Tab-Picker, Scrollen, Drag & Drop, Pinnen
 - `theme-zoom`: Theme, Zoom, Autosave/Backup, Toasts, Beenden-Dialog, Menü-Tastatur
 - `grosse-dateien`: Binärdateien, Riesenzeilen, E2E-Betrieb/Windows, Use-after-free in Render-Commands

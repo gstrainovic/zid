@@ -28,6 +28,9 @@ Requires:       zlib
 Requires:       glib2
 # Ohne Vulkan-Treiber startet das Rendering nicht.
 Requires:       vulkan-loader
+# Suche im Projekt (Ctrl+Shift+F). Das rg aus dem Tarball (libexec/zid) bleibt
+# draussen, die Distribution liefert ihr eigenes.
+Requires:       ripgrep
 
 %description
 zid ist ein in Zig geschriebener Editor. Er rendert über Vulkan, läuft unter

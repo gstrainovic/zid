@@ -15,6 +15,8 @@ prefix="${1:-$HOME/.local}"
 app_id="io.github.gstrainovic.zid"
 files=(
     "bin/zid"
+    "libexec/zid/rg"
+    "libexec/zid/ripgrep-LICENSE-MIT"
     "share/applications/$app_id.desktop"
     "share/icons/hicolor/scalable/apps/$app_id.svg"
     "share/metainfo/$app_id.metainfo.xml"
@@ -33,13 +35,16 @@ if [ "$uninstall" = yes ]; then
     for f in "${files[@]}"; do
         rm -f "$prefix/$f"
     done
+    rmdir "$prefix/libexec/zid" 2>/dev/null || true
     refresh_caches
     echo "zid aus $prefix entfernt."
     exit 0
 fi
 
 for f in "${files[@]}"; do
-    install -Dm "$([ "${f%%/*}" = bin ] && echo 755 || echo 644)" "$here/$f" "$prefix/$f"
+    mode=644
+    case "$f" in bin/* | */rg) mode=755 ;; esac
+    install -Dm "$mode" "$here/$f" "$prefix/$f"
 done
 refresh_caches
 

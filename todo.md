@@ -38,12 +38,14 @@ KI-Punkte: Wirkung vorab schätzen, vorher/nachher messen (`scripts/e2e_ai_read_
    der abgelehnte Inhalt steht im Prompt) und weitere Aufrufe derselben Antwort laufen trotzdem.
    Neu: übrige Aufrufe als „skipped“, kein weiterer LLM-Aufruf. Erwartung: 3–8 s schneller nach
    Deny (`e2e_ai_tools.py` Schritt 5).
-2. **Suchen und Ersetzen im ganzen Projekt:** Ergebnisliste mit Datei und Zeile, Klick öffnet die
-   Stelle, Ersetzen einzeln und alle. Gemeinsamer Kern mit 3.3.
-3. **KI: projektweite Suche als Werkzeug** anstelle von `find_in_editor` (gleiche Werkzeugzahl,
-   Suchleiste bleibt über `command` erreichbar). Teilstring, `pfad:zeile:text`, höchstens 30
-   Treffer, Zeilen auf 200 Zeichen, gitignored/`engines/`/`models/`/`reference/` ausgeschlossen.
-   Werkzeugwahl mit `llm-bench/bench/agent_eval.py` prüfen.
+2. **KI: projektweite Suche als Werkzeug** anstelle von `find_in_editor` (gleiche Werkzeugzahl,
+   Suchleiste bleibt über `command` erreichbar), über `project_search.Runner` wie Ctrl+Shift+F.
+   Teilstring, `pfad:zeile:text`, höchstens 30 Treffer, Zeilen auf 200 Zeichen,
+   `engines/`/`models/`/`reference/` ausgeschlossen. Werkzeugwahl mit
+   `llm-bench/bench/agent_eval.py` prüfen.
+3. **Suche im Projekt, Rest zu VS Code:** Ersetzen in offenen Buffern mit ungespeicherten
+   Änderungen (heute übersprungen, per Undo rücknehmbar wie VS Code), Include/Exclude-Globs,
+   Suchverlauf mit ↑/↓, „Find in Folder“ im Explorer-Kontextmenü.
 4. **LSP:** Diagnosen (publishDiagnostics, inline und Sprung zur nächsten), inkrementelles
    `didChange`, Hover, Referenzen, Umbenennen (WorkspaceEdit), Datei-Symbole, Server je Dateityp
    (`libs/flow-core/src/file_type_lsp.zig` ist vorhanden, `src/` nutzt nur zls), Formatieren über

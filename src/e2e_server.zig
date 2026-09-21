@@ -562,6 +562,7 @@ pub fn createDispatcher(alloc: std.mem.Allocator, ctx: *E2EContext) !*zigjr.RpcD
     try rpc_dispatcher.addWithCtx("open_file", ctx, openFile);
     try rpc_dispatcher.addWithCtx("tab_bounds", ctx, tabBounds);
     try rpc_dispatcher.addWithCtx("picker_state", ctx, pickerState);
+    try rpc_dispatcher.addWithCtx("search_state", ctx, searchState);
     try rpc_dispatcher.addWithCtx("middle_click", ctx, middleClick);
     try rpc_dispatcher.addWithCtx("click_mods", ctx, clickMods);
     try rpc_dispatcher.addWithCtx("mouse_down", ctx, mouseDown);
@@ -1069,6 +1070,75 @@ fn editorLines(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
 /// Editor-Zustand: Zeilen, Cursor und der gesamte Text (JSON-escaped).
 fn editorState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     return onMain(ctx, dc, editorStateMain, .{});
+}
+
+/// Suche im Projekt: Felder, Optionen, Meldung und die sichtbare Trefferliste (höchstens 300
+/// Zeilen). Im Hauptthread: Treffer und Zeilen tauscht `SearchView.update` pro Frame.
+fn searchState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
+    return onMain(ctx, dc, searchStateMain, .{});
+}
+
+fn searchStateMain(ctx: *E2EContext, dc: *zigjr.DispatchCtx) anyerror![]const u8 {
+    const ui = ctx.ui_system;
+    const v = &ui.search_view;
+    const ps = @import("ui/project_search.zig");
+    var buf = std.Io.Writer.Allocating.init(dc.arena());
+    const w = &buf.writer;
+    const focused = ui.sidebar_focus == .search;
+    try w.print("{{\"visible\": {}, \"focus\": \"{s}\", \"replace_open\": {}, \"case_sensitive\": {}, \"whole_word\": {}, \"regex\": {}, \"searching\": {}, \"match_count\": {d}, \"file_count\": {d}, \"limit_hit\": {}, \"query\": ", .{
+        ui.show_file_explorer and ui.sidebar_mode == .search,
+        if (focused) @tagName(v.focus) else "none",
+        v.replace_open,
+        v.opts.case_sensitive,
+        v.opts.whole_word,
+        v.opts.regex,
+        v.searching(),
+        v.results.match_count,
+        v.results.files.items.len,
+        v.runner.limitHit(),
+    });
+    try std.json.Stringify.value(v.queryText(), .{}, w);
+    try w.writeAll(", \"replace\": ");
+    try std.json.Stringify.value(v.replaceText(), .{}, w);
+    try w.writeAll(", \"error\": ");
+    try std.json.Stringify.value(v.runner.errorText(), .{}, w);
+    var msg_buf: [160]u8 = undefined;
+    try w.writeAll(", \"message\": ");
+    try std.json.Stringify.value(v.message(&msg_buf), .{}, w);
+    try w.writeAll(", \"selected\": ");
+    try std.json.Stringify.value(v.selected, .{}, w);
+    try w.writeAll(", \"rows\": [");
+    const r = &v.results;
+    for (r.rows.items[0..@min(r.rows.items.len, 300)], 0..) |row, i| {
+        if (i > 0) try w.writeAll(", ");
+        switch (row) {
+            .file => |f| {
+                const file = r.files.items[f];
+                try w.writeAll("{\"kind\": \"file\", \"path\": ");
+                try std.json.Stringify.value(file.path, .{}, w);
+                try w.print(", \"count\": {d}, \"collapsed\": {}}}", .{ file.count, file.collapsed });
+            },
+            .match => |m| {
+                const file = r.files.items[m.file];
+                const line = file.lines.items[m.line];
+                const sub = line.subs[m.sub];
+                const p = ps.preview(line.line, sub, 26);
+                try w.writeAll("{\"kind\": \"match\", \"path\": ");
+                try std.json.Stringify.value(file.path, .{}, w);
+                try w.print(", \"row\": {d}, \"match\": ", .{line.row});
+                try std.json.Stringify.value(p.match, .{}, w);
+                try w.writeAll(", \"before\": ");
+                try std.json.Stringify.value(p.before, .{}, w);
+                try w.writeAll(", \"after\": ");
+                try std.json.Stringify.value(p.after, .{}, w);
+                try w.writeAll(", \"replacement\": ");
+                try std.json.Stringify.value(sub.replacement, .{}, w);
+                try w.writeAll("}");
+            },
+        }
+    }
+    try w.writeAll("]}");
+    return buf.written();
 }
 
 fn editorStateMain(ctx: *E2EContext, dc: *zigjr.DispatchCtx) anyerror![]const u8 {

@@ -16,6 +16,10 @@ engine=""
 image="docker.io/library/debian:12"
 zig_version="0.15.2"
 mupdf_out="build/release-deb12"
+# ripgrep für die Suche im Projekt (Ctrl+Shift+F), statisch (musl), fest gepinnt.
+# Prüfsumme aus dem GitHub-Release (Asset-Digest).
+rg_version="15.2.0"
+rg_sha256="33e15bcf1624b25cdd2a55813a47a2f95dbe126268203e76aa6a585d1e7b149c"
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -50,6 +54,7 @@ chown_back=no
     -v "$root:/src:rw" -w /src \
     -e ZIG_VERSION="$zig_version" -e MUPDF_OUT="$mupdf_out" -e VERSION="$version" \
     -e CHOWN_BACK="$chown_back" -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
+    -e RG_VERSION="$rg_version" -e RG_SHA256="$rg_sha256" \
     "$image" bash -euo pipefail -s <<'CONTAINER'
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
@@ -106,6 +111,16 @@ zig build install \
     -Doptimize=ReleaseSafe --prefix "$out"
 
 strip -s "$out/bin/zid"
+
+# ripgrep unter libexec/zid, nicht in bin/: ein eigenes rg im PATH bleibt unberührt.
+# zid sucht es dort über ../libexec/zid/rg relativ zum Binary.
+rg_name="ripgrep-$RG_VERSION-x86_64-unknown-linux-musl"
+curl -sSL "https://github.com/BurntSushi/ripgrep/releases/download/$RG_VERSION/$rg_name.tar.gz" -o /tmp/rg.tar.gz
+echo "$RG_SHA256  /tmp/rg.tar.gz" | sha256sum -c -
+tar -xzf /tmp/rg.tar.gz -C /tmp
+install -Dm755 "/tmp/$rg_name/rg" "$out/libexec/zid/rg"
+install -Dm644 "/tmp/$rg_name/LICENSE-MIT" "$out/libexec/zid/ripgrep-LICENSE-MIT"
+
 cp packaging/install.sh "$out/install.sh"
 cp README.md LICENSE "$out/"
 chmod +x "$out/install.sh"
