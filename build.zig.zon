@@ -3,7 +3,7 @@
     // hängt am Paketnamen.
     .fingerprint = 0x58c7413b2cab22c0,
     .name = .zid,
-    .version = "0.1.1",
+    .version = "0.1.2",
     .minimum_zig_version = "0.15.2",
     .dependencies = .{
         .wio = .{

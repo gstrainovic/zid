@@ -34,6 +34,16 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.1.2" date="2026-09-21">
+      <description>
+        <p>Search and replace across the project (Ctrl+Shift+F / Ctrl+Shift+H), powered by ripgrep.</p>
+        <p>Find (Ctrl+F) in the Markdown preview.</p>
+        <p>Color emoji on Windows.</p>
+        <p>New packages: .deb, .rpm and Snap.</p>
+        <p>Release binaries run on every x86-64 CPU again (0.1.1 needed AVX2).</p>
+        <p>Files with CRLF line endings no longer count as modified after opening; invalid UTF-8 no longer crashes zid.</p>
+      </description>
+    </release>
     <release version="0.1.1" date="2026-09-20">
       <description>
         <p>Color emoji in editor, preview and chat; the font is fetched on first use.</p>
