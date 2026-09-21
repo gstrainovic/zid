@@ -43,11 +43,8 @@ sudo dnf install zid
 ## Installation (Windows)
 
 Am Release hängt `zid-0.1.1-x86_64-windows.zip` (gebaut von GitHub Actions).
-Entpacken, `zid.exe` starten — daneben braucht es nichts, Schrift und Shader
-stecken im Binary.
-
-Emoji bleiben unter Windows leere Kästchen: dort läuft der Text über DirectWrite,
-und die Rückfall-Kette auf eine Emoji-Schrift gibt es bisher nur unter Linux.
+Entpacken, `zid.exe` starten — Schrift und Shader stecken im Binary, `rg.exe`
+(ripgrep, für die Suche im Projekt) liegt daneben.
 
 Mit Scoop:
 
@@ -56,14 +53,8 @@ scoop bucket add zid https://github.com/gstrainovic/scoop-zid
 scoop install zid/zid
 ```
 
-Das Manifest wird in diesem Repo gepflegt (`packaging/scoop/zid.json`) und bei
-jedem Release nach `bucket/zid.json` im Repo
-[gstrainovic/scoop-zid](https://github.com/gstrainovic/scoop-zid) kopiert.
-Lokal prüfen:
-
-```powershell
-scoop install packaging\scoop\zid.json
-```
+Das Manifest liegt im Bucket [gstrainovic/scoop-zid](https://github.com/gstrainovic/scoop-zid)
+und folgt neuen Releases selbst (Excavator, alle 4 Stunden).
 
 ### Voraussetzungen
 
@@ -170,41 +161,32 @@ cd zid-0.1.1-x86_64-linux
 
 ### Release veröffentlichen
 
+Ein Befehl, von `main` mit sauberem Arbeitsbaum:
+
 ```bash
-packaging/build-release.sh                       # dist/…tar.xz + .sha256
-git tag -a v0.1.1 -m "zid 0.1.1" && git push origin v0.1.1
-gh release create v0.1.1 dist/zid-0.1.1-x86_64-linux.tar.xz* \
-    --title "zid 0.1.1" --notes "…"
+packaging/release.sh 0.1.2 "Search and replace across the project (Ctrl+Shift+F)."
 ```
 
-Danach die beiden Distributionspakete auf die neue Version ziehen — beide
-installieren das Release-Tarball, bauen also nichts nach:
+Das Skript setzt die Version in `build.zig.zon`, AppStream, RPM-Spec, PKGBUILD,
+`.SRCINFO` und README, committet, taggt `v0.1.2` und pusht. Der Text geht englisch
+in AppStream und Release-Notiz; mehrere Punkte mit ` | ` trennen. `--dry-run`
+ändert nur die Dateien.
 
-* `packaging/aur/PKGBUILD` — `pkgver` und `sha256sums` (Wert aus der
-  `.sha256`-Datei) anpassen, `.SRCINFO` neu erzeugen, beides ins AUR-Repository
-  `zid-bin` pushen:
+Den Rest erledigt `.github/workflows/release.yml`:
 
-  ```bash
-  git clone ssh://aur@aur.archlinux.org/zid-bin.git
-  cp packaging/aur/PKGBUILD packaging/aur/.SRCINFO zid-bin/
-  cd zid-bin && git commit -am "zid-bin 0.1.1" && git push
-  ```
+* Linux-Tarball (`packaging/build-release.sh`, Debian-12-Container) und Windows-Zip
+  (`windows-release.yml`) bauen, beide mit ripgrep.
+* Release als Entwurf anlegen, beides anhängen, dann veröffentlichen.
+* **Fedora:** SRPM bauen und an COPR `gstrainovic/zid` schicken. Braucht das Secret
+  `COPR_CONFIG` (Inhalt von `~/.config/copr`, Token von
+  <https://copr.fedorainfracloud.org/api/>, läuft nach 180 Tagen ab).
+* **Arch:** PKGBUILD samt neuer Prüfsumme nach `zid-bin` im AUR pushen. Braucht das
+  Secret `AUR_SSH_PRIVATE_KEY`.
+* **Scoop:** nichts zu tun, der Excavator im Bucket zieht innerhalb von 4 Stunden nach
+  (sofort: `gh workflow run excavator.yml -R gstrainovic/scoop-zid`).
 
-  `.SRCINFO` erzeugt `makepkg --printsrcinfo > .SRCINFO`; ohne Arch-Rechner:
-  `podman run --rm -v "$PWD/packaging/aur:/b" archlinux bash -c 'pacman -Sy --noconfirm pacman-contrib && useradd -m b && chown -R b /b && su b -c "cd /b && makepkg --printsrcinfo > .SRCINFO"'`
-* `packaging/rpm/zid.spec` — `Version` und `%changelog` anpassen, dann SRPM bauen
-  und ins COPR-Projekt `gstrainovic/zid` schicken. `copr-cli build` nimmt ein SRPM
-  oder eine URL, keine Spec-Datei:
-
-  ```bash
-  rpmbuild -bs --define "_topdir $PWD/tmp/rpm" --define "_sourcedir $PWD/dist" \
-      packaging/rpm/zid.spec
-  copr-cli build zid tmp/rpm/SRPMS/zid-<version>-1.fc*.src.rpm
-  ```
-
-  Das Tarball muss dafür in `dist/` liegen (Source0 wird von dort genommen, nicht
-  geladen). Zugangsdaten holt `copr-cli` aus `~/.config/copr`, zu erzeugen unter
-  <https://copr.fedorainfracloud.org/api/>.
+Fehlt ein Secret, überspringt der Job mit einer Warnung, der Rest läuft.
+Fortschritt: `gh run watch`.
 
 Warum Binärpakete statt Bauen aus den Quellen: zid verlangt exakt Zig 0.15.2,
 die vendorte MuPDF aus einem Submodul und Netzzugang während des Builds. Das
