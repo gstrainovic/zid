@@ -46,4 +46,6 @@ tmp/
 zig-pkg/
 __pycache__/
 dist/
+# Lokale Engine-Builds (optional, sonst laedt zid die Engine selbst, src/ai/selfsetup.zig)
+engines/
 _engines/
