@@ -18,9 +18,9 @@ FIX = os.path.join(ROOT, "tmp", "quit_e2e", "a.txt")
 ORIGINAL = "original\n"
 
 
-def fresh_fixture():
+def fresh_fixture(newline="\n"):
     os.makedirs(os.path.dirname(FIX), exist_ok=True)
-    with open(FIX, "w") as f:
+    with open(FIX, "w", newline=newline) as f:
         f.write(ORIGINAL)
 
 
@@ -53,8 +53,11 @@ def content():
 
 
 def main():
-    print("--- 1. Ohne Änderung beendet request_quit sofort")
-    fresh_fixture()
+    # CRLF mit Absicht: last_save_eol_mode blieb nach dem Laden LF, jede CRLF-Datei galt als
+    # geändert (unter Windows jede aus Git ausgecheckte). Ohne Startdatei galt dazu der
+    # namenlose Scratch-Buffer als geändert.
+    print("--- 1. Ohne Änderung (CRLF-Datei) beendet request_quit sofort")
+    fresh_fixture("\r\n")
     proc, log = start("clean")
     try:
         rpc("open_file", [FIX]); settle(30)
