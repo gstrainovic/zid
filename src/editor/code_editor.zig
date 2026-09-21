@@ -13,6 +13,7 @@ const ctx_menu = @import("context_menu");
 const scrollbar = @import("scrollbar");
 const marp = @import("marp");
 const find_ops = @import("find_ops.zig");
+const find_bar = @import("find_bar.zig");
 
 const actions = @import("actions.zig");
 const keymap = @import("keymap.zig");
@@ -1679,35 +1680,8 @@ pub const CodeEditor = struct {
         self.recordCursorMovement();
     }
 
-    pub const FindState = struct {
-        active: bool = false,
-        query: [256]u8 = undefined,
-        len: usize = 0,
-        /// Letzter Treffer; Ausgangspunkt für weiter/zurück
-        last_match: ?find_ops.Match = null,
-        not_found: bool = false,
-        /// Ersetzen-Zeile sichtbar (Ctrl+H); Tab wechselt das Feld
-        replace_mode: bool = false,
-        focus_replace: bool = false,
-        replacement: [256]u8 = undefined,
-        replacement_len: usize = 0,
-        /// Letzte Ersetzen-alle-Anzahl für die Anzeige
-        replaced_count: ?usize = null,
-        /// Nach dem Öffnen ersetzt das erste getippte Zeichen den alten Begriff (wie VS Code)
-        replace_on_type: bool = false,
-        /// Optionen (Alt+C, Alt+W, Alt+R)
-        case_sensitive: bool = false,
-        whole_word: bool = false,
-        use_regex: bool = false,
-
-        pub fn text(self: *const FindState) []const u8 {
-            return self.query[0..self.len];
-        }
-
-        pub fn replacementText(self: *const FindState) []const u8 {
-            return self.replacement[0..self.replacement_len];
-        }
-    };
+    /// Zustand der Suchleiste, gemeinsam mit der Markdown-Vorschau (`find_bar.zig`)
+    pub const FindState = find_bar.FindState;
 
     /// Gehe zu Zeile (Ctrl+G): Ziffern tippen, Enter springt
     pub const GotoState = struct {
@@ -1721,7 +1695,7 @@ pub const CodeEditor = struct {
     }
 
     fn findOptions(self: *const Self) find_ops.Options {
-        return .{ .case_sensitive = self.find.case_sensitive, .whole_word = self.find.whole_word, .regex = self.find.use_regex };
+        return self.find.options();
     }
 
     /// Ctrl+H: Suchleiste mit Ersetzen-Zeile öffnen
@@ -1816,19 +1790,13 @@ pub const CodeEditor = struct {
     };
 
     pub fn openFind(self: *Self) void {
-        self.find.active = true;
-        self.find.not_found = false;
-        self.find.replace_on_type = true;
         // Markierten Text als Suchbegriff übernehmen (einzeilig)
+        var selected: ?[]const u8 = null;
         if (self.selectionRange()) |r| {
-            if (r.begin.row == r.end.row) {
-                const t = self.getTextInRange(r) catch "";
-                defer if (t.len > 0) self.allocator.free(t);
-                const n = @min(t.len, self.find.query.len);
-                @memcpy(self.find.query[0..n], t[0..n]);
-                self.find.len = n;
-            }
+            if (r.begin.row == r.end.row) selected = self.getTextInRange(r) catch null;
         }
+        defer if (selected) |t| if (t.len > 0) self.allocator.free(t);
+        self.find.open(selected);
     }
 
     pub fn closeFind(self: *Self) void {
@@ -1874,12 +1842,10 @@ pub const CodeEditor = struct {
     /// (Agent-Werkzeug find_in_editor).
     pub fn findText(self: *Self, query: []const u8) void {
         self.openFind();
-        const n = @min(query.len, self.find.query.len);
-        @memcpy(self.find.query[0..n], query[0..n]);
-        self.find.len = n;
+        self.find.setQuery(query);
         self.find.last_match = null;
         self.find.not_found = false;
-        if (n > 0) self.findStep(true, true);
+        if (self.find.len > 0) self.findStep(true, true);
     }
 
     fn handleFindKey(self: *Self, key: wio.Button) void {
@@ -1890,13 +1856,7 @@ pub const CodeEditor = struct {
         if (self.mods.ctrl and !self.mods.alt and key == .f) return self.openFind();
         if (self.mods.ctrl and !self.mods.alt and key == .h) return self.openReplace();
         if (self.mods.alt and (key == .c or key == .w or key == .r)) {
-            switch (key) {
-                .c => self.find.case_sensitive = !self.find.case_sensitive,
-                .w => self.find.whole_word = !self.find.whole_word,
-                else => self.find.use_regex = !self.find.use_regex,
-            }
-            self.find.last_match = null;
-            self.find.not_found = false;
+            _ = self.find.toggleOption(@tagName(key)[0]);
             if (self.find.len > 0) self.findStep(true, true);
             return;
         }
@@ -1923,13 +1883,7 @@ pub const CodeEditor = struct {
                     }
                     return;
                 }
-                if (self.find.len > 0) {
-                    var i = self.find.len - 1;
-                    while (i > 0 and (self.find.query[i] & 0xC0) == 0x80) i -= 1;
-                    self.find.len = i;
-                }
-                self.find.last_match = null;
-                self.find.not_found = false;
+                self.find.backspaceQuery();
                 if (self.find.len > 0) self.findStep(true, true);
             },
             else => {},
@@ -1945,77 +1899,19 @@ pub const CodeEditor = struct {
             self.find.replacement_len += n;
             return;
         }
-        if (self.find.replace_on_type) {
-            self.find.len = 0;
-            self.find.last_match = null;
-            self.find.replace_on_type = false;
-        }
-        if (self.find.len + n > self.find.query.len) return;
-        @memcpy(self.find.query[self.find.len .. self.find.len + n], tmp[0..n]);
-        self.find.len += n;
+        if (!self.find.appendQuery(cp)) return;
         self.findStep(true, true);
     }
 
     /// Widget-IDs tragen das Editor-Salz (`idi`): zwei Panes mit offener Suchleiste meldeten
     /// sonst je Frame duplicate_id für Leiste und Eingabefeld.
     fn renderFindWidget(self: *Self, arena: std.mem.Allocator, editor_id: clay.ElementId) void {
-        clay.UI()(.{
-            .id = self.idi("find_widget", 0),
-            .floating = .{
-                .attach_to = .to_element_with_id,
-                .parentId = editor_id.id,
-                .attach_points = .{ .element = .right_top, .parent = .right_top },
-                .offset = .{ .x = -24, .y = 8 },
-                .z_index = 500,
-            },
-            .layout = .{
-                .sizing = .{ .w = .fit, .h = .fit },
-                .direction = .left_to_right,
-                .padding = .all(8),
-                .child_gap = 10,
-                .child_alignment = .{ .y = .center },
-            },
-            .background_color = .{ 45, 45, 60, 255 },
-            .border = .{ .width = .all(1), .color = .{ 100, 100, 120, 255 } },
-            .corner_radius = .all(4),
-        })({
-            clay.text("Find", .{ .font_size = 18, .color = .{ 150, 150, 170, 255 }, .wrap_mode = .none });
-            clay.UI()(.{
-                .id = self.idi("find_input", 0),
-                .layout = .{
-                    .sizing = .{ .w = .fixed(260), .h = .fixed(30) },
-                    .padding = .axes(0, 8),
-                    .child_alignment = .{ .y = .center },
-                },
-                .clip = .{ .horizontal = true },
-                .background_color = .{ 30, 30, 46, 255 },
-                .border = .{ .width = .all(1), .color = if (self.find.not_found) .{ 220, 90, 90, 255 } else .{ 120, 140, 220, 255 } },
-                .corner_radius = .all(3),
-            })({
-                const shown = std.fmt.allocPrint(arena, "{s}|", .{self.find.text()}) catch self.find.text();
-                clay.text(shown, .{ .font_size = 18, .color = .{ 220, 220, 240, 255 }, .wrap_mode = .none });
-            });
-            const status: []const u8 = if (self.find.not_found) "No results" else if (self.find.last_match) |m|
-                std.fmt.allocPrint(arena, "Line {d}", .{m.begin.row + 1}) catch ""
-            else
-                "";
-            if (status.len > 0) clay.text(status, .{ .font_size = 16, .color = if (self.find.not_found) .{ 220, 90, 90, 255 } else .{ 150, 150, 170, 255 }, .wrap_mode = .none });
-            renderFindToggle("Aa", self.find.case_sensitive);
-            renderFindToggle("W", self.find.whole_word);
-            renderFindToggle(".*", self.find.use_regex);
-            clay.text("Enter ↓  Shift+Enter ↑  Alt+C/W/R  Esc", .{ .font_size = 14, .color = .{ 120, 120, 140, 255 }, .wrap_mode = .none });
-        });
+        const status: []const u8 = if (self.find.not_found) "No results" else if (self.find.last_match) |m|
+            std.fmt.allocPrint(arena, "Line {d}", .{m.begin.row + 1}) catch ""
+        else
+            "";
+        find_bar.render(&self.find, arena, .{ .widget = self.idi("find_widget", 0), .input = self.idi("find_input", 0) }, editor_id.id, status);
         if (self.find.replace_mode) self.renderReplaceRow(arena, editor_id);
-    }
-
-    fn renderFindToggle(label: []const u8, on: bool) void {
-        clay.UI()(.{
-            .layout = .{ .padding = .{ .left = 6, .right = 6, .top = 2, .bottom = 2 } },
-            .background_color = if (on) .{ 120, 140, 220, 255 } else .{ 60, 60, 80, 255 },
-            .corner_radius = .all(3),
-        })({
-            clay.text(label, .{ .font_size = 14, .color = if (on) .{ 20, 20, 30, 255 } else .{ 170, 170, 190, 255 }, .wrap_mode = .none });
-        });
     }
 
     fn renderReplaceRow(self: *Self, arena: std.mem.Allocator, editor_id: clay.ElementId) void {

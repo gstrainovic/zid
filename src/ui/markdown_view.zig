@@ -3,6 +3,9 @@ const clay = @import("clay");
 const zigdown = @import("zigdown");
 const word_wrap = @import("word_wrap.zig");
 const md_select = @import("md_select.zig");
+const md_find = @import("md_find.zig");
+const find_ops = @import("../editor/find_ops.zig");
+const find_bar = @import("../editor/find_bar.zig");
 const ui_mod = @import("mod.zig");
 const shortcuts = @import("shortcuts");
 const marp = @import("marp");
@@ -132,6 +135,30 @@ pub const MarkdownView = struct {
     /// Zeilennummern der Auswahl nicht mehr, sie wird aufgehoben.
     sel_layout_key: f32 = -1,
 
+    /// Suche (Ctrl+F): Leiste, Zustand und Optionen wie im Editor (`find_bar.zig`), Treffer
+    /// über `find_ops.Pattern`. Gezählt wird über den Klartext der Blöcke (`find_hits`),
+    /// markiert beim Zeichnen je Zeile (`md_find.zig`).
+    find: find_bar.FindState = .{},
+    find_hits: std.ArrayListUnmanaged(md_find.Hit) = .empty,
+    find_current: ?usize = null,
+    /// Vorkommen im gerade gezeichneten Block bisher (`beginBlock` setzt zurück)
+    find_block_seen: u32 = 0,
+    /// Zeile (Index in `frame_lines`) und Byte-Offset des aktuellen Treffers im letzten Frame
+    find_cur_line: ?u32 = null,
+    find_cur_offset: u32 = 0,
+    /// Treffer-Index, für den `find_cur_line` gilt (nach einem Sprung erst ab dem nächsten Frame)
+    find_cur_for: ?usize = null,
+    find_hit_counter: u32 = 0,
+    find_match_color: clay.Color = .{ 230, 180, 60, 80 },
+    find_current_color: clay.Color = .{ 230, 150, 40, 200 },
+    /// Bildlauf, mit dem der letzte Frame gezeichnet wurde (Bounding-Boxen stammen von dort)
+    drawn_scroll_y: f32 = 0,
+    drawn_scroll_x: f32 = 0,
+    /// So viele Frames lang wird der aktuelle Treffer noch in den Sichtbereich geholt: erst
+    /// über die Blockhöhe (Schätzung), dann über die gezeichnete Zeile.
+    find_reveal: u8 = 0,
+    frame_arena: ?std.mem.Allocator = null,
+
     /// Geparster Dokumentbaum, einmal pro View erzeugt. Arena und Ergebnis
     /// liegen auf dem Heap: Views leben in ArrayLists und dürfen wandern,
     /// der Parser hält aber einen Pointer auf seinen Allocator.
@@ -146,7 +173,7 @@ pub const MarkdownView = struct {
 
     const FrameLine = struct { block: u32, line: u32, size: f32 };
     const LineText = struct { text: []u8, join: md_select.Join };
-    const LineCtx = struct { id: clay.ElementId, range: ?md_select.Range };
+    const LineCtx = struct { id: clay.ElementId, range: ?md_select.Range, marks: []const md_find.Mark = &.{} };
 
     fn lineKey(block: u32, line: u32) u64 {
         return (@as(u64, block) << 32) | line;
@@ -182,6 +209,7 @@ pub const MarkdownView = struct {
     pub fn deinit(self: *Self) void {
         self.block_heights.deinit(self.allocator);
         self.frame_lines.deinit(self.allocator);
+        self.find_hits.deinit(self.allocator);
         var lt = self.line_texts.valueIterator();
         while (lt.next()) |v| self.allocator.free(v.text);
         self.line_texts.deinit(self.allocator);
@@ -310,6 +338,9 @@ pub const MarkdownView = struct {
             }
         }
 
+        // Suchleiste liegt über dem Text: Klicks dort erreichen weder Auswahl noch Balken.
+        if (self.find.active and self.hitElement("md_find_widget", x, y)) return true;
+
         if (self.deck != null) {
             if (self.hitElement("md_slide_prev", x, y)) {
                 self.prevSlide();
@@ -379,6 +410,190 @@ pub const MarkdownView = struct {
         if (self.selecting) {
             if (self.hitLine(x, y)) |p| self.sel_head = p;
         }
+    }
+
+    // ---- Suche (Ctrl+F) --------------------------------------------------------------
+
+    /// Ctrl+F: Leiste öffnen wie im Editor (`FindState.open`): markierter Text aus einer Zeile
+    /// wird Suchbegriff, das erste getippte Zeichen ersetzt den alten. Im Deck keine Suche.
+    pub fn openFind(self: *Self) void {
+        if (self.deck != null) return;
+        const sel = self.selectedText(self.allocator);
+        defer if (sel) |t| self.allocator.free(t);
+        const one_line: ?[]const u8 = if (sel) |t| (if (t.len > 0 and std.mem.indexOfScalar(u8, t, '\n') == null) t else null) else null;
+        self.find.open(one_line);
+        self.refreshFind();
+    }
+
+    pub fn closeFind(self: *Self) void {
+        self.find.active = false;
+        self.find_hits.clearRetainingCapacity();
+        self.find_current = null;
+        self.find_reveal = 0;
+    }
+
+    /// Suche einer älteren Ansicht derselben Datei übernehmen (Neuaufbau nach dem Speichern).
+    pub fn adoptFind(self: *Self, old: *const Self) void {
+        if (!old.find.active) return;
+        self.find = old.find;
+        const block: u32 = if (old.find_current) |c| old.find_hits.items[c].block else 0;
+        self.refreshFind();
+        self.find_current = md_find.firstFrom(self.find_hits.items, block);
+        self.find_reveal = 0; // Scroll-Position bleibt wie vor dem Speichern
+    }
+
+    pub const FindMods = struct { ctrl: bool = false, shift: bool = false, alt: bool = false };
+
+    /// Tasten bei offener Leiste, dieselben wie im Editor (`CodeEditor.handleFindKey`):
+    /// Ctrl+F markiert den Begriff neu, Alt+C/W/R schalten Optionen, Enter/Shift+Enter
+    /// springen, Backspace löscht, Escape schließt. Andere Tasten werden geschluckt.
+    pub fn handleFindKey(self: *Self, key: wio.Button, mods: FindMods) void {
+        if (mods.ctrl and !mods.alt and key == .f) return self.openFind();
+        if (mods.alt and (key == .c or key == .w or key == .r)) {
+            _ = self.find.toggleOption(@tagName(key)[0]);
+            return self.refreshFind();
+        }
+        switch (key) {
+            .escape => self.closeFind(),
+            .enter, .kp_enter => self.findStep(!mods.shift),
+            .backspace => {
+                self.find.backspaceQuery();
+                self.refreshFind();
+            },
+            else => {},
+        }
+    }
+
+    pub fn handleFindChar(self: *Self, cp: u21) void {
+        if (cp < 32 or cp == 127) return;
+        if (!self.find.appendQuery(cp)) return;
+        self.refreshFind();
+    }
+
+    /// Begriff mit den Optionen der Leiste; null ohne Begriff oder bei ungültiger Regex.
+    fn findPattern(self: *const Self) ?find_ops.Pattern {
+        return find_ops.Pattern.init(self.find.text(), self.find.options());
+    }
+
+    /// Treffer neu sammeln und den ersten ab der Leseposition anspringen.
+    fn refreshFind(self: *Self) void {
+        self.find_hits.clearRetainingCapacity();
+        self.find_current = null;
+        self.find.not_found = false;
+        const pat = self.findPattern() orelse {
+            self.find.not_found = self.find.len > 0;
+            return;
+        };
+        const doc = self.cachedDocument() orelse return;
+        const children = switch (doc.*) {
+            .Container => |*c| c.children.items,
+            else => return,
+        };
+        var buf: std.ArrayListUnmanaged(u8) = .empty;
+        defer buf.deinit(self.allocator);
+        for (children, 0..) |*child, i| {
+            buf.clearRetainingCapacity();
+            appendPlainText(self.allocator, child, &buf);
+            md_find.appendHits(&self.find_hits, self.allocator, @intCast(i), pat.count(buf.items));
+        }
+        self.find.not_found = self.find_hits.items.len == 0;
+        self.find_current = md_find.firstFrom(self.find_hits.items, @intCast(self.firstVisibleBlock()));
+        self.revealCurrent();
+    }
+
+    pub fn findStep(self: *Self, forward: bool) void {
+        self.find_current = md_find.step(self.find_current, self.find_hits.items.len, forward);
+        self.revealCurrent();
+    }
+
+    /// Oberkante des Blocks `index` im Inhalt (aus gemessenen bzw. geschätzten Höhen).
+    fn blockTop(self: *const Self, index: usize) f32 {
+        var y: f32 = content_pad;
+        for (self.block_heights.items[0..@min(index, self.block_heights.items.len)]) |h| y += h + block_gap;
+        return y;
+    }
+
+    fn firstVisibleBlock(self: *const Self) usize {
+        var y: f32 = content_pad;
+        for (self.block_heights.items, 0..) |h, i| {
+            if (y + h > self.scroll_offset_y) return i;
+            y += h + block_gap;
+        }
+        return 0;
+    }
+
+    fn maxScrollY(self: *const Self) f32 {
+        return @max(0, self.content_height - self.viewport_height);
+    }
+
+    /// Aktuellen Treffer in den Sichtbereich holen. Liegt sein Block außerhalb des gezeichneten
+    /// Fensters, springt der Bildlauf erst zum Block; die genaue Zeile rückt `applyFindReveal`
+    /// in den folgenden Frames zurecht.
+    fn revealCurrent(self: *Self) void {
+        const cur = self.find_current orelse return;
+        const block = self.find_hits.items[cur].block;
+        if (self.block_heights.items.len > 0 and (block < self.measured_from or block > self.measured_to)) {
+            self.scroll_offset_y = std.math.clamp(self.blockTop(block) - self.viewport_height / 3, 0, self.maxScrollY());
+        }
+        self.find_reveal = 4;
+    }
+
+    /// Vor dem Layout: Lage der Treffer-Zeile aus dem letzten Frame (Bildlauf von damals) in
+    /// Inhaltskoordinaten umrechnen und den Bildlauf nachführen, senkrecht und ohne Umbruch
+    /// auch waagrecht.
+    fn applyFindReveal(self: *Self) void {
+        if (self.find_reveal == 0) return;
+        self.find_reveal -= 1;
+        const cur = self.find_current orelse return;
+        if (self.find_cur_for != cur) return;
+        const li = self.find_cur_line orelse return;
+        if (li >= self.frame_lines.items.len) return;
+        const data = clay.getElementData(self.idi("md_line", li));
+        if (!data.found) return;
+        const bb = data.bounding_box;
+        const y = bb.y - self.scrollbar_track_y + self.drawn_scroll_y;
+        if (md_find.reveal(y, bb.height, self.scroll_offset_y, self.viewport_height, 40, self.maxScrollY())) |s| self.scroll_offset_y = s;
+        if (self.wrap) return;
+        const fl = self.frame_lines.items[li];
+        const lt = self.line_texts.get(lineKey(fl.block, fl.line)) orelse return;
+        const off = @min(self.find_cur_offset, lt.text.len);
+        const x = bb.x - self.viewport_x + self.drawn_scroll_x + ui_mod.measureTextWidth(lt.text[0..off], fl.size);
+        const w = ui_mod.measureTextWidth(self.find.text(), fl.size);
+        const max_x = @max(0, self.content_width - self.viewport_width);
+        if (md_find.reveal(x, w, self.scroll_offset_x, self.viewport_width, 40, max_x)) |s| self.scroll_offset_x = s;
+    }
+
+    /// Treffer in einer gezeichneten Zeile; zählt die Vorkommen im Block mit und merkt sich
+    /// die Zeile des aktuellen Treffers.
+    fn lineMarks(self: *Self, text: []const u8, block: u32, frame_line: u32) []const md_find.Mark {
+        if (!self.find.active or self.find_hits.items.len == 0) return &.{};
+        const fa = self.frame_arena orelse return &.{};
+        const pat = self.findPattern() orelse return &.{};
+        var marks: std.ArrayListUnmanaged(md_find.Mark) = .empty;
+        var it = pat.iterate(text);
+        while (it.next()) |h| {
+            const m = md_find.Range{ .start = @intCast(h[0]), .end = @intCast(h[1]) };
+            const nth = self.find_block_seen;
+            self.find_block_seen += 1;
+            const is_cur = if (self.find_current) |c| blk: {
+                const hit = self.find_hits.items[c];
+                break :blk hit.block == block and hit.nth == nth;
+            } else false;
+            if (is_cur) {
+                self.find_cur_line = frame_line;
+                self.find_cur_offset = m.start;
+                self.find_cur_for = self.find_current;
+            }
+            marks.append(fa, .{ .start = m.start, .end = m.end, .current = is_cur }) catch break;
+        }
+        return marks.items;
+    }
+
+    /// Dieselbe Leiste wie im Editor; statt „Line n“ steht „3 of 12“.
+    fn renderFindBar(self: *Self, arena: std.mem.Allocator) void {
+        var buf: [48]u8 = undefined;
+        const status = arena.dupe(u8, md_find.label(&buf, self.find_current, self.find_hits.items.len, self.find.len)) catch "";
+        find_bar.render(&self.find, arena, .{ .widget = self.idi("md_find_widget", 0), .input = self.idi("md_find_input", 0) }, self.idi("markdown_view_root", 0).id, status);
     }
 
     // ---- Textauswahl ----------------------------------------------------------------
@@ -551,6 +766,7 @@ pub const MarkdownView = struct {
     fn beginBlock(self: *Self, index: u32) void {
         self.cur_block = index;
         self.block_line_counter = 0;
+        self.find_block_seen = 0;
         self.run_counter = 0;
         self.block_table_counter = 0;
     }
@@ -582,30 +798,50 @@ pub const MarkdownView = struct {
             gop.value_ptr.* = .{ .text = self.allocator.dupe(u8, text) catch "", .join = join };
         }
         const range = if (self.span()) |sp| md_select.lineRange(sp, block, line) else null;
-        return .{ .id = id, .range = range };
+        return .{ .id = id, .range = range, .marks = self.lineMarks(text, block, idx) };
     }
 
-    /// Ein Textstück mit Auswahlhervorhebung: der ausgewählte Teil steht in einem eigenen
-    /// Element mit Hintergrund (`md_sel`, ab 1), Text davor und danach bleiben nackte
-    /// Textelemente. Leere Stücke bleiben leere Textelemente (Zeilenhöhe in Codeblöcken).
-    fn textSel(self: *Self, text: []const u8, piece_start: u32, size: u16, color: clay.Color, range: ?md_select.Range) void {
+    /// Ein Textstück mit Hervorhebung: markierte Teile (Auswahl `md_sel`, Suchtreffer `md_hit`,
+    /// aktueller Treffer `md_hit_cur`, je ab 1) stehen in eigenen Elementen mit Hintergrund,
+    /// der Rest bleibt nackte Textelemente. Leere Stücke bleiben leere Textelemente
+    /// (Zeilenhöhe in Codeblöcken).
+    fn textSel(self: *Self, text: []const u8, piece_start: u32, size: u16, color: clay.Color, ctx: LineCtx) void {
         const cfg: clay.TextElementConfig = .{ .font_size = size, .color = color, .wrap_mode = .none };
-        if (range) |r| {
-            if (md_select.intersect(r, piece_start, @intCast(text.len))) |ir| {
-                if (ir.start > 0) clay.text(text[0..ir.start], cfg);
-                self.sel_counter += 1;
-                clay.UI()(.{
-                    .id = self.idi("md_sel", self.sel_counter),
-                    .layout = .{ .sizing = .{ .w = .fit, .h = .fit } },
-                    .background_color = self.sel_color,
-                })({
-                    clay.text(text[ir.start..ir.end], cfg);
-                });
-                if (ir.end < text.len) clay.text(text[ir.end..], cfg);
-                return;
+        const fa = self.frame_arena orelse return clay.text(text, cfg);
+        if (ctx.range == null and ctx.marks.len == 0) return clay.text(text, cfg);
+        const sel: ?md_find.Range = if (ctx.range) |r| .{ .start = r.start, .end = r.end } else null;
+        for (md_find.segments(fa, piece_start, @intCast(text.len), sel, ctx.marks)) |s| {
+            const part = text[s.start..s.end];
+            if (s.kind == .plain) {
+                clay.text(part, cfg);
+                continue;
             }
+            const id = switch (s.kind) {
+                .selection => blk: {
+                    self.sel_counter += 1;
+                    break :blk self.idi("md_sel", self.sel_counter);
+                },
+                .current => blk: {
+                    self.find_hit_counter += 1;
+                    break :blk self.idi("md_hit_cur", self.find_hit_counter);
+                },
+                else => blk: {
+                    self.find_hit_counter += 1;
+                    break :blk self.idi("md_hit", self.find_hit_counter);
+                },
+            };
+            clay.UI()(.{
+                .id = id,
+                .layout = .{ .sizing = .{ .w = .fit, .h = .fit } },
+                .background_color = switch (s.kind) {
+                    .selection => self.sel_color,
+                    .current => self.find_current_color,
+                    else => self.find_match_color,
+                },
+            })({
+                clay.text(part, cfg);
+            });
         }
-        clay.text(text, cfg);
     }
 
     pub fn showContextMenu(self: *Self, x: f32, y: f32) void {
@@ -723,6 +959,7 @@ pub const MarkdownView = struct {
     }
 
     pub fn renderDocument(self: *Self, arena: std.mem.Allocator, theme: Theme, ui_ptr: *ui_mod.UI) void {
+        self.frame_arena = arena;
         const doc = self.cachedDocument() orelse return;
         var effective_theme = theme;
         if (self.text_color) |c| effective_theme.text = c;
@@ -742,6 +979,8 @@ pub const MarkdownView = struct {
         self.list_item_counter = 0;
         self.code_counter = 0;
         self.sel_counter = 0;
+        self.find_hit_counter = 0;
+        self.find_cur_line = null;
         self.frame_lines.clearRetainingCapacity();
         self.cur_block = 0;
         self.block_line_counter = 0;
@@ -1112,7 +1351,10 @@ pub const MarkdownView = struct {
     }
 
     pub fn render(self: *Self, arena: std.mem.Allocator, theme: Theme, ui_ptr: *ui_mod.UI) void {
+        self.frame_arena = arena;
         self.sel_color = .{ theme.primary[0], theme.primary[1], theme.primary[2], 110 };
+        self.find_match_color = .{ theme.warning[0], theme.warning[1], theme.warning[2], 70 };
+        self.find_current_color = .{ theme.warning[0], theme.warning[1], theme.warning[2], 170 };
         const layout_key = (self.wrap_width_hint orelse 0) * 1000 + @as(f32, @floatFromInt(self.font_size));
         if (layout_key != self.sel_layout_key) {
             if (self.sel_layout_key >= 0) self.clearSelection();
@@ -1140,6 +1382,10 @@ pub const MarkdownView = struct {
         self.wrap = ui_ptr.getActiveEditor().word_wrap;
         // Nach Umbruch oder schmalerem Fenster nicht im Leeren stehen bleiben
         self.scroll_offset_x = std.math.clamp(self.scroll_offset_x, 0, @max(0, self.content_width - self.viewport_width));
+        // Suchtreffer in den Sichtbereich (braucht die Zeilen des letzten Frames, vor dem Layout)
+        self.applyFindReveal();
+        self.drawn_scroll_y = self.scroll_offset_y;
+        self.drawn_scroll_x = self.scroll_offset_x;
 
         clay.UI()(.{
             .id = self.idi("markdown_view_root", 0),
@@ -1181,6 +1427,7 @@ pub const MarkdownView = struct {
             }
         });
 
+        if (self.find.active) self.renderFindBar(arena);
         self.renderContextMenu(theme);
     }
 
@@ -1295,7 +1542,7 @@ pub const MarkdownView = struct {
                     const join: md_select.Join = if (row_start == 0) .hard else .none;
                     const ctx = self.registerLineJoin(line[row_start..row_end], join, code_size);
                     clay.UI()(.{ .id = ctx.id, .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .left_to_right, .child_gap = 0 } })({
-                        self.renderCodeRow(line, row_start, row_end, tags_opt, code_size, theme, ctx.range);
+                        self.renderCodeRow(line, row_start, row_end, tags_opt, code_size, theme, ctx);
                     });
                     if (row_end >= line.len) break;
                     row_start = row_end;
@@ -1324,8 +1571,8 @@ pub const MarkdownView = struct {
     }
 
     /// Eine Reihe `line[row_start..row_end]` mit Highlight-Tags (Offsets der ganzen Zeile);
-    /// die Auswahl (`range`) und `textSel` rechnen relativ zur Reihe.
-    fn renderCodeRow(self: *Self, line: []const u8, row_start: usize, row_end: usize, tags_opt: ?[]flow_core.highlight.ColorTag, code_size: u16, theme: Theme, range: ?md_select.Range) void {
+    /// Auswahl und Treffer (`ctx`) und `textSel` rechnen relativ zur Reihe.
+    fn renderCodeRow(self: *Self, line: []const u8, row_start: usize, row_end: usize, tags_opt: ?[]flow_core.highlight.ColorTag, code_size: u16, theme: Theme, ctx: LineCtx) void {
         const row = line[row_start..row_end];
         if (tags_opt) |tags| {
             var pos: usize = row_start;
@@ -1334,13 +1581,13 @@ pub const MarkdownView = struct {
                 const s = @max(@max(tag.start, pos), row_start);
                 const e = @min(tag.end, row_end);
                 if (s >= e) continue;
-                if (s > pos) self.textSel(line[pos..s], @intCast(pos - row_start), code_size, theme.text, range);
-                self.textSel(line[s..e], @intCast(s - row_start), code_size, colorFromTag(tag.fg), range);
+                if (s > pos) self.textSel(line[pos..s], @intCast(pos - row_start), code_size, theme.text, ctx);
+                self.textSel(line[s..e], @intCast(s - row_start), code_size, colorFromTag(tag.fg), ctx);
                 pos = e;
             }
-            if (pos < row_end) self.textSel(line[pos..row_end], @intCast(pos - row_start), code_size, theme.text, range);
+            if (pos < row_end) self.textSel(line[pos..row_end], @intCast(pos - row_start), code_size, theme.text, ctx);
         } else {
-            self.textSel(row, 0, code_size, theme.text, range);
+            self.textSel(row, 0, code_size, theme.text, ctx);
         }
     }
 
@@ -1785,7 +2032,7 @@ pub const MarkdownView = struct {
                     clay.UI()(.{ .id = ctx.id, .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .left_to_right, .child_gap = 0 } })({
                         var pos: u32 = 0;
                         for (parts[line.start..line.end]) |p| {
-                            self.textSel(p.text, pos, base_size, p.color, ctx.range);
+                            self.textSel(p.text, pos, base_size, p.color, ctx);
                             pos += @intCast(p.text.len);
                         }
                     });
