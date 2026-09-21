@@ -883,6 +883,10 @@ für Nachmessungen.
   Save All legt wie `save()` eine Sicherung an und bricht beim ersten Speicherfehler ab, ohne zu
   beenden. Der Main-Loop endet über `quit_confirmed`. RPC `request_quit` stellt den
   Schließen-Knopf nach, E2E `python3 scripts/e2e_quit_unsaved.py`.
+  **Nach dem Laden `UI.markLoaded`, nie nur `last_save = root`:** `is_dirty` vergleicht auch
+  `last_save_eol_mode` (Vorgabe LF) mit dem erkannten `file_eol_mode`. Bis 21.09.2026 galt so
+  jede CRLF-Datei ab dem Öffnen als geändert (unter Windows jede aus Git ausgecheckte), dazu der
+  namenlose Scratch-Buffer ohne Startdatei; Beenden fragte nach „todo.md, .“.
 - **Autosave:** File → Toggle Autosave (`UI.autosave`), speichert 1 s nach der letzten Änderung
   (`CodeEditor.last_edit_ms`) nur Text-Tabs mit Pfad. Jedes Speichern legt vorher eine Sicherung
   unter `$XDG_DATA_HOME/zid/backup/<name>.<hash>.bak` ab (`src/editor/backup.zig`, eine je

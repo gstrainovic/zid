@@ -381,7 +381,7 @@ pub const UI = struct {
                 defer allocator.free(file_content);
                 initial_buf.root = try initial_buf.load_from_string(file_content, &initial_buf.file_eol_mode, &initial_buf.file_utf8_sanitized);
                 initial_buf.set_file_path(path);
-                initial_buf.last_save = initial_buf.root;
+                markLoaded(initial_buf);
                 log.info("Loaded default file: {s} ({d} bytes)", .{ path, file_content.len });
                 try open_buffers.put(try allocator.dupe(u8, path), initial_buf);
             } else |err| {
@@ -392,6 +392,10 @@ pub const UI = struct {
         } else {
             const default_text = "pub fn main() !void {\n    std.log.info(\"Hello World\", .{});\n}\n";
             initial_buf.root = try initial_buf.load_from_string(default_text, &initial_buf.file_eol_mode, &initial_buf.file_utf8_sanitized);
+            // Ohne Pfad und ohne Tab: nichts, was beim Beenden gespeichert werden könnte. Ohne
+            // last_save galt der Buffer als geändert, und der Beenden-Dialog nannte eine Datei
+            // ohne Namen („todo.md, .“).
+            markLoaded(initial_buf);
             try open_buffers.put(try allocator.dupe(u8, "scratchpad"), initial_buf);
         }
 
@@ -1734,8 +1738,17 @@ pub const UI = struct {
         if (!via_editor) {
             buf.root = buf.load_from_string(content, &buf.file_eol_mode, &buf.file_utf8_sanitized) catch return true;
         }
-        buf.last_save = buf.root;
+        markLoaded(buf);
         return true;
+    }
+
+    /// Nach dem Laden: Inhalt und Zeilenende gelten als gespeichert. Nur `last_save` zu setzen
+    /// reicht nicht: `is_dirty` vergleicht auch `last_save_eol_mode` (Vorgabe LF) mit dem
+    /// erkannten `file_eol_mode`. Jede CRLF-Datei (Git for Windows checkt mit autocrlf aus)
+    /// galt sonst ab dem Öffnen als geändert, und Beenden fragte nach ungespeicherten Dateien.
+    fn markLoaded(buf: *@import("flow_core").Buffer) void {
+        buf.last_save = buf.root;
+        buf.last_save_eol_mode = buf.file_eol_mode;
     }
 
     fn reloadInPane(self: *Self, pane: *pane_mod.Pane, buf: *@import("flow_core").Buffer, path: []const u8, content: []const u8, via_editor: *bool) void {
@@ -4064,7 +4077,7 @@ pub const UI = struct {
                 const new_buf = try @import("flow_core").Buffer.create(self.allocator);
                 new_buf.root = try new_buf.load_from_string("", &new_buf.file_eol_mode, &new_buf.file_utf8_sanitized);
                 new_buf.set_file_path(path);
-                new_buf.last_save = new_buf.root;
+                markLoaded(new_buf);
                 try self.open_buffers.put(try self.allocator.dupe(u8, path), new_buf);
                 return new_buf;
             }
@@ -4074,7 +4087,7 @@ pub const UI = struct {
         const new_buf = try @import("flow_core").Buffer.create(self.allocator);
         new_buf.root = try new_buf.load_from_string(content, &new_buf.file_eol_mode, &new_buf.file_utf8_sanitized);
         new_buf.set_file_path(path);
-        new_buf.last_save = new_buf.root;
+        markLoaded(new_buf);
         try self.open_buffers.put(try self.allocator.dupe(u8, path), new_buf);
         return new_buf;
     }
