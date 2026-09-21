@@ -255,6 +255,13 @@ echo -e "open ./README.md\nget-state\nshutdown" | zig build run -- --interactive
 
 ## Clay-Layout
 
+**UI-Bausteine nie parallel nachbauen.** Scrollbalken, Tooltips, Kontextmenüs und
+Eingabezeilen gibt es je einmal (`scrollbar.zig`, `tooltip.zig`, `context_menu.zig`,
+`line_edit.zig`). Vor einem neuen Bedienelement dort suchen und das Modul verwenden oder
+erweitern. Kopien bekommen Fixes nur an einer Stelle: der I-Beam über dem waagrechten
+Balken war im Editor behoben und kam am 18.09.2026 in der Markdown-Vorschau wieder, weil
+die einen eigenen Balken samt Zieh-Logik hatte.
+
 Regeln und Fallstricke stehen in der Skill `.claude/skills/clay-layout/SKILL.md`
 (Elementgrenze, Mindestbreite von Text ohne Umbruch, verschachteltes Clipping, IDs in
 Schleifen, Fehlerhandler, Virtualisierung). `UI.MAX_CLAY_ELEMENTS` und `UI.clayError`
@@ -1292,6 +1299,27 @@ blieb Text ungemessen. `Clay__ResetMeasureTextCacheWhenFull` leert den Cache in
   run` ist zid ein Enkel, ein `kill` auf zig lässt zid auf dem Port zurück; Prozessgruppen
   (`start_new_session`/`killpg`) als Ausweg gibt es unter Windows nicht. `stop_zid` beendet per RPC,
   notfalls hart.
+- **Nicht alle Suiten bauen selbst.** Nur wer `start_zid` nimmt, ruft vorher `zig build` auf.
+  `e2e_scm_changes.py`, `e2e_scm_graph.py`, `e2e_timeline.py`, `e2e_git_diff.py`, `e2e_lsp.py`,
+  `e2e_editor.py`, `e2e_picker.py` u. a. starten `zig-out/bin/zid` direkt: vor dem Lauf `zig build`,
+  sonst testet die Suite still das alte Binary (18.09.2026 so passiert, der Knopf zeigte noch
+  „Push 1↑").
+- **Suiten nacheinander, nie parallel** — auch nicht als zwei Hintergrund-Tasks. Alle nutzen
+  Port 9999; ein zweiter Lauf redet mit der Instanz des ersten, und beide scheitern ohne
+  erkennbaren Grund.
+- **Zeitfehler erst messen, dann erklären.** Kommt ein Tooltip oder Toast zu spät, zuerst mit
+  einem 100-ms-Polling-Probe die echte Dauer bestimmen (beim Tooltip-Fehler 1,5 s statt 0,7 s,
+  Ursache war die Frame-Uhr), nicht am Timeout des Tests schrauben.
+- **Fenster nur nach Rückfrage.** Auch Reproduktionen und Messungen laufen `--headless`. Braucht
+  ein Befund zwingend ein Fenster (Present, Swapchain, DPI, Maximieren), das begründen und den
+  User fragen oder ihn selbst starten lassen und das Log auswerten. Frame-Vergleiche per
+  Screenshot-RPC zeigen kein Present-Flackern, das nur am Monitor sichtbar ist.
+- **Meldungen aus dem Fenster am echten Dokument nachstellen.** „Funktioniert nicht" hat oft eine
+  andere Ursache als vermutet (18.09.2026: „Word Wrap geht nicht" war Text in Listen, der an der
+  vollen statt der eingerückten Breite umbrach). Die Datei des Users aus dem Log holen (die
+  Ausgabe von `zig build run` zeigt geöffnete Pfade), headless öffnen, Zustand per RPC messen,
+  notfalls in Zeilenbereiche schneiden, bevor eine Theorie entsteht. Ein Test muss den Effekt an
+  dem prüfen, was der User sieht (Fliesstext), nicht nur an einem Sonderfall (Codeblock).
 - Verwaiste Headless-Prozesse: Linux `pkill -f '[v]ulkan-ed --headless'` — ohne die Klammer trifft
   das Muster die eigene Shell, die den Befehl enthält. Windows `taskkill /F /IM zid.exe`.
 - **Windows:** Die Suiten laufen headless genauso (`python scripts/e2e_*.py`, kein Fenster).
@@ -1317,6 +1345,16 @@ blieb Text ungemessen. `Clay__ResetMeasureTextCacheWhenFull` leert den Cache in
   werden erzeugt), nicht aus dem ignorierten `test_data/`. Git-Fixtures löscht
   `e2e_open_folder.rmtree` (setzt Rechte auf `.git/objects`, sonst bleibt das Fixture unter
   Windows still stehen); die Suiten stellen stdout auf UTF-8 (Pfeile in Meldungen).
+- **Zeilenenden:** Git for Windows setzt systemweit `core.autocrlf=true`. Neue Git-Fixtures in
+  Zig-Tests und Suiten setzen `core.autocrlf false` (daran scheiterte
+  `git_worker.test.taskGitAction` bis 21.09.2026), Python-Suiten schreiben Dateien mit
+  `newline="\n"`.
+- Umgebungsvariablen nur über `src/platform/env.zig` lesen, nie `std.posix.getenv` — das gibt
+  es unter Windows nicht, und der Windows-Build bricht still, weil hauptsächlich unter Linux
+  entwickelt wird. Bei neuen Windows-Buildfehlern zuerst `zig version` (muss 0.15.x sein) und
+  die MuPDF-Archive prüfen, bevor Code angefasst wird (README, Abschnitt Windows).
+- Ein langsamer Test lässt sich unter Windows nicht mit `timeout` aus Git Bash begrenzen (dort
+  teils gesperrt, `Permission denied`); Runner in Python mit `subprocess.run(timeout=)`.
 - Windows-Build der Engine: clang + ninja, `-DGGML_VULKAN=OFF`, dazu
   `-D_WIN32_WINNT=0x0A00` in C- und CXX-Flags (cpp-httplib verlangt Windows 10).
 - Pfade in Git-Status (`/`) und LSP-URIs (`file:///C:/…`) werden auf Windows-Trenner umgesetzt
