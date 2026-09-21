@@ -21,18 +21,7 @@ KI-Punkte: Wirkung vorab schätzen, vorher/nachher messen (`scripts/e2e_ai_read_
    umstellen wie flow.
 6. **Suche ignoriert Groß/Klein nur für ASCII** (`find_ops.zig` `eqlIgnoreCase`): „Ä“ findet
    kein „ä“.
-7. **Windows: Watcher folgt Symlink-Ordnern nicht.** `src/async/file_watcher_win.zig` hält ein
-   `ReadDirectoryChangesW`-Handle auf die Wurzel mit `bWatchSubtree=TRUE`; Windows folgt dabei
-   keinen Reparse-Points. Linux ist seit `bc6872c` behoben (`scripts/e2e_external_change.py`).
-   1. Skript auf dem Windows-PC laufen lassen. Erwartung: `inplace`, `atomic`, `symlink` grün,
-      `symlink_out` rot. `os.symlink` braucht dort Developer-Mode oder Admin; sonst Junction per
-      `mklink /J` als Fallback.
-   2. Für `symlink_out`: beim Start je Symlink-/Junction-Ordner mit Ziel außerhalb der Wurzel ein
-      eigenes Handle öffnen (gleiche Filter und Overlapped-Schleife), Ereignisse unter dem
-      Link-Pfad melden.
-   3. AGENTS.md-Satz „Der Windows-Watcher folgt Symlink-Ordnern nicht“ danach streichen.
-
-8. **mupdf stürzt bei manchen kaputten PDFs ab** (System-Bibliothek 1.27.2; `mutool draw` auf
+7. **mupdf stürzt bei manchen kaputten PDFs ab** (System-Bibliothek 1.27.2; `mutool draw` auf
     einem zu 40 % geschriebenen PDF: Segfault, in zid „double free“). Der Reload wartet deshalb
     auf eine ruhende Datei; eine dauerhaft kaputte Datei öffnen reißt zid aber weiter mit.
     Rendern in einen Kindprozess auslagern oder mupdf-Version prüfen.

@@ -12,7 +12,7 @@ Editor-Buffer den neuen Inhalt zeigen, ohne Neustart und ohne Dialog (Buffer unv
 Screenshots: tmp/e2e_extern_<fall>.ppm
 Aufruf: python3 scripts/e2e_external_change.py
 """
-import os, sys, tempfile, time
+import os, subprocess, sys, tempfile, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from e2e_open_folder import ROOT, rpc, result_json, wait_port, settle, check, shot, start_zid, stop_zid, rmtree  # noqa: E402
@@ -27,14 +27,16 @@ OLD = "# Alt\n\nZeile aus dem Editor.\n"
 NEW = "# Neu\n\nVon außen geschrieben.\n"
 
 
+# newline="\n": im Textmodus schriebe Python unter Windows CRLF, und der Buffer-Vergleich
+# gegen OLD/NEW scheiterte schon vor der ersten Änderung.
 def write_inplace(path, text):
-    with open(path, "w", encoding="utf-8") as f:
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write(text)
 
 
 def write_atomic(path, text):
     tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
+    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
         f.write(text)
     os.replace(tmp, path)
 
@@ -73,6 +75,18 @@ def case(name, open_path, write_path, writer):
     check(result_json("ui_state")["dialog"] is None, "Kein Dialog (Buffer war ungeändert)")
 
 
+def dir_link(target, link):
+    """Ordner-Link anlegen. Windows verlangt für Symlinks Entwicklermodus oder Adminrechte;
+    ohne die nimmt der Test eine Junction (wie e2e_symlink_dir.py)."""
+    try:
+        os.symlink(target, link, target_is_directory=True)
+    except OSError:
+        if os.name != "nt":
+            raise
+        absolute = os.path.join(os.path.dirname(link), target)
+        subprocess.run(["cmd", "/c", "mklink", "/J", link, absolute], check=True, capture_output=True)
+
+
 def run_case(failures, *args):
     try:
         case(*args)
@@ -85,8 +99,8 @@ def main():
     rmtree(OUTSIDE)
     os.makedirs(REAL)
     os.makedirs(OUTSIDE)
-    os.symlink("real", LINK)
-    os.symlink(OUTSIDE, LINK_OUT)
+    dir_link("real", LINK)
+    dir_link(OUTSIDE, LINK_OUT)
     log = open(os.path.join(ROOT, "tmp", "e2e_external_change.log"), "w")
     proc = start_zid(["--headless", "--ai=off"], log)
     try:

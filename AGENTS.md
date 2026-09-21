@@ -790,7 +790,8 @@ für Nachmessungen.
   `bufferKeyForPath` findet den Buffer notfalls über realpath, weil Ereignis- und Öffnungspfad
   verschiedene Schreibweisen derselben Datei sein können. E2E:
   `python3 scripts/e2e_external_change.py` (in-place, atomic, Symlink im und außerhalb des
-  Projekts). Der Windows-Watcher folgt Symlink-Ordnern nicht (ungetestet, offen in `todo.md`).
+  Projekts). Unter Windows nimmt die Suite ohne Symlink-Recht Junctions und schreibt LF
+  (`newline="\n"`; im Textmodus käme CRLF und schon der Ausgangsvergleich schlüge fehl).
 - Panes: Ctrl+\ splittet, Ctrl+Alt+Pfeil oder Chord Ctrl+K dann Pfeil wechselt geometrisch
   (`focusPane` über die Pane-Bounds des letzten Frames), Ctrl+Shift+E fokussiert den Explorer,
   Ctrl+J wechselt zum Terminal-Tab und zurück (`terminal_return_index`). Ctrl+K erreicht die Shell
@@ -1306,6 +1307,12 @@ blieb Text ungemessen. `Clay__ResetMeasureTextCacheWhenFull` leert den Cache in
   und Filter wie Linux (versteckte Pfadteile, `zig-out`, `node_modules`, `.gguf`, 100-ms-Dedupe).
   Atomares Speichern (Rename) meldet `file_created`, nur Überschreiben `file_changed` — wie
   inotify. `src/async/file_watcher.zig` ist ein alter, nicht eingebundener Stub.
+  `bWatchSubtree` folgt keinen Reparse-Points: der Watcher-Thread sucht deshalb nach dem Start
+  Symlink-/Junction-Ordner mit Ziel außerhalb der Wurzel (`GetFileAttributesW`, denn
+  `Dir.iterate` meldet sie als `.directory`) und öffnet je Ziel ein eigenes Handle (höchstens 63),
+  Ereignisse kommen unter dem Link-Pfad; gewartet wird mit `WaitForMultipleObjects`. Ziele
+  innerhalb braucht es nicht (realpath in `bufferKeyForPath`). Nicht abgedeckt: Links, die nach
+  dem Start entstehen, und Links innerhalb eines Link-Ziels. E2E `e2e_external_change.py`.
 - Testdaten der Suiten kommen aus `scripts/fixtures/` und `scripts/e2e_fixtures.py` (PDF, PNG
   werden erzeugt), nicht aus dem ignorierten `test_data/`. Git-Fixtures löscht
   `e2e_open_folder.rmtree` (setzt Rechte auf `.git/objects`, sonst bleibt das Fixture unter
