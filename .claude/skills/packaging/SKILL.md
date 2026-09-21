@@ -91,13 +91,20 @@ Aus AGENTS.md hierher verschoben (21.09.2026), Wortlaut unverändert.
 - `packaging/release.sh <x.y.z> "notes | more notes"` setzt die Version in allen Dateien
   (Python, kein sed: freier Text mit `&`, `<`, `|`), committet, taggt und pusht.
   `--dry-run` ändert nur Dateien; ausprobieren in einer Kopie außerhalb des Repos.
-- Der Tag startet `.github/workflows/release.yml`: `linux` (build-release.sh mit docker)
-  und `windows` (ruft `windows-release.yml` per `workflow_call`) laufen parallel, `publish`
-  legt das Release als Entwurf an, hängt beides an und veröffentlicht erst dann — Scoops
-  Excavator sieht so nie ein Release ohne Zip. `copr` und `aur` folgen, jeweils nur mit
-  Secret (`COPR_CONFIG`, `AUR_SSH_PRIVATE_KEY`), sonst Warnung und weiter.
-- `workflow_dispatch` von `release.yml` baut nur (Artefakte `zid-linux`, `zid-windows`),
-  ohne zu veröffentlichen — so lässt sich der Bau ohne Tag prüfen.
+- Der Tag startet `.github/workflows/release.yml`: `linux` (build-release.sh mit docker,
+  danach `.deb`/`.rpm` per nfpm aus dem Tarball) und `windows` (ruft `windows-release.yml`
+  per `workflow_call`) laufen parallel, `snap` packt das Tarball danach. `publish` legt
+  das Release als Entwurf an, hängt alles an und veröffentlicht erst dann — Scoops
+  Excavator sieht so nie ein Release ohne Zip. `copr` und `snapstore` folgen, jeweils nur
+  mit Secret (`COPR_CONFIG`, `SNAPCRAFT_STORE_CREDENTIALS`), sonst Warnung und weiter.
+- `workflow_dispatch` von `release.yml` baut nur (Artefakte `zid-linux`, `zid-windows`,
+  `zid-snap`), ohne zu veröffentlichen — so lässt sich der Bau ohne Tag prüfen.
+- `.deb`/`.rpm` (`packaging/nfpm.yaml`): rpm-Abhängigkeiten nach SONAME
+  (`libfreetype.so.6()(64bit)`), damit dieselbe Datei auf Fedora und openSUSE passt; deb
+  mit `libpng16-16 | libpng16-16t64` wegen der time64-Umbenennung ab Ubuntu 24.04.
+- Snap (`snap/snapcraft.yaml`): classic, ohne patchelf, also Host-Bibliotheken und
+  Host-Vulkan-Treiber wie beim Tarball. Gebaut mit `snapcraft pack --destructive-mode` auf
+  ubuntu-24.04 (passt zu core24). Der Store verlangt für classic einmal eine Freigabe.
 - COPR baut aus einem SRPM (`rpmbuild -bs`, Source0 aus dem veröffentlichten Release);
   mit der Spec direkt baute COPR 0.1.1 nicht.
 - Scoop: `bucket/zid.json` im Repo gstrainovic/scoop-zid ist die einzige Kopie des
