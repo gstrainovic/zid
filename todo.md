@@ -25,6 +25,12 @@ KI-Punkte: Wirkung vorab schätzen, vorher/nachher messen (`scripts/e2e_ai_read_
     einem zu 40 % geschriebenen PDF: Segfault, in zid „double free“). Der Reload wartet deshalb
     auf eine ruhende Datei; eine dauerhaft kaputte Datei öffnen reißt zid aber weiter mit.
     Rendern in einen Kindprozess auslagern oder mupdf-Version prüfen.
+8. **Clay `duplicate_id` in Serie beim Öffnen einer Markdown-Datei** (Windows, Fenster,
+   21.09.2026): rund 140 Meldungen, dieselbe ID `3113540797` unter wechselnden Elternelementen (`908726519`,
+   `3402408544`, `3494701479`, …), dazu `1800183164` unter `3921318746`. Die Diagnose meldet
+   „keine doppelte ID in den Render-Commands (das Element zeichnet nichts)“ — also eine feste ID
+   in einer Schleife, vermutlich ein unsichtbares Element je Zeile/Block. Datei headless öffnen,
+   `ui_state.clay_errors` messen, ID über `clay.ElementId.ID`-Hashes der Kandidaten zuordnen.
 
 ## 3. Wichtige Funktionen
 

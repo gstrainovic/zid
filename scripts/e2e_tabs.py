@@ -122,9 +122,11 @@ def step_recent_switch_and_picker():
     check(active_name() == "one.txt", "Enter wechselt zu one.txt")
     # Für die nächsten Schritte: two/three/four bleiben offen, four.txt aktiv
     rpc("middle_click", [*tab_center("one.txt")]); settle(5)
-    # four.txt liegt rechts außerhalb des Fensters (Streifen scrollt nur zum aktiven Tab): Ctrl+4
-    check(tab_names().index("four.txt") == 3, "four.txt ist der vierte Tab")
-    key("4", ctrl=True); settle()
+    # four.txt kann rechts außerhalb des Fensters liegen (Streifen scrollt nur zum aktiven Tab):
+    # Ctrl+<Position> statt Klick
+    pos = tab_names().index("four.txt") + 1
+    check(pos <= 9, f"four.txt per Ctrl+Ziffer erreichbar (Position {pos})")
+    key(str(pos), ctrl=True); settle()
     check(active_name() == "four.txt", "four.txt aktiv")
 
 
