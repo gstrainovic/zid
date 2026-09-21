@@ -43,6 +43,9 @@ const dialog_mod = @import("dialog.zig");
 const dialog_ops = @import("dialog_ops.zig");
 const folder_picker_mod = @import("folder_picker.zig");
 const picker_mod = @import("picker.zig");
+const search_view_mod = @import("search_view.zig");
+const project_search = @import("project_search.zig");
+const find_ops = @import("../editor/find_ops.zig");
 const user_state = @import("user_state.zig");
 const shortcuts = @import("shortcuts");
 const ctx_menu = @import("context_menu");
@@ -126,8 +129,12 @@ pub const UI = struct {
     timeline_view: timeline_view_mod.TimelineView,
     /// Zuletzt an die Timeline gemeldeter Tab-Pfad (nur bei Änderung neu auflösen)
     timeline_follow_key: ?[]u8 = null,
-    /// Sidebar zeigt Explorer oder Source Control (VS Code: Ansichten der Aktivitätsleiste)
-    sidebar_mode: enum { explorer, scm } = .explorer,
+    /// Sidebar zeigt Explorer, Source Control oder die Suche (VS Code: Ansichten der Aktivitätsleiste)
+    sidebar_mode: enum { explorer, scm, search } = .explorer,
+    /// Suche im Projekt (Ctrl+Shift+F) in der Sidebar
+    search_view: search_view_mod.SearchView,
+    /// Pfad zu rg (owned), einmal aufgelöst: `ZID_RG_PATH`, neben dem Binary, sonst PATH
+    rg_path: ?[]u8 = null,
     scm_graph: scm_graph_view_mod.ScmGraphView,
     /// Commit, auf den sich das Graph-Kontextmenü bezieht
     scm_cmd_commit: ?usize = null,
@@ -183,7 +190,7 @@ pub const UI = struct {
     explorer_focused: bool = false,
     /// Letzter Klick war im Source Control Graph oder in der Timeline: Pfeile/Enter/F5
     /// gehören der Liste, keine Taste erreicht den Editor. Escape gibt den Fokus zurück.
-    sidebar_focus: enum { none, scm, timeline, changes, commit_input } = .none,
+    sidebar_focus: enum { none, scm, timeline, changes, commit_input, search } = .none,
     /// Zuletzt per setClipboard kopierter Text (owned; für Tests ohne Fenster)
     last_clipboard_text: ?[]u8 = null,
     /// Dauer des letzten Frames (Eingabe bis Ende Layout/Render) und Maximum seit dem letzten Abholen
@@ -491,6 +498,7 @@ pub const UI = struct {
             .active_dialog = null,
             .folder_picker = folder_picker_mod.FolderPicker.init(allocator),
             .picker = picker_mod.Picker.init(allocator),
+            .search_view = search_view_mod.SearchView.init(allocator),
             .pending_tab_closes = std.ArrayListUnmanaged(TabCloseRequest).empty,
             .open_buffers = open_buffers,
             .open_images = std.StringHashMap(*anyopaque).init(allocator),
@@ -608,6 +616,8 @@ pub const UI = struct {
         self.toasts.deinit(self.allocator);
         self.folder_picker.deinit();
         self.picker.deinit();
+        self.search_view.deinit();
+        if (self.rg_path) |p| self.allocator.free(p);
         if (self.git_branch.len > 0) self.allocator.free(self.git_branch);
         self.pending_tab_closes.deinit(self.allocator);
 
@@ -848,6 +858,12 @@ pub const UI = struct {
                 self.sidebar_focus = .none;
                 return;
             }
+            // Suche: Felder, Umschalter und Trefferliste gehören dem Panel
+            if (self.sidebar_focus == .search and self.sidebar_mode == .search) {
+                const mods: search_view_mod.Mods = .{ .ctrl = self.is_ctrl_down, .shift = self.is_shift_down, .alt = self.is_alt_down };
+                self.runSearchAction(self.search_view.handleKey(key, mods, self.editClipboard(), self.ui_time_ms));
+                return;
+            }
             // Commit-Eingabefeld: Ctrl+Enter committet, Tab wechselt in die Liste, Rest ist Text
             if (self.sidebar_focus == .commit_input and self.sidebar_mode == .scm) {
                 if (key == .tab) {
@@ -878,7 +894,7 @@ pub const UI = struct {
                         };
                         if (k) |kk| self.runScmAction(self.scm_changes.handleKey(kk));
                     },
-                    .commit_input => {},
+                    .commit_input, .search => {},
                     .scm => if (self.sidebar_mode == .scm) {
                         if (key == .tab) {
                             self.sidebar_focus = .commit_input;
@@ -1086,6 +1102,11 @@ pub const UI = struct {
             self.scm_changes.handleInputChar(char_code);
             return;
         }
+        if (self.show_file_explorer and self.sidebar_focus == .search and self.sidebar_mode == .search) {
+            // Alt+C/W/R schalten Optionen, das Zeichen dazu gehört nicht ins Feld
+            if (!self.is_ctrl_down and !self.is_alt_down) self.search_view.handleChar(char_code, self.ui_time_ms);
+            return;
+        }
         if (self.show_file_explorer and self.sidebar_focus != .none) return; // Fokus in Graph/Timeline/Changes
         // kein Text in den unsichtbaren Editor hinter History- und Diff-Tabs
         if (self.activeTabKind() == .git_diff or self.activeTabKind() == .git_commit) return;
@@ -1248,6 +1269,14 @@ pub const UI = struct {
             }
         }
 
+        // Suche in der Sidebar: Felder, Umschalter, Zeilen und ihre Aktionen
+        if (self.show_file_explorer and self.sidebar_mode == .search and self.inSidebarBox(x, y)) {
+            self.explorer_focused = false;
+            self.sidebar_focus = .search;
+            if (button == .mouse_left) self.runSearchAction(self.search_view.handleMouseDown(x, y, self.is_shift_down, self.ui_time_ms));
+            return;
+        }
+
         // Source Control Graph in der Sidebar
         if (self.show_file_explorer and self.sidebar_mode == .scm and (self.scm_graph.menu != null or self.inSidebarBox(x, y))) {
             self.explorer_focused = false;
@@ -1402,6 +1431,7 @@ pub const UI = struct {
                     self.scm_changes.handleMouseMove(x, y);
                     self.scm_graph.handleMouseMove(x, y);
                 },
+                .search => self.search_view.handleMouseMove(x, y),
             }
         }
 
@@ -1433,6 +1463,7 @@ pub const UI = struct {
         self.picker.handleMouseUp();
         self.folder_picker.handleMouseUp();
         self.scm_changes.handleMouseUp();
+        self.search_view.handleMouseUp();
 
         if (self.show_file_explorer) {
             self.file_explorer.handleMouseUp();
@@ -1493,6 +1524,10 @@ pub const UI = struct {
         }
         if (self.picker.visible) {
             self.picker.handleScroll(delta);
+            return;
+        }
+        if (self.show_file_explorer and self.sidebar_mode == .search and self.inSidebarBox(self.mouse_x, self.mouse_y)) {
+            self.search_view.scrollLines(delta);
             return;
         }
         if (self.show_file_explorer and self.sidebar_mode == .scm and self.inSidebarBox(self.mouse_x, self.mouse_y)) {
@@ -1624,6 +1659,8 @@ pub const UI = struct {
                 self.allocator.free(self.toasts.orderedRemove(ti).text);
             } else ti += 1;
         }
+        if (self.search_view.searchDue(self.ui_time_ms)) self.startProjectSearch();
+        self.search_view.update();
         self.picker.poll();
         if (self.picker.takeFile()) |rel| {
             defer self.allocator.free(rel);
@@ -2028,11 +2065,215 @@ pub const UI = struct {
                 self.explorer_focused = false;
                 self.sidebar_focus = .commit_input; // wie VS Code Ctrl+Shift+G: Fokus im Eingabefeld
             },
+            .find_in_files => self.showSearch(false),
+            .replace_in_files => self.showSearch(true),
             .graph_open_changes => if (self.scm_cmd_commit) |c| self.openCommitChanges(c),
             .graph_copy_commit_hash => if (self.graphCommit()) |c| self.setClipboard(c.hash),
             .graph_copy_commit_message => if (self.graphCommit()) |c| self.setClipboard(c.message),
             .graph_refresh => self.scm_graph.refresh(),
         }
+    }
+
+    // ───────────────────────── Suche im Projekt (Ctrl+Shift+F) ─────────────────────────
+
+    fn searchRoot(self: *const Self) []const u8 {
+        return if (self.file_explorer.nodes.items.len > 0) self.file_explorer.nodes.items[0].path else (self.current_directory orelse ".");
+    }
+
+    /// Panel zeigen und Fokus ins Such- bzw. Ersetzen-Feld. Eine einzeilige Auswahl im Editor
+    /// wird Suchbegriff (VS Code search.seedOnFocus).
+    fn showSearch(self: *Self, replace: bool) void {
+        self.show_file_explorer = true;
+        self.sidebar_mode = .search;
+        self.explorer_focused = false;
+        self.sidebar_focus = .search;
+        const seed = self.getActiveEditor().getSelectedText(self.allocator) catch null;
+        defer if (seed) |s| self.allocator.free(s);
+        if (replace) self.search_view.focusReplace(seed, self.ui_time_ms) else self.search_view.focusQuery(seed, self.ui_time_ms);
+    }
+
+    /// rg: `ZID_RG_PATH`, sonst das mitgelieferte (Windows-Zip: neben zid.exe, Linux-Tarball:
+    /// `../libexec/zid/rg`), sonst über PATH (Distributionspakete hängen an ripgrep).
+    fn rgPath(self: *Self) []const u8 {
+        if (self.rg_path) |p| return p;
+        const exe_name = if (@import("builtin").os.tag == .windows) "rg.exe" else "rg";
+        self.rg_path = blk: {
+            if (env.get("ZID_RG_PATH")) |p| break :blk self.allocator.dupe(u8, p) catch null;
+            var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+            if (std.fs.selfExeDirPath(&dir_buf)) |dir| {
+                for ([_][]const []const u8{ &.{ dir, exe_name }, &.{ dir, "..", "libexec", "zid", exe_name } }) |parts| {
+                    const candidate = std.fs.path.join(self.allocator, parts) catch continue;
+                    if (std.fs.accessAbsolute(candidate, .{})) |_| break :blk candidate else |_| self.allocator.free(candidate);
+                }
+            } else |_| {}
+            break :blk self.allocator.dupe(u8, exe_name) catch null;
+        };
+        log.info("search: rg = {s}", .{self.rg_path orelse exe_name});
+        return self.rg_path orelse exe_name;
+    }
+
+    /// Suche starten. Offene Buffer mit ungespeicherten Änderungen durchsucht rg statt der
+    /// Datei (über stdin), damit Treffer und Zeilen zum sichtbaren Text passen.
+    fn startProjectSearch(self: *Self) void {
+        var arena_state = std.heap.ArenaAllocator.init(self.allocator);
+        defer arena_state.deinit();
+        const arena = arena_state.allocator();
+        const root = std.fs.cwd().realpathAlloc(arena, self.searchRoot()) catch self.searchRoot();
+        var dirty: std.ArrayList(project_search.DirtyBuffer) = .empty;
+        var it = self.open_buffers.iterator();
+        while (it.next()) |kv| {
+            const buf = kv.value_ptr.*;
+            if (!buf.is_dirty()) continue;
+            const rel = relativeTo(arena, root, kv.key_ptr.*) orelse continue;
+            dirty.append(arena, .{ .path = rel, .text = buf.store_to_string_cached(buf.root, buf.file_eol_mode) }) catch continue;
+        }
+        self.search_view.start(self.rgPath(), root, dirty.items);
+    }
+
+    /// `path` relativ zu `root` mit `/` als Trenner; null, wenn die Datei nicht darunter liegt.
+    fn relativeTo(arena: std.mem.Allocator, root: []const u8, path: []const u8) ?[]const u8 {
+        const cwd = std.process.getCwdAlloc(arena) catch return null;
+        const abs = std.fs.path.resolve(arena, &.{ cwd, path }) catch return null;
+        const rel = std.fs.path.relative(arena, root, abs) catch return null;
+        if (rel.len == 0 or std.mem.startsWith(u8, rel, "..") or std.fs.path.isAbsolute(rel)) return null;
+        if (std.fs.path.sep == '\\') std.mem.replaceScalar(u8, rel, '\\', '/');
+        return rel;
+    }
+
+    fn searchMatchPath(self: *Self, file: u32) ?[]u8 {
+        const rel = self.search_view.results.files.items[file].path;
+        const root = std.fs.cwd().realpathAlloc(self.allocator, self.searchRoot()) catch return null;
+        defer self.allocator.free(root);
+        return std.fs.path.join(self.allocator, &.{ root, rel }) catch null;
+    }
+
+    fn runSearchAction(self: *Self, action: search_view_mod.Action) void {
+        switch (action) {
+            .none, .consumed => {},
+            .leave => self.sidebar_focus = .none,
+            .search_now => self.startProjectSearch(),
+            .open => |m| self.openSearchMatch(m),
+            .replace_match => |m| {
+                if (!self.replaceReady()) return;
+                const e = self.search_view.results.matchEdit(m, self.search_view.replaceText());
+                self.finishReplace(self.replaceInFile(m.file, &.{e}));
+            },
+            .replace_file => |f| {
+                if (!self.replaceReady()) return;
+                const edits = self.search_view.results.fileEdits(self.allocator, f, self.search_view.replaceText()) catch return;
+                defer self.allocator.free(edits);
+                self.finishReplace(self.replaceInFile(f, edits));
+            },
+            .replace_all => {
+                if (!self.replaceReady() or self.active_dialog != null) return;
+                const r = &self.search_view.results;
+                const msg = std.fmt.allocPrint(self.allocator, "Replace {d} {s} across {d} {s} with '{s}'?", .{
+                    r.match_count,
+                    if (r.match_count == 1) "occurrence" else "occurrences",
+                    r.files.items.len,
+                    if (r.files.items.len == 1) "file" else "files",
+                    self.search_view.replaceText(),
+                }) catch return;
+                self.active_dialog = .{
+                    .dialog = .{
+                        .title = "Replace All",
+                        .message = msg,
+                        .actions = &.{
+                            .{ .label = "Replace", .result = .yes },
+                            .{ .label = "Cancel", .result = .cancel },
+                        },
+                    },
+                    .callback = handleReplaceAllDialog,
+                    .message_needs_free = true,
+                };
+            },
+        }
+    }
+
+    /// Ersetzen nur mit Ergebnissen, die zum Ersetzen-Feld passen. Bei Regex liefert rg den
+    /// Ersatz samt Gruppen (`$1`); lief die Suche noch ohne, erst neu suchen.
+    fn replaceReady(self: *Self) bool {
+        const v = &self.search_view;
+        // Laufende Suche: Liste unvollständig, Ersetzen alle träfe nicht alles
+        if (v.searching()) return false;
+        if (v.opts.regex and !v.searched_with_replace) {
+            self.startProjectSearch();
+            return false;
+        }
+        return true;
+    }
+
+    fn handleReplaceAllDialog(ui: *UI, res: dialog_mod.DialogResult, _: usize, _: ?*anyopaque) void {
+        if (res != .yes) return;
+        var total: ReplaceOutcome = .{};
+        const r = &ui.search_view.results;
+        for (0..r.files.items.len) |f| {
+            const edits = r.fileEdits(ui.allocator, @intCast(f), ui.search_view.replaceText()) catch continue;
+            defer ui.allocator.free(edits);
+            const o = ui.replaceInFile(@intCast(f), edits);
+            total.replaced += o.replaced;
+            total.files += o.files;
+            total.skipped_dirty += o.skipped_dirty;
+            total.failed += o.failed;
+        }
+        ui.finishReplace(total);
+    }
+
+    const ReplaceOutcome = struct { replaced: usize = 0, files: usize = 0, skipped_dirty: usize = 0, failed: usize = 0 };
+
+    /// Ersetzungen einer Datei auf der Platte. Ist sie offen und ungespeichert, bleibt sie
+    /// unberührt (VS Code ersetzt dort im Buffer; hier gingen sonst Undo und die Änderungen
+    /// verloren). Offene, unveränderte Tabs laden den neuen Inhalt.
+    fn replaceInFile(self: *Self, file: u32, edits: []const project_search.Edit) ReplaceOutcome {
+        const abs = self.searchMatchPath(file) orelse return .{ .failed = 1 };
+        defer self.allocator.free(abs);
+        const key = self.bufferKeyForPath(abs);
+        if (key) |k| if (self.open_buffers.get(k)) |buf| if (buf.is_dirty()) return .{ .skipped_dirty = 1 };
+        const content = std.fs.cwd().readFileAlloc(self.allocator, abs, 256 * 1024 * 1024) catch return .{ .failed = 1 };
+        defer self.allocator.free(content);
+        const updated = project_search.applyEdits(self.allocator, content, edits) catch {
+            log.warn("replace: '{s}' changed since the search, skipped", .{abs});
+            return .{ .failed = 1 };
+        };
+        defer self.allocator.free(updated);
+        std.fs.cwd().writeFile(.{ .sub_path = abs, .data = updated }) catch |err| {
+            log.warn("replace: writing '{s}' failed: {}", .{ abs, err });
+            return .{ .failed = 1 };
+        };
+        if (key) |k| _ = self.reloadFileFromDisk(k, updated);
+        return .{ .replaced = edits.len, .files = 1 };
+    }
+
+    fn finishReplace(self: *Self, o: ReplaceOutcome) void {
+        if (o.skipped_dirty > 0) {
+            self.showToast("Replaced {d} in {d} {s}; skipped {d} with unsaved changes", .{ o.replaced, o.files, if (o.files == 1) "file" else "files", o.skipped_dirty });
+        } else if (o.failed > 0) {
+            self.showToast("Replaced {d} in {d} {s}; {d} changed on disk, search again", .{ o.replaced, o.files, if (o.files == 1) "file" else "files", o.failed });
+        } else if (o.files > 1) {
+            self.showToast("Replaced {d} occurrences in {d} files", .{ o.replaced, o.files });
+        }
+        // Offsets der übrigen Treffer stimmen nach dem Schreiben nicht mehr: neu suchen
+        self.startProjectSearch();
+    }
+
+    fn openSearchMatch(self: *Self, m: project_search.MatchRef) void {
+        const r = &self.search_view.results;
+        const line = r.files.items[m.file].lines.items[m.line];
+        const sub = line.subs[m.sub];
+        const abs = self.searchMatchPath(m.file) orelse return;
+        defer self.allocator.free(abs);
+        self.getActiveTabBar().openFile(abs) catch |err| {
+            log.warn("search: opening '{s}' failed: {}", .{ abs, err });
+            return;
+        };
+        if (self.lsp_goto) |g| self.allocator.free(g.path);
+        self.lsp_goto = .{
+            .path = self.allocator.dupe(u8, abs) catch return,
+            .row = line.row,
+            .col = find_ops.colOfByte(line.line, sub.start),
+            .select_to = find_ops.colOfByte(line.line, sub.end),
+            .frames_left = 240,
+        };
     }
 
     // ───────────────────────── Source Control Graph ─────────────────────────
@@ -2399,7 +2640,9 @@ pub const UI = struct {
     // ───────────────────────── LSP (zls): Sprung zur Definition ─────────────────────────
 
     const LspPending = struct { editor: *editor_mod.CodeEditor, row: usize, col: usize };
-    const LspGoto = struct { path: []u8, row: usize, col: usize, frames_left: u32 };
+    /// Sprung in eine Datei, sobald ihr Tab geladen ist (LSP-Definition, Treffer der Suche).
+    /// `select_to`: bis zu dieser Spalte markieren.
+    const LspGoto = struct { path: []u8, row: usize, col: usize, frames_left: u32, select_to: ?usize = null };
 
     /// Jeder Editor bekommt Definition- und Zwischenablage-Hook (UI-Zeiger ist erst nach init
     /// stabil, deshalb hier). Die Eingabefelder (Chat, Commit) sind auch CodeEditoren.
@@ -2515,7 +2758,8 @@ pub const UI = struct {
     }
 
     fn applyLspGoto(self: *Self) void {
-        const g = &(self.lsp_goto orelse return);
+        // Zeiger in das Feld, keine Kopie: sonst zählte frames_left nie herunter
+        const g = if (self.lsp_goto) |*p| p else return;
         const tab_bar = self.getActiveTabBar();
         const loaded = tab_bar.pending_switch_path == null and blk: {
             const idx = tab_bar.active_index orelse break :blk false;
@@ -2523,7 +2767,7 @@ pub const UI = struct {
             break :blk std.mem.eql(u8, tab_bar.tabs.items[idx].path, g.path);
         };
         if (loaded) {
-            self.getActiveEditor().jumpTo(g.row, g.col);
+            if (g.select_to) |end| self.getActiveEditor().jumpToSelect(g.row, g.col, end) else self.getActiveEditor().jumpTo(g.row, g.col);
         } else if (g.frames_left > 0) {
             g.frames_left -= 1;
             return;
@@ -3675,6 +3919,7 @@ pub const UI = struct {
                                 self.scm_changes.render(self.frame_arena.allocator(), t, self.file_explorer.width, self.mouse_x, self.mouse_y, self.sidebar_focus == .commit_input);
                                 self.scm_graph.render(self.frame_arena.allocator(), t, self.file_explorer.width, self.mouse_x, self.mouse_y);
                             },
+                            .search => self.search_view.render(self.frame_arena.allocator(), t, self.file_explorer.width, self.mouse_x, self.mouse_y, self.sidebar_focus == .search),
                         }
                     });
                     // Deferred Toggle ausführen (nach Rendering, vor endLayout)
@@ -4458,6 +4703,8 @@ pub const UI = struct {
     /// (Icon-Knopf, Explorer-Pfad, Timeline- oder Graph-Commit) noch auf seine 700 ms wartet.
     pub fn wantsFrameSoon(self: *Self) bool {
         if (tooltip.pending()) return true;
+        // Suche beim Tippen wartet auf die Pause, rg liefert aus dem Thread
+        if (self.search_view.searching()) return true;
         if (self.pending_pdf_reloads.items.len > 0) return true; // wartet, bis die Datei ruht
         const fx = &self.file_explorer;
         if (fx.hover_index != null and fx.now_ms - fx.hover_since_ms <= 700) return true;

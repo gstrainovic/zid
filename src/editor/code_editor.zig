@@ -2471,6 +2471,14 @@ pub const CodeEditor = struct {
         self.current_line = r + 1;
     }
 
+    /// Springen und `begin_col..end_col` in der Zeile markieren (Treffer der Projektsuche),
+    /// Cursor am Ende wie nach Ctrl+F. Spalten werden an die Zeile geklemmt.
+    pub fn jumpToSelect(self: *Self, row: usize, begin_col: usize, end_col: usize) void {
+        self.jumpTo(row, end_col);
+        const b = @min(begin_col, self.cursor.col);
+        if (b < self.cursor.col) self.selection_anchor = .{ .row = self.cursor.row, .col = b, .target = b };
+    }
+
     /// Gesamter Text des Buffers (owned).
     pub fn allTextAlloc(self: *const Self) ![]u8 {
         const last = self.lineCount() -| 1;
@@ -3686,6 +3694,22 @@ fn testEditor(allocator: std.mem.Allocator, text: []const u8) !struct { buffer: 
     var ed = CodeEditor.init(allocator, buffer);
     ed.setText(text);
     return .{ .buffer = buffer, .ed = ed };
+}
+
+test "jumpToSelect: markiert den Treffer, Cursor am Ende, Spalten begrenzt" {
+    var t = try testEditor(std.testing.allocator, "eins\n\tfoo foo\nx\n");
+    defer t.buffer.deinit();
+    defer t.ed.deinit();
+    t.ed.jumpToSelect(1, 4, 7);
+    const r = t.ed.selectionRange().?;
+    try std.testing.expectEqual(@as(usize, 1), r.begin.row);
+    try std.testing.expectEqual(@as(usize, 4), r.begin.col);
+    try std.testing.expectEqual(@as(usize, 7), r.end.col);
+    try std.testing.expectEqual(@as(usize, 7), t.ed.cursor.col);
+    // Zeile hinter dem Ende (Datei inzwischen kürzer): letzte Zeile, Spalten an die Zeile geklemmt
+    t.ed.jumpToSelect(99, 5, 9);
+    try std.testing.expectEqual(@as(usize, 3), t.ed.cursor.row);
+    try std.testing.expect(t.ed.selectionRange() == null);
 }
 
 test "Kontextmenü: Export to PDF nur bei Marp-Decks, Preview bei jeder .md" {

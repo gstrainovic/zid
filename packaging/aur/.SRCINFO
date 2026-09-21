@@ -10,6 +10,7 @@ pkgbase = zid-bin
 	depends = libpng
 	depends = zlib
 	depends = glib2
+	depends = ripgrep
 	optdepends = vulkan-icd-loader: GPU-Rendering
 	optdepends = vulkan-radeon: Vulkan-Treiber für AMD
 	optdepends = vulkan-intel: Vulkan-Treiber für Intel

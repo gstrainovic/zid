@@ -11,8 +11,9 @@ arch=('x86_64')
 url="https://github.com/gstrainovic/zid"
 license=('AGPL-3.0-only')
 # freetype2, harfbuzz, libpng, zlib und glib2 zieht das Binary dynamisch; alles
-# andere (MuPDF, libjpeg, tree-sitter, wgpu) steckt drin.
-depends=('freetype2' 'harfbuzz' 'libpng' 'zlib' 'glib2')
+# andere (MuPDF, libjpeg, tree-sitter, wgpu) steckt drin. ripgrep für die Suche im
+# Projekt (Ctrl+Shift+F); das rg aus dem Tarball (libexec/zid) bleibt draussen.
+depends=('freetype2' 'harfbuzz' 'libpng' 'zlib' 'glib2' 'ripgrep')
 # Vulkan-Treiber zur Laufzeit; welcher, entscheidet die Hardware.
 optdepends=('vulkan-icd-loader: GPU-Rendering'
             'vulkan-radeon: Vulkan-Treiber für AMD'
