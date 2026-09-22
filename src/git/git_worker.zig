@@ -669,6 +669,12 @@ pub fn repoTopLevel(path: []const u8, buf: *[std.fs.max_path_bytes]u8) ?[]const 
             return dir;
         } else |_| {}
 
+        // An der Laufwerks- bzw. Freigabewurzel aufhören: dirname steigt unter UNC von
+        // `\\server\share` weiter zu `\\server` und `\`, access darauf endet in
+        // `error.Unexpected` samt Stacktrace (NTSTATUS 0xc00000cc, 0xc0000039).
+        const root = std.fs.path.diskDesignator(dir);
+        if (std.mem.trimRight(u8, dir, "/\\").len <= root.len) return null;
+
         const parent = std.fs.path.dirname(dir) orelse return null;
         if (parent.len == dir.len) return null;
         dir = parent;
