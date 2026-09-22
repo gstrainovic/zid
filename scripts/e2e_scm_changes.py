@@ -133,6 +133,8 @@ def step_show():
     check(c["groups"]["staged"] == [] and c["groups"]["merge"] == [], "keine Staged/Merge Changes")
     check([r["kind"] for r in c["rows"]] == ["group", "entry", "entry", "entry"], "Zeilen: Kopf Changes + drei Einträge")
     check(bounds("sc_input_box")["h"] > 20, "Eingabefeld im Layout")
+    check(c["input_inner_height"] >= c["line_height"],
+          f"eine Editor-Zeile passt ins Feld ({c['line_height']} in {c['input_inner_height']})")
     shot("e2e_scm_changes.ppm")
     # Tooltip nach 700 ms über der Kopf-Aktion
     h = c["header"]
@@ -252,6 +254,9 @@ def step_publish_push_multiline():
     s = wait(lambda s: s["changes"]["message"] == "feat: vier\nZweite Zeile\nDritte" and s["changes"]["lines"] == 3, "drei Zeilen im Feld")
     h3 = bounds("sc_input_box")["h"]
     check(h3 > h1 + 30, f"Feld wächst mit den Zeilen ({h1:.0f} → {h3:.0f})")
+    c = ch()
+    check(c["input_inner_height"] >= 3 * c["line_height"],
+          f"drei Editor-Zeilen passen ins Feld ({3 * c['line_height']} in {c['input_inner_height']})")
     key("up"); key("home"); rpc("type_text", ["> "]); settle(4)
     wait(lambda s: s["changes"]["message"] == "feat: vier\n> Zweite Zeile\nDritte", "↑ und Pos1 bewegen in der Zeile, Tippen fügt dort ein")
     # Seit das Feld der CodeEditor ist (statt line_edit mit festem Puffer): Ctrl+Z

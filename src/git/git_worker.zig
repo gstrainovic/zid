@@ -649,7 +649,9 @@ fn terminateLocked(id: std.process.Child.Id) void {
             _ = job_api.TerminateJobObject(job, 1);
         } else std.os.windows.TerminateProcess(id, 1) catch {};
     } else {
-        std.posix.kill(id, std.posix.SIG.TERM) catch {};
+        // Ganze Prozessgruppe (pgid = 0 beim Start): Kinder wie ein Hook erben sonst die
+        // stderr-Pipe und halten sie offen, nachdem git selbst schon beendet ist.
+        std.posix.kill(-id, std.posix.SIG.TERM) catch {};
     }
 }
 
@@ -683,6 +685,8 @@ fn runGitCaptureStdin(alloc: std.mem.Allocator, cwd: []const u8, args: []const [
     child.stdout_behavior = .Pipe;
     child.stderr_behavior = .Pipe;
     child.cwd = cwd;
+    // Eigene Prozessgruppe, damit killRunning git samt Kindern beenden kann
+    if (builtin.os.tag != .windows) child.pgid = 0;
     child.spawn() catch |err| return .{ .failed = alloc.dupe(u8, @errorName(err)) catch no_message };
     registerRunning(child.id);
     if (stdin) |text| {
