@@ -360,7 +360,7 @@ MuPDFs Story-Engine. Folienvorschau in `MarkdownView` (`deck`-Feld), Command
 
 Das Submodul zeigt auf den eigenen Fork `gstrainovic/clay-zig-bindings`, Branch `zid`
 (Upstream johan0A als Remote `upstream`); dort liegen beide Fixes als Commits `598a5c7`
-(Scroll-Container), `27407cd` (Hash-Map) und `7c66140` (Messcache). Für eine neuere clay.h den Branch `zid` auf
+(Scroll-Container), `27407cd` (Hash-Map), `7c66140` (Messcache) und `72d89dd` (Umbruch mit fremden Wörtern). Für eine neuere clay.h den Branch `zid` auf
 upstream rebasen. `libs/clay-zig/build.zig` legt `vendor/clay.h` vor die Abhängigkeit. Gegenüber v0.14 (upstream
 unverändert) sind dort drei Stellen in `Clay_UpdateScrollContainers` korrigiert, alle mit „zid:“
 markiert: Swap-Remove ohne `i--` übersprang Einträge, `Clay__GetHashMapItem` liefert nie `NULL`
@@ -394,6 +394,17 @@ die Wortgrenze (16384) voll („run out of space in it's internal text measureme
 blieb Text ungemessen. `Clay__ResetMeasureTextCacheWhenFull` leert den Cache in
 `Clay_BeginLayout`, sobald Wort- oder Eintragsliste zu drei Vierteln voll ist. Unit-Test
 `src/ui/clay_cache_tests.zig` (eigenes Test-Root mit Clay, ohne UI).
+
+Vierter Fix (`72d89dd`): **Der Umbruch bekam Wörter eines fremden Texts.** Der Messcache
+schlägt über einen 32-Bit-Hash des Inhalts nach; der SIMD-Hash auf x86_64 bezieht die Länge
+nicht ein („ab“ und „ab\0\0“ kollidieren), und `Clay__MeasureTextCacheItem_DEFAULT` (Cache
+voll) zeigt mit Wortindex 0 auf eine beliebige Wortliste. Der Umbruch las dann hinter dem
+eigenen Puffer; bei leerem Text (Zeiger `0xfff…f`, Zigs Leerslice) war das der Absturz
+„applying non-zero offset to non-null pointer 0xffffffffffffffff“ in
+`Clay__CalculateFinalLayout`. Einträge tragen jetzt die Textlänge, DEFAULT wird ungebrochen
+ausgegeben, Wörter hinter dem Textende beenden den Umbruch. Test im selben Test-Root; dort
+teilen sich alle Tests einen Clay-Puffer, weil der aktuelle Kontext nicht zurückgesetzt werden
+kann und ein freigegebener Puffer den nächsten Test in fremden Speicher schreiben lässt.
 
 ## Bekannte Grenzen (kein Todo, bewusst so)
 
