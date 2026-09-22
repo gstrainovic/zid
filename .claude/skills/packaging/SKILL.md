@@ -120,6 +120,14 @@ Aus AGENTS.md hierher verschoben (21.09.2026), Wortlaut unverändert.
   gibt es nur als Secret `APT_SIGNING_KEY`; geht er verloren, neuen erzeugen und Nutzer
   müssen `zid.gpg` neu holen. Lokal unter Windows: gpg aus Git-Bash braucht ein kurzes
   `--homedir` (der Agent-Socket-Pfad darf nicht zu lang sein und kein `C:` enthalten).
+- pacman (`.github/workflows/pacman.yml`, `packaging/pacman/publish.sh`): statt AUR, dessen
+  Registrierung für neue Konten geschlossen ist. nfpm baut `-p archlinux` aus dem Tarball,
+  Pages-Repo gstrainovic/pacman-zid mit `x86_64/zid.db` von `repo-add --sign`. pacman
+  verlangt signierte Pakete (`SigLevel Required`), daher je Paket eine `.sig`; Schlüssel ist
+  `APT_SIGNING_KEY`, gepusht mit `PACMAN_DEPLOY_KEY`. Die Symlinks, die `repo-add` anlegt
+  (`zid.db` usw.), ersetzt das Skript durch Kopien, weil Pages Symlinks nicht ausliefert.
+  Lokal prüfen: Paket per nfpm bauen, im `archlinux`-Container `publish.sh` mit einem
+  Wegwerf-Schlüssel, Ordner per `python -m http.server` ausliefern, wie im README einrichten.
 - Scoop: `bucket/zid.json` im Repo gstrainovic/scoop-zid ist die einzige Kopie des
   Manifests. Dessen Excavator (`.github/workflows/excavator.yml`, ScoopInstaller/GithubActions)
   läuft alle 4 Stunden, `gh workflow run excavator.yml -R gstrainovic/scoop-zid` sofort.

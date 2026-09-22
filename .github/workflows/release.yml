@@ -4,7 +4,7 @@
 #   2. Release als Entwurf anlegen, beides anhängen, dann veröffentlichen — erst dann
 #      sieht Scoops Excavator die Version, nie ein Release ohne Zip
 #   3. COPR (Fedora) anstossen, sofern die Zugangsdaten als Secret da sind, und die
-#      apt-Quelle (apt.yml) nachziehen
+#      apt-Quelle (apt.yml) und die pacman-Quelle (pacman.yml) nachziehen
 # Scoop braucht hier nichts: der Excavator im Bucket gstrainovic/scoop-zid prüft alle
 # 4 Stunden das neueste Release (checkver/autoupdate im Manifest).
 #
@@ -28,9 +28,10 @@ jobs:
           submodules: recursive
       - name: Tarball bauen (Debian 12)
         run: packaging/build-release.sh --engine docker
-      # Aus demselben Binary: .deb (Debian, Ubuntu, Mint) und .rpm (Fedora, openSUSE).
+      # Aus demselben Binary: .deb (Debian, Ubuntu, Mint), .rpm (Fedora, openSUSE) und
+      # .pkg.tar.zst (Arch).
       # nfpm fest gepinnt, Prüfsumme aus dem GitHub-Release.
-      - name: .deb und .rpm
+      - name: .deb, .rpm und Arch-Paket
         run: |
           curl -sSLf -o nfpm.tgz https://github.com/goreleaser/nfpm/releases/download/v2.47.0/nfpm_2.47.0_Linux_x86_64.tar.gz
           echo "0660ca602b2d2d2ae4781a06c692b3eeb9d437ffea05b831d76e41f4a3188783  nfpm.tgz" | sha256sum -c -
@@ -38,7 +39,7 @@ jobs:
           export VERSION="$(sed -n 's/.*\.version = "\([^"]*\)".*/\1/p' build.zig.zon | head -1)"
           tar -xJf "dist/zid-$VERSION-x86_64-linux.tar.xz" -C "$RUNNER_TEMP"
           export STAGE="$RUNNER_TEMP/zid-$VERSION-x86_64-linux"
-          for p in deb rpm; do ./nfpm package -f packaging/nfpm.yaml -p "$p" -t dist/; done
+          for p in deb rpm archlinux; do ./nfpm package -f packaging/nfpm.yaml -p "$p" -t dist/; done
           ls -la dist
       - uses: actions/upload-artifact@v7
         with:
@@ -47,6 +48,7 @@ jobs:
             dist/zid-*-x86_64-linux.tar.xz*
             dist/*.deb
             dist/*.rpm
+            dist/*.pkg.tar.zst
 
   windows:
     uses: ./.github/workflows/windows-release.yml
@@ -103,6 +105,7 @@ jobs:
           test -f "dist/zid-$version-x86_64-windows.zip"
           test -f "dist/zid_${version}_amd64.snap"
           ls dist/*.deb dist/*.rpm
+          test -f "dist/zid-$version-1-x86_64.pkg.tar.zst"
           echo "version=$version" >> "$GITHUB_OUTPUT"
       - name: Release anlegen und veröffentlichen
         env:
@@ -150,6 +153,14 @@ jobs:
   apt:
     needs: publish
     uses: ./.github/workflows/apt.yml
+    with:
+      version: ${{ needs.publish.outputs.version }}
+    secrets: inherit
+
+  # pacman-Quelle auf GitHub Pages (Arch), samt Installationsprobe
+  pacman:
+    needs: publish
+    uses: ./.github/workflows/pacman.yml
     with:
       version: ${{ needs.publish.outputs.version }}
     secrets: inherit
