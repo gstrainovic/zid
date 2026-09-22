@@ -110,6 +110,8 @@ pub const Platform = struct {
 
         self.window = try wio.createWindow(.{
             .title = self.config.title,
+            // Immer maximiert starten; die Größe gilt nach dem Wiederherstellen.
+            .mode = .maximized,
             .size = .{
                 .width = @intCast(self.config.width),
                 .height = @intCast(self.config.height),
