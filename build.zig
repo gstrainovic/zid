@@ -209,6 +209,8 @@ pub fn build(b: *std.Build) void {
         exe.root_module.linkSystemLibrary("gdi32", .{});
         exe.root_module.linkSystemLibrary("comdlg32", .{});
         exe.root_module.link_libc = true;
+        // Programm-Icon (Explorer, Taskleiste, Titelleiste)
+        exe.root_module.addWin32ResourceFile(.{ .file = b.path("packaging/windows/zid.rc") });
 
         // MuPDF Integration
         exe.root_module.addIncludePath(b.path("src/rendering/mupdf_wrapper"));
