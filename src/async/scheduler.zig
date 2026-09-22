@@ -10,6 +10,9 @@ const log = std.log.scoped(.scheduler);
 
 pub const ResultTag = enum {
     git_status,
+    /// Repo gehört einem anderen Benutzer; Payload = Wert für `safe.directory`
+    /// (git_worker.unsafeRepoDirectory), die UI fragt nach
+    git_unsafe_repo,
     git_diff,
     git_branch,
     /// Payload `<tab_path>\n` + git_diff.encodeContents (git_worker.taskGitFileDiff)

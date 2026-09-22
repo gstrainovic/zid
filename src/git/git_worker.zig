@@ -41,7 +41,11 @@ pub fn taskGitBranch(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.Tas
     const params: *Params = @ptrCast(@alignCast(data.?));
     defer params.deinit();
 
-    const out = try runGit(alloc, params.repo_path, &.{ "rev-parse", "--abbrev-ref", "HEAD" });
+    // Fremdes Repo: die Rückfrage kommt vom Status-Task, der Branch bleibt leer
+    const out = runGit(alloc, params.repo_path, &.{ "rev-parse", "--abbrev-ref", "HEAD" }) catch |err| switch (err) {
+        error.GitUnsafeRepo => return .{ .tag = .git_branch, .payload = try alloc.dupe(u8, ""), .allocator = alloc },
+        else => return err,
+    };
     defer alloc.free(out);
 
     return .{
@@ -58,10 +62,24 @@ pub fn taskGitStatus(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.Tas
     const params: *Params = @ptrCast(@alignCast(data.?));
     defer params.deinit();
 
-    const out = try runGit(alloc, params.repo_path, &.{
+    const args = [_][]const u8{
         "--no-optional-locks", "status", "--porcelain=v2",
         "--branch",            "--null", "--ignored",
-    });
+    };
+    const out = switch (runGitCapture(alloc, params.repo_path, &args)) {
+        .ok => |o| o,
+        .failed => |msg| {
+            defer alloc.free(msg);
+            // Repo gehört einem anderen Benutzer: die UI fragt, ob sie ihm vertrauen soll
+            // (Payload = der Wert, den git selbst für safe.directory vorschlägt)
+            if (unsafeRepoDirectory(msg)) |dir| {
+                log.warn("git status in '{s}': Repo gehört einem anderen Benutzer (safe.directory)", .{params.repo_path});
+                return .{ .tag = .git_unsafe_repo, .payload = try alloc.dupe(u8, dir), .allocator = alloc };
+            }
+            log.err("git status in '{s}': {s}", .{ params.repo_path, msg });
+            return error.GitFailed;
+        },
+    };
     defer alloc.free(out);
 
     // Pfade in porcelain v2 sind relativ zur Repo-Wurzel, nicht zum Projektordner
@@ -153,6 +171,10 @@ pub fn taskGitAction(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.Tas
         else if (std.mem.eql(u8, action, "push"))
             // Push (Felder = weitere git-Argumente, `-u origin main` für Publish Branch)
             &.{ "push", "--quiet" }
+        else if (std.mem.eql(u8, action, "trust_repo"))
+            // Fremdes Repo freigeben wie VS Code „Manage Unsafe Repositories“ (Feld = Wert
+            // aus gits Fehlermeldung, siehe unsafeRepoDirectory)
+            &.{ "config", "--global", "--add", "safe.directory" }
         else
             return error.UnknownGitAction;
         try argv.appendSlice(alloc, head);
@@ -541,13 +563,35 @@ fn runGitCwd(alloc: std.mem.Allocator, cwd: []const u8, args: []const []const u8
     return switch (runGitCapture(alloc, cwd, args)) {
         .ok => |out| out,
         .failed => |msg| {
+            defer alloc.free(msg);
+            // Fremdes Repo: eine Zeile statt gits zehnzeiliger Anleitung, die Rückfrage
+            // übernimmt die UI (taskGitStatus → git_unsafe_repo)
+            if (unsafeRepoDirectory(msg) != null) {
+                log.warn("git {s} in '{s}': Repo gehört einem anderen Benutzer (safe.directory)", .{ args[0], cwd });
+                return error.GitUnsafeRepo;
+            }
             // stderr mitloggen: „git exited 128" allein sagt nicht, ob der Ordner
             // kein Repo ist, die Datei fehlt oder git etwas anderes bemängelt.
             log.err("git {s} in '{s}': {s}", .{ args[0], cwd, msg });
-            alloc.free(msg);
             return error.GitFailed;
         },
     };
+}
+
+/// Weist git das Repo ab, weil es einem anderen Benutzer gehört („detected dubious ownership“,
+/// seit git 2.35.2)? Dann der Wert, den git in seiner Anleitung für
+/// `git config --global --add safe.directory <wert>` vorschlägt, ohne Anführungszeichen.
+/// Den Wert nimmt zid wörtlich: unter Windows auf Netzlaufwerken ist es `%(prefix)///host/…`,
+/// eine Form, die sich aus dem Projektpfad nicht sicher ableiten lässt. null sonst.
+pub fn unsafeRepoDirectory(msg: []const u8) ?[]const u8 {
+    if (std.mem.indexOf(u8, msg, "dubious ownership") == null) return null;
+    const marker = "safe.directory ";
+    const start = (std.mem.lastIndexOf(u8, msg, marker) orelse return null) + marker.len;
+    const end = std.mem.indexOfScalarPos(u8, msg, start, '\n') orelse msg.len;
+    var value = std.mem.trim(u8, msg[start..end], " \t\r");
+    // git quotet nur bei Bedarf (sq_quote_buf_pretty): unter Windows mit '…', unter Linux meist roh
+    if (value.len >= 2 and value[0] == '\'' and value[value.len - 1] == '\'') value = value[1 .. value.len - 1];
+    return if (value.len > 0) value else null;
 }
 
 /// Ausgabe von git (owned) oder die Fehlermeldung (owned, stderr bzw. Fehlername).
@@ -667,6 +711,28 @@ test "samePath: Trenner und Endstrich egal, sonst genau" {
     try std.testing.expect(samePath("C:/x/repo", "C:\\x\\repo\\"));
     try std.testing.expect(!samePath("/x/repo", "/x/repo/sub"));
     try std.testing.expect(!samePath("/x/repo", "/x/rep"));
+}
+
+test "unsafeRepoDirectory: Vorschlag aus gits Meldung, wörtlich" {
+    // Windows, Repo auf einem Netzlaufwerk (Format der Meldung von git for Windows)
+    const win =
+        \\fatal: detected dubious ownership in repository at '//10.0.0.1/share/repo'
+        \\'//10.0.0.1/share/repo' is owned by:
+        \\        (inconvertible) (S-1-5-21-1-2-3-1007)
+        \\but the current user is:
+        \\        DOMAIN/user (S-1-12-1-4-5-6-7)
+        \\To add an exception for this directory, call:
+        \\
+        \\        git config --global --add safe.directory '%(prefix)///10.0.0.1/share/repo'
+    ;
+    try std.testing.expectEqualStrings("%(prefix)///10.0.0.1/share/repo", unsafeRepoDirectory(win).?);
+    // Linux ohne Anführungszeichen, mit Tab davor und Zeilenende danach
+    const linux = "fatal: detected dubious ownership in repository at '/srv/repo'\n" ++
+        "To add an exception for this directory, call:\n\n" ++
+        "\tgit config --global --add safe.directory /srv/repo\n";
+    try std.testing.expectEqualStrings("/srv/repo", unsafeRepoDirectory(linux).?);
+    try std.testing.expect(unsafeRepoDirectory("fatal: not a git repository") == null);
+    try std.testing.expect(unsafeRepoDirectory("fatal: detected dubious ownership in repository at '/x'") == null);
 }
 
 test "isInsideRepo lehnt Ordner ohne Repo ab" {

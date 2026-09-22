@@ -144,8 +144,13 @@ pub const UI = struct {
     scm_repo_root: ?[]u8 = null,
     /// Nach einer Aktion: main.zig lädt den Status neu (`takeGitStatusRequest`)
     git_status_wanted: bool = false,
+    /// Nach dem Freigeben eines fremden Repos: main.zig lädt auch den Branch neu
+    git_branch_wanted: bool = false,
+    /// `safe.directory`-Wert des fremden Repos, nach dem schon gefragt wurde (owned). Jeder
+    /// git status meldet es erneut; ohne das käme die Rückfrage nach jeder Dateiänderung.
+    unsafe_repo: ?[]u8 = null,
     /// Was der offene Rückfrage-Dialog bei „Ja“ ausführt
-    scm_pending: ?union(enum) { discard: git_changes.Row, discard_all, commit_all } = null,
+    scm_pending: ?union(enum) { discard: git_changes.Row, discard_all, commit_all, trust_repo } = null,
     /// Knopftext und Aktionen des Rückfrage-Dialogs (der Dialog hält nur Slices)
     scm_dialog_button: ?[]u8 = null,
     scm_dialog_actions: [2]dialog_mod.DialogAction = undefined,
@@ -552,6 +557,7 @@ pub const UI = struct {
         self.scm_changes.deinit();
         if (self.scm_repo_root) |r| self.allocator.free(r);
         if (self.scm_dialog_button) |b| self.allocator.free(b);
+        if (self.unsafe_repo) |u| self.allocator.free(u);
         var gc_iter = self.git_commits.valueIterator();
         while (gc_iter.next()) |v| v.*.destroy();
         self.git_commits.deinit(self.allocator);
@@ -4727,6 +4733,38 @@ pub const UI = struct {
         return v;
     }
 
+    /// main.zig: Branch neu laden (nach dem Freigeben eines fremden Repos).
+    pub fn takeGitBranchRequest(self: *Self) bool {
+        const v = self.git_branch_wanted;
+        self.git_branch_wanted = false;
+        return v;
+    }
+
+    /// git verweigert das Repo, weil es einem anderen Benutzer gehört (Netzlaufwerk, anderes
+    /// Konto). Wie VS Code „Manage Unsafe Repositories“: nachfragen, bei Ja trägt
+    /// `taskGitAction` den von git vorgeschlagenen Wert in `safe.directory` ein. Nicht still
+    /// freigeben: gits Prüfung schützt davor, dass die `.git/config` eines fremden Repos
+    /// (z. B. `core.fsmonitor`) beim automatischen `git status` Programme startet.
+    pub fn handleUnsafeRepo(self: *Self, safe_dir: []const u8) void {
+        if (self.unsafe_repo) |u| if (std.mem.eql(u8, u, safe_dir)) return;
+        if (self.active_dialog != null) return; // der nächste Status fragt erneut
+        const copy = self.allocator.dupe(u8, safe_dir) catch return;
+        if (self.unsafe_repo) |u| self.allocator.free(u);
+        self.unsafe_repo = copy;
+        // Nur der Ordnername: ein Pfad ist ein Wort ohne Umbruchstelle und lief über den
+        // Dialogrand hinaus. Den vollen Wert nennt das Log.
+        const folder = std.fs.path.basename(std.mem.trimRight(u8, self.current_directory orelse safe_dir, "/\\"));
+        log.info("fremdes Repo, safe.directory wäre: {s}", .{safe_dir});
+        const msg = std.fmt.allocPrint(self.allocator,
+            \\The git repository in '{s}' is potentially unsafe as the folder is owned by someone other than the current user.
+            \\
+            \\Trust it? zid adds the folder to safe.directory in your global git config.
+        , .{folder}) catch return;
+        defer self.allocator.free(msg);
+        self.scm_pending = .trust_repo;
+        self.showScmDialog("Unsafe Git Repository", msg, "Trust Repository");
+    }
+
     // ───────────────────────── Source Control: Changes ─────────────────────────
 
     fn scmRepo(self: *Self) ?[]const u8 {
@@ -4932,6 +4970,7 @@ pub const UI = struct {
                 if (untracked.items.len > 0) ui.submitScm("discard_untracked", untracked.items, null);
             },
             .commit_all => ui.submitScm("commit_all", &.{}, sc.messageText()),
+            .trust_repo => if (ui.unsafe_repo) |dir| ui.submitScm("trust_repo", &.{dir}, null),
         }
     }
 
@@ -4972,6 +5011,12 @@ pub const UI = struct {
             const first = u.body[0 .. std.mem.indexOfScalar(u8, u.body, '\n') orelse u.body.len];
             self.showToast("git {s}: {s}", .{ u.key, first });
             return;
+        }
+        if (std.mem.eql(u8, u.key, "trust_repo")) {
+            self.git_branch_wanted = true;
+            self.scm_graph.refresh();
+            self.timeline_view.timeline.refresh();
+            self.showToast("Repository trusted (safe.directory)", .{});
         }
         if (is_push) {
             self.showToast("Published branch to origin", .{});
