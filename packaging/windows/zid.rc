@@ -1,0 +1,3 @@
+// Programm-Icon für Explorer und Taskleiste. wio lädt es beim Registrieren der
+// Fensterklasse unter dem Namen WIO_ICON; zid.ico baut make_ico.py aus dem SVG.
+WIO_ICON ICON "zid.ico"

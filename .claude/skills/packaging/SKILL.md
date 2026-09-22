@@ -55,6 +55,12 @@ Aus AGENTS.md hierher verschoben (21.09.2026), Wortlaut unverändert.
   einzelne Verbindungen reissen mit `HttpConnectionClosing` ab.
 - DirectWrite lädt keine Schrift aus dem Speicher. Die Schrift liegt deshalb neben der exe,
   gesucht wird über `platform/asset_path.zig`.
+- Programm-Icon: `packaging/windows/zid.rc` bettet `zid.ico` als Ressource `WIO_ICON` ein
+  (`addWin32ResourceFile` in build.zig). wio lädt sie beim Registrieren der Fensterklasse
+  (`hIcon`/`hIconSm`); das Exe-Icon allein reicht der Taskleiste nicht, sie nimmt das der
+  Fensterklasse. Nach Änderung am SVG `python3
+  packaging/windows/make_ico.py` (Inkscape, legt PNGs direkt ins ICO; ImageMagick schrieb
+  BMP, 300 KiB statt 14).
 
 ## Release-Tarball: `packaging/build-release.sh`
 
