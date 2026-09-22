@@ -1,0 +1,94 @@
+# pacman-Quelle für Arch Linux: legt das Arch-Paket eines veröffentlichten Releases in
+# gstrainovic/pacman-zid (GitHub Pages, https://gstrainovic.github.io/pacman-zid) und prüft
+# danach in einem frischen Container, dass `pacman -S zid` genau diese Version bringt.
+#
+# Läuft aus release.yml nach `publish`; von Hand für eine schon veröffentlichte Version:
+#   gh workflow run pacman.yml -f version=0.1.6
+#
+# Secrets: APT_SIGNING_KEY (derselbe GPG-Schlüssel wie für apt, signiert Pakete und
+# Datenbank) und PACMAN_DEPLOY_KEY (SSH-Deploy-Key mit Schreibrecht auf pacman-zid). Das
+# Pages-Repo trägt nur den letzten Stand als einen Commit, sonst wüchse es um jedes Paket.
+name: pacman
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version eines veröffentlichten Releases, z. B. 0.1.6'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    env:
+      SIGNING_KEY: ${{ secrets.APT_SIGNING_KEY }}
+      DEPLOY_KEY: ${{ secrets.PACMAN_DEPLOY_KEY }}
+      VERSION: ${{ inputs.version }}
+    steps:
+      - name: Ohne Secrets abbrechen
+        if: env.SIGNING_KEY == '' || env.DEPLOY_KEY == ''
+        run: |
+          echo "::error::Secret APT_SIGNING_KEY oder PACMAN_DEPLOY_KEY fehlt"
+          exit 1
+      # checkout braucht git und ssh im Container, sonst lädt es nur ein Archiv ohne .git
+      - name: Werkzeuge
+        run: pacman -Syu --noconfirm --needed -q git openssh gnupg >/dev/null
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          repository: gstrainovic/pacman-zid
+          ssh-key: ${{ secrets.PACMAN_DEPLOY_KEY }}
+          path: site
+      - name: Paket aus dem Release laden
+        run: |
+          mkdir pkgs
+          curl -fsSL -o "pkgs/zid-$VERSION-1-x86_64.pkg.tar.zst" \
+            "https://github.com/$GITHUB_REPOSITORY/releases/download/v$VERSION/zid-$VERSION-1-x86_64.pkg.tar.zst"
+      - name: Datenbank bauen und signieren
+        run: |
+          printf '%s\n' "$SIGNING_KEY" | gpg --batch --import
+          packaging/pacman/publish.sh site pkgs/*.pkg.tar.zst
+      - name: Nach pacman-zid pushen
+        working-directory: site
+        run: |
+          git config user.name "zid release"
+          git config user.email "noreply@github.com"
+          git checkout -q --orphan pages
+          git add -A
+          git commit -q -m "zid $VERSION"
+          git push -f origin pages:main
+
+  # Pages braucht nach dem Push ein bis zwei Minuten; bis dahin liefert es die alte Datenbank.
+  verify:
+    needs: publish
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    env:
+      VERSION: ${{ inputs.version }}
+      BASE: https://gstrainovic.github.io/pacman-zid
+    steps:
+      - name: Auf die neue Datenbank warten
+        run: |
+          for i in $(seq 60); do
+            curl -fsS "$BASE/x86_64/zid.db" | tar -tz | grep -qx "zid-$VERSION-1/" && exit 0
+            sleep 15
+          done
+          echo "::error::Pages liefert $VERSION nach 15 Minuten noch nicht"
+          exit 1
+      - name: Wie im README einrichten und installieren
+        run: |
+          pacman-key --init
+          curl -fsSL "$BASE/zid.asc" | pacman-key --add -
+          pacman-key --lsign-key E5E96FA53EB5B2226D438FB39C64B2A2A6DFA473
+          printf '\n[zid]\nServer = %s/$arch\n' "$BASE" >> /etc/pacman.conf
+          pacman -Syu --noconfirm zid
+          zid --version | tee /dev/stderr | grep -qx "zid $VERSION"

@@ -46,6 +46,19 @@ Updates kommen danach mit `apt upgrade`. Braucht Debian 12 oder Ubuntu 22.04 und
 Ohne Quelle geht auch das einzelne Paket:
 `curl -LO https://github.com/gstrainovic/zid/releases/latest/download/zid_0.1.5-1_amd64.deb && sudo apt install ./zid_0.1.5-1_amd64.deb`.
 
+### Arch Linux, Manjaro, EndeavourOS
+
+Einmal die pacman-Quelle einrichten:
+
+```bash
+curl -fsSL https://gstrainovic.github.io/pacman-zid/zid.asc | sudo pacman-key --add -
+sudo pacman-key --lsign-key E5E96FA53EB5B2226D438FB39C64B2A2A6DFA473
+printf '\n[zid]\nServer = https://gstrainovic.github.io/pacman-zid/$arch\n' | sudo tee -a /etc/pacman.conf
+sudo pacman -Syu zid
+```
+
+Updates kommen danach mit `pacman -Syu`.
+
 ### openSUSE und andere RPM-Distributionen
 
 ```bash
@@ -208,6 +221,11 @@ Den Rest erledigt `.github/workflows/release.yml`:
   GPG-Schlüssel, Fingerabdruck `E5E9 6FA5 3EB5 B222 6D43 8FB3 9C64 B2A2 A6DF A473`) und
   `APT_DEPLOY_KEY` (Deploy-Key mit Schreibrecht auf apt-zid). Nachholen für eine Version:
   `gh workflow run apt.yml -f version=0.1.3`.
+* **Arch:** `pacman.yml` legt das `.pkg.tar.zst` in die pacman-Quelle
+  `gstrainovic/pacman-zid` (GitHub Pages, letzte drei Versionen), signiert Pakete und
+  Datenbank mit demselben Schlüssel wie apt und installiert es danach zur Probe in
+  `archlinux:latest`. Braucht `APT_SIGNING_KEY` und `PACMAN_DEPLOY_KEY`. Nachholen:
+  `gh workflow run pacman.yml -f version=0.1.4`.
 * **Snap Store:** Upload in den Kanal `stable`. Braucht das Secret
   `SNAPCRAFT_STORE_CREDENTIALS` (`snapcraft export-login -`) und einmalig die Freigabe
   für Classic-Confinement.
