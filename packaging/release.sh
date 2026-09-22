@@ -26,7 +26,8 @@ fi
 
 old="$(sed -n 's/.*\.version = "\([^"]*\)".*/\1/p' build.zig.zon | head -1)"
 [ "$old" != "$new" ] || { echo "Version $new ist schon gesetzt." >&2; exit 1; }
-if [ "$(printf '%s\n%s\n' "$old" "$new" | sort -V | tail -1)" != "$new" ]; then
+# Vergleich in Python statt `sort -V`: unter Windows darf Git-Bash sort.exe nicht starten
+if ! python3 -c 'import sys; v = lambda s: tuple(map(int, s.split("."))); sys.exit(v(sys.argv[2]) <= v(sys.argv[1]))' "$old" "$new"; then
     echo "$new ist nicht neuer als $old." >&2
     exit 1
 fi
