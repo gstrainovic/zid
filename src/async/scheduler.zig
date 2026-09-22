@@ -133,6 +133,8 @@ pub const Scheduler = struct {
     // statt joined. Dann dürfen workers und self NICHT freigegeben werden
     // (noch-laufender Worker hält Referenzen).
     detached: bool = false,
+    /// shutdown lief schon (main ruft es vor deinit, um `detached` zu lesen)
+    stopped: bool = false,
     /// Wird nach jedem erfolgreich eingereihten Result gerufen, auch aus Worker- und
     /// Watcher-Threads. main.zig hängt hier wio.cancelWait ein: der Frame-Loop schläft
     /// sonst in wio.wait(.{}) und holt Results erst beim nächsten Fenster-Event ab.
@@ -214,6 +216,8 @@ pub const Scheduler = struct {
     }
 
     pub fn shutdown(self: *Self) void {
+        if (self.stopped) return;
+        self.stopped = true;
         self.should_stop.store(true, .release);
         self.work_queue.wakeAll();
 
