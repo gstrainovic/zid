@@ -16,6 +16,19 @@ Aus AGENTS.md hierher verschoben (21.09.2026), Wortlaut unverändert.
 - `src/git/git_list.zig` (Modul `git_list`, unit-getestet): `visibleRange`, `scrollToShow`,
   `clampScroll` für virtualisierte Listen mit fester Zeilenhöhe (Timeline, Graph).
 - Alle git-Aufrufe laufen mit `core.quotepath=off`.
+- **Fremde Repos („detected dubious ownership“):** Gehört das Repo einem anderen Benutzer
+  (Netzlaufwerk, anderes Konto), verweigert git jeden Befehl. `taskGitStatus` meldet dann
+  `git_unsafe_repo` mit dem Wert, den git selbst für `safe.directory` vorschlägt
+  (`unsafeRepoDirectory`, wörtlich übernommen: auf Windows-Netzlaufwerken ist das
+  `%(prefix)///host/…`, aus dem Projektpfad nicht sicher ableitbar). `UI.handleUnsafeRepo`
+  fragt wie VS Code „Manage Unsafe Repositories“ nach, je Wert einmal pro Sitzung
+  (`unsafe_repo`), sonst käme die Rückfrage nach jeder Dateiänderung. Ja führt die Aktion
+  `trust_repo` aus (`config --global --add safe.directory`), danach laden Status und Branch
+  (`git_branch_wanted`) neu. Bewusst nicht still per `-c safe.directory`: die Prüfung
+  verhindert, dass die `.git/config` eines fremden Repos (`core.fsmonitor`) beim automatischen
+  `git status` Programme startet. Die übrigen Tasks loggen nur eine Zeile (`error.GitUnsafeRepo`).
+  E2E `python3 scripts/e2e_unsafe_repo.py`: `GIT_TEST_ASSUME_DIFFERENT_OWNER=1` stellt den
+  fremden Besitzer nach, `GIT_CONFIG_GLOBAL` hält die Benutzer-Config heraus.
 - E2E: RPC `git_diff_state` liefert den Diff-Editor des aktiven Tabs (`view: "diff"`), JSON vom
   Main-Thread pro Frame gespiegelt (`snapshotGitViews`, mit `timeline_state` und `scm_state`).
 

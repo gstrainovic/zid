@@ -472,6 +472,7 @@ pub fn main() !void {
                     switch (result.tag) {
                         .git_branch => ui_system.updateBranch(result.payload),
                         .git_status => ui_system.updateGitStatus(result.payload),
+                        .git_unsafe_repo => ui_system.handleUnsafeRepo(result.payload),
                         .git_file_diff, .git_file_diff_error => ui_system.handleGitFileDiff(result.tag == .git_file_diff, result.payload),
                         .git_timeline, .git_timeline_error => ui_system.handleGitTimeline(result.tag == .git_timeline, result.payload),
                         .git_graph_log, .git_graph_log_error => ui_system.handleGitGraphLog(result.tag == .git_graph_log, result.payload),
@@ -499,6 +500,12 @@ pub fn main() !void {
                 if (results.len > 0) wio.cancelWait();
                 // Source-Control-Aktion oder Refresh: Status neu laden (über denselben Debounce)
                 if (ui_system.takeGitStatusRequest()) git_refresh.mark(std.time.milliTimestamp());
+                // Fremdes Repo freigegeben: der Branch kam vorher leer zurück
+                if (ui_system.takeGitBranchRequest()) if (git_repo_path) |path| {
+                    if (git_worker.Params.init(allocator, path, "")) |params| {
+                        if (!scheduler.submit(.{ .func = git_worker.taskGitBranch, .data = params })) params.deinit();
+                    } else |err| log.warn("git_branch submit failed: {}", .{err});
+                };
                 // Dateiänderungen: git status und die Timeline der aktiven Datei neu laden
                 if (submitGitStatusIfDue(&git_refresh, scheduler, allocator, git_repo_path)) {
                     ui_system.timeline_view.timeline.refresh();
