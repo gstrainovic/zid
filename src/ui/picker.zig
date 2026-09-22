@@ -13,7 +13,7 @@ const ui_mod = @import("mod.zig");
 const line_edit = @import("line_edit.zig");
 
 /// Suchzeile (Textelement-ID, Schriftgröße)
-const query_field: line_edit.Config = .{ .id = "pk_query", .font_size = 20 };
+const query_field: line_edit.Config = .{ .id = "pk_query", .font_size = 20, .z_index = 2002 };
 const Theme = @import("theme.zig").Theme;
 
 const log = std.log.scoped(.picker);

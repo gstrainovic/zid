@@ -16,9 +16,13 @@ const ui = @import("mod.zig");
 const Theme = @import("theme.zig").Theme;
 
 /// Feste Eigenschaften eines Felds: Clay-ID des Textelements und Schriftgröße.
+/// `z_index` gilt für Cursorstrich und Markierung (Markierung eins darunter). Clay
+/// sortiert schwebende Elemente global, nicht relativ zum Elternteil: in einem Dialog
+/// (z 2000) muss das Feld darüber liegen, sonst verdeckt der Dialog den Cursor.
 pub const Config = struct {
     id: []const u8,
     font_size: f32,
+    z_index: i16 = 10,
 };
 
 /// Gehaltene Modifier beim Tastendruck.
@@ -183,7 +187,7 @@ pub fn render(edit: anytype, comptime cfg: Config, color: clay.Color, show_caret
                     .attach_to = .to_parent,
                     .attach_points = .{ .element = .left_center, .parent = .left_center },
                     .offset = .{ .x = x0, .y = 0 },
-                    .z_index = 9,
+                    .z_index = cfg.z_index - 1,
                     .pointer_capture_mode = .passthrough,
                 },
                 .layout = .{ .sizing = .{ .w = .fixed(@max(1, x1 - x0)), .h = .fixed(cfg.font_size + 4) } },
@@ -197,7 +201,7 @@ pub fn render(edit: anytype, comptime cfg: Config, color: clay.Color, show_caret
                     .attach_to = .to_parent,
                     .attach_points = .{ .element = .left_center, .parent = .left_center },
                     .offset = .{ .x = ui.measureTextWidth(edit.textBeforeCursor(), cfg.font_size), .y = 0 },
-                    .z_index = 10,
+                    .z_index = cfg.z_index,
                     .pointer_capture_mode = .passthrough,
                 },
                 .layout = .{ .sizing = .{ .w = .fixed(2), .h = .fixed(cfg.font_size) } },

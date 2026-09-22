@@ -170,12 +170,22 @@ def main():
         picker = result_json("folder_picker_state")
         check(picker["open"] and picker["path"] == old_root, f"Dialog startet im aktuellen Ordner: {picker['path']}")
         check(any(e == "src" for e in picker["entries"]), "Dialog listet Unterordner (src)")
+        # Cursorstrich muss sichtbar sein: lag er mit z 10 unter dem Dialog (z 2000),
+        # hatte das Pixel die Farbe des Feldhintergrunds.
+        from e2e_pdf_pager import pixel
+        caret = bounds("fp_input_text_caret")
+        shot("e2e_caret.ppm")
+        cy = caret["y"] + caret["h"] / 2
+        check(pixel("e2e_caret.ppm", caret["x"] + 1, cy) != pixel("e2e_caret.ppm", caret["x"] + 8, cy),
+              "Cursorstrich im Pfadfeld ist sichtbar")
 
         # 2) Unterordner per Klick betreten und mit ↑ zurück
-        idx = picker["entries"].index("src")
-        click_center("fp_entry", idx)
+        # Erster Eintrag statt "src": lokale Ordner (engines, models, zig-pkg …) schieben
+        # "src" je nach Rechner unter den sichtbaren Rand der Liste.
+        first = picker["entries"][0]
+        click_center("fp_entry", 0)
         picker = result_json("folder_picker_state")
-        check(picker["path"] == os.path.join(old_root, "src"), f"Klick auf Ordner steigt ab: {picker['path']}")
+        check(picker["path"] == os.path.join(old_root, first), f"Klick auf Ordner steigt ab: {picker['path']}")
         click_center("fp_up")
         picker = result_json("folder_picker_state")
         check(picker["path"] == old_root, "↑ steigt wieder auf")
