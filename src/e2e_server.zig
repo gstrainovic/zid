@@ -136,8 +136,8 @@ pub const E2EContext = struct {
     screenshot_failed: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
     /// Zustand der PDF-Vorschau, vom Main-Thread pro Frame gesetzt: der
     /// Server-Thread darf weder Tabs noch die Handler-Map anfassen.
-    pdf_page: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
-    pdf_pages: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
+    pdf_mutex: std.Thread.Mutex = .{},
+    pdf_snapshot: PdfSnapshot = .{},
     /// JSON des aktiven Diff-Editors, vom Main-Thread pro Frame geschrieben (`snapshotGitViews`):
     /// die Ansicht tauscht Inhalte aus, der Server-Thread darf sie nicht direkt lesen.
     git_views_mutex: std.Thread.Mutex = .{},
@@ -1431,13 +1431,37 @@ fn slideState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
 /// pdf_state: Seite und Seitenzahl der PDF-Vorschau, aus den vom Main-Thread
 /// gesetzten Feldern.
 fn pdfState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
+    ctx.pdf_mutex.lock();
+    const s = ctx.pdf_snapshot;
+    ctx.pdf_mutex.unlock();
     var buf = std.Io.Writer.Allocating.init(dc.arena());
-    const pages = ctx.pdf_pages.load(.seq_cst);
     try buf.writer.print(
-        \\{{"pdf": {}, "page": {d}, "pages": {d}}}
-    , .{ pages > 0, ctx.pdf_page.load(.seq_cst), pages });
+        \\{{"pdf": {}, "page": {d}, "pages": {d}, "zoom": {d:.3}, "scroll_x": {d:.1}, "scroll_y": {d:.1}, "scale": {d:.3}, "find_active": {}, "searching": {}, "hits": {d}, "current": {?d}, "hit_page": {?d}}}
+    , .{ s.pages > 0, s.page, s.pages, s.zoom, s.scroll_x, s.scroll_y, s.scale, s.find_active, s.searching, s.hits, s.current, s.hit_page });
     return buf.written();
 }
+
+pub fn setPdfSnapshot(ctx: *E2EContext, s: PdfSnapshot) void {
+    ctx.pdf_mutex.lock();
+    defer ctx.pdf_mutex.unlock();
+    ctx.pdf_snapshot = s;
+}
+
+/// Zustand der PDF-Vorschau für `pdf_state`, vom Main-Thread je Frame geschrieben.
+pub const PdfSnapshot = struct {
+    page: u32 = 0,
+    pages: u32 = 0,
+    zoom: f32 = 1,
+    scroll_x: f32 = 0,
+    scroll_y: f32 = 0,
+    /// Maßstab der zuletzt angeforderten Textur (px/pt)
+    scale: f32 = 0,
+    find_active: bool = false,
+    searching: bool = false,
+    hits: u32 = 0,
+    current: ?u32 = null,
+    hit_page: ?u32 = null,
+};
 
 fn folderPickerState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     const fp = &ctx.ui_system.folder_picker;

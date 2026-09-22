@@ -63,6 +63,71 @@ fz_device *fz_new_draw_device_z(fz_context *ctx, fz_matrix ctm, fz_pixmap *pix) 
   return dev;
 }
 
+/* --- Text für die Suche ---------------------------------------------------- */
+
+typedef struct {
+  int *codes;
+  fz_rect *boxes;
+  int len, cap;
+} zid_text;
+
+static void zid_text_push(fz_context *ctx, zid_text *t, int code, fz_rect box) {
+  if (t->len == t->cap) {
+    int cap = t->cap ? t->cap * 2 : 1024;
+    t->codes = fz_realloc(ctx, t->codes, (size_t)cap * sizeof(int));
+    t->boxes = fz_realloc(ctx, t->boxes, (size_t)cap * sizeof(fz_rect));
+    t->cap = cap;
+  }
+  t->codes[t->len] = code;
+  t->boxes[t->len] = box;
+  t->len++;
+}
+
+/* Strukturblöcke (Tagged PDF) enthalten weitere Blöcke: rekursiv absteigen. */
+static void zid_text_blocks(fz_context *ctx, zid_text *t, fz_stext_block *block) {
+  const fz_rect none = {0, 0, 0, 0};
+  for (; block; block = block->next) {
+    if (block->type == FZ_STEXT_BLOCK_TEXT) {
+      for (fz_stext_line *line = block->u.t.first_line; line; line = line->next) {
+        for (fz_stext_char *ch = line->first_char; ch; ch = ch->next)
+          zid_text_push(ctx, t, ch->c, fz_rect_from_quad(ch->quad));
+        zid_text_push(ctx, t, ' ', none);
+      }
+      zid_text_push(ctx, t, '\n', none);
+    } else if (block->type == FZ_STEXT_BLOCK_STRUCT && block->u.s.down) {
+      zid_text_blocks(ctx, t, block->u.s.down->first_block);
+    }
+  }
+}
+
+int fz_page_text_z(fz_context *ctx, fz_document *doc, int page_number, int **codes_out, fz_rect **boxes_out) {
+  zid_text t = {0};
+  fz_page *page = NULL;
+  fz_stext_page *text = NULL;
+  int rc = -1;
+  fz_var(page);
+  fz_var(text);
+  fz_try(ctx) {
+    page = fz_load_page(ctx, doc, page_number);
+    text = fz_new_stext_page_from_page(ctx, page, NULL);
+    zid_text_blocks(ctx, &t, text->first_block);
+    rc = t.len;
+  }
+  fz_always(ctx) {
+    fz_drop_stext_page(ctx, text);
+    fz_drop_page(ctx, page);
+  }
+  fz_catch(ctx) {
+    fz_free(ctx, t.codes);
+    fz_free(ctx, t.boxes);
+    t.codes = NULL;
+    t.boxes = NULL;
+  }
+  *codes_out = t.codes;
+  *boxes_out = t.boxes;
+  return rc;
+}
+
 /* --- Schreibender Teil ---------------------------------------------------
    fz_try/fz_catch braucht setjmp; Zig kann das nicht, deshalb liegt jeder
    Aufruf hier gekapselt. int-Rückgaben: 0 = ok, -1 = Fehler. */

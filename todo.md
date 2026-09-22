@@ -14,18 +14,16 @@ KI-Punkte: Wirkung vorab schätzen, vorher/nachher messen (`scripts/e2e_ai_read_
    aus gooey `platform/wgpu/shaders/unified.wgsl` (WGSL, übertragbar), dazu Rahmen mit Radius.
 3. **Horizontales Scrollen ohne Grenze:** `scrollColumns` (`code_editor.zig`) erhöht `view.col`
    endlos; flow klemmt auf `longest_line_len - cols + 1`, `maxLineWidth()` gibt es schon.
-4. **PDF-Auflösung uneinheitlich:** 1.5 beim Öffnen, 2.0 beim Blättern, fest statt aus der
-   Pane-Größe; bei Größenänderung neu rendern.
-5. **Unicode-Fallfaltung fehlerhaft** (`libs/flow-core/src/buffer/unicode.zig`: × → ÷, ß → ÿ,
+4. **Unicode-Fallfaltung fehlerhaft** (`libs/flow-core/src/buffer/unicode.zig`: × → ÷, ß → ÿ,
    Σ/Τ, Č/Š/Ž und Kyrillisch fehlen). Heute ungenutzt; vor Groß-/Kleinschreibung (4.2) auf uucode
    umstellen wie flow.
-6. **Suche ignoriert Groß/Klein nur für ASCII** (`find_ops.zig` `eqlIgnoreCase`): „Ä“ findet
-   kein „ä“.
-7. **mupdf stürzt bei manchen kaputten PDFs ab** (System-Bibliothek 1.27.2; `mutool draw` auf
+5. **Suche ignoriert Groß/Klein nur für ASCII** (`find_ops.zig` `eqlIgnoreCase`): „Ä“ findet
+   kein „ä“ (Editor, Markdown- und PDF-Vorschau).
+6. **mupdf stürzt bei manchen kaputten PDFs ab** (System-Bibliothek 1.27.2; `mutool draw` auf
     einem zu 40 % geschriebenen PDF: Segfault, in zid „double free“). Der Reload wartet deshalb
     auf eine ruhende Datei; eine dauerhaft kaputte Datei öffnen reißt zid aber weiter mit.
     Rendern in einen Kindprozess auslagern oder mupdf-Version prüfen.
-8. **Clay `duplicate_id` in Serie beim Öffnen einer Markdown-Datei** (Windows, Fenster,
+7. **Clay `duplicate_id` in Serie beim Öffnen einer Markdown-Datei** (Windows, Fenster,
    21.09.2026): rund 140 Meldungen, dieselbe ID `3113540797` unter wechselnden Elternelementen (`908726519`,
    `3402408544`, `3494701479`, …), dazu `1800183164` unter `3921318746`. Die Diagnose meldet
    „keine doppelte ID in den Render-Commands (das Element zeichnet nichts)“ — also eine feste ID
@@ -65,7 +63,7 @@ KI-Punkte: Wirkung vorab schätzen, vorher/nachher messen (`scripts/e2e_ai_read_
 1. **Leerzeichen am Zeilenende beim Speichern entfernen** (abschaltbar, wie Autosave gemerkt).
 2. **Editier-Befehle:** Zeile darunter/darüber einfügen (Ctrl+Enter, Ctrl+Shift+Enter), Zeile
    markieren (Ctrl+L), alle Vorkommen markieren (Ctrl+Shift+L), Groß-/Kleinschreibung (braucht
-   2.5).
+   2.4).
 3. **Editier-Komfort aus flow:** Smart Home (erst Codeanfang, dann Spalte 0), Smart Backspace (eine
    Einrückstufe), Auswahl nach Syntaxbaum vergrößern/verkleinern, zur passenden Klammer springen,
    Zeilen verbinden, letzten Mehrfach-Cursor zurücknehmen, Cursor an alle Zeilenenden.
@@ -76,8 +74,7 @@ KI-Punkte: Wirkung vorab schätzen, vorher/nachher messen (`scripts/e2e_ai_read_
    3. Zu Seite N springen, dazu Home/End.
    4. LRU-Cache gerenderter Seiten (Schlüssel: Seite, Zoom, Modus, Farbe), Textur beim Verdrängen
       freigeben.
-   5. Zoom und Verschieben innerhalb der Seite (z. B. Ctrl+Rad), ohne das Blättern per Rad zu
-      brechen.
+   5. Seite mit gedrückter Maus verschieben (heute nur Rad und Shift+Rad).
 5. **IME:** wio liefert `preview_reset`/`preview_char`/`preview_cursor`, `platform/mod.zig` wirft
    sie weg; Vorschautext unterstrichen zeichnen, Cursor-Rechteck an `enableTextInput` geben.
 6. **Schatten** für Dialoge, Menüs, Tooltips, Picker (gleicher Shader wie 2.2, `PRIM_SHADOW`).

@@ -593,6 +593,15 @@ pub fn build(b: *std.Build) void {
     const run_pdf_nav_tests = b.addRunArtifact(pdf_nav_tests);
     run_pdf_nav_tests.has_side_effects = true;
 
+    // Suche in der PDF-Vorschau (Text je Seite, Treffer-Rechtecke).
+    const pdf_find_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("src/ui/pdf_find.zig"),
+        .target = target,
+        .optimize = optimize,
+    }) });
+    const run_pdf_find_tests = b.addRunArtifact(pdf_find_tests);
+    run_pdf_find_tests.has_side_effects = true;
+
     // Erklärtext, wenn kein Wayland-Compositor erreichbar ist.
     const display_check_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("src/platform/display_check.zig"),
@@ -961,6 +970,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_ai_selfsetup_tests.step);
     test_step.dependOn(&run_wheel_tests.step);
     test_step.dependOn(&run_pdf_nav_tests.step);
+    test_step.dependOn(&run_pdf_find_tests.step);
     test_step.dependOn(&run_context_menu_tests.step);
     test_step.dependOn(&run_scrollbar_tests.step);
     test_step.dependOn(&run_find_ops_tests.step);

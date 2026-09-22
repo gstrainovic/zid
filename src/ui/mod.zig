@@ -89,7 +89,6 @@ pub const components = @import("components/mod.zig");
 
 pub const UI = struct {
     pub const TabCloseRequest = struct { pane: *pane_mod.Pane, index: usize };
-    pub const PdfPageChange = struct { path: []const u8, delta: i16 };
     pub const TabTarget = struct { pane: *pane_mod.Pane, index: usize };
     pub const Toast = struct { text: []u8, until_ms: f32 };
     /// `marp_deck` wird beim Öffnen einmal bestimmt (ggf. Dateikopf lesen), nicht pro Frame.
@@ -163,14 +162,13 @@ pub const UI = struct {
 
     current_directory: ?[]const u8,
     pending_tab_switch: ?[]const u8,
-    pending_pdf_page_change: ?PdfPageChange,
     /// Offene PDFs, die sich auf der Platte geändert haben (Schlüssel aus `open_pdfs`, owned)
     pending_pdf_reloads: std.ArrayListUnmanaged([]u8) = .empty,
     /// Vom Main-Thread beim Rendern gesetzt, damit E2E den Zustand lesen kann,
     /// ohne im Server-Thread über Tabs und Handler-Map zu laufen.
     /// Beschriftung der Blätter-Leiste: gehört der UI, weil Clay den Text erst
     /// beim Zeichnen liest und die Frame-Arena bis dahin zurückgesetzt ist.
-    pdf_label_buf: [32]u8 = undefined,
+    pdf_labels: PdfViewState.Labels = .{},
     pdf_view_page: u16 = 0,
     pdf_view_pages: u16 = 0,
     pending_split: ?pane_mod.PaneDirection,
@@ -497,8 +495,6 @@ pub const UI = struct {
             .show_ai_chat = false,
             .current_directory = null,
             .pending_tab_switch = null,
-            .pending_pdf_page_change = null,
-            .pdf_label_buf = undefined,
             .pending_split = null,
             .active_dialog = null,
             .folder_picker = folder_picker_mod.FolderPicker.init(allocator),
@@ -800,11 +796,14 @@ pub const UI = struct {
                 else => {},
             }
         }
-        // PDF-Vorschau: Pfeile und Bild auf/ab blättern durch die Seiten.
-        if (self.activePdfTabPath()) |pdf_path| {
+        // PDF-Vorschau: Pfeile und Bild auf/ab blättern durch die Seiten. Ctrl+F öffnet die
+        // Suchleiste (dieselbe wie im Editor); ist sie offen, gehen Enter, Backspace, Escape
+        // und Alt+C/W/R dorthin, Blättern bleibt möglich.
+        if (self.activePdf()) |pdf| {
+            if (self.handlePdfFindKey(pdf, key)) return;
             if (keyFromButton(key)) |k| {
                 if (pdf_nav.deltaForKey(k, self.currentMods())) |delta| {
-                    self.pending_pdf_page_change = .{ .path = pdf_path, .delta = delta };
+                    pdfChangePage(pdf, delta);
                     return;
                 }
             }
@@ -1132,6 +1131,12 @@ pub const UI = struct {
         }
         if (self.activeMarkdownView()) |v| {
             if (v.find.active and !self.is_ctrl_down and !self.is_alt_down) v.handleFindChar(char_code);
+            return;
+        }
+        if (self.activePdf()) |pdf| {
+            if (pdf.find.active and !self.is_ctrl_down and !self.is_alt_down and char_code >= 32 and char_code != 127) {
+                if (pdf.find.appendQuery(char_code)) pdf.restartSearch();
+            }
             return;
         }
         // kein Text in den unsichtbaren Editor hinter Vorschau, Bild, PDF, Binär
@@ -1498,6 +1503,7 @@ pub const UI = struct {
     /// Horizontales Scrollen (Touchpad/Shift+Rad): Editor-Spalten.
     pub fn handleScrollHorizontal(self: *Self, delta: i32) void {
         if (self.active_dialog != null or self.folder_picker.visible) return;
+        if (self.handlePdfScrollHorizontal(delta)) return;
         if (self.getActiveTabBar().getActiveTab()) |tab| {
             if (tab.kind == .git_diff) {
                 if (self.activeGitDiff()) |d| d.view.scrollLines(delta, true);
@@ -2030,9 +2036,10 @@ pub const UI = struct {
                 self.applyThemeToEditors();
                 self.saveUserState();
             },
-            .zoom_in => self.setFontSizeAll(self.getActiveEditor().font_size + 2),
-            .zoom_out => self.setFontSizeAll(self.getActiveEditor().font_size -| 2),
-            .zoom_reset => self.setFontSizeAll(24),
+            // Im PDF-Tab zoomen Ctrl+Plus/Minus/0 die Seite, wie im Browser
+            .zoom_in => if (self.activePdf()) |pdf| self.pdfZoom(pdf, pdf_nav.nextZoom(pdf.zoom, true), false) else self.setFontSizeAll(self.getActiveEditor().font_size + 2),
+            .zoom_out => if (self.activePdf()) |pdf| self.pdfZoom(pdf, pdf_nav.nextZoom(pdf.zoom, false), false) else self.setFontSizeAll(self.getActiveEditor().font_size -| 2),
+            .zoom_reset => if (self.activePdf()) |pdf| self.pdfZoom(pdf, 1.0, false) else self.setFontSizeAll(24),
             .toggle_autosave => {
                 self.autosave = !self.autosave;
                 self.showToast("Autosave {s}", .{if (self.autosave) "on" else "off"});
@@ -3449,11 +3456,80 @@ pub const UI = struct {
         return tab.path;
     }
 
-    /// Mausrad im PDF-Tab blättert seitenweise.
+    /// Handler des aktiven PDF-Tabs, sonst null.
+    pub fn activePdf(self: *Self) ?*PdfHandler {
+        const path = self.activePdfTabPath() orelse return null;
+        const ptr = self.open_pdfs.get(path) orelse return null;
+        return @ptrCast(@alignCast(ptr));
+    }
+
+    /// Blättern um `delta` Seiten; die neue Seite beginnt oben.
+    fn pdfChangePage(pdf: *PdfHandler, delta: i16) void {
+        pdf.setPage(pdf_nav.clampPage(pdf.current_page, pdf.total_pages, delta), 0);
+    }
+
+    /// Tasten der PDF-Suche. Liefert true, wenn die Taste verbraucht ist.
+    fn handlePdfFindKey(self: *Self, pdf: *PdfHandler, key: wio.Button) bool {
+        const ctrl = self.is_ctrl_down;
+        const alt = self.is_alt_down;
+        if (ctrl and !alt and !self.is_shift_down and key == .f) {
+            pdf.find.open(null);
+            pdf.restartSearch();
+            return true;
+        }
+        if (!pdf.find.active) return false;
+        if (alt and (key == .c or key == .w or key == .r)) {
+            _ = pdf.find.toggleOption(@tagName(key)[0]);
+            pdf.restartSearch();
+            return true;
+        }
+        if (ctrl or alt) return false;
+        switch (key) {
+            .escape => pdf.closeFind(),
+            .enter, .kp_enter => pdf.findStep(!self.is_shift_down),
+            .backspace => {
+                pdf.find.backspaceQuery();
+                pdf.restartSearch();
+            },
+            else => return false,
+        }
+        return true;
+    }
+
+    /// Zoom der PDF-Vorschau (Ctrl+Rad um die Maus, Ctrl+Plus/Minus/0 um die Mitte).
+    fn pdfZoom(self: *Self, pdf: *PdfHandler, new_zoom: f32, at_mouse: bool) void {
+        const salt = self.activePaneSalt();
+        if (at_mouse) {
+            PdfViewState.applyZoom(pdf, salt, new_zoom, self.mouse_x, self.mouse_y);
+        } else {
+            PdfViewState.applyZoom(pdf, salt, new_zoom, null, null);
+        }
+    }
+
+    /// Mausrad im PDF-Tab: mit Ctrl Zoom, sonst Bildlauf in der Seite und am Rand blättern.
     pub fn handlePdfScroll(self: *Self, delta_y: f32) bool {
-        const path = self.activePdfTabPath() orelse return false;
-        const delta = pdf_nav.deltaForScroll(delta_y) orelse return false;
-        self.pending_pdf_page_change = .{ .path = path, .delta = delta };
+        const pdf = self.activePdf() orelse return false;
+        if (self.is_shift_down and !self.is_ctrl_down) return self.handlePdfScrollHorizontal(@intFromFloat(delta_y));
+        if (self.is_ctrl_down) {
+            if (delta_y != 0) self.pdfZoom(pdf, pdf_nav.nextZoom(pdf.zoom, delta_y > 0), true);
+            return true;
+        }
+        const vp = PdfViewState.viewport(self.activePaneSalt());
+        const g = if (vp) |v| PdfViewState.geometryOf(pdf, v) else null;
+        const max_y = if (g) |gg| gg.max_y else 0;
+        const w = pdf_nav.wheel(delta_y, pdf.scroll_y, max_y, pdf_nav.canGoBack(pdf.current_page), pdf_nav.canGoForward(pdf.current_page, pdf.total_pages)) orelse return true;
+        if (w.page_delta != 0) {
+            pdf.setPage(pdf_nav.clampPage(pdf.current_page, pdf.total_pages, w.page_delta), w.scroll_y);
+        } else {
+            pdf.scroll_y = w.scroll_y;
+        }
+        return true;
+    }
+
+    /// Waagrechtes Rad (oder Shift+Rad) im PDF-Tab: Bildlauf, wenn die Seite breiter ist.
+    fn handlePdfScrollHorizontal(self: *Self, delta: i32) bool {
+        const pdf = self.activePdf() orelse return false;
+        pdf.scroll_x = @max(0, pdf.scroll_x - @as(f32, @floatFromInt(delta)) * 60);
         return true;
     }
 
@@ -4110,8 +4186,8 @@ pub const UI = struct {
                                 const maybe_texture = self.open_images.get(tab.path);
                                 if (maybe_handler) |handler_ptr| {
                                     const handler: *PdfHandler = @ptrCast(@alignCast(handler_ptr));
-                                    if (PdfViewState.render(&self.pdf_label_buf, handler, maybe_texture, t, paneSalt(pane), self.mouse_pressed_this_frame, self.mouse_x, self.mouse_y)) |delta| {
-                                        self.pending_pdf_page_change = .{ .path = tab.path, .delta = delta };
+                                    if (PdfViewState.render(&self.pdf_labels, allocator, handler, maybe_texture, t, paneSalt(pane), self.mouse_pressed_this_frame, self.mouse_x, self.mouse_y)) |delta| {
+                                        pdfChangePage(handler, delta);
                                     }
                                 }
                                 special_active = true;
@@ -4739,6 +4815,11 @@ pub const UI = struct {
         // Suche beim Tippen wartet auf die Pause, rg liefert aus dem Thread
         if (self.search_view.searching()) return true;
         if (self.pending_pdf_reloads.items.len > 0) return true; // wartet, bis die Datei ruht
+        var pdf_it = self.open_pdfs.valueIterator();
+        while (pdf_it.next()) |p| {
+            const pdf: *PdfHandler = @ptrCast(@alignCast(p.*));
+            if (pdf.search.running() or pdf.needs_render) return true;
+        }
         const fx = &self.file_explorer;
         if (fx.hover_index != null and fx.now_ms - fx.hover_since_ms <= 700) return true;
         const tl = &self.timeline_view;

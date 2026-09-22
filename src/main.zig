@@ -636,34 +636,41 @@ pub fn main() !void {
             var render_commands = ui_system.renderExample(&logo_texture);
             if (e2e_ctx) |*c| e2e_server.serviceScreenshot(c, render_commands);
 
-            // Phase 9: PDF Seitenwechsel verarbeiten
-            if (ui_system.pending_pdf_page_change) |change| {
-                if (ui_system.open_pdfs.get(change.path)) |handler_ptr| {
-                    const PdfHandler = @import("rendering/pdf_handler.zig").PdfHandler;
-                    const handler: *PdfHandler = @ptrCast(@alignCast(handler_ptr));
-
-                    const old_page = handler.current_page;
-                    handler.current_page = pdf_nav.clampPage(handler.current_page, handler.total_pages, change.delta);
-
-                    if (handler.current_page != old_page) {
-                        log.info("PDF Page Change: {d} -> {d}", .{ old_page, handler.current_page });
-                        if (handler.renderPage(handler.current_page, 2.0)) |info| {
-                            defer allocator.free(info.pixels);
-
-                            // Alte Textur ersetzen
-                            if (ui_system.open_images.get(change.path)) |tex_ptr| {
-                                const ImageTexture = @import("clay_renderer/image_renderer.zig").ImageTexture;
-                                const tex_cast: *ImageTexture = @ptrCast(@alignCast(tex_ptr));
-                                tex_cast.deinit();
-                                tex_cast.* = image_rdr.createTextureFromPixels(info.pixels, info.width, info.height) catch unreachable;
-                            }
-                            wio.cancelWait();
-                        } else |err| {
-                            log.err("Failed to render PDF page {d}: {}", .{ handler.current_page, err });
-                        }
+            // PDF-Seiten neu rendern: nach einem Seitenwechsel (`needs_render`) oder wenn die
+            // Ansicht einen deutlich anderen Maßstab braucht (Zoom, Fenstergröße). Die Suche
+            // läuft hier schrittweise weiter, höchstens ~8 ms je Frame.
+            {
+                const PdfHandler = @import("rendering/pdf_handler.zig").PdfHandler;
+                var pdf_it = ui_system.open_pdfs.iterator();
+                while (pdf_it.next()) |entry| {
+                    const handler: *PdfHandler = @ptrCast(@alignCast(entry.value_ptr.*));
+                    if (handler.search.running()) {
+                        if (handler.searchStep(8 * std.time.ns_per_ms)) wio.cancelWait();
                     }
+                    const want = handler.wanted_scale;
+                    handler.wanted_scale = 0;
+                    const have = handler.requested_scale;
+                    const stale = want > 0 and (have <= 0 or @abs(want - have) > have * 0.1);
+                    if (!handler.needs_render and !stale) continue;
+                    handler.needs_render = false;
+                    const scale = if (want > 0) want else if (have > 0) have else 2.0;
+                    const info = handler.renderPage(handler.current_page, scale) catch |err| {
+                        log.err("Failed to render PDF page {d}: {}", .{ handler.current_page, err });
+                        continue;
+                    };
+                    defer allocator.free(info.pixels);
+                    if (ui_system.open_images.get(entry.key_ptr.*)) |tex_ptr| {
+                        const ImageTexture = @import("clay_renderer/image_renderer.zig").ImageTexture;
+                        const tex: *ImageTexture = @ptrCast(@alignCast(tex_ptr));
+                        const new_tex = image_rdr.createTextureFromPixels(info.pixels, info.width, info.height) catch |err| {
+                            log.err("PDF page texture failed: {}", .{err});
+                            continue;
+                        };
+                        tex.deinit();
+                        tex.* = new_tex;
+                    }
+                    wio.cancelWait();
                 }
-                ui_system.pending_pdf_page_change = null;
             }
 
             // Offene PDFs neu laden, wenn sich die Datei geändert hat (Watcher, Marp-Export),
@@ -684,7 +691,16 @@ pub fn main() !void {
                     continue;
                 }
                 fresh.current_page = @min(old.current_page, fresh.total_pages - 1);
-                const info = fresh.renderPage(fresh.current_page, 2.0) catch |err| {
+                // Ansicht und Suche übernehmen, die Suche läuft auf dem neuen Stand neu
+                fresh.zoom = old.zoom;
+                fresh.scroll_x = old.scroll_x;
+                fresh.scroll_y = old.scroll_y;
+                fresh.find = old.find;
+                if (fresh.find.active) {
+                    fresh.restartSearch();
+                    fresh.search.jump_pending = false; // nach dem Speichern nicht wegspringen
+                }
+                const info = fresh.renderPage(fresh.current_page, if (old.requested_scale > 0) old.requested_scale else 2.0) catch |err| {
                     log.warn("PDF reload of {s}: render failed ({}), keeping the old state", .{ pdf_key, err });
                     fresh.deinit();
                     continue;
@@ -709,18 +725,23 @@ pub fn main() !void {
 
             // Zustand der PDF-Vorschau für E2E spiegeln (nur hier im Main-Thread).
             if (e2e_ctx) |*c| {
-                var page: u32 = 0;
-                var pages: u32 = 0;
-                if (ui_system.activePdfTabPath()) |pdf_path| {
-                    if (ui_system.open_pdfs.get(pdf_path)) |handler_ptr| {
-                        const PdfHandler = @import("rendering/pdf_handler.zig").PdfHandler;
-                        const handler: *PdfHandler = @ptrCast(@alignCast(handler_ptr));
-                        page = handler.current_page;
-                        pages = handler.total_pages;
-                    }
+                var snap: e2e_server.PdfSnapshot = .{};
+                if (ui_system.activePdf()) |handler| {
+                    snap = .{
+                        .page = handler.current_page,
+                        .pages = handler.total_pages,
+                        .zoom = handler.zoom,
+                        .scroll_x = handler.scroll_x,
+                        .scroll_y = handler.scroll_y,
+                        .scale = handler.requested_scale,
+                        .find_active = handler.find.active,
+                        .searching = handler.search.running(),
+                        .hits = @intCast(handler.search.hits.items.len),
+                        .current = if (handler.search.current) |hi| @intCast(hi) else null,
+                        .hit_page = if (handler.search.current) |hi| handler.search.hits.items[hi].page else null,
+                    };
                 }
-                c.pdf_page.store(page, .seq_cst);
-                c.pdf_pages.store(pages, .seq_cst);
+                e2e_server.setPdfSnapshot(c, snap);
                 e2e_server.snapshotGitViews(c);
             }
 
