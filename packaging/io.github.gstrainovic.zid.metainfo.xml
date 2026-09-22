@@ -34,6 +34,15 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.1.5" date="2026-09-22">
+      <description>
+        <p>PDF preview: zoom (50-400 %, Ctrl+wheel, Ctrl+Plus/Minus/0), scrolling within the page and pages rendered sharp at the display scale.</p>
+        <p>PDF preview: search with Ctrl+F, hits highlighted on the page, Enter/Shift+Enter jump across pages.</p>
+        <p>Source control: commit field no longer clips its text, the graph loads faster, quitting aborts hanging git processes.</p>
+        <p>Long input scrolls inside text fields; cursor visible in folder dialog and picker; the window starts maximized.</p>
+        <p>Fixed a crash in text wrapping caused by a colliding measurement cache entry.</p>
+      </description>
+    </release>
     <release version="0.1.4" date="2026-09-22">
       <description>
         <p>apt-Quelle für Debian und Ubuntu</p>

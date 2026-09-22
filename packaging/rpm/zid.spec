@@ -8,7 +8,7 @@
 %global __brp_check_rpaths %{nil}
 
 Name:           zid
-Version:        0.1.4
+Version:        0.1.5
 Release:        1%{?dist}
 Summary:        GPU-beschleunigter Editor mit Markdown-Vorschau, PDF-Anzeige und lokaler KI
 
@@ -68,6 +68,13 @@ appstreamcli validate --no-net \
 %{_datadir}/metainfo/%{appid}.metainfo.xml
 
 %changelog
+* Tue Sep 22 2026 gst <g.strainovic@waelli.ch> - 0.1.5-1
+- PDF preview: zoom (50-400 %, Ctrl+wheel, Ctrl+Plus/Minus/0), scrolling within the page and pages rendered sharp at the display scale.
+- PDF preview: search with Ctrl+F, hits highlighted on the page, Enter/Shift+Enter jump across pages.
+- Source control: commit field no longer clips its text, the graph loads faster, quitting aborts hanging git processes.
+- Long input scrolls inside text fields; cursor visible in folder dialog and picker; the window starts maximized.
+- Fixed a crash in text wrapping caused by a colliding measurement cache entry.
+
 * Tue Sep 22 2026 gst <g.strainovic@waelli.ch> - 0.1.4-1
 - apt-Quelle für Debian und Ubuntu
 - fremde Repos nach Rückfrage in safe.directory eintragen
