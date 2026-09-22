@@ -8,7 +8,8 @@
 # Aufgerufen von .github/workflows/pacman.yml; committen und pushen tut der Workflow.
 set -euo pipefail
 
-site="$1"
+mkdir -p "$1"
+site="$(cd "$1" && pwd)" # absolut, das Skript wechselt unten das Verzeichnis
 shift
 keep=3 # so viele Versionen bleiben liegen, ältere fliegen raus (Pages-Grenze 1 GB)
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
