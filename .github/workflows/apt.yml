@@ -1,0 +1,94 @@
+# apt-Quelle für Debian und Ubuntu: legt das .deb eines veröffentlichten Releases in
+# gstrainovic/apt-zid (GitHub Pages, https://gstrainovic.github.io/apt-zid) und prüft
+# danach in frischen Containern, dass `apt install zid` genau diese Version bringt.
+#
+# Läuft aus release.yml nach `publish`; von Hand für eine schon veröffentlichte Version:
+#   gh workflow run apt.yml -f version=0.1.3
+#
+# Secrets: APT_SIGNING_KEY (geheimer GPG-Schlüssel, signiert InRelease) und
+# APT_DEPLOY_KEY (SSH-Deploy-Key mit Schreibrecht auf apt-zid). Das Pages-Repo trägt
+# nur den letzten Stand als einen Commit, sonst wüchse es um jedes .deb.
+name: apt
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version eines veröffentlichten Releases, z. B. 0.1.3'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      APT_SIGNING_KEY: ${{ secrets.APT_SIGNING_KEY }}
+      APT_DEPLOY_KEY: ${{ secrets.APT_DEPLOY_KEY }}
+      VERSION: ${{ inputs.version }}
+    steps:
+      - name: Ohne Secrets abbrechen
+        if: env.APT_SIGNING_KEY == '' || env.APT_DEPLOY_KEY == ''
+        run: |
+          echo "::error::Secret APT_SIGNING_KEY oder APT_DEPLOY_KEY fehlt"
+          exit 1
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          repository: gstrainovic/apt-zid
+          ssh-key: ${{ secrets.APT_DEPLOY_KEY }}
+          path: site
+      - name: .deb aus dem Release laden
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download "v$VERSION" -R "$GITHUB_REPOSITORY" -p "zid_${VERSION}-*_amd64.deb" -D debs
+      - name: Index bauen und signieren
+        run: |
+          sudo apt-get install -y -qq apt-utils >/dev/null
+          printf '%s\n' "$APT_SIGNING_KEY" | gpg --batch --import
+          packaging/apt/publish.sh site debs/*.deb
+      - name: Nach apt-zid pushen
+        working-directory: site
+        run: |
+          git config user.name "zid release"
+          git config user.email "noreply@github.com"
+          git checkout -q --orphan pages
+          git add -A
+          git commit -q -m "zid $VERSION"
+          git push -f origin pages:main
+
+  # Pages braucht nach dem Push ein bis zwei Minuten; bis dahin liefert es den alten Index.
+  verify:
+    needs: publish
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ['debian:12', 'ubuntu:22.04', 'ubuntu:24.04']
+    container: ${{ matrix.image }}
+    env:
+      VERSION: ${{ inputs.version }}
+      BASE: https://gstrainovic.github.io/apt-zid
+    steps:
+      - name: Auf den neuen Index warten
+        run: |
+          apt-get update -qq && apt-get install -y -qq curl ca-certificates >/dev/null
+          for i in $(seq 60); do
+            curl -fsS "$BASE/dists/stable/main/binary-amd64/Packages" | grep -qx "Version: $VERSION-1" && exit 0
+            sleep 15
+          done
+          echo "::error::Pages liefert $VERSION nach 15 Minuten noch nicht"
+          exit 1
+      - name: Wie im README einrichten und installieren
+        run: |
+          curl -fsSL "$BASE/zid.gpg" -o /usr/share/keyrings/zid.gpg
+          echo "deb [signed-by=/usr/share/keyrings/zid.gpg] $BASE stable main" > /etc/apt/sources.list.d/zid.list
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y zid
+          zid --version | tee /dev/stderr | grep -qx "zid $VERSION"

@@ -33,12 +33,18 @@ Updates kommen mit `dnf upgrade`.
 
 ### Debian, Ubuntu, Mint
 
+Einmal die apt-Quelle einrichten:
+
 ```bash
-curl -LO https://github.com/gstrainovic/zid/releases/latest/download/zid_0.1.3-1_amd64.deb
-sudo apt install ./zid_0.1.3-1_amd64.deb
+curl -fsSL https://gstrainovic.github.io/apt-zid/zid.gpg | sudo tee /usr/share/keyrings/zid.gpg >/dev/null
+echo "deb [signed-by=/usr/share/keyrings/zid.gpg] https://gstrainovic.github.io/apt-zid stable main" \
+  | sudo tee /etc/apt/sources.list.d/zid.list
+sudo apt update && sudo apt install zid
 ```
 
-Braucht Debian 12 oder Ubuntu 22.04 und neuer. Updates: neue `.deb` vom Release.
+Updates kommen danach mit `apt upgrade`. Braucht Debian 12 oder Ubuntu 22.04 und neuer.
+Ohne Quelle geht auch das einzelne Paket:
+`curl -LO https://github.com/gstrainovic/zid/releases/latest/download/zid_0.1.3-1_amd64.deb && sudo apt install ./zid_0.1.3-1_amd64.deb`.
 
 ### openSUSE und andere RPM-Distributionen
 
@@ -196,13 +202,20 @@ Den Rest erledigt `.github/workflows/release.yml`:
 * **Fedora:** SRPM bauen und an COPR `gstrainovic/zid` schicken. Braucht das Secret
   `COPR_CONFIG` (Inhalt von `~/.config/copr`, Token von
   <https://copr.fedorainfracloud.org/api/>, läuft nach 180 Tagen ab).
+* **Debian/Ubuntu:** `apt.yml` legt das `.deb` in die apt-Quelle `gstrainovic/apt-zid`
+  (GitHub Pages, behält die letzten drei Versionen) und installiert es danach zur Probe in
+  Debian 12, Ubuntu 22.04 und 24.04. Braucht die Secrets `APT_SIGNING_KEY` (geheimer
+  GPG-Schlüssel, Fingerabdruck `E5E9 6FA5 3EB5 B222 6D43 8FB3 9C64 B2A2 A6DF A473`) und
+  `APT_DEPLOY_KEY` (Deploy-Key mit Schreibrecht auf apt-zid). Nachholen für eine Version:
+  `gh workflow run apt.yml -f version=0.1.3`.
 * **Snap Store:** Upload in den Kanal `stable`. Braucht das Secret
   `SNAPCRAFT_STORE_CREDENTIALS` (`snapcraft export-login -`) und einmalig die Freigabe
   für Classic-Confinement.
 * **Scoop:** nichts zu tun, der Excavator im Bucket zieht innerhalb von 4 Stunden nach
   (sofort: `gh workflow run excavator.yml -R gstrainovic/scoop-zid`).
 
-Fehlt ein Secret, überspringt der Job mit einer Warnung, der Rest läuft.
+Fehlt ein Secret, überspringt der Job mit einer Warnung, der Rest läuft; nur `apt`
+schlägt dann fehl, weil sonst eine eingerichtete Quelle still veraltet.
 Fortschritt: `gh run watch`.
 
 Warum Binärpakete statt Bauen aus den Quellen: zid verlangt exakt Zig 0.15.2,
