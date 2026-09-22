@@ -27,6 +27,9 @@ pub const ResultTag = enum {
     /// Payload `<schlüssel>\n<git diff --name-status>` (git_worker.taskGitCommitChanges)
     git_commit_changes,
     git_commit_changes_error,
+    /// Payload `<schlüssel>\n<git diff --shortstat>` (git_worker.taskGitCommitStat, Graph-Hover)
+    git_commit_stat,
+    git_commit_stat_error,
     /// Payload `<aktion>\n<stderr>` (git_worker.taskGitAction: stage/unstage/discard/commit)
     git_action,
     git_action_error,

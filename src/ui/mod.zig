@@ -2369,6 +2369,18 @@ pub const UI = struct {
                 const params = git_worker.FieldsParam.init(self.allocator, &.{ key, v.repo, c.hash, c.firstParent() }) catch continue;
                 if (!sched.submit(.{ .func = git_worker.taskGitCommitChanges, .data = params })) params.deinit();
             }
+            while (v.takeStatRequest()) |hash| {
+                const c = for (v.commits()) |c| {
+                    if (std.mem.eql(u8, c.hash, hash)) break c;
+                } else continue;
+                var key_buf: [96]u8 = undefined;
+                const key = std.fmt.bufPrint(&key_buf, graph_key ++ "{d}\x1f{s}", .{ self.scm_graph.generation, hash }) catch continue;
+                const params = git_worker.FieldsParam.init(self.allocator, &.{ key, v.repo, c.hash, c.firstParent() }) catch continue;
+                if (!sched.submit(.{ .func = git_worker.taskGitCommitStat, .data = params })) {
+                    params.deinit();
+                    v.applyStat(hash, false, "");
+                }
+            }
         }
         var it = self.git_commits.valueIterator();
         while (it.next()) |vp| {
@@ -2416,6 +2428,16 @@ pub const UI = struct {
         const current = std.fmt.bufPrint(&buf, graph_key ++ "{d}", .{self.scm_graph.generation}) catch return;
         if (!std.mem.eql(u8, k.tab_path, current)) return;
         self.scm_graph.view.applyChanges(k.hash, ok, u.body) catch |err| log.warn("graph changes: {}", .{err});
+    }
+
+    /// Statistik eines Commits für den Graph-Hover (`graph<gen>\x1f<hash>`).
+    pub fn handleGitCommitStat(self: *Self, ok: bool, payload: []const u8) void {
+        const u = git_worker.unframe(payload) orelse return;
+        const k = git_worker.splitKey(u.key);
+        var buf: [32]u8 = undefined;
+        const current = std.fmt.bufPrint(&buf, graph_key ++ "{d}", .{self.scm_graph.generation}) catch return;
+        if (!std.mem.eql(u8, k.tab_path, current)) return;
+        self.scm_graph.view.applyStat(k.hash, ok, u.body);
     }
 
     fn dropUnusedGitCommit(self: *Self, tab_path: []const u8) void {
