@@ -208,6 +208,8 @@ pub const CodeEditor = struct {
     measure_fn: ?MeasureFn = null,
 
     font_size: u16 = 24,
+    /// Zeilenhöhe = Schriftgröße + line_pad; eingebettete Felder (Commit-Nachricht) enger
+    line_pad: u16 = 16,
     time_ms: f32 = 0,
 
     /// Farben
@@ -362,6 +364,10 @@ pub const CodeEditor = struct {
         self.selection_color = .{ t.primary[0], t.primary[1], t.primary[2], 110 };
         self.text_color = t.text;
         self.menu_colors = ctx_menu.Colors.fromTheme(t);
+    }
+
+    pub fn lineHeight(self: *const Self) f32 {
+        return @floatFromInt(self.font_size + self.line_pad);
     }
 
     /// Schriftgröße setzen (Zoom), 10–48.
@@ -2280,7 +2286,7 @@ pub const CodeEditor = struct {
     fn renderRowOverlays(self: *Self, arena: std.mem.Allocator, line_idx: usize, slice: []const u8, full_line: []const u8, first_col: usize) void {
         _ = arena;
         const cw = self.charWidth();
-        const row_h: f32 = @floatFromInt(self.font_size + 16);
+        const row_h: f32 = self.lineHeight();
         const seg_cols = blk: {
             var n: usize = 0;
             for (slice) |c| {
@@ -2679,7 +2685,7 @@ pub const CodeEditor = struct {
 
     /// Sichtbare Reihe unter y → Buffer-Zeile und Segmentanfang (Word-Wrap).
     fn hitFromY(self: *Self, y: f32) Hit {
-        const line_height: f32 = @floatFromInt(self.font_size + 16);
+        const line_height: f32 = self.lineHeight();
         if (line_height <= 0) return .{ .line = 0, .first_byte = 0 };
         const rel_y = y - self.content_origin_y;
         if (rel_y < 0) return .{ .line = @min(self.view.row, self.lineCount() -| 1), .first_byte = 0 };
@@ -2952,7 +2958,7 @@ pub const CodeEditor = struct {
     }
 
     pub fn visibleLineCount(self: *const Self) usize {
-        const line_height: f32 = @floatFromInt(self.font_size + 16);
+        const line_height: f32 = self.lineHeight();
         if (line_height <= 0) return 10;
         const available = self.height;
         if (available <= 0) return 10;
@@ -3253,7 +3259,7 @@ pub const CodeEditor = struct {
                                 // Fortsetzungsreihen bekommen eigene IDs je sichtbarer Reihe
                                 .id = if (k == 0) self.idi("row", @intCast(i)) else self.idi("roww", @intCast(vrow)),
                                 .layout = .{
-                                    .sizing = .{ .w = .grow, .h = .fixed(@floatFromInt(self.font_size + 16)) },
+                                    .sizing = .{ .w = .grow, .h = .fixed(self.lineHeight()) },
                                     .direction = .left_to_right,
                                     .child_alignment = .{ .x = .left, .y = .center },
                                 },
@@ -3261,7 +3267,7 @@ pub const CodeEditor = struct {
                                 if (self.show_gutter) clay.UI()(.{
                                     .id = if (k == 0) self.idi("gutter", @intCast(i)) else self.idi("gutterw", @intCast(vrow)),
                                     .layout = .{
-                                        .sizing = .{ .w = .fixed(self.gutter_width), .h = .fixed(@floatFromInt(self.font_size + 16)) },
+                                        .sizing = .{ .w = .fixed(self.gutter_width), .h = .fixed(self.lineHeight()) },
                                         .padding = .{ .left = 8, .right = 16 },
                                         .child_alignment = .{ .x = .right, .y = .center },
                                     },
@@ -3282,7 +3288,7 @@ pub const CodeEditor = struct {
                                 clay.UI()(.{
                                     .id = if (k == 0) self.idi("code", @intCast(i)) else self.idi("codew", @intCast(vrow)),
                                     .layout = .{
-                                        .sizing = .{ .w = .grow, .h = .fixed(@floatFromInt(self.font_size + 16)) },
+                                        .sizing = .{ .w = .grow, .h = .fixed(self.lineHeight()) },
                                         .padding = .{ .left = 12 },
                                         .child_alignment = .{ .x = .left, .y = .center },
                                     },
@@ -3370,7 +3376,7 @@ pub const CodeEditor = struct {
             const selected_text = line[start_clamped..];
 
             clay.UI()(.{
-                .layout = .{ .sizing = .{ .w = .fixed(0), .h = .fixed(@floatFromInt(self.font_size + 16)) } },
+                .layout = .{ .sizing = .{ .w = .fixed(0), .h = .fixed(self.lineHeight()) } },
                 .floating = .{
                     .attach_to = .to_parent,
                     .attach_points = .{ .element = .left_top, .parent = .left_top },
@@ -3398,7 +3404,7 @@ pub const CodeEditor = struct {
             const selected_text = line[start_clamped..end_clamped];
 
             clay.UI()(.{
-                .layout = .{ .sizing = .{ .w = .fixed(0), .h = .fixed(@floatFromInt(self.font_size + 16)) } },
+                .layout = .{ .sizing = .{ .w = .fixed(0), .h = .fixed(self.lineHeight()) } },
                 .floating = .{
                     .attach_to = .to_parent,
                     .attach_points = .{ .element = .left_top, .parent = .left_top },
@@ -3446,7 +3452,7 @@ pub const CodeEditor = struct {
         const text_before_cursor = if (byte_pos > offset) line[offset..byte_pos] else line[0..0];
 
         clay.UI()(.{
-            .layout = .{ .sizing = .{ .w = .fixed(0), .h = .fixed(@floatFromInt(self.font_size + 16)) } },
+            .layout = .{ .sizing = .{ .w = .fixed(0), .h = .fixed(self.lineHeight()) } },
             .floating = .{
                 .attach_to = .to_parent,
                 .attach_points = .{ .element = .left_top, .parent = .left_top },

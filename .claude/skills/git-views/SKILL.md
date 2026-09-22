@@ -124,6 +124,9 @@ Aus AGENTS.md hierher verschoben (21.09.2026), Wortlaut unverändert.
   in `theme.git_*` (VS Code `gitDecoration.*`), gelöscht durchgestrichen. Aktionen nur beim
   Überfahren (Reihenfolge wie `package.json`): Datei öffnen, Stage/Unstage, Discard; Köpfe:
   Stage All / Unstage All / Discard All. IDs `sc_act` mit Index `zeile * 8 + RowAction`.
+- Das Eingabefeld ist ein `CodeEditor` mit `font_size = 16` und `line_pad = 6` (Zeilenhöhe
+  `lineHeight()` = `INPUT_LINE_HEIGHT` 22). Mit den Editor-Vorgaben (24 + 16) schnitt das Feld
+  die untere Hälfte der Buchstaben ab (seit `a3ce61c` bis 22.09.2026).
 - Daten `src/git/git_changes.zig` (Modul `git_changes`, unit-getestet): Gruppen aus der rohen
   porcelain-v2-Ausgabe, die `taskGitStatus` hinter 0x1c mitliefert (`splitStatusPayload`), Buchstabe/
   Farbe/Hover-Text/Durchstreichen wie `Resource` in `repository.ts`, Diff-Spec je Zeile
