@@ -8,7 +8,7 @@
 %global __brp_check_rpaths %{nil}
 
 Name:           zid
-Version:        0.1.2
+Version:        0.1.3
 Release:        1%{?dist}
 Summary:        GPU-beschleunigter Editor mit Markdown-Vorschau, PDF-Anzeige und lokaler KI
 
@@ -68,6 +68,9 @@ appstreamcli validate --no-net \
 %{_datadir}/metainfo/%{appid}.metainfo.xml
 
 %changelog
+* Tue Sep 22 2026 gst <g.strainovic@waelli.ch> - 0.1.3-1
+- Windows: zid logo as program and taskbar icon.
+
 * Mon Sep 21 2026 gstrainovic <g.strainovic@gmail.com> - 0.1.2-1
 - Search and replace across the project (Ctrl+Shift+F / Ctrl+Shift+H), powered by ripgrep.
 - Find (Ctrl+F) in the Markdown preview.

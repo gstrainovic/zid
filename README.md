@@ -11,9 +11,9 @@ Fertiges Binary, kein Zig, kein Compiler. Läuft unter Wayland und X11.
 ### Alle Distributionen: Tarball
 
 ```bash
-curl -LO https://github.com/gstrainovic/zid/releases/latest/download/zid-0.1.2-x86_64-linux.tar.xz
-tar xf zid-0.1.2-x86_64-linux.tar.xz
-cd zid-0.1.2-x86_64-linux
+curl -LO https://github.com/gstrainovic/zid/releases/latest/download/zid-0.1.3-x86_64-linux.tar.xz
+tar xf zid-0.1.3-x86_64-linux.tar.xz
+cd zid-0.1.3-x86_64-linux
 ./install.sh            # nach ~/.local, ohne root
 ```
 
@@ -34,8 +34,8 @@ Updates kommen mit `dnf upgrade`.
 ### Debian, Ubuntu, Mint
 
 ```bash
-curl -LO https://github.com/gstrainovic/zid/releases/latest/download/zid_0.1.2-1_amd64.deb
-sudo apt install ./zid_0.1.2-1_amd64.deb
+curl -LO https://github.com/gstrainovic/zid/releases/latest/download/zid_0.1.3-1_amd64.deb
+sudo apt install ./zid_0.1.3-1_amd64.deb
 ```
 
 Braucht Debian 12 oder Ubuntu 22.04 und neuer. Updates: neue `.deb` vom Release.
@@ -43,7 +43,7 @@ Braucht Debian 12 oder Ubuntu 22.04 und neuer. Updates: neue `.deb` vom Release.
 ### openSUSE und andere RPM-Distributionen
 
 ```bash
-sudo zypper install https://github.com/gstrainovic/zid/releases/latest/download/zid-0.1.2-1.x86_64.rpm
+sudo zypper install https://github.com/gstrainovic/zid/releases/latest/download/zid-0.1.3-1.x86_64.rpm
 ```
 
 ### Snap
@@ -57,7 +57,7 @@ einer Sandbox. Updates holt snapd selbst.
 
 ## Installation (Windows)
 
-Am Release hängt `zid-0.1.2-x86_64-windows.zip` (gebaut von GitHub Actions).
+Am Release hängt `zid-0.1.3-x86_64-windows.zip` (gebaut von GitHub Actions).
 Entpacken, `zid.exe` starten — Schrift und Shader stecken im Binary, `rg.exe`
 (ripgrep, für die Suche im Projekt) liegt daneben.
 
@@ -167,8 +167,8 @@ eigenen Zig-Cache, die Artefakte der Entwicklungsmaschine bleiben also liegen.
 Im Tarball steckt ein `install.sh`:
 
 ```bash
-tar xf zid-0.1.2-x86_64-linux.tar.xz
-cd zid-0.1.2-x86_64-linux
+tar xf zid-0.1.3-x86_64-linux.tar.xz
+cd zid-0.1.3-x86_64-linux
 ./install.sh                 # nach ~/.local
 ./install.sh /usr/local      # systemweit (als root)
 ./install.sh --uninstall     # wieder entfernen
@@ -183,7 +183,7 @@ packaging/release.sh 0.1.2 "Search and replace across the project (Ctrl+Shift+F)
 ```
 
 Das Skript setzt die Version in `build.zig.zon`, AppStream, RPM-Spec und README,
-committet, taggt `v0.1.2` und pusht. Der Text geht englisch
+committet, taggt `v0.1.3` und pusht. Der Text geht englisch
 in AppStream und Release-Notiz; mehrere Punkte mit ` | ` trennen. `--dry-run`
 ändert nur die Dateien.
 
