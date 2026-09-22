@@ -31,6 +31,9 @@ pub fn EditBuffer(comptime capacity: usize) type {
         /// in `line_edit.handleClick`.
         last_click_ms: i64 = 0,
         last_click_cursor: usize = std.math.maxInt(usize),
+        /// Waagrechter Versatz in Pixeln, wenn der Text breiter als das Feld ist
+        /// (`line_edit.render` führt ihn dem Cursor nach, Klicks rechnen ihn ein).
+        scroll_x: f32 = 0,
         undo: ?Snapshot = null,
         redo: ?Snapshot = null,
         group_open: bool = false,
@@ -411,6 +414,19 @@ pub fn EditBuffer(comptime capacity: usize) type {
     };
 }
 
+/// Waagrechter Versatz eines einzeiligen Felds: bleibt stehen, solange der Cursor
+/// (`caret_x`, Pixel ab Textanfang) sichtbar ist, und rückt sonst gerade so weit, dass
+/// er am Rand steht. Nie weiter als bis zum Textende plus Cursorbreite; passt der Text
+/// ins Feld, ist der Versatz 0. Das Feld ist `field_w` breit, `caret_w` der Strich.
+pub fn followCaret(scroll: f32, caret_x: f32, text_w: f32, field_w: f32, caret_w: f32) f32 {
+    if (field_w <= caret_w) return @max(0, caret_x);
+    var s = scroll;
+    if (caret_x < s) s = caret_x;
+    if (caret_x + caret_w > s + field_w) s = caret_x + caret_w - field_w;
+    const max_s = @max(0, text_w + caret_w - field_w);
+    return std.math.clamp(s, 0, max_s);
+}
+
 /// Editierpuffer für Inline-Umbenennen (Dateinamen bis 255 Bytes).
 pub const RenameEdit = EditBuffer(max_name_len);
 
@@ -510,6 +526,26 @@ test "EditBuffer: selectWordAtCursor auf leerem Puffer ist harmlos" {
     var e = EditBuffer(8){};
     e.selectWordAtCursor();
     try std.testing.expect(!e.hasSelection());
+}
+
+test "followCaret: kurzer Text scrollt nie" {
+    try std.testing.expectEqual(@as(f32, 0), followCaret(0, 50, 80, 200, 2));
+    // Text wurde kürzer: alter Versatz fällt weg.
+    try std.testing.expectEqual(@as(f32, 0), followCaret(120, 50, 80, 200, 2));
+}
+
+test "followCaret: Cursor am Ende eines langen Texts steht am rechten Rand" {
+    // Text 500 breit, Feld 200: Cursor hinten → Versatz 302 (Strich passt noch hinein).
+    try std.testing.expectEqual(@as(f32, 302), followCaret(0, 500, 500, 200, 2));
+}
+
+test "followCaret: Versatz bleibt, solange der Cursor sichtbar ist" {
+    try std.testing.expectEqual(@as(f32, 302), followCaret(302, 400, 500, 200, 2));
+}
+
+test "followCaret: Cursor links aus dem Bild zieht den Versatz nach" {
+    try std.testing.expectEqual(@as(f32, 100), followCaret(302, 100, 500, 200, 2));
+    try std.testing.expectEqual(@as(f32, 0), followCaret(302, 0, 500, 200, 2));
 }
 
 test "isDirectory: Ordner und Symlink auf Ordner ja, Datei, Symlink auf Datei und Fehlendes nein" {

@@ -486,7 +486,6 @@ pub const Picker = struct {
                         .child_alignment = .{ .x = .left, .y = .center },
                         .child_gap = 8,
                     },
-                    .clip = .{ .horizontal = true },
                     .background_color = t.overlay,
                     .border = .{ .width = .all(1), .color = t.border_focus },
                     .corner_radius = .all(4),

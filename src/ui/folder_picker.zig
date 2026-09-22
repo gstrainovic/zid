@@ -176,7 +176,6 @@ pub const FolderPicker = struct {
                             .padding = .axes(0, 10),
                             .child_alignment = .{ .x = .left, .y = .center },
                         },
-                        .clip = .{ .horizontal = true },
                         .background_color = t.overlay,
                         .border = .{ .width = .all(1), .color = t.border_focus },
                         .corner_radius = .all(4),

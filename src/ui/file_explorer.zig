@@ -1425,7 +1425,6 @@ fn renderFilterRow(state: *FileExplorerState, theme: Theme) void {
         clay.UI()(.{
             .id = clay.ElementId.ID("fx_filter_box"),
             .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(28) }, .padding = .{ .left = 6, .right = 6 }, .child_alignment = .{ .y = .center } },
-            .clip = .{ .horizontal = true },
             .background_color = theme.overlay,
             .border = .{ .width = .all(1), .color = if (state.filter_active) theme.border_focus else theme.border },
             .corner_radius = .all(3),
@@ -1458,7 +1457,7 @@ fn renderContextMenu(menu: ContextMenu, theme: Theme) void {
 }
 
 /// Eingabezeile für „neue Datei / neuer Ordner“ unter dem Elternordner
-fn renderCreateRow(arena: std.mem.Allocator, cs: *const CreateState, depth: u32, theme: Theme) void {
+fn renderCreateRow(arena: std.mem.Allocator, cs: *CreateState, depth: u32, theme: Theme) void {
     const indent = @as(f32, @floatFromInt(depth)) * DEFAULT_INDENT_PX + 8.0 + 24.0;
     clay.UI()(.{
         .id = clay.ElementId.ID("fx_create_row"),
