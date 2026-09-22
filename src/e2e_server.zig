@@ -310,7 +310,9 @@ fn writeScmChangesJson(ui: *ui_mod.UI, w: *std.Io.Writer) !void {
     var label_buf: [64]u8 = undefined;
     try w.print(", \"ahead\": {d}, \"behind\": {d}, \"button\": ", .{ v.ahead(), v.behind() });
     try std.json.Stringify.value(v.buttonLabel(&label_buf), .{}, w);
-    try w.print(", \"lines\": {d}, \"message\": ", .{ui.scm_changes.editor.lineCount()});
+    // Zeilenhöhe des Editors und Innenhöhe des Felds: passt eine Zeile nicht hinein, schneidet
+    // das Feld die Buchstaben ab (Schrift 24 in 22 px, bis 22.09.2026)
+    try w.print(", \"lines\": {d}, \"line_height\": {d:.1}, \"input_inner_height\": {d:.1}, \"message\": ", .{ ui.scm_changes.editor.lineCount(), ui.scm_changes.editor.lineHeight(), ui.scm_changes.editor.height });
     try std.json.Stringify.value(ui.scm_changes.messageText(), .{}, w);
     // Markierter Text im Commit-Feld (CodeEditor zeichnet die Auswahl ohne eigenes Element)
     try w.writeAll(", \"selected_text\": ");

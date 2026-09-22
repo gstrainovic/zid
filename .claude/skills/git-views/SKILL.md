@@ -21,7 +21,11 @@ Aus AGENTS.md hierher verschoben (21.09.2026), Wortlaut unverändert.
   Wartezeit des Schedulers hinaus fest; der wurde zurückgelassen und der Allocator meldete
   dessen Speicher als Leck. Unter Windows laufen die Prozesse in einem Job-Objekt, weil
   `bin\git.exe` nur ein Launcher für `mingw64\bin\git.exe` ist: `TerminateProcess` auf den
-  Launcher ließ den echten git mit offenen Pipes weiterlaufen.
+  Launcher ließ den echten git mit offenen Pipes weiterlaufen. Unter Linux startet git mit
+  eigener Prozessgruppe (`pgid = 0`), `kill(-pid)` trifft auch Hooks, die sonst die
+  stderr-Pipe offen hielten. E2E `python3 scripts/e2e_git_shutdown.py`: ein
+  `core.fsmonitor = sleep 30` im Fixture lässt `git status` hängen, zid muss sich in unter
+  2 s ohne zurückgelassenen Worker beenden (ohne Fix: 2,2 s, git und sleep laufen weiter).
 - **Fremde Repos („detected dubious ownership“):** Gehört das Repo einem anderen Benutzer
   (Netzlaufwerk, anderes Konto), verweigert git jeden Befehl. `taskGitStatus` meldet dann
   `git_unsafe_repo` mit dem Wert, den git selbst für `safe.directory` vorschlägt
