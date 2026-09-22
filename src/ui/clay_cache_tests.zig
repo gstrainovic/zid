@@ -19,14 +19,24 @@ fn measure(text: []const u8, _: *clay.TextElementConfig, _: void) clay.Dimension
     return .{ .w = @floatFromInt(text.len * 8), .h = 16 };
 }
 
-test "Messcache läuft beim Streamen eines wachsenden Absatzes nicht voll" {
-    const alloc = std.testing.allocator;
-    clay.setMaxElementCount(16384); // wie UI.MAX_CLAY_ELEMENTS
-    const memory = try alloc.alloc(u8, clay.minMemorySize());
-    defer alloc.free(memory);
-    _ = clay.initialize(clay.createArenaWithCapacityAndMemory(memory), .{ .w = 800, .h = 600 }, .{ .error_handler_function = onError });
+// Clays aktueller Kontext liegt im Arena-Speicher und lässt sich nicht zurücksetzen. Ein Test,
+// der seinen Speicher freigibt, lässt den nächsten in freigegebenen Speicher schreiben
+// (`setMaxElementCount` segfaultete). Daher ein Puffer für alle Tests, je Test neu initialisiert.
+var clay_memory: ?[]u8 = null;
+
+fn initClay() !void {
+    if (clay_memory == null) {
+        clay.setMaxElementCount(16384); // wie UI.MAX_CLAY_ELEMENTS
+        clay_memory = try std.heap.page_allocator.alloc(u8, clay.minMemorySize());
+    }
+    _ = clay.initialize(clay.createArenaWithCapacityAndMemory(clay_memory.?), .{ .w = 800, .h = 600 }, .{ .error_handler_function = onError });
     clay.setMeasureTextFunction(void, {}, measure);
     capacity_errors = 0;
+}
+
+test "Messcache läuft beim Streamen eines wachsenden Absatzes nicht voll" {
+    const alloc = std.testing.allocator;
+    try initClay();
 
     var arena = std.heap.ArenaAllocator.init(alloc);
     defer arena.deinit();
@@ -46,4 +56,33 @@ test "Messcache läuft beim Streamen eines wachsenden Absatzes nicht voll" {
         _ = clay.endLayout();
     }
     try std.testing.expectEqual(@as(usize, 0), capacity_errors);
+}
+
+// Absturz 22.09.2026 („applying non-zero offset to non-null pointer 0xffffffffffffffff“ in
+// Clay__CalculateFinalLayout): der Umbruch bekam aus dem Messcache die Wortliste eines anderen,
+// längeren Texts und las hinter dem eigenen Puffer. Der SIMD-Hash (x86_64) bezieht die Länge
+// nicht ein, „a b“ und „a b\0\0\0“ haben denselben Schlüssel.
+test "Umbruch nutzt keine Wörter eines kollidierenden längeren Texts" {
+    try initClay();
+
+    const long: []const u8 = "a b\x00\x00\x00";
+    var short_buf = [_]u8{ 'a', ' ', 'b' };
+    const short: []const u8 = &short_buf;
+    clay.beginLayout();
+    // 20 px breit, „a b“ misst 24: beide Texte laufen durch den Umbruch.
+    clay.UI()(.{ .id = clay.ElementId.ID("root"), .layout = .{ .direction = .top_to_bottom, .sizing = .{ .w = .fixed(20) } } })({
+        clay.text(long, .{ .font_size = 16 });
+        clay.text(short, .{ .font_size = 16 });
+    });
+    const commands = clay.endLayout();
+    var short_lines: usize = 0;
+    for (commands) |cmd| {
+        if (cmd.command_type != .text) continue;
+        const s = cmd.render_data.text.string_contents;
+        if (s.base_chars != short.ptr) continue;
+        short_lines += 1;
+        // Keine Zeile des kurzen Texts reicht über dessen Ende.
+        try std.testing.expect(@intFromPtr(s.chars) + @as(usize, @intCast(s.length)) <= @intFromPtr(short.ptr) + short.len);
+    }
+    try std.testing.expect(short_lines > 0);
 }
