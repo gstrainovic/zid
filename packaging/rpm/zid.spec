@@ -8,7 +8,7 @@
 %global __brp_check_rpaths %{nil}
 
 Name:           zid
-Version:        0.1.3
+Version:        0.1.4
 Release:        1%{?dist}
 Summary:        GPU-beschleunigter Editor mit Markdown-Vorschau, PDF-Anzeige und lokaler KI
 
@@ -68,6 +68,11 @@ appstreamcli validate --no-net \
 %{_datadir}/metainfo/%{appid}.metainfo.xml
 
 %changelog
+* Tue Sep 22 2026 gst <g.strainovic@waelli.ch> - 0.1.4-1
+- apt-Quelle für Debian und Ubuntu
+- fremde Repos nach Rückfrage in safe.directory eintragen
+- Repo-Suche endet an der UNC-Freigabewurzel
+
 * Tue Sep 22 2026 gst <g.strainovic@waelli.ch> - 0.1.3-1
 - Windows: zid logo as program and taskbar icon.
 
