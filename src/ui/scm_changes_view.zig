@@ -87,6 +87,10 @@ pub const ScmChangesView = struct {
         self.editor.show_indent_guides = false;
         self.editor.compact_menu = true;
         self.editor.word_wrap = true;
+        // Schrift und Zeilenhöhe passend zum Feld (INPUT_LINE_HEIGHT); mit den Editor-Vorgaben
+        // (24 + 16) schnitt das Feld die untere Hälfte der Buchstaben ab.
+        self.editor.font_size = 16;
+        self.editor.line_pad = @intFromFloat(INPUT_LINE_HEIGHT - 16);
         // Buffer.create liefert einen Root ohne Zeilenanfang; erst setText macht ihn
         // beschreibbar (siehe ai_chat.zig).
         self.editor.setText("");
@@ -326,7 +330,7 @@ pub const ScmChangesView = struct {
             // wächst bis INPUT_MAX_LINES; darüber scrollt er.
             const line_count = self.editor.lineCount();
             const shown = @min(@max(line_count, 1), INPUT_MAX_LINES);
-            const input_h = @as(f32, @floatFromInt(shown)) * INPUT_LINE_HEIGHT + 2 * INPUT_PAD;
+            const input_h = @as(f32, @floatFromInt(shown)) * self.editor.lineHeight() + 2 * INPUT_PAD;
             clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(input_h + 10) }, .padding = .{ .left = 8, .right = 8, .top = 5, .bottom = 5 } } })({
                 clay.UI()(.{
                     .id = inputId(),
