@@ -16,6 +16,12 @@ Aus AGENTS.md hierher verschoben (21.09.2026), Wortlaut unverändert.
 - `src/git/git_list.zig` (Modul `git_list`, unit-getestet): `visibleRange`, `scrollToShow`,
   `clampScroll` für virtualisierte Listen mit fester Zeilenhöhe (Timeline, Graph).
 - Alle git-Aufrufe laufen mit `core.quotepath=off`.
+- **Beenden bricht laufende git-Prozesse ab** (`git_worker.killRunning`, in main.zig vor
+  `scheduler.deinit`). Ein `git log` auf dem Netzlaufwerk hielt sonst einen Worker über die 2 s
+  Wartezeit des Schedulers hinaus fest; der wurde zurückgelassen und der Allocator meldete
+  dessen Speicher als Leck. Unter Windows laufen die Prozesse in einem Job-Objekt, weil
+  `bin\git.exe` nur ein Launcher für `mingw64\bin\git.exe` ist: `TerminateProcess` auf den
+  Launcher ließ den echten git mit offenen Pipes weiterlaufen.
 - **Fremde Repos („detected dubious ownership“):** Gehört das Repo einem anderen Benutzer
   (Netzlaufwerk, anderes Konto), verweigert git jeden Befehl. `taskGitStatus` meldet dann
   `git_unsafe_repo` mit dem Wert, den git selbst für `safe.directory` vorschlägt

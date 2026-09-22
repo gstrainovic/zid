@@ -599,6 +599,71 @@ const GitRun = union(enum) { ok: []u8, failed: []u8 };
 /// Leere Meldung ohne Allokation (free auf Länge 0 ist erlaubt).
 const no_message: []u8 = &.{};
 
+/// Laufende git-Prozesse, damit `killRunning` sie beim Beenden abbrechen kann. Auf einem
+/// Netzlaufwerk dauert `git log` länger als die 2 s, die der Scheduler beim Beenden wartet;
+/// er ließ den Worker dann zurück, und der Allocator meldete dessen Speicher als Leck.
+///
+/// Unter Windows reicht es nicht, den gestarteten Prozess zu beenden: `git.exe` aus `bin\` ist
+/// ein Launcher, der `mingw64\bin\git.exe` startet. Der echte git hielt die Pipes offen und
+/// der Worker wartete weiter. Deshalb laufen alle git-Prozesse in einem Job-Objekt;
+/// Kindprozesse erben es, `TerminateJobObject` beendet den ganzen Baum.
+var running_mutex: std.Thread.Mutex = .{};
+var running: [16]?std.process.Child.Id = @splat(null);
+var stopping: bool = false;
+var git_job: ?std.os.windows.HANDLE = null;
+
+const job_api = struct {
+    const windows = std.os.windows;
+    extern "kernel32" fn CreateJobObjectW(attrs: ?*anyopaque, name: ?[*:0]const u16) callconv(.winapi) ?windows.HANDLE;
+    extern "kernel32" fn AssignProcessToJobObject(job: windows.HANDLE, process: windows.HANDLE) callconv(.winapi) windows.BOOL;
+    extern "kernel32" fn TerminateJobObject(job: windows.HANDLE, exit_code: windows.UINT) callconv(.winapi) windows.BOOL;
+};
+
+/// Beendet sich zid schon, wird der Prozess sofort wieder beendet.
+fn registerRunning(id: std.process.Child.Id) void {
+    running_mutex.lock();
+    defer running_mutex.unlock();
+    if (builtin.os.tag == .windows) {
+        if (git_job == null) git_job = job_api.CreateJobObjectW(null, null);
+        if (git_job) |job| _ = job_api.AssignProcessToJobObject(job, id);
+    }
+    if (stopping) return terminateLocked(id);
+    for (&running) |*slot| if (slot.* == null) {
+        slot.* = id;
+        break;
+    };
+}
+
+/// Muss vor `child.wait` laufen: wait schließt den Handle, danach darf ihn niemand mehr beenden.
+fn unregisterRunning(id: std.process.Child.Id) void {
+    running_mutex.lock();
+    defer running_mutex.unlock();
+    for (&running) |*slot| if (slot.* == id) {
+        slot.* = null;
+    };
+}
+
+fn terminateLocked(id: std.process.Child.Id) void {
+    if (builtin.os.tag == .windows) {
+        if (git_job) |job| {
+            _ = job_api.TerminateJobObject(job, 1);
+        } else std.os.windows.TerminateProcess(id, 1) catch {};
+    } else {
+        std.posix.kill(id, std.posix.SIG.TERM) catch {};
+    }
+}
+
+/// Beim Beenden: laufende git-Prozesse abbrechen und keine neuen mehr starten.
+pub fn killRunning() void {
+    running_mutex.lock();
+    defer running_mutex.unlock();
+    stopping = true;
+    for (&running) |*slot| if (slot.*) |id| {
+        terminateLocked(id);
+        slot.* = null;
+    };
+}
+
 fn runGitCapture(alloc: std.mem.Allocator, cwd: []const u8, args: []const []const u8) GitRun {
     return runGitCaptureStdin(alloc, cwd, args, null);
 }
@@ -619,6 +684,7 @@ fn runGitCaptureStdin(alloc: std.mem.Allocator, cwd: []const u8, args: []const [
     child.stderr_behavior = .Pipe;
     child.cwd = cwd;
     child.spawn() catch |err| return .{ .failed = alloc.dupe(u8, @errorName(err)) catch no_message };
+    registerRunning(child.id);
     if (stdin) |text| {
         if (child.stdin) |f| {
             f.writeAll(text) catch |err| log.warn("git stdin: {}", .{err});
@@ -630,7 +696,9 @@ fn runGitCaptureStdin(alloc: std.mem.Allocator, cwd: []const u8, args: []const [
     defer stdout.deinit(alloc);
     var stderr: std.ArrayList(u8) = .empty;
     defer stderr.deinit(alloc);
-    child.collectOutput(alloc, &stdout, &stderr, 10 * 1024 * 1024) catch |err| {
+    const collected = child.collectOutput(alloc, &stdout, &stderr, 10 * 1024 * 1024);
+    unregisterRunning(child.id);
+    collected catch |err| {
         _ = child.kill() catch {};
         return .{ .failed = alloc.dupe(u8, @errorName(err)) catch no_message };
     };

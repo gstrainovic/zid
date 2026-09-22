@@ -90,9 +90,16 @@ fn debugLogEnabled() bool {
 }
 
 pub fn main() !void {
+    // Logs sind UTF-8; die Windows-Konsole zeigte sonst „geh├Ârt“ statt „gehört“.
+    if (builtin.os.tag == .windows) _ = std.os.windows.kernel32.SetConsoleOutputCP(65001);
     // Allocator setup
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
+    // Hat der Scheduler Worker zurückgelassen, halten die ihren Speicher absichtlich
+    // (Scheduler.deinit); die Leck-Liste wäre dann nur Rauschen.
+    var leak_check = true;
+    defer if (leak_check) {
+        _ = gpa.deinit();
+    };
     // --page-alloc: jede Allokation auf eigenen Seiten, Freigaben mit Stack-Trace protokolliert
     // (Use-after-free-Suche zusammen mit der Text-Probe im Headless-Loop).
     var page_alloc_mode = env.get("ZID_PAGE_ALLOC") != null;
@@ -313,7 +320,14 @@ pub fn main() !void {
 
         // Scheduler für async Git/LSP/FileWatcher/AI Tasks
         var scheduler = try async_mod.Scheduler.init(allocator, 4);
-        defer scheduler.deinit();
+        defer {
+            scheduler.shutdown();
+            if (scheduler.detached) leak_check = false;
+            scheduler.deinit();
+        }
+        // Läuft vor scheduler.deinit (defer rückwärts): ein git auf einem Netzlaufwerk hielt
+        // sonst einen Worker über die 2 s Wartezeit hinaus fest.
+        defer git_worker.killRunning();
         // Ergebnisse aus Worker- und Watcher-Threads wecken den Frame-Loop aus wio.wait(.{}).
         // Ohne das liefen bei ruhigem Fenster 256 Results auf und die Queue blockte.
         if (!headless_mode) scheduler.on_result = &wio.cancelWait;
