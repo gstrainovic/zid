@@ -190,6 +190,38 @@ def main():
         picker = result_json("folder_picker_state")
         check(picker["path"] == old_root, "↑ steigt wieder auf")
 
+        # 2b) Langer Pfad scrollt im Feld: der Cursor bleibt im Feld, statt rechts
+        # hinauszulaufen, und ein Klick trifft trotz Versatz die richtige Stelle.
+        tail = os.sep + "sehr_langer_unterordner_name" * 6
+        rpc("key_press", ["end", False])
+        rpc("type_text", [tail])
+        settle()
+        field = bounds("fp_input_text")
+        box = bounds("fp_input")
+        check(field["x"] + field["w"] <= box["x"] + box["w"],
+              f"Feld wächst nicht mit dem Text: {field['w']:.0f} breit, Rahmen {box['w']:.0f}")
+        caret = bounds("fp_input_text_caret")
+        check(field["x"] <= caret["x"] and caret["x"] + caret["w"] <= field["x"] + field["w"] + 0.5,
+              f"Cursor am Ende eines langen Pfads bleibt im Feld: {caret['x']:.0f} in {field['x']:.0f}..{field['x'] + field['w']:.0f}")
+        shot("e2e_long_path.ppm")
+        rpc("click", [field["x"] + field["w"] - 1, field["y"] + field["h"] / 2])
+        settle()
+        rpc("type_text", ["Z"])
+        settle()
+        check(result_json("folder_picker_state")["path"] == old_root + tail + "Z",
+              "Klick an den rechten Rand des gescrollten Felds setzt den Cursor ans Ende")
+        rpc("key_press", ["home", False])
+        settle()
+        caret = bounds("fp_input_text_caret")
+        check(abs(caret["x"] - field["x"]) < 1, "Pos1 scrollt zurück an den Anfang")
+        rpc("key_press", ["end", False])
+        for _ in range(len(tail) + 1):
+            rpc("key_press", ["backspace", False])
+        settle()
+        picker = result_json("folder_picker_state")
+        check(picker["path"] == old_root, "Langer Anhang wieder entfernt")
+        check(result_json("ui_state")["clay_errors"] == 0, "Keine Clay-Fehler (Liste der Clip-Container)")
+
         # 3) Pfad tippen (Feld leeren, ~-Pfad eingeben) und mit Enter öffnen
         for _ in range(len(picker["path"])):
             rpc("key_press", ["backspace", False])

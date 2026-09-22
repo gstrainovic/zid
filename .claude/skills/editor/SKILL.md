@@ -132,6 +132,15 @@ Aus AGENTS.md hierher verschoben (21.09.2026), Wortlaut unverändert.
   zum Elternteil. Mit dem Standard 10 lagen sie unter Ordner-Dialog und Picker (z 2000) und
   waren unsichtbar (bis 22.09.2026). Beide Felder stehen jetzt auf 2002; E2E prüft das Pixel
   am Cursor in `e2e_open_folder.py`.
+- **`line_edit` scrollt waagrecht** (seit 22.09.2026): `EditBuffer.scroll_x` folgt dem
+  Cursor (`explorer_ops.followCaret`, unit-getestet), das Textelement ist selbst ein
+  Clip-Container mit `child_offset`, Markierung und Strich ziehen den Versatz selbst ab
+  (Clay versetzt schwebende Kinder nicht) und hängen mit `clip_to = .to_attached_parent`
+  am Feld; Klick und Ziehen rechnen `scroll_x` ein. Vorher lief ein langer Pfad im
+  Ordner-Dialog rechts hinaus, und der Cursorstrich stand ausserhalb des Dialogs. Der
+  Rahmen um das Feld darf **kein** `.clip` haben: Clay zieht `grow`-Kinder eines
+  Clip-Elternteils auf Inhaltsbreite, das Feld wuchs dann mit dem Text mit. E2E: Schritt 2b
+  in `e2e_open_folder.py`.
 - Jeder eingebettete `CodeEditor` braucht die Modifier: `UI.setCtrlState`/`setAltState`/
   `setShiftState` reichen sie an Chat **und** Commit-Feld weiter. Ohne das greift die
   Keymap des Editors nicht und Ctrl+Z tut nichts.

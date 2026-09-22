@@ -624,7 +624,6 @@ pub const SearchView = struct {
         clay.UI()(.{
             .id = id,
             .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(INPUT_HEIGHT) }, .padding = .{ .left = 6, .right = 2 }, .child_alignment = .{ .y = .center }, .child_gap = 2 },
-            .clip = .{ .horizontal = true },
             .background_color = theme.bg,
             .border = .{ .width = .all(1), .color = if (active) theme.border_focus else theme.border },
             .corner_radius = .all(3),

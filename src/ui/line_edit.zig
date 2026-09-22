@@ -14,6 +14,10 @@ const clay = @import("clay");
 const wio = @import("wio");
 const ui = @import("mod.zig");
 const Theme = @import("theme.zig").Theme;
+const explorer_ops = @import("explorer_ops.zig");
+
+/// Breite des Cursorstrichs in Pixeln.
+const caret_w: f32 = 2;
 
 /// Feste Eigenschaften eines Felds: Clay-ID des Textelements und Schriftgröße.
 /// `z_index` gilt für Cursorstrich und Markierung (Markierung eins darunter). Clay
@@ -128,7 +132,7 @@ pub fn handleClick(edit: anytype, comptime cfg: Config, x: f32, extend: bool) bo
     const data = clay.getElementData(id);
     if (!data.found) return false;
     edit.prepareMove(extend);
-    edit.setCursorAtX(ui.measureTextWidth, cfg.font_size, x - data.bounding_box.x);
+    edit.setCursorAtX(ui.measureTextWidth, cfg.font_size, x - data.bounding_box.x + edit.scroll_x);
 
     // Doppelklick markiert das Wort. Die Zeit kommt direkt von der Uhr, damit die
     // Aufrufer (Explorer, Picker, Ordner-Dialog) keine Uhr durchreichen müssen.
@@ -152,7 +156,7 @@ pub fn handleDrag(edit: anytype, comptime cfg: Config, x: f32) void {
     const data = clay.getElementData(clay.ElementId.ID(cfg.id));
     if (!data.found) return;
     edit.prepareMove(true);
-    edit.setCursorAtX(ui.measureTextWidth, cfg.font_size, x - data.bounding_box.x);
+    edit.setCursorAtX(ui.measureTextWidth, cfg.font_size, x - data.bounding_box.x + edit.scroll_x);
 }
 
 /// Maustaste losgelassen: Ziehen beendet.
@@ -170,10 +174,25 @@ pub fn selectionColor(theme: Theme) clay.Color {
 /// ein Rechteck an der gemessenen Textbreite, wie im Editor, statt eines
 /// eingefügten "|"-Zeichens, das den Text hinter dem Cursor verschieben würde.
 /// Die Markierung ist ein durchscheinendes Rechteck über dem markierten Teil.
+///
+/// Ist der Text breiter als das Feld, scrollt er waagrecht (`edit.scroll_x`), sodass
+/// der Cursor sichtbar bleibt; Text, Markierung und Strich werden am Feldrand
+/// abgeschnitten. Die Feldbreite stammt aus dem Vorframe.
 pub fn render(edit: anytype, comptime cfg: Config, color: clay.Color, show_caret: bool, theme: Theme) void {
+    const id = clay.ElementId.ID(cfg.id);
+    const caret_x = ui.measureTextWidth(edit.textBeforeCursor(), cfg.font_size);
+    const field = clay.getElementData(id);
+    if (field.found) {
+        const text_w = ui.measureTextWidth(edit.text(), cfg.font_size);
+        edit.scroll_x = explorer_ops.followCaret(edit.scroll_x, caret_x, text_w, field.bounding_box.width, caret_w);
+    }
+    const scroll = edit.scroll_x;
     clay.UI()(.{
-        .id = clay.ElementId.ID(cfg.id),
+        .id = id,
         .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .child_alignment = .{ .y = .center } },
+        // Schwebende Kinder hängen am Feld selbst; Clay versetzt sie nicht um
+        // `child_offset`, deshalb ziehen Markierung und Strich den Versatz selbst ab.
+        .clip = .{ .horizontal = true, .child_offset = .{ .x = -scroll, .y = 0 } },
     })({
         clay.text(edit.text(), .{ .font_size = cfg.font_size, .color = color, .wrap_mode = .none });
         // Kein `return` im Block: der Block ist das Argument des schließenden Aufrufs,
@@ -186,9 +205,10 @@ pub fn render(edit: anytype, comptime cfg: Config, color: clay.Color, show_caret
                 .floating = .{
                     .attach_to = .to_parent,
                     .attach_points = .{ .element = .left_center, .parent = .left_center },
-                    .offset = .{ .x = x0, .y = 0 },
+                    .offset = .{ .x = x0 - scroll, .y = 0 },
                     .z_index = cfg.z_index - 1,
                     .pointer_capture_mode = .passthrough,
+                    .clip_to = .to_attached_parent,
                 },
                 .layout = .{ .sizing = .{ .w = .fixed(@max(1, x1 - x0)), .h = .fixed(cfg.font_size + 4) } },
                 .background_color = selectionColor(theme),
@@ -200,11 +220,12 @@ pub fn render(edit: anytype, comptime cfg: Config, color: clay.Color, show_caret
                 .floating = .{
                     .attach_to = .to_parent,
                     .attach_points = .{ .element = .left_center, .parent = .left_center },
-                    .offset = .{ .x = ui.measureTextWidth(edit.textBeforeCursor(), cfg.font_size), .y = 0 },
+                    .offset = .{ .x = caret_x - scroll, .y = 0 },
                     .z_index = cfg.z_index,
                     .pointer_capture_mode = .passthrough,
+                    .clip_to = .to_attached_parent,
                 },
-                .layout = .{ .sizing = .{ .w = .fixed(2), .h = .fixed(cfg.font_size) } },
+                .layout = .{ .sizing = .{ .w = .fixed(caret_w), .h = .fixed(cfg.font_size) } },
                 .background_color = theme.text,
             })({});
         }
