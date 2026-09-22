@@ -80,12 +80,15 @@ pub const page_size: usize = 50;
 
 const log_format = "--format=%x1e%H%x1f%aN%x1f%aE%x1f%at%x1f%P%x1f%D%x1f%B%x1d";
 
-/// Wie VS Code `Repository.log` mit `refNames` und `shortStats`.
+/// Wie VS Code `Repository.log` mit `refNames`, aber ohne `shortStats`: `--shortstat` vergleicht
+/// für jeden Commit die Dateiversionen. Auf einem Netzlaufwerk mit losen Objekten dauerte eine
+/// Seite damit 35–50 s statt 2 s (22.09.2026). Die Zahlen lädt der Hover je Commit nach
+/// (`statArgs`, `View.requestStat`).
 pub fn logArgs(buf: *[24][]const u8, num_buf: []u8, refs: []const []const u8, skip: usize, limit: usize) []const []const u8 {
     const n_arg = std.fmt.bufPrint(num_buf, "-n{d}", .{limit}) catch "-n50";
     const skip_arg = std.fmt.bufPrint(num_buf[n_arg.len..], "--skip={d}", .{skip}) catch "--skip=0";
     var n: usize = 0;
-    for ([_][]const u8{ "log", "--no-color", log_format, "--topo-order", "--decorate=full", "--shortstat", "--diff-merges=first-parent", n_arg, skip_arg }) |a| {
+    for ([_][]const u8{ "log", "--no-color", log_format, "--topo-order", "--decorate=full", "--diff-merges=first-parent", n_arg, skip_arg }) |a| {
         buf[n] = a;
         n += 1;
     }
@@ -99,6 +102,40 @@ pub fn logArgs(buf: *[24][]const u8, num_buf: []u8, refs: []const []const u8, sk
 
 pub const Stat = struct { files: u32 = 0, insertions: u32 = 0, deletions: u32 = 0 };
 
+/// Statistik eines Commits: kommt nicht mehr mit dem Log, sondern auf Anfrage.
+pub const StatState = union(enum) { unknown, loading, failed, loaded: Stat };
+
+/// Zeile `2 files changed, 3 insertions(+), 1 deletion(-)` aus `--shortstat`; null ohne Zeile.
+pub fn parseShortStat(text: []const u8) ?Stat {
+    var stat = Stat{};
+    var found = false;
+    var lines = std.mem.splitScalar(u8, text, '\n');
+    while (lines.next()) |line| {
+        if (std.mem.indexOf(u8, line, " changed") == null) continue;
+        found = true;
+        var parts = std.mem.splitSequence(u8, std.mem.trim(u8, line, " \r"), ", ");
+        while (parts.next()) |part| {
+            const space = std.mem.indexOfScalar(u8, part, ' ') orelse continue;
+            const value = std.fmt.parseInt(u32, part[0..space], 10) catch continue;
+            const word = part[space + 1 ..];
+            if (std.mem.startsWith(u8, word, "file")) stat.files = value;
+            if (std.mem.startsWith(u8, word, "insertion")) stat.insertions = value;
+            if (std.mem.startsWith(u8, word, "deletion")) stat.deletions = value;
+        }
+    }
+    return if (found) stat else null;
+}
+
+/// Statistik eines Commits gegen den ersten Elternteil; beim Wurzel-Commit über `git show`.
+pub fn statArgs(buf: *[16][]const u8, hash: []const u8, parent: []const u8) []const []const u8 {
+    const args: []const []const u8 = if (parent.len > 0)
+        &.{ "diff", "--no-color", "--shortstat", parent, hash }
+    else
+        &.{ "show", "--no-color", "--shortstat", "--format=", hash };
+    @memcpy(buf[0..args.len], args);
+    return buf[0..args.len];
+}
+
 pub const Commit = struct {
     hash: []const u8,
     author: []const u8,
@@ -109,7 +146,7 @@ pub const Commit = struct {
     refs: []const Ref,
     subject: []const u8,
     message: []const u8,
-    stat: Stat,
+    stat: StatState = .unknown,
     label_color: ?git_graph.Color = null,
 
     pub fn firstParent(self: Commit) []const u8 {
@@ -154,20 +191,8 @@ fn parseLogInto(a: std.mem.Allocator, out: []const u8) ![]Commit {
         const refs = try a.dupe(Ref, parseRefs(&ref_buf, f[5]));
         const message = std.mem.trimRight(u8, f[6], " \t\r\n");
 
-        var stat = Stat{};
-        var lines = std.mem.splitScalar(u8, record[end + 1 ..], '\n');
-        while (lines.next()) |line| {
-            if (std.mem.indexOf(u8, line, " changed") == null) continue;
-            var parts = std.mem.splitSequence(u8, std.mem.trim(u8, line, " \r"), ", ");
-            while (parts.next()) |part| {
-                const space = std.mem.indexOfScalar(u8, part, ' ') orelse continue;
-                const value = std.fmt.parseInt(u32, part[0..space], 10) catch continue;
-                const word = part[space + 1 ..];
-                if (std.mem.startsWith(u8, word, "file")) stat.files = value;
-                if (std.mem.startsWith(u8, word, "insertion")) stat.insertions = value;
-                if (std.mem.startsWith(u8, word, "deletion")) stat.deletions = value;
-            }
-        }
+        // Log mit --shortstat (Tests, ältere Aufrufer): Zahlen gleich übernehmen
+        const stat: StatState = if (parseShortStat(record[end + 1 ..])) |s| .{ .loaded = s } else .unknown;
         try list.append(a, .{
             .hash = f[0],
             .author = f[1],
@@ -307,6 +332,8 @@ pub const View = struct {
     has_more: bool = false,
     error_text: ?[]u8 = null,
     want_changes: std.ArrayListUnmanaged([]const u8) = .empty,
+    /// Commits, deren Statistik der Hover braucht (`requestStat`)
+    want_stats: std.ArrayListUnmanaged([]const u8) = .empty,
     selected: ?usize = null,
     scroll: f32 = 0,
 
@@ -335,6 +362,8 @@ pub const View = struct {
         self.rows = .empty;
         self.want_changes.deinit(self.alloc);
         self.want_changes = .empty;
+        self.want_stats.deinit(self.alloc);
+        self.want_stats = .empty;
         if (self.error_text) |e| self.alloc.free(e);
         self.error_text = null;
         _ = self.arena.reset(.retain_capacity);
@@ -503,6 +532,30 @@ pub const View = struct {
         return self.want_changes.pop();
     }
 
+    /// Statistik des Commits einer Zeile anfordern (Hover), je Commit höchstens einmal.
+    pub fn requestStat(self: *View, row_index: usize) void {
+        if (row_index >= self.rows.items.len) return;
+        const row = self.rows.items[row_index];
+        if (row.kind != .commit or row.commit >= self.list.items.len) return;
+        const c = &self.list.items[row.commit];
+        if (c.stat != .unknown) return;
+        self.want_stats.append(self.alloc, c.hash) catch return;
+        c.stat = .loading;
+    }
+
+    pub fn takeStatRequest(self: *View) ?[]const u8 {
+        return self.want_stats.pop();
+    }
+
+    /// Antwort auf `requestStat`; `out` = Ausgabe von `statArgs` (leer bei Commit ohne Änderung).
+    pub fn applyStat(self: *View, hash: []const u8, ok: bool, out: []const u8) void {
+        for (self.list.items) |*c| {
+            if (!std.mem.eql(u8, c.hash, hash)) continue;
+            c.stat = if (!ok) .failed else .{ .loaded = parseShortStat(out) orelse .{} };
+            return;
+        }
+    }
+
     pub fn applyChanges(self: *View, hash: []const u8, ok: bool, out: []const u8) !void {
         const e = self.expansions.getPtr(hash) orelse return;
         e.loading = false;
@@ -575,13 +628,15 @@ test "Filter Auto: Branch blau, Upstream lila, Basis orange; Basis gleich Upstre
     try testing.expectEqual(@as(?git_graph.Color, .ref_remote), same.colorOf("refs/remotes/origin/main"));
 }
 
-test "logArgs: Format, --topo-order, --decorate=full, Statistik, Seite, Refs am Ende" {
+test "logArgs: Format, --topo-order, --decorate=full, keine Statistik, Seite, Refs am Ende" {
     var buf: [24][]const u8 = undefined;
     var num: [32]u8 = undefined;
     const refs = [_][]const u8{ "refs/heads/main", "refs/remotes/origin/main" };
     const args = logArgs(&buf, &num, &refs, 50, 50);
     try testing.expectEqualStrings("log", args[0]);
-    for ([_][]const u8{ "--topo-order", "--decorate=full", "--shortstat", "--diff-merges=first-parent", "-n50", "--" }) |a| try testing.expect(contains(args, a));
+    for ([_][]const u8{ "--topo-order", "--decorate=full", "--diff-merges=first-parent", "-n50", "--" }) |a| try testing.expect(contains(args, a));
+    // --shortstat kostet auf Netzlaufwerken Sekunden je Seite; der Hover lädt die Zahlen nach
+    try testing.expect(!contains(args, "--shortstat"));
     try testing.expect(contains(args, "--skip=50"));
     try testing.expectEqualStrings("refs/remotes/origin/main", args[args.len - 2]);
     try testing.expectEqualStrings("--", args[args.len - 1]);
@@ -606,10 +661,46 @@ test "parseLog: Commit-Felder, Eltern, Referenzen, Betreff, Statistik" {
     try testing.expectEqual(@as(usize, 2), a.refs.len);
     try testing.expectEqualStrings("zweiter", a.subject);
     try testing.expectEqualStrings("zweiter\n\nText", a.message);
-    try testing.expectEqual(@as(u32, 2), a.stat.files);
-    try testing.expectEqual(@as(u32, 1), a.stat.deletions);
+    try testing.expectEqual(StatState{ .loaded = .{ .files = 2, .insertions = 3, .deletions = 1 } }, a.stat);
     try testing.expectEqual(@as(usize, 0), log.commits[1].parents.len);
-    try testing.expectEqual(@as(u32, 5), log.commits[1].stat.insertions);
+    try testing.expectEqual(StatState{ .loaded = .{ .files = 1, .insertions = 5 } }, log.commits[1].stat);
+}
+
+test "parseLog ohne --shortstat: Statistik unbekannt" {
+    var log = try parseLog(testing.allocator, "\x1eaaaa\x1fAda\x1fada@x.org\x1f2000\x1f\x1f\x1feins\n\x1d\n");
+    defer log.deinit();
+    try testing.expectEqual(StatState.unknown, log.commits[0].stat);
+}
+
+test "statArgs: diff gegen den Elternteil, Wurzel über show" {
+    var buf: [16][]const u8 = undefined;
+    const d = statArgs(&buf, "cccc", "bbbb");
+    try testing.expectEqualStrings("diff", d[0]);
+    try testing.expect(contains(d, "--shortstat"));
+    try testing.expectEqualStrings("cccc", d[d.len - 1]);
+    const r = statArgs(&buf, "aaaa", "");
+    try testing.expectEqualStrings("show", r[0]);
+    try testing.expect(contains(r, "--format="));
+}
+
+test "View.requestStat: je Commit einmal, applyStat setzt Zahlen, leere Ausgabe = keine Änderung" {
+    var v = View.init(testing.allocator);
+    defer v.deinit();
+    try v.applyLog(true, "main\x1frefs/heads/main\x1f\x1f\x1f/repo\n\x1eaaaa\x1fAda\x1fa@x\x1f2\x1fbbbb\x1f\x1fzwei\n\x1d\n\x1ebbbb\x1fAda\x1fa@x\x1f1\x1f\x1f\x1feins\n\x1d\n", 50);
+    try testing.expectEqual(StatState.unknown, v.commits()[0].stat);
+    v.requestStat(0);
+    v.requestStat(0);
+    try testing.expectEqual(StatState.loading, v.commits()[0].stat);
+    try testing.expectEqualStrings("aaaa", v.takeStatRequest().?);
+    try testing.expectEqual(@as(?[]const u8, null), v.takeStatRequest());
+    v.applyStat("aaaa", true, " 2 files changed, 3 insertions(+), 1 deletion(-)\n");
+    try testing.expectEqual(StatState{ .loaded = .{ .files = 2, .insertions = 3, .deletions = 1 } }, v.commits()[0].stat);
+    v.requestStat(1);
+    _ = v.takeStatRequest();
+    v.applyStat("bbbb", true, "");
+    try testing.expectEqual(StatState{ .loaded = .{} }, v.commits()[1].stat);
+    v.requestStat(99); // außerhalb: nichts
+    try testing.expectEqual(@as(?[]const u8, null), v.takeStatRequest());
 }
 
 test "parseChanges: name-status mit Umbenennung, Status wie VS Code Dekoration" {

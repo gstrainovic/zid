@@ -491,6 +491,7 @@ pub fn main() !void {
                         .git_timeline, .git_timeline_error => ui_system.handleGitTimeline(result.tag == .git_timeline, result.payload),
                         .git_graph_log, .git_graph_log_error => ui_system.handleGitGraphLog(result.tag == .git_graph_log, result.payload),
                         .git_commit_changes, .git_commit_changes_error => ui_system.handleGitCommitChanges(result.tag == .git_commit_changes, result.payload),
+                        .git_commit_stat, .git_commit_stat_error => ui_system.handleGitCommitStat(result.tag == .git_commit_stat, result.payload),
                         .git_action, .git_action_error => ui_system.handleGitAction(result.tag == .git_action, result.payload),
                         .ai_commit_message, .ai_commit_message_error => ui_system.handleAICommitMessage(result.tag == .ai_commit_message, result.payload),
                         .ai_chat_reply => ui_system.handleAIReply(result.payload),

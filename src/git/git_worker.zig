@@ -480,6 +480,16 @@ pub fn taskGitCommitChanges(alloc: std.mem.Allocator, data: ?*anyopaque) !schedu
     return framedResult(alloc, param.field(0), runGitCapture(alloc, param.field(1), args), .git_commit_changes, .git_commit_changes_error);
 }
 
+/// Statistik eines Commits für den Graph-Hover (`git_scm.statArgs`). Felder wie
+/// `taskGitCommitChanges`; Payload `<schlüssel>\n<git diff --shortstat>`.
+pub fn taskGitCommitStat(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.TaskResult {
+    const param: *FieldsParam = @ptrCast(@alignCast(data.?));
+    defer param.deinit();
+    var args_buf: [16][]const u8 = undefined;
+    const args = git_scm.statArgs(&args_buf, param.field(2), param.field(3));
+    return framedResult(alloc, param.field(0), runGitCapture(alloc, param.field(1), args), .git_commit_stat, .git_commit_stat_error);
+}
+
 /// Dateiinhalt über `git show <ref>:<pfad>`; nicht vorhanden → leer (owned).
 /// Datei der Arbeitskopie (relativ zur Repo-Wurzel), leer wenn sie fehlt oder zu groß ist.
 fn readWorktreeFile(alloc: std.mem.Allocator, repo: []const u8, path: []const u8) []u8 {
@@ -965,6 +975,16 @@ test "taskGitGraphLog und taskGitCommitChanges: eigenes Repo, Filter Auto, Datei
     const changes = try git_scm.parseChanges(alloc, cu.body);
     defer alloc.free(changes);
     try std.testing.expect(changes.len > 0);
+
+    // Graph-Log ohne Statistik; der Hover lädt sie je Commit nach
+    try std.testing.expectEqual(git_scm.StatState.unknown, c.stat);
+    const st = try taskGitCommitStat(alloc, try FieldsParam.init(alloc, &.{ c.hash, cwd, c.hash, c.firstParent() }));
+    defer st.deinit();
+    try std.testing.expect(st.tag == .git_commit_stat);
+    const su = unframe(st.payload).?;
+    view.applyStat(su.key, true, su.body);
+    const stat = view.commits()[0].stat.loaded;
+    try std.testing.expectEqual(@as(u32, @intCast(changes.len)), stat.files);
 }
 
 test "taskGitTimeline: Fehler von git kommt als Text im Ergebnis, nicht als Task-Fehler" {

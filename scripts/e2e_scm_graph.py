@@ -107,8 +107,15 @@ def step_hover_expand_diff():
     print("--- 2./3. Hover, Aufklappen, Datei-Diff")
     s = st()
     idx = next(i for i, x in enumerate(s["commits"]) if x["subject"] == "Merge feature")
+    # Log ohne --shortstat (Netzlaufwerk: 35–50 s je Seite); Zahlen kommen erst mit dem Hover
+    check(all(c["stat"] == "unknown" for c in s["commits"]), "Graph lädt ohne Statistik")
     rpc("move_mouse", list(row_center(s, idx))); time.sleep(1.0); settle(4)
     wait(lambda s: s["hover_visible"], "Hover nach 700 ms")
+    s = wait(lambda s: isinstance(s["commits"][idx]["stat"], dict), "Hover lädt die Statistik des Commits nach")
+    check(s["commits"][idx]["stat"] == {"files": 1, "insertions": 1, "deletions": 0},
+          f"Merge gegen ersten Elternteil: 1 Datei, 1 Einfügung ({s['commits'][idx]['stat']})")
+    check(sum(isinstance(c["stat"], dict) for c in s["commits"]) == 1, "nur dieser eine Commit geladen")
+    settle(4)
     shot("e2e_scm_hover.ppm")
     rpc("click", list(row_center(s, idx))); settle(4)
     s = wait(lambda s: s["commits"][idx]["expanded"] and any(r["kind"] == "change" for r in s["rows"]), "Klick klappt den Merge auf")

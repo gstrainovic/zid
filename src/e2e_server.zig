@@ -248,6 +248,12 @@ fn writeScmJson(ui: *ui_mod.UI, w: *std.Io.Writer) !void {
         try std.json.Stringify.value(c.hash, .{}, w);
         try w.writeAll(", \"subject\": ");
         try std.json.Stringify.value(c.subject, .{}, w);
+        // Statistik: "unknown"/"loading"/"failed" oder {files, insertions, deletions}
+        try w.writeAll(", \"stat\": ");
+        switch (c.stat) {
+            .loaded => |s| try w.print("{{\"files\": {d}, \"insertions\": {d}, \"deletions\": {d}}}", .{ s.files, s.insertions, s.deletions }),
+            else => try w.print("\"{s}\"", .{@tagName(c.stat)}),
+        }
         try w.writeAll(", \"refs\": [");
         for (c.refs, 0..) |r, k| {
             if (k > 0) try w.writeAll(", ");

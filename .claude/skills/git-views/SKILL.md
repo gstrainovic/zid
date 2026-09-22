@@ -111,6 +111,13 @@ Aus AGENTS.md hierher verschoben (21.09.2026), Wortlaut unverändert.
   ein kleines SVG mit eigenem Pfad. Das ist Absicht: Der Rasterizer füllt nach Even-Odd (mehrere
   Formen in einem Pfad schneiden Löcher) und der Atlas rastert höchstens vier neue Formen pro
   Durchgang — als eigene Formen je Radius und Quadrant werden sie wiederverwendet.
+- **Graph-Log ohne `--shortstat`** (seit 22.09.2026). Auf einem Netzlaufwerk mit losen Objekten
+  (jedes Objekt eine Datei, jeder Zugriff ein SMB-Roundtrip) brauchte eine Seite damit 35–50 s,
+  ohne 2–6 s. `Commit.stat` ist ein `StatState` (unknown/loading/failed/loaded); das Überfahren
+  einer Zeile fordert die Zahlen dieses einen Commits an (`View.requestStat`, Worker
+  `taskGitCommitStat` mit `git_scm.statArgs`), die Hover-Karte zeigt bis dahin „Loading
+  changes…“. E2E in `e2e_scm_graph.py` (`scm_state.commits[].stat`). Der Rest der Wartezeit ist
+  `--topo-order`: git liest dafür den ganzen Verlauf, bevor es die erste Zeile ausgibt.
 - `git_worker.FieldsParam` trennt Felder mit 0x1e, weil Schlüssel selbst 0x1f enthalten
   (`graph<generation>\x1f<hash>`); `generation` verwirft Ergebnisse von vor einem Refresh.
 - E2E `python3 scripts/e2e_scm_graph.py` (Fixture mit Remote, Merge, Tag und 55 Commits Vorlauf),

@@ -92,6 +92,8 @@ pub const ScmGraphView = struct {
         if (row != self.hover_row) {
             self.hover_row = row;
             self.hover_since_ms = self.now_ms;
+            // Statistik schon beim Überfahren anfordern, nicht erst mit der Karte nach 700 ms
+            if (row) |r| self.view.requestStat(r);
         }
     }
 
@@ -416,8 +418,18 @@ fn renderBadges(arena: std.mem.Allocator, theme: Theme, row_index: usize, c: git
 
 fn renderHover(arena: std.mem.Allocator, theme: Theme, row_index: usize, c: git_scm.Commit, filter: git_scm.AutoFilter) void {
     // Gleicher Aufbau wie der Timeline-Hover (VS Code getHistoryItemHover)
-    const item = git_timeline.Item{ .hash = c.hash, .timestamp = c.timestamp, .author = c.author, .message = c.message, .stat = .{ .files = c.stat.files, .insertions = c.stat.insertions, .deletions = c.stat.deletions } };
+    // Statistik kommt nachgeladen (git_scm.View.requestStat); bis dahin ein Platzhalter
+    const loaded: ?git_scm.Stat = switch (c.stat) {
+        .loaded => |s| s,
+        else => null,
+    };
+    const s = loaded orelse git_scm.Stat{};
+    const item = git_timeline.Item{ .hash = c.hash, .timestamp = c.timestamp, .author = c.author, .message = c.message, .stat = .{ .files = s.files, .insertions = s.insertions, .deletions = s.deletions } };
     const h = git_timeline.hoverText(arena, item, std.time.timestamp()) catch return;
+    const stats_text: []const u8 = if (loaded != null) h.stats else switch (c.stat) {
+        .failed => "",
+        else => "Loading changes…",
+    };
     const upward = blk: {
         const b = GBox.of(clay.ElementId.IDI("sg_row", @intCast(row_index))) orelse break :blk false;
         const sidebar = GBox.of(clay.ElementId.ID("sidebar")) orelse break :blk false;
@@ -440,7 +452,7 @@ fn renderHover(arena: std.mem.Allocator, theme: Theme, row_index: usize, c: git_
         clay.text(h.header, .{ .font_size = 16, .color = theme.text, .wrap_mode = .words });
         clay.text(h.message, .{ .font_size = 16, .color = theme.text, .wrap_mode = .words });
         clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(1) } }, .background_color = theme.border })({});
-        clay.text(h.stats, .{ .font_size = 15, .color = theme.subtext, .wrap_mode = .words });
+        if (stats_text.len > 0) clay.text(stats_text, .{ .font_size = 15, .color = if (loaded != null) theme.subtext else theme.muted, .wrap_mode = .words });
         clay.UI()(.{ .layout = .{ .direction = .left_to_right, .child_gap = 6 } })({
             for (c.refs, 0..) |r, k| {
                 const color = filter.colorOf(r.id);
