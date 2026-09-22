@@ -127,6 +127,11 @@ Aus AGENTS.md hierher verschoben (21.09.2026), Wortlaut unverändert.
   (`undoEdit`/`redoEdit`): zusammenhängendes Tippen ist eine Gruppe, eine Cursorbewegung
   schliesst sie. Doppelklick markiert das Wort (`selectWordAtCursor`); die Zeit dafür kommt
   aus `std.time.milliTimestamp`, damit die Aufrufer keine Uhr durchreichen müssen.
+- **`line_edit` in einem Dialog braucht `Config.z_index` über dem Dialog.** Cursorstrich
+  und Markierung sind schwebende Elemente, und Clay sortiert z-Indizes global, nicht relativ
+  zum Elternteil. Mit dem Standard 10 lagen sie unter Ordner-Dialog und Picker (z 2000) und
+  waren unsichtbar (bis 22.09.2026). Beide Felder stehen jetzt auf 2002; E2E prüft das Pixel
+  am Cursor in `e2e_open_folder.py`.
 - Jeder eingebettete `CodeEditor` braucht die Modifier: `UI.setCtrlState`/`setAltState`/
   `setShiftState` reichen sie an Chat **und** Commit-Feld weiter. Ohne das greift die
   Keymap des Editors nicht und Ctrl+Z tut nichts.

@@ -12,7 +12,7 @@ const tooltip = @import("components/tooltip.zig");
 const line_edit = @import("line_edit.zig");
 
 /// Pfadfeld (Textelement-ID, Schriftgröße)
-const path_field: line_edit.Config = .{ .id = "fp_input_text", .font_size = 20 };
+const path_field: line_edit.Config = .{ .id = "fp_input_text", .font_size = 20, .z_index = 2002 };
 
 const log = std.log.scoped(.folder_picker);
 
