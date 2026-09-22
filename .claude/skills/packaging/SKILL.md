@@ -113,6 +113,13 @@ Aus AGENTS.md hierher verschoben (21.09.2026), Wortlaut unverändert.
   ubuntu-24.04 (passt zu core24). Der Store verlangt für classic einmal eine Freigabe.
 - COPR baut aus einem SRPM (`rpmbuild -bs`, Source0 aus dem veröffentlichten Release);
   mit der Spec direkt baute COPR 0.1.1 nicht.
+- apt (`.github/workflows/apt.yml`, `packaging/apt/publish.sh`): Pages-Repo
+  gstrainovic/apt-zid, flache Quelle `stable main`, Index per `apt-ftparchive`, signiert als
+  `InRelease` und `Release.gpg`. Das Repo trägt nur einen Commit (Orphan + Force-Push), im
+  Pool bleiben drei Versionen — sonst wüchse es je Release um ~40 MB. Den privaten Schlüssel
+  gibt es nur als Secret `APT_SIGNING_KEY`; geht er verloren, neuen erzeugen und Nutzer
+  müssen `zid.gpg` neu holen. Lokal unter Windows: gpg aus Git-Bash braucht ein kurzes
+  `--homedir` (der Agent-Socket-Pfad darf nicht zu lang sein und kein `C:` enthalten).
 - Scoop: `bucket/zid.json` im Repo gstrainovic/scoop-zid ist die einzige Kopie des
   Manifests. Dessen Excavator (`.github/workflows/excavator.yml`, ScoopInstaller/GithubActions)
   läuft alle 4 Stunden, `gh workflow run excavator.yml -R gstrainovic/scoop-zid` sofort.
