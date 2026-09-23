@@ -3,7 +3,6 @@
 //! alles mit tmpDir testbar bleibt.
 
 const std = @import("std");
-const builtin = @import("builtin");
 const env = @import("env");
 
 pub const max_name_len = 255;
@@ -732,11 +731,6 @@ pub fn moveByCopy(alloc: std.mem.Allocator, src: []const u8, dest: []const u8) !
     }
 }
 
-/// Windows kennt kein `gio` und Netzlaufwerke haben keinen Papierkorb: dort wird über
-/// die Laufwerksgrenze kopiert. Unter Linux bleibt der Fallback `gio trash` (nutzt die
-/// Ablage auf dem jeweiligen Datenträger, statt ein 4-GB-File nach HOME zu kopieren).
-const copy_across_volumes = builtin.os.tag == .windows;
-
 /// Verschiebt `path` in den freedesktop-Papierkorb unter `trash_root`
 /// (`files/` + `info/<name>.trashinfo`). Liefert den Namen im Papierkorb (owned).
 /// DeletionDate steht in UTC (kein Zeitzonen-Support in std).
@@ -771,28 +765,41 @@ pub fn trashPath(alloc: std.mem.Allocator, path: []const u8, trash_root: []const
     return error.PathAlreadyExists;
 }
 
+/// Rename in den Papierkorb; über eine Laufwerksgrenze (USB-Stick, Netzlaufwerk, andere
+/// Partition) per Kopie. Der Home-Papierkorb ist der, den die Oberfläche zeigt, und die
+/// `.trashinfo` trägt den Ursprungspfad, „Wiederherstellen“ legt also zurück.
 fn moveIntoTrash(alloc: std.mem.Allocator, path: []const u8, dest: []const u8) !void {
     std.fs.renameAbsolute(path, dest) catch |err| switch (err) {
         error.FileNotFound, error.AccessDenied, error.PathAlreadyExists => return err,
-        // Windows meldet UNC → C: nicht als RenameAcrossMountPoints, sondern Unexpected;
+        // Linux meldet RenameAcrossMountPoints, Windows für UNC → C: nur Unexpected;
         // deshalb jeder andere Fehler. Die Kopie ist gefahrlos: erst kopieren, dann löschen.
-        else => if (copy_across_volumes) try moveByCopy(alloc, path, dest) else return err,
+        else => try moveByCopy(alloc, path, dest),
     };
 }
 
-/// Standard-Papierkorb (owned): `$XDG_DATA_HOME/Trash`, sonst unter Windows
-/// `%LOCALAPPDATA%\zid\Trash` (für Laufwerke ohne Papierkorb), sonst `~/.local/share/Trash`.
+/// Standard-Papierkorb: $XDG_DATA_HOME/Trash oder ~/.local/share/Trash (owned).
 pub fn defaultTrashRoot(alloc: std.mem.Allocator) ![]u8 {
     if (env.get("XDG_DATA_HOME")) |x| {
         if (x.len > 0) return std.fs.path.join(alloc, &.{ x, "Trash" });
     }
-    if (builtin.os.tag == .windows) {
-        if (env.get("LOCALAPPDATA")) |l| {
-            if (l.len > 0) return std.fs.path.join(alloc, &.{ l, "zid", "Trash" });
-        }
-    }
     const home = env.home() orelse return error.InvalidName;
     return std.fs.path.join(alloc, &.{ home, ".local", "share", "Trash" });
+}
+
+/// Windows: Zwischenordner auf C: für Dateien von Laufwerken ohne Papierkorb
+/// (`%LOCALAPPDATA%\zid\recycled`, owned). Die Kopie wandert von dort in den Recycle Bin,
+/// „Wiederherstellen“ legt sie in diesen Ordner zurück.
+pub fn recycleStagingDir(alloc: std.mem.Allocator) ![]u8 {
+    const base = env.get("LOCALAPPDATA") orelse env.home() orelse return error.InvalidName;
+    if (base.len == 0) return error.InvalidName;
+    return std.fs.path.join(alloc, &.{ base, "zid", "recycled" });
+}
+
+/// Datei oder Ordnerbaum endgültig entfernen. Nur für Originale, deren Kopie schon im
+/// Papierkorb liegt, und für gescheiterte Kopien.
+pub fn removeTree(path: []const u8) !void {
+    if (isDir(path)) return std.fs.deleteTreeAbsolute(path);
+    return std.fs.deleteFileAbsolute(path);
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────

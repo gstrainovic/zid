@@ -58,18 +58,24 @@ Aus AGENTS.md hierher verschoben (21.09.2026), Wortlaut unverändert.
   Ordner, sonst Elternordner, sonst Root); Enter legt an (Dateien werden geöffnet), Escape bricht ab.
 - **Löschen = Papierkorb** (`explorer_ops.trashPath`: `$XDG_DATA_HOME/Trash` bzw. `~/.local/share/Trash`,
   `files/` + `info/*.trashinfo`, DeletionDate in UTC), Fallback `gio trash`, nie endgültig.
+  Über Laufwerksgrenzen (USB-Stick, Netz, andere Partition) geht das Rename nicht; dann kopiert
+  `explorer_ops.moveByCopy` in den Home-Papierkorb und löscht danach das Original (scheitert ein
+  Schritt, bleibt das Original). Kein eigener Ablageort: der Home-Papierkorb ist der, den die
+  Oberfläche zeigt, und „Wiederherstellen“ folgt dem Pfad in der `.trashinfo`.
   E2E-Skripte setzen `XDG_DATA_HOME=tmp/xdg`, damit der echte Papierkorb leer bleibt. Fehler von
   Explorer-Aktionen landen in `takeError` → Dialog „Error“ statt nur im Log.
 - **Windows** (seit 23.09.2026, `src/platform/recycle_bin.zig`): Recycle Bin über
   `SHFileOperationW` mit `FOF_ALLOWUNDO`, aber nur auf festen Laufwerken (`GetDriveTypeW ==
   DRIVE_FIXED`). Netz- und Wechsellaufwerke haben keinen Papierkorb, Windows würde dort mit
-  `FOF_NOCONFIRMATION` still endgültig löschen; deshalb landet die Datei dann in der zid-Ablage
-  `%LOCALAPPDATA%\zid\Trash` (freedesktop-Format), über die Laufwerksgrenze per
-  `explorer_ops.moveByCopy` (erst kopieren, dann löschen; scheitert ein Schritt, bleibt das
-  Original). Die Statusmeldung nennt dann den Ordner. Vorher lief auch Windows in den
-  Linux-Pfad: `~/.local/share/Trash` + `gio` — vom BM-Netzlaufwerk (`\\172.16.21.71\f`) schlug
-  das Rename mit `Unexpected` fehl, dann `NoTrash`. Ein gesetztes `XDG_DATA_HOME` erzwingt
-  auch unter Windows die Ablage (E2E). `build.zig` linkt dafür `shell32`.
+  `FOF_NOCONFIRMATION` still endgültig löschen; deshalb `FileExplorer.recycleViaStaging`: Kopie
+  nach `%LOCALAPPDATA%\zid\recycled` (`copyPath`), die Kopie in den Recycle Bin, dann das
+  Original entfernen. Die Datei liegt so im normalen Papierkorb; „Wiederherstellen“ legt sie in
+  den Zwischenordner, nicht aufs Netzlaufwerk zurück (die API kennt keinen fremden
+  Ursprungsort; das `$I`-Format selbst zu schreiben wäre undokumentiert). Die Statusmeldung nennt
+  den Ordner. Vorher lief auch Windows in den Linux-Pfad: `~/.local/share/Trash` + `gio` — vom
+  BM-Netzlaufwerk (`\\172.16.21.71\f`) schlug das Rename mit `Unexpected` fehl, dann `NoTrash`.
+  Ein gesetztes `XDG_DATA_HOME` erzwingt auch unter Windows die freedesktop-Ablage (E2E).
+  `build.zig` linkt dafür `shell32`.
 - **Dialoge per Tastatur** (`dialog_ops.zig`, unit-getestet): Enter wählt den fokussierten Button
   (Start: erster = primär), Escape Cancel, Tab/Shift+Tab wandern, Anfangsbuchstabe wählt (`d` Delete,
   `s` Save, `n` Don't Save). Bei offenem Dialog erreicht keine Taste und kein Zeichen den Editor.
