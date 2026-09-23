@@ -5,9 +5,12 @@
 //! ist der Cursor für Tastaturnavigation. Dateisystem-Aktionen liegen in explorer_ops.zig.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const clay = @import("clay");
 const wio = @import("wio");
+const env = @import("env");
 const explorer_ops = @import("explorer_ops.zig");
+const recycle_bin = @import("../platform/recycle_bin.zig");
 const shortcuts = @import("shortcuts");
 const ctx_menu = @import("context_menu");
 const ui = @import("../ui/mod.zig");
@@ -1087,14 +1090,37 @@ pub const FileExplorerState = struct {
         }
     }
 
-    /// In den Papierkorb verschieben; Fallback `gio trash`. Nie endgültig löschen.
-    fn trashOrFail(self: *Self, path: []const u8) !void {
+    /// Wohin ein Eintrag beim Löschen gewandert ist.
+    const Trashed = enum {
+        /// Papierkorb des Systems (Windows Recycle Bin, Linux `gio trash`).
+        system,
+        /// freedesktop-Ablage unter `explorer_ops.defaultTrashRoot` (Windows: Laufwerk
+        /// ohne Papierkorb, etwa Netzlaufwerk; Linux: HOME-Papierkorb).
+        folder,
+    };
+
+    /// In den Papierkorb verschieben, nie endgültig löschen. Windows: Recycle Bin auf
+    /// festen Laufwerken, sonst die zid-Ablage (kopiert über die Laufwerksgrenze); ein
+    /// gesetztes `XDG_DATA_HOME` erzwingt die Ablage (E2E). Linux: HOME-Papierkorb,
+    /// Fallback `gio trash`.
+    fn trashOrFail(self: *Self, path: []const u8) !Trashed {
+        if (builtin.os.tag == .windows and env.get("XDG_DATA_HOME") == null) {
+            if (recycle_bin.recycle(self.allocator, path)) |_| {
+                return .system;
+            } else |err| {
+                log.warn("recycle bin for '{s}' failed: {s}, using zid trash", .{ path, @errorName(err) });
+            }
+        }
         const root = explorer_ops.defaultTrashRoot(self.allocator) catch return error.NoTrash;
         defer self.allocator.free(root);
         if (explorer_ops.trashPath(self.allocator, path, root)) |name| {
             self.allocator.free(name);
-            return;
+            return .folder;
         } else |err| {
+            if (builtin.os.tag == .windows) {
+                log.err("trash '{s}' via {s} failed: {s}", .{ path, root, @errorName(err) });
+                return error.NoTrash;
+            }
             log.warn("trash '{s}' via {s} failed: {s}, trying gio", .{ path, root, @errorName(err) });
         }
         var child = std.process.Child.init(&.{ "gio", "trash", "--", path }, self.allocator);
@@ -1103,6 +1129,7 @@ pub const FileExplorerState = struct {
         child.stderr_behavior = .Ignore;
         const term = child.spawnAndWait() catch return error.NoTrash;
         if (term != .Exited or term.Exited != 0) return error.NoTrash;
+        return .system;
     }
 
     /// Alle markierten Einträge in den Papierkorb verschieben.
@@ -1112,15 +1139,23 @@ pub const FileExplorerState = struct {
             for (paths) |p| self.allocator.free(p);
             self.allocator.free(paths);
         }
+        var in_folder: usize = 0;
         for (paths) |p| {
-            self.trashOrFail(p) catch |err| {
+            const where = self.trashOrFail(p) catch |err| {
                 self.setError("trash '{s}' failed: {s}", .{ std.fs.path.basename(p), @errorName(err) });
                 continue;
             };
-            log.info("moved to trash '{s}'", .{p});
+            if (where == .folder) in_folder += 1;
+            log.info("moved to trash '{s}' ({s})", .{ p, @tagName(where) });
             self.pushFsChange(.deleted, p, null);
         }
-        if (paths.len == 1) self.setInfo("Moved to trash: {s}", .{std.fs.path.basename(paths[0])}) else self.setInfo("Moved {d} items to trash", .{paths.len});
+        // Unter Windows sucht man im Recycle Bin vergeblich, wenn die Datei in der
+        // zid-Ablage liegt: den Ort nennen.
+        if (builtin.os.tag == .windows and in_folder > 0) {
+            const root = explorer_ops.defaultTrashRoot(self.allocator) catch null;
+            defer if (root) |r| self.allocator.free(r);
+            if (paths.len == 1) self.setInfo("Moved to zid trash ({s}): {s}", .{ root orelse "?", std.fs.path.basename(paths[0]) }) else self.setInfo("Moved {d} items to zid trash ({s})", .{ paths.len, root orelse "?" });
+        } else if (paths.len == 1) self.setInfo("Moved to trash: {s}", .{std.fs.path.basename(paths[0])}) else self.setInfo("Moved {d} items to trash", .{paths.len});
         self.refresh(null);
     }
 
