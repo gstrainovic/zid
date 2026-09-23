@@ -208,6 +208,7 @@ pub fn build(b: *std.Build) void {
         exe.root_module.linkSystemLibrary("ole32", .{});
         exe.root_module.linkSystemLibrary("gdi32", .{});
         exe.root_module.linkSystemLibrary("comdlg32", .{});
+        exe.root_module.linkSystemLibrary("shell32", .{}); // Papierkorb (SHFileOperationW)
         exe.root_module.link_libc = true;
         // Programm-Icon (Explorer, Taskleiste, Titelleiste)
         exe.root_module.addWin32ResourceFile(.{ .file = b.path("packaging/windows/zid.rc") });
@@ -572,6 +573,16 @@ pub fn build(b: *std.Build) void {
     const folder_ops_tests = b.addTest(.{ .root_module = folder_ops_mod });
     const run_folder_ops_tests = b.addRunArtifact(folder_ops_tests);
     run_folder_ops_tests.has_side_effects = true;
+
+    // Windows-Papierkorb (SHFileOperationW); auf anderen Plattformen nur die Nein-Pfade.
+    const recycle_bin_mod = b.createModule(.{
+        .root_source_file = b.path("src/platform/recycle_bin.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    if (target.result.os.tag == .windows) recycle_bin_mod.linkSystemLibrary("shell32", .{});
+    const run_recycle_bin_tests = b.addRunArtifact(b.addTest(.{ .root_module = recycle_bin_mod }));
+    run_recycle_bin_tests.has_side_effects = true;
 
     // Keysym-Tabelle des wio-Forks: layout-unabhängige Tastenzuordnung.
     const wio_keysym_tests = b.addTest(.{ .root_module = b.createModule(.{
@@ -956,6 +967,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_explorer_ops_tests.step);
     test_step.dependOn(&run_hover_delay_tests.step);
     test_step.dependOn(&run_folder_ops_tests.step);
+    test_step.dependOn(&run_recycle_bin_tests.step);
     test_step.dependOn(&run_shortcuts_tests.step);
     test_step.dependOn(&run_wio_keysym_tests.step);
     test_step.dependOn(&run_display_check_tests.step);

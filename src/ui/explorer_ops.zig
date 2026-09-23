@@ -3,6 +3,7 @@
 //! alles mit tmpDir testbar bleibt.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const env = @import("env");
 
 pub const max_name_len = 255;
@@ -716,6 +717,26 @@ fn writeTrashInfo(alloc: std.mem.Allocator, info_path: []const u8, original: []c
     try f.writeAll(buf.items);
 }
 
+/// Verschiebt `src` nach `dest` über eine Laufwerksgrenze: erst vollständig kopieren,
+/// dann das Original löschen. Bleibt ein Schritt stecken, wird die Kopie wieder entfernt
+/// und `src` bleibt unangetastet — es geht nie etwas verloren.
+pub fn moveByCopy(alloc: std.mem.Allocator, src: []const u8, dest: []const u8) !void {
+    if (isDir(src)) {
+        errdefer std.fs.deleteTreeAbsolute(dest) catch {};
+        try copyTree(alloc, src, dest);
+        try std.fs.deleteTreeAbsolute(src);
+    } else {
+        errdefer std.fs.deleteFileAbsolute(dest) catch {};
+        try std.fs.copyFileAbsolute(src, dest, .{});
+        try std.fs.deleteFileAbsolute(src);
+    }
+}
+
+/// Windows kennt kein `gio` und Netzlaufwerke haben keinen Papierkorb: dort wird über
+/// die Laufwerksgrenze kopiert. Unter Linux bleibt der Fallback `gio trash` (nutzt die
+/// Ablage auf dem jeweiligen Datenträger, statt ein 4-GB-File nach HOME zu kopieren).
+const copy_across_volumes = builtin.os.tag == .windows;
+
 /// Verschiebt `path` in den freedesktop-Papierkorb unter `trash_root`
 /// (`files/` + `info/<name>.trashinfo`). Liefert den Namen im Papierkorb (owned).
 /// DeletionDate steht in UTC (kein Zeitzonen-Support in std).
@@ -741,7 +762,7 @@ pub fn trashPath(alloc: std.mem.Allocator, path: []const u8, trash_root: []const
             continue;
         }
         try writeTrashInfo(alloc, info, path);
-        std.fs.renameAbsolute(path, dest) catch |err| {
+        moveIntoTrash(alloc, path, dest) catch |err| {
             std.fs.deleteFileAbsolute(info) catch {};
             return err;
         };
@@ -750,10 +771,25 @@ pub fn trashPath(alloc: std.mem.Allocator, path: []const u8, trash_root: []const
     return error.PathAlreadyExists;
 }
 
-/// Standard-Papierkorb: $XDG_DATA_HOME/Trash oder ~/.local/share/Trash (owned).
+fn moveIntoTrash(alloc: std.mem.Allocator, path: []const u8, dest: []const u8) !void {
+    std.fs.renameAbsolute(path, dest) catch |err| switch (err) {
+        error.FileNotFound, error.AccessDenied, error.PathAlreadyExists => return err,
+        // Windows meldet UNC → C: nicht als RenameAcrossMountPoints, sondern Unexpected;
+        // deshalb jeder andere Fehler. Die Kopie ist gefahrlos: erst kopieren, dann löschen.
+        else => if (copy_across_volumes) try moveByCopy(alloc, path, dest) else return err,
+    };
+}
+
+/// Standard-Papierkorb (owned): `$XDG_DATA_HOME/Trash`, sonst unter Windows
+/// `%LOCALAPPDATA%\zid\Trash` (für Laufwerke ohne Papierkorb), sonst `~/.local/share/Trash`.
 pub fn defaultTrashRoot(alloc: std.mem.Allocator) ![]u8 {
     if (env.get("XDG_DATA_HOME")) |x| {
         if (x.len > 0) return std.fs.path.join(alloc, &.{ x, "Trash" });
+    }
+    if (builtin.os.tag == .windows) {
+        if (env.get("LOCALAPPDATA")) |l| {
+            if (l.len > 0) return std.fs.path.join(alloc, &.{ l, "zid", "Trash" });
+        }
     }
     const home = env.home() orelse return error.InvalidName;
     return std.fs.path.join(alloc, &.{ home, ".local", "share", "Trash" });
@@ -964,6 +1000,46 @@ test "movePath: verschiebt, gleiches Verzeichnis ist No-op" {
     defer testing.allocator.free(moved);
     try tmp.dir.access("ziel/a.txt", .{});
     try testing.expectError(error.FileNotFound, tmp.dir.access("a.txt", .{}));
+}
+
+test "moveByCopy: Datei und Ordnerbaum kommen vollständig an, Original ist weg" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root);
+
+    try tmp.dir.writeFile(.{ .sub_path = "single.txt", .data = "eins" });
+    const f = try joinT(root, "single.txt");
+    defer testing.allocator.free(f);
+    const f2 = try joinT(root, "single.moved");
+    defer testing.allocator.free(f2);
+    try moveByCopy(testing.allocator, f, f2);
+    try testing.expect(!exists(f));
+    const got = try tmp.dir.readFileAlloc(testing.allocator, "single.moved", 64);
+    defer testing.allocator.free(got);
+    try testing.expectEqualStrings("eins", got);
+
+    try tmp.dir.makePath("tree/sub/deep");
+    try tmp.dir.writeFile(.{ .sub_path = "tree/a.txt", .data = "a" });
+    try tmp.dir.writeFile(.{ .sub_path = "tree/sub/deep/b.txt", .data = "bb" });
+    const t = try joinT(root, "tree");
+    defer testing.allocator.free(t);
+    const t2 = try joinT(root, "tree.moved");
+    defer testing.allocator.free(t2);
+    try moveByCopy(testing.allocator, t, t2);
+    try testing.expect(!exists(t));
+    const b = try tmp.dir.readFileAlloc(testing.allocator, "tree.moved/sub/deep/b.txt", 64);
+    defer testing.allocator.free(b);
+    try testing.expectEqualStrings("bb", b);
+    try tmp.dir.access("tree.moved/a.txt", .{});
+
+    // Fehlende Quelle: nichts entsteht am Ziel.
+    const nix = try joinT(root, "nix.txt");
+    defer testing.allocator.free(nix);
+    const nix2 = try joinT(root, "nix.moved");
+    defer testing.allocator.free(nix2);
+    try testing.expectError(error.FileNotFound, moveByCopy(testing.allocator, nix, nix2));
+    try testing.expect(!exists(nix2));
 }
 
 test "trashPath: Datei landet in files/, info/ bekommt trashinfo mit Pfad" {
