@@ -1092,30 +1092,29 @@ pub const FileExplorerState = struct {
 
     /// Wohin ein Eintrag beim Löschen gewandert ist.
     const Trashed = enum {
-        /// Papierkorb des Systems (Windows Recycle Bin, Linux `gio trash`).
+        /// Papierkorb des Systems, direkt (Recycle Bin bzw. Home-Papierkorb / `gio trash`).
         system,
-        /// freedesktop-Ablage unter `explorer_ops.defaultTrashRoot` (Windows: Laufwerk
-        /// ohne Papierkorb, etwa Netzlaufwerk; Linux: HOME-Papierkorb).
-        folder,
+        /// Windows-Laufwerk ohne Papierkorb: Kopie über `recycleStagingDir` im Recycle Bin.
+        staged,
     };
 
-    /// In den Papierkorb verschieben, nie endgültig löschen. Windows: Recycle Bin auf
-    /// festen Laufwerken, sonst die zid-Ablage (kopiert über die Laufwerksgrenze); ein
-    /// gesetztes `XDG_DATA_HOME` erzwingt die Ablage (E2E). Linux: HOME-Papierkorb,
-    /// Fallback `gio trash`.
+    /// In den Papierkorb verschieben, nie endgültig löschen.
+    /// Windows: Recycle Bin; von Laufwerken ohne Papierkorb (Netz, USB) über eine Kopie auf
+    /// C:. Ein gesetztes `XDG_DATA_HOME` erzwingt die freedesktop-Ablage (E2E).
+    /// Linux: Home-Papierkorb, über Laufwerksgrenzen per Kopie, Fallback `gio trash`.
     fn trashOrFail(self: *Self, path: []const u8) !Trashed {
         if (builtin.os.tag == .windows and env.get("XDG_DATA_HOME") == null) {
-            if (recycle_bin.recycle(self.allocator, path)) |_| {
+            if (recycle_bin.hasRecycleBin(self.allocator, path)) {
+                try recycle_bin.recycle(self.allocator, path);
                 return .system;
-            } else |err| {
-                log.warn("recycle bin for '{s}' failed: {s}, using zid trash", .{ path, @errorName(err) });
             }
+            return self.recycleViaStaging(path);
         }
         const root = explorer_ops.defaultTrashRoot(self.allocator) catch return error.NoTrash;
         defer self.allocator.free(root);
         if (explorer_ops.trashPath(self.allocator, path, root)) |name| {
             self.allocator.free(name);
-            return .folder;
+            return .system;
         } else |err| {
             if (builtin.os.tag == .windows) {
                 log.err("trash '{s}' via {s} failed: {s}", .{ path, root, @errorName(err) });
@@ -1132,6 +1131,26 @@ pub const FileExplorerState = struct {
         return .system;
     }
 
+    /// Laufwerk ohne Papierkorb: erst nach `%LOCALAPPDATA%\zid\recycled` kopieren, die
+    /// Kopie in den Recycle Bin legen, dann das Original entfernen. Scheitert die Kopie
+    /// oder der Recycle Bin, bleibt das Original unangetastet.
+    fn recycleViaStaging(self: *Self, path: []const u8) !Trashed {
+        const staging = try explorer_ops.recycleStagingDir(self.allocator);
+        defer self.allocator.free(staging);
+        try std.fs.cwd().makePath(staging);
+        const copy = try explorer_ops.copyPath(self.allocator, path, staging);
+        defer self.allocator.free(copy);
+        recycle_bin.recycle(self.allocator, copy) catch |err| {
+            explorer_ops.removeTree(copy) catch {};
+            return err;
+        };
+        explorer_ops.removeTree(path) catch |err| {
+            log.err("'{s}' is in the recycle bin (copied via {s}), but the original could not be removed: {s}", .{ path, staging, @errorName(err) });
+            return err;
+        };
+        return .staged;
+    }
+
     /// Alle markierten Einträge in den Papierkorb verschieben.
     pub fn deleteSelection(self: *Self) void {
         const paths = self.selectedPaths(self.allocator) catch return;
@@ -1139,22 +1158,22 @@ pub const FileExplorerState = struct {
             for (paths) |p| self.allocator.free(p);
             self.allocator.free(paths);
         }
-        var in_folder: usize = 0;
+        var staged: usize = 0;
         for (paths) |p| {
             const where = self.trashOrFail(p) catch |err| {
                 self.setError("trash '{s}' failed: {s}", .{ std.fs.path.basename(p), @errorName(err) });
                 continue;
             };
-            if (where == .folder) in_folder += 1;
+            if (where == .staged) staged += 1;
             log.info("moved to trash '{s}' ({s})", .{ p, @tagName(where) });
             self.pushFsChange(.deleted, p, null);
         }
-        // Unter Windows sucht man im Recycle Bin vergeblich, wenn die Datei in der
-        // zid-Ablage liegt: den Ort nennen.
-        if (builtin.os.tag == .windows and in_folder > 0) {
-            const root = explorer_ops.defaultTrashRoot(self.allocator) catch null;
-            defer if (root) |r| self.allocator.free(r);
-            if (paths.len == 1) self.setInfo("Moved to zid trash ({s}): {s}", .{ root orelse "?", std.fs.path.basename(paths[0]) }) else self.setInfo("Moved {d} items to zid trash ({s})", .{ paths.len, root orelse "?" });
+        // „Wiederherstellen“ im Recycle Bin legt eine Kopie vom Netzlaufwerk in den
+        // Zwischenordner, nicht zurück: den Ort nennen.
+        if (builtin.os.tag == .windows and staged > 0) {
+            const dir = explorer_ops.recycleStagingDir(self.allocator) catch null;
+            defer if (dir) |d| self.allocator.free(d);
+            if (paths.len == 1) self.setInfo("Moved to Recycle Bin (restore lands in {s}): {s}", .{ dir orelse "?", std.fs.path.basename(paths[0]) }) else self.setInfo("Moved {d} items to Recycle Bin (restore lands in {s})", .{ paths.len, dir orelse "?" });
         } else if (paths.len == 1) self.setInfo("Moved to trash: {s}", .{std.fs.path.basename(paths[0])}) else self.setInfo("Moved {d} items to trash", .{paths.len});
         self.refresh(null);
     }
