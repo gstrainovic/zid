@@ -17,10 +17,6 @@ Thumbs.db
 # Archives
 archives/
 
-# Snap-Bau (release.yml entpackt das Tarball hierher)
-snap-src/
-*.snap
-
 # External libs (not tracked in main repo)
 libs/wgpu-native/
 libs/wio_test_vulkan/
