@@ -397,6 +397,9 @@ pub const UI = struct {
             } else |err| {
                 log.err("Failed to load default file '{s}': {}. Using fallback.", .{ path, err });
                 initial_buf.root = try initial_buf.load_from_string("// Error loading file", &initial_buf.file_eol_mode, &initial_buf.file_utf8_sanitized);
+                // Wie der Scratchpad unten: ohne last_save galt der namenlose Buffer als
+                // geändert, und Beenden fragte „1 file with unsaved changes: .“ (zid .).
+                markLoaded(initial_buf);
                 try open_buffers.put(try allocator.dupe(u8, "error"), initial_buf);
             }
         } else {

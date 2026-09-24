@@ -163,7 +163,7 @@ pub fn main() !void {
             var stdout_f = std.fs.File.stdout();
             var stdout_writer = stdout_f.writer(&buf);
             const w = &stdout_writer.interface;
-            try w.writeAll("Usage: zid [OPTIONS] [FILE]\n\n");
+            try w.writeAll("Usage: zid [OPTIONS] [FILE|FOLDER]\n\n");
             try w.writeAll("Options:\n");
             try w.writeAll("  --theme light|dark    Override theme\n");
             try w.writeAll("  --e2e                 Enable E2E mode (RPC on port 9999)\n");
@@ -187,9 +187,23 @@ pub fn main() !void {
     const exe_dir = std.fs.selfExeDirPathAlloc(allocator) catch null;
     defer if (exe_dir) |d| allocator.free(d);
 
-    // Nur eine auf der Kommandozeile genannte Datei wird beim Start geöffnet.
-    const resolved_file_path: ?[]const u8 = default_file_path;
+    // Nur eine auf der Kommandozeile genannte Datei wird beim Start geöffnet. Ein Ordner
+    // (`zid .`) wird Projektordner statt Datei: als Datei gelesen scheiterte er mit IsDir,
+    // und der Fallback-Buffer galt beim Beenden als „1 file with unsaved changes: .“.
+    var resolved_file_path: ?[]const u8 = default_file_path;
+    var start_folder: ?[]const u8 = null;
+    if (default_file_path) |p| {
+        // openDir statt statFile: statFile öffnet unter Windows als Datei und scheitert
+        // bei Ordnern mit IsDir, meldet also nie `.directory`.
+        if (std.fs.cwd().openDir(p, .{})) |d| {
+            var dir = d;
+            dir.close();
+            start_folder = p;
+            resolved_file_path = null;
+        } else |_| {}
+    }
     if (resolved_file_path) |p| log.info("Start file: {s}", .{p});
+    if (start_folder) |p| log.info("Start folder: {s}", .{p});
 
     log.info("=== zid starting ===", .{});
     log.info("Platform: {s}-{s}", .{
@@ -343,8 +357,8 @@ pub fn main() !void {
 
         // Phase 9: File Explorer mit aktuellem Verzeichnis initialisieren
         const cwd = std.fs.cwd();
-        var cwd_buf: [1024]u8 = undefined;
-        const cwd_path = cwd.realpath(".", &cwd_buf) catch null;
+        var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const cwd_path = cwd.realpath(start_folder orelse ".", &cwd_buf) catch null;
         var git_repo_path: ?[]u8 = null;
         defer if (git_repo_path) |p| allocator.free(p);
         if (cwd_path) |path| {

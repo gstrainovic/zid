@@ -26,7 +26,13 @@ Aus AGENTS.md hierher verschoben (21.09.2026), Wortlaut unverändert.
   **Nach dem Laden `UI.markLoaded`, nie nur `last_save = root`:** `is_dirty` vergleicht auch
   `last_save_eol_mode` (Vorgabe LF) mit dem erkannten `file_eol_mode`. Bis 21.09.2026 galt so
   jede CRLF-Datei ab dem Öffnen als geändert (unter Windows jede aus Git ausgecheckte), dazu der
-  namenlose Scratch-Buffer ohne Startdatei; Beenden fragte nach „todo.md, .“.
+  namenlose Scratch-Buffer ohne Startdatei; Beenden fragte nach „todo.md, .“. Dasselbe Bild
+  („1 file with unsaved changes: .“, kein Tab) gab es bis 24.09.2026 bei `zid .`: der Ordner
+  ging als Startdatei in `UI.init`, `readFileAlloc` scheiterte mit IsDir, und der
+  Fallback-Buffer hatte kein `markLoaded`. Jetzt erkennt `main.zig` ein Ordner-Argument per
+  `openDir` (`statFile` öffnet unter Windows als Datei und meldet bei Ordnern IsDir, nie
+  `.directory`) und nimmt es als Projektordner statt der cwd; der Fallback-Buffer ist
+  zusätzlich `markLoaded`. E2E-Fall 1b in `e2e_quit_unsaved.py`.
 - **Autosave:** File → Toggle Autosave (`UI.autosave`), speichert 1 s nach der letzten Änderung
   (`CodeEditor.last_edit_ms`) nur Text-Tabs mit Pfad. Jedes Speichern legt vorher eine Sicherung
   unter `$XDG_DATA_HOME/zid/backup/<name>.<hash>.bak` ab (`src/editor/backup.zig`, eine je

@@ -11,7 +11,7 @@ Aufruf: python3 scripts/e2e_quit_unsaved.py
 import os, subprocess, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from e2e_open_folder import ROOT, rpc, wait_port, settle, start_zid, stop_zid, check, click_center  # noqa: E402
+from e2e_open_folder import ROOT, rpc, result_json, wait_port, settle, start_zid, stop_zid, check, click_center  # noqa: E402
 from e2e_shortcuts import ui_state  # noqa: E402
 
 FIX = os.path.join(ROOT, "tmp", "quit_e2e", "a.txt")
@@ -24,9 +24,9 @@ def fresh_fixture(newline="\n"):
         f.write(ORIGINAL)
 
 
-def start(name):
+def start(name, extra=()):
     log = open(os.path.join(ROOT, "tmp", f"e2e_quit_{name}.log"), "w")
-    proc = start_zid(["--headless", "--ai=off"], log)
+    proc = start_zid(["--headless", "--ai=off", *extra], log)
     wait_port(proc)
     settle(20)
     return proc, log
@@ -63,6 +63,22 @@ def main():
         rpc("open_file", [FIX]); settle(30)
         rpc("request_quit")
         check(exited(proc), "zid hat sich beendet")
+    finally:
+        if proc.poll() is None:
+            stop_zid(proc)
+        log.close()
+
+    # `zid .` gab "." als Startdatei weiter: Laden scheiterte mit IsDir, der Fallback-Buffer
+    # ohne Namen galt als geändert, Beenden fragte „1 file with unsaved changes: .“.
+    print("--- 1b. Ordner als Argument (zid .) wird Projektordner, Beenden fragt nicht")
+    folder = os.path.dirname(FIX)
+    proc, log = start("folder", [folder])
+    try:
+        root = result_json("get_state")["root"]
+        check(os.path.normcase(root) == os.path.normcase(folder), f"Projektordner ist das Argument: {root!r}")
+        check(ui_state()["tabs"] == [], "kein Tab offen")
+        rpc("request_quit")
+        check(exited(proc), "zid hat sich ohne Dialog beendet")
     finally:
         if proc.poll() is None:
             stop_zid(proc)
