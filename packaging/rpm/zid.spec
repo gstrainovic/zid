@@ -8,7 +8,7 @@
 %global __brp_check_rpaths %{nil}
 
 Name:           zid
-Version:        0.1.6
+Version:        0.1.7
 Release:        1%{?dist}
 Summary:        GPU-beschleunigter Editor mit Markdown-Vorschau, PDF-Anzeige und lokaler KI
 
@@ -68,6 +68,12 @@ appstreamcli validate --no-net \
 %{_datadir}/metainfo/%{appid}.metainfo.xml
 
 %changelog
+* Thu Sep 24 2026 gst <g.strainovic@waelli.ch> - 0.1.7-1
+- Windows: deleting in the explorer moves files to the Recycle Bin; files on network shares and USB drives without a Recycle Bin are copied to a local drive first and recycled from there.
+- Linux: deleting files on another partition or a USB drive copies them to the home trash instead of failing.
+- Arch Linux package source (pacman).
+- Snap package discontinued.
+
 * Thu Sep 24 2026 gst <g.strainovic@waelli.ch> - 0.1.6-1
 - Windows: deleting in the explorer moves files to the Recycle Bin; files on network shares and USB drives without a Recycle Bin are copied to a local drive first and recycled from there.
 - Linux: deleting files on another partition or a USB drive copies them to the home trash instead of failing.

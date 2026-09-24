@@ -34,6 +34,14 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.1.7" date="2026-09-24">
+      <description>
+        <p>Windows: deleting in the explorer moves files to the Recycle Bin; files on network shares and USB drives without a Recycle Bin are copied to a local drive first and recycled from there.</p>
+        <p>Linux: deleting files on another partition or a USB drive copies them to the home trash instead of failing.</p>
+        <p>Arch Linux package source (pacman).</p>
+        <p>Snap package discontinued.</p>
+      </description>
+    </release>
     <release version="0.1.6" date="2026-09-24">
       <description>
         <p>Windows: deleting in the explorer moves files to the Recycle Bin; files on network shares and USB drives without a Recycle Bin are copied to a local drive first and recycled from there.</p>
