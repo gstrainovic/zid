@@ -65,15 +65,6 @@ Updates kommen danach mit `pacman -Syu`.
 sudo zypper install https://github.com/gstrainovic/zid/releases/latest/download/zid-0.1.6-1.x86_64.rpm
 ```
 
-### Snap
-
-```bash
-sudo snap install zid --classic
-```
-
-`--classic` wie bei VS Code: Terminal, git und die Suche laufen auf dem System, nicht in
-einer Sandbox. Updates holt snapd selbst.
-
 ## Installation (Windows)
 
 Am Release hängt `zid-0.1.6-x86_64-windows.zip` (gebaut von GitHub Actions).
@@ -210,7 +201,7 @@ Den Rest erledigt `.github/workflows/release.yml`:
 
 * Linux-Tarball (`packaging/build-release.sh`, Debian-12-Container) und Windows-Zip
   (`windows-release.yml`) bauen, beide mit ripgrep. Aus dem Tarball ohne neuen Bau:
-  `.deb` und `.rpm` (`packaging/nfpm.yaml`) und der Snap (`snap/snapcraft.yaml`).
+  `.deb`, `.rpm` und Arch-Paket (`packaging/nfpm.yaml`).
 * Release als Entwurf anlegen, alles anhängen, dann veröffentlichen.
 * **Fedora:** SRPM bauen und an COPR `gstrainovic/zid` schicken. Braucht das Secret
   `COPR_CONFIG` (Inhalt von `~/.config/copr`, Token von
@@ -226,9 +217,6 @@ Den Rest erledigt `.github/workflows/release.yml`:
   Datenbank mit demselben Schlüssel wie apt und installiert es danach zur Probe in
   `archlinux:latest`. Braucht `APT_SIGNING_KEY` und `PACMAN_DEPLOY_KEY`. Nachholen:
   `gh workflow run pacman.yml -f version=0.1.4`.
-* **Snap Store:** Upload in den Kanal `stable`. Braucht das Secret
-  `SNAPCRAFT_STORE_CREDENTIALS` (`snapcraft export-login -`) und einmalig die Freigabe
-  für Classic-Confinement.
 * **Scoop:** nichts zu tun, der Excavator im Bucket zieht innerhalb von 4 Stunden nach
   (sofort: `gh workflow run excavator.yml -R gstrainovic/scoop-zid`).
 

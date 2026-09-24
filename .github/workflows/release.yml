@@ -5,6 +5,7 @@
 #      sieht Scoops Excavator die Version, nie ein Release ohne Zip
 #   3. COPR (Fedora) anstossen, sofern die Zugangsdaten als Secret da sind, und die
 #      apt-Quelle (apt.yml) und die pacman-Quelle (pacman.yml) nachziehen
+# Snap gibt es seit 0.1.6 nicht mehr (snapcraft.yaml entfernt).
 # Scoop braucht hier nichts: der Excavator im Bucket gstrainovic/scoop-zid prüft alle
 # 4 Stunden das neueste Release (checkver/autoupdate im Manifest).
 #
@@ -53,33 +54,9 @@ jobs:
   windows:
     uses: ./.github/workflows/windows-release.yml
 
-  # Snap aus dem Tarball (snap/snapcraft.yaml). --destructive-mode baut direkt auf dem
-  # Runner, dafür muss er zu base core24 passen: Ubuntu 24.04.
-  snap:
-    needs: linux
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v8
-        with:
-          name: zid-linux
-          path: dist
-      - name: Snap packen
-        run: |
-          version="$(sed -n 's/.*\.version = "\([^"]*\)".*/\1/p' build.zig.zon | head -1)"
-          mkdir snap-src
-          tar -xJf "dist/zid-$version-x86_64-linux.tar.xz" -C snap-src --strip-components=1
-          sudo snap install snapcraft --classic
-          sudo snapcraft pack --destructive-mode
-          ls -la ./*.snap
-      - uses: actions/upload-artifact@v7
-        with:
-          name: zid-snap
-          path: ./*.snap
-
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [linux, windows, snap]
+    needs: [linux, windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -103,7 +80,6 @@ jobs:
           ls -la dist
           test -f "dist/zid-$version-x86_64-linux.tar.xz"
           test -f "dist/zid-$version-x86_64-windows.zip"
-          test -f "dist/zid_${version}_amd64.snap"
           ls dist/*.deb dist/*.rpm
           test -f "dist/zid-$version-1-x86_64.pkg.tar.zst"
           echo "version=$version" >> "$GITHUB_OUTPUT"
@@ -164,25 +140,3 @@ jobs:
     with:
       version: ${{ needs.publish.outputs.version }}
     secrets: inherit
-
-  # Snap Store, Kanal stable. Solange die Classic-Freigabe fehlt, lehnt der Store den
-  # Upload ab (manuelle Prüfung); das hält das Release nicht auf.
-  snapstore:
-    needs: publish
-    runs-on: ubuntu-24.04
-    continue-on-error: true
-    env:
-      SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
-    steps:
-      - name: Ohne Secret SNAPCRAFT_STORE_CREDENTIALS überspringen
-        if: env.SNAPCRAFT_STORE_CREDENTIALS == ''
-        run: echo "::warning::Secret SNAPCRAFT_STORE_CREDENTIALS fehlt, Snap nicht hochgeladen (snapcraft export-login)"
-      - uses: actions/download-artifact@v8
-        if: env.SNAPCRAFT_STORE_CREDENTIALS != ''
-        with:
-          name: zid-snap
-      - name: In den Snap Store laden
-        if: env.SNAPCRAFT_STORE_CREDENTIALS != ''
-        run: |
-          sudo snap install snapcraft --classic
-          snapcraft upload --release=stable ./*.snap

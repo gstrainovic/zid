@@ -5,8 +5,8 @@
 #
 # Setzt die Version überall (build.zig.zon, AppStream, RPM-Spec, README), committet,
 # taggt v<version> und pusht. Den Rest macht .github/workflows/release.yml: Tarball,
-# .deb, .rpm, Snap und Windows-Zip bauen, Release anlegen, COPR und Snap Store
-# anstossen. Scoop zieht über den Excavator im Bucket nach (alle 4 h).
+# .deb, .rpm, Arch-Paket und Windows-Zip bauen, Release anlegen, COPR, apt- und
+# pacman-Quelle anstossen. Scoop zieht über den Excavator im Bucket nach (alle 4 h).
 #
 # Mehrere Punkte im Text: mit " | " trennen, jeder wird ein eigener Absatz.
 # --dry-run ändert nur die Dateien, ohne Commit, Tag und Push.
