@@ -4,8 +4,6 @@ description: >
   Git-Ansichten in zid im VS-Code-Stil: Diff-Editor, Timeline, Source Control Graph, Multi-File-Diff, Changes mit Commit/Sync/Publish. Use when touching src/git/*, git_diff_view.zig, git_commit_view.zig, scm_*_view.zig, timeline_view.zig, taskGit* in git_worker, or scripts/e2e_git_diff.py, e2e_timeline.py, e2e_scm_*.py.
 ---
 
-Aus AGENTS.md hierher verschoben (21.09.2026), Wortlaut unverändert.
-
 ## Git-Ansichten: gemeinsame Bausteine
 
 - Repo-Verlauf zeigt der Source Control Graph, Datei-Verlauf die Timeline im Explorer; es gibt
@@ -17,15 +15,14 @@ Aus AGENTS.md hierher verschoben (21.09.2026), Wortlaut unverändert.
   `clampScroll` für virtualisierte Listen mit fester Zeilenhöhe (Timeline, Graph).
 - Alle git-Aufrufe laufen mit `core.quotepath=off`.
 - **Beenden bricht laufende git-Prozesse ab** (`git_worker.killRunning`, in main.zig vor
-  `scheduler.deinit`). Ein `git log` auf dem Netzlaufwerk hielt sonst einen Worker über die 2 s
-  Wartezeit des Schedulers hinaus fest; der wurde zurückgelassen und der Allocator meldete
-  dessen Speicher als Leck. Unter Windows laufen die Prozesse in einem Job-Objekt, weil
-  `bin\git.exe` nur ein Launcher für `mingw64\bin\git.exe` ist: `TerminateProcess` auf den
-  Launcher ließ den echten git mit offenen Pipes weiterlaufen. Unter Linux startet git mit
+  `scheduler.deinit`), sonst hält ein langsamer `git log` einen Worker über die 2 s Wartezeit
+  des Schedulers hinaus fest. Unter Windows laufen die Prozesse in einem Job-Objekt, weil
+  `bin\git.exe` nur ein Launcher für `mingw64\bin\git.exe` ist und `TerminateProcess` auf den
+  Launcher den echten git weiterlaufen lässt. Unter Linux startet git mit
   eigener Prozessgruppe (`pgid = 0`), `kill(-pid)` trifft auch Hooks, die sonst die
   stderr-Pipe offen hielten. E2E `python3 scripts/e2e_git_shutdown.py`: ein
   `core.fsmonitor = sleep 30` im Fixture lässt `git status` hängen, zid muss sich in unter
-  2 s ohne zurückgelassenen Worker beenden (ohne Fix: 2,2 s, git und sleep laufen weiter).
+  2 s ohne zurückgelassenen Worker beenden.
 - **Fremde Repos („detected dubious ownership“):** Gehört das Repo einem anderen Benutzer
   (Netzlaufwerk, anderes Konto), verweigert git jeden Befehl. `taskGitStatus` meldet dann
   `git_unsafe_repo` mit dem Wert, den git selbst für `safe.directory` vorschlägt
@@ -56,7 +53,7 @@ Aus AGENTS.md hierher verschoben (21.09.2026), Wortlaut unverändert.
   `<eltern>:<alter pfad>`, neuer `<commit>:<pfad>`, fehlende Seite leer), Ansicht
   `src/ui/git_diff_view.zig`. Die Zeilen-Ausrichtung übernimmt git (Hunks), zid berechnet keinen Diff.
 - Beide Seiten nutzen den Tree-sitter-Highlighter wie die Markdown-Codeblöcke; Hälften sind
-  `.percent(0.5)`: feste Breiten aus dem Vorframe zogen im neuen Pane den Container auf 1200 px.
+  `.percent(0.5)`, weil feste Breiten aus dem Vorframe im neuen Pane den Container aufziehen.
 - Tab-Pfade enthalten 0x1f: RPC-JSON immer über `std.json.Stringify` schreiben (`ui_state.tabs`).
 - E2E `python3 scripts/e2e_git_diff.py` (öffnet den Tab per `open_file` mit gebautem Pfad), Zustand
   über `git_diff_state`.
@@ -74,8 +71,7 @@ Aus AGENTS.md hierher verschoben (21.09.2026), Wortlaut unverändert.
   deutscher Locale leer → 24 h). Klick öffnet den Diff-Editor (`openGitDiff`), Rechtsklick
   `timeline_menu_items`. Die Hunks kommen dafür aus `git diff <voriger Datei-Commit> <commit>`.
 - Folgt dem aktiven Tab (Text, Bild, PDF, Binär, Vorschau-Quelle); Diff-Tabs lassen die Timeline
-  stehen, weil ihr Pfad der historische Name ist (sonst sprang sie nach einer Umbenennung auf die
-  alte Datei). Geladen wird nur aufgeklappt; Dateiereignisse (git-status-Debounce) laden neu.
+  stehen, weil ihr Pfad der historische Name ist. Geladen wird nur aufgeklappt; Dateiereignisse (git-status-Debounce) laden neu.
 - „File History“ im Explorer-, Tab- und Editor-Kontextmenü (`file_history`, `file_history_entry`)
   stellt die Timeline wie VS Code `files.openTimeline` auf diese Datei: aufgeklappt, angepinnt,
   ohne Tab zu öffnen (`Timeline.show`). Aus dem Editor-Menü läuft das über `pending_file_history`
@@ -111,9 +107,8 @@ Aus AGENTS.md hierher verschoben (21.09.2026), Wortlaut unverändert.
   ein kleines SVG mit eigenem Pfad. Das ist Absicht: Der Rasterizer füllt nach Even-Odd (mehrere
   Formen in einem Pfad schneiden Löcher) und der Atlas rastert höchstens vier neue Formen pro
   Durchgang — als eigene Formen je Radius und Quadrant werden sie wiederverwendet.
-- **Graph-Log ohne `--shortstat`** (seit 22.09.2026). Auf einem Netzlaufwerk mit losen Objekten
-  (jedes Objekt eine Datei, jeder Zugriff ein SMB-Roundtrip) brauchte eine Seite damit 35–50 s,
-  ohne 2–6 s. `Commit.stat` ist ein `StatState` (unknown/loading/failed/loaded); das Überfahren
+- **Graph-Log ohne `--shortstat`**: auf einem Netzlaufwerk mit losen Objekten kostet es je Seite
+  35–50 s statt 2–6 s. `Commit.stat` ist ein `StatState` (unknown/loading/failed/loaded); das Überfahren
   einer Zeile fordert die Zahlen dieses einen Commits an (`View.requestStat`, Worker
   `taskGitCommitStat` mit `git_scm.statArgs`), die Hover-Karte zeigt bis dahin „Loading
   changes…“. E2E in `e2e_scm_graph.py` (`scm_state.commits[].stat`). Der Rest der Wartezeit ist
@@ -142,8 +137,8 @@ Aus AGENTS.md hierher verschoben (21.09.2026), Wortlaut unverändert.
   Überfahren (Reihenfolge wie `package.json`): Datei öffnen, Stage/Unstage, Discard; Köpfe:
   Stage All / Unstage All / Discard All. IDs `sc_act` mit Index `zeile * 8 + RowAction`.
 - Das Eingabefeld ist ein `CodeEditor` mit `font_size = 16` und `line_pad = 6` (Zeilenhöhe
-  `lineHeight()` = `INPUT_LINE_HEIGHT` 22). Mit den Editor-Vorgaben (24 + 16) schnitt das Feld
-  die untere Hälfte der Buchstaben ab (seit `a3ce61c` bis 22.09.2026).
+  `lineHeight()` = `INPUT_LINE_HEIGHT` 22); mit den Editor-Vorgaben (24 + 16) schneidet das Feld
+  die untere Hälfte der Buchstaben ab.
 - Daten `src/git/git_changes.zig` (Modul `git_changes`, unit-getestet): Gruppen aus der rohen
   porcelain-v2-Ausgabe, die `taskGitStatus` hinter 0x1c mitliefert (`splitStatusPayload`), Buchstabe/
   Farbe/Hover-Text/Durchstreichen wie `Resource` in `repository.ts`, Diff-Spec je Zeile

@@ -4,19 +4,17 @@ description: >
   PDF-Vorschau in zid: Blättern, Zoom und Bildlauf in der Seite, Suche (Ctrl+F), Neuladen bei Dateiänderung, mupdf-Abstürze bei halb geschriebenen PDFs, E2E-Zustand. Use when touching src/ui/pdf_view.zig, pdf_nav.zig, pdf_find.zig, src/rendering/pdf_handler.zig, fz_page_text_z, PDF reload, or scripts/e2e_pdf_*.py.
 ---
 
-Aus AGENTS.md hierher verschoben (21.09.2026); Zoom und Suche am 22.09.2026 ergänzt.
-
 ## Zoom und Bildlauf
 
 - Zustand je Dokument im `PdfHandler` (`zoom`, `scroll_x/y`), also gemeinsam für beide Panes
-  eines Splits, wie schon `current_page`. Zoom 1.0 = Seitenbreite; Stufen `pdf_nav.zoom_levels`
+  eines Splits, wie `current_page`. Zoom 1.0 = Seitenbreite; Stufen `pdf_nav.zoom_levels`
   (50–400 %). Geometrie rein in `pdf_nav.geometry` (unit-getestet): passt die Seite, steht sie
   mittig, sonst verschiebt der Bildlauf sie über `child_offset` des Clip-Elements `pdf_viewport`.
 - Bedienung: Knöpfe −/Prozent/+ in der Leiste (Prozent setzt auf 100 %), Ctrl+Rad um die
   Mausposition (`zoomAround`), Ctrl+Plus/Minus/0 über die Befehle `zoom_in/out/reset`, die im
   PDF-Tab die Seite statt der Schrift zoomen. Rad ohne Ctrl scrollt in einer überstehenden Seite
   und blättert erst am Rand (`pdf_nav.wheel`); zurück landet man am Ende der vorigen Seite. Passt
-  die Seite, blättert jede Stufe wie früher. Shift+Rad scrollt waagrecht.
+  die Seite, blättert jede Stufe eine Seite. Shift+Rad scrollt waagrecht.
 - **Scharf rendern:** die Ansicht meldet je Frame den nötigen Maßstab (`wanted_scale`, px/pt,
   Maximum aller Panes), die Hauptschleife rendert neu, wenn er um mehr als 10 % von
   `requested_scale` abweicht oder `needs_render` (Seitenwechsel) gesetzt ist. Damit richtet sich
@@ -69,7 +67,7 @@ Aus AGENTS.md hierher verschoben (21.09.2026); Zoom und Suche am 22.09.2026 erg�
 - Die Beschriftung liegt in einem Puffer der UI (`pdf_labels`: Seite, Zoom, Trefferzahl), nicht in der Frame-Arena:
   `beginLayout` setzt die Arena zurück, Clay liest den Text erst beim Zeichnen.
 - Zustand für E2E: `pdf_state` liest Felder im `E2EContext`, die der Main-Thread pro Frame
-  setzt. Über Tabs und `open_pdfs` im Server-Thread zu laufen lieferte springende Werte.
+  setzt, weil der Server-Thread über Tabs und `open_pdfs` springende Werte liest.
 - E2E: `python3 scripts/e2e_pdf_pager.py`, das siebenseitige PDF erzeugt `write_pdf` nach
   `tmp/e2e_pdf/pager.pdf`. Der Test startet
   mit eigenem, frischem `XDG_CONFIG_HOME` und übergibt das PDF als Startdatei: über eine

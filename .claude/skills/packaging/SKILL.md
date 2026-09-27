@@ -4,16 +4,13 @@ description: >
   Build und Auslieferung von zid: eingebettete Daten und Installation, MuPDF system/bundled, Windows-Build in CI, Release-Tarball im Debian-Container, Binärgröße und glibc. Use when touching build.zig, build.zig.zon, packaging/, .github/workflows/, MuPDF linking, release builds, or adding runtime data files.
 ---
 
-Aus AGENTS.md hierher verschoben (21.09.2026), Wortlaut unverändert.
-
 ## Eingebettete Daten und Installation
 
 - Schrift (`fonts/font_data.zig`), Logo (`assets/asset_data.zig`) und die WGSL-Shader
   (`shaders/shader_data.zig`) liegen im Binary. `build.zig` reicht sie als anonyme Module
-  `builtin_font`, `builtin_assets` und `builtin_shaders` herein. Vorher las zid `fonts/…`,
-  `assets/…` und `zig-out/share/*.wgsl` relativ zum Arbeitsverzeichnis und brach ausserhalb
-  des Repos mit `FileNotFound` ab.
-- Neue Laufzeitdaten deshalb einbetten, nicht über einen relativen Pfad lesen.
+  `builtin_font`, `builtin_assets` und `builtin_shaders` herein.
+- Neue Laufzeitdaten einbetten, nie relativ zum Arbeitsverzeichnis lesen: ausserhalb des Repos
+  bricht zid sonst mit `FileNotFound` ab.
   `python3 scripts/e2e_installed_run.py` startet das Binary in einem leeren Ordner und
   prüft Glyphen, Screenshot und ein Log ohne `FileNotFound`.
 - Schriftladen: `TextRenderer` nimmt `font_data` (Voreinstellung: eingebaute Schrift) und
@@ -54,7 +51,7 @@ Aus AGENTS.md hierher verschoben (21.09.2026), Wortlaut unverändert.
 - `zig build -Dtarget=x86_64-windows-gnu` übersetzt hier alle Windows-Zweige und scheitert
   erst beim Linken (MuPDF-Archive fehlen lokal, und Zig findet `OleAut32`/`Ole32` nur auf
   einem Dateisystem ohne Gross-/Kleinschreibung). Das reicht, um Tippfehler in Code zu
-  finden, den Linux nie analysiert — so fiel `nativeWindow` auf (HWND ist bei wio optional).
+  finden, den Linux nie analysiert.
 - Gebaut wird in `.github/workflows/windows-release.yml` auf `windows-latest`, weil MuPDFs
   Makefile während des Bauens Hilfsprogramme ausführt.
 - Beide Zig-Caches müssen dort im Workspace liegen: das Repo liegt auf `D:`, der globale
@@ -68,7 +65,7 @@ Aus AGENTS.md hierher verschoben (21.09.2026), Wortlaut unverändert.
   (`addWin32ResourceFile` in build.zig). wio lädt sie beim Registrieren der Fensterklasse
   (`hIcon`/`hIconSm`); das Exe-Icon allein reicht der Taskleiste nicht, sie nimmt das der
   Fensterklasse. Nach Änderung am SVG `python3
-  packaging/windows/make_ico.py` (Inkscape, legt PNGs direkt ins ICO; ImageMagick schrieb
+  packaging/windows/make_ico.py` (Inkscape, legt PNGs direkt ins ICO; ImageMagick schreibt
   BMP, 300 KiB statt 14).
 
 ## Release-Tarball: `packaging/build-release.sh`
@@ -80,12 +77,10 @@ Aus AGENTS.md hierher verschoben (21.09.2026), Wortlaut unverändert.
 - `--security-opt label=disable` ist Pflicht: unter SELinux scheitert der Container sonst
   am gemounteten Repo (`make: stat: Makefile: Permission denied`). Ein `:z`-Mount würde
   stattdessen das ganze Repo auf dem Host umlabeln.
-- Der Container baut MuPDF nach `build/release-deb12` und **löscht das Verzeichnis vorher**:
-  `make` sieht geänderte Flags nicht, ein OUT aus einem Lauf mit `USE_SYSTEM_LIBJPEG=yes`
-  behielt sein leeres `jmemcust.o` und der Link scheiterte an `undefined symbol: jpeg_mem_init`.
+- Der Container baut MuPDF nach `build/release-deb12` und **löscht das Verzeichnis vorher**,
+  weil `make` geänderte Flags nicht sieht (alte Objekte → `undefined symbol: jpeg_mem_init`).
 - libjpeg gehört ins Binary, nicht ans System: Debian und Fedora liefern `libjpeg.so.62`,
-  Ubuntu und Arch `libjpeg.so.8`. Mit System-libjpeg gebaut startete das Tarball auf
-  Ubuntu 22.04 nicht (`libjpeg.so.62: cannot open shared object file`).
+  Ubuntu und Arch `libjpeg.so.8`.
 - Im Tarball liegt `packaging/install.sh` (Vorgabe `~/.local`, `--uninstall`, beliebiges
   Präfix als Argument).
 
@@ -114,15 +109,13 @@ Aus AGENTS.md hierher verschoben (21.09.2026), Wortlaut unverändert.
   (`COPR_CONFIG`), sonst Warnung und weiter; `apt` und `pacman` ziehen ihre Quellen nach.
 - `workflow_dispatch` von `release.yml` baut nur (Artefakte `zid-linux`, `zid-windows`),
   ohne zu veröffentlichen — so lässt sich der Bau ohne Tag prüfen.
-- **Snap gibt es nicht mehr** (snapcraft.yaml am 23.09.2026 entfernt, die Jobs `snap` und
-  `snapstore` am 24.09.2026): der erste Release-Lauf nach dem Entfernen (v0.1.6) scheiterte,
-  weil `publish` noch am `snap`-Job hing. Wer einen Paketkanal streicht, muss Workflow,
-  README, `.gitignore` und diese Skill im selben Commit mitziehen.
+- Wer einen Paketkanal streicht, zieht Workflow (auch die `needs` von `publish`), README,
+  `.gitignore` und diese Skill im selben Commit mit, sonst scheitert der nächste Release-Lauf.
 - `.deb`/`.rpm` (`packaging/nfpm.yaml`): rpm-Abhängigkeiten nach SONAME
   (`libfreetype.so.6()(64bit)`), damit dieselbe Datei auf Fedora und openSUSE passt; deb
   mit `libpng16-16 | libpng16-16t64` wegen der time64-Umbenennung ab Ubuntu 24.04.
-- COPR baut aus einem SRPM (`rpmbuild -bs`, Source0 aus dem veröffentlichten Release);
-  mit der Spec direkt baute COPR 0.1.1 nicht.
+- COPR baut aus einem SRPM (`rpmbuild -bs`, Source0 aus dem veröffentlichten Release), weil
+  COPR mit der Spec direkt nicht baut.
 - apt (`.github/workflows/apt.yml`, `packaging/apt/publish.sh`): Pages-Repo
   gstrainovic/apt-zid, flache Quelle `stable main`, Index per `apt-ftparchive`, signiert als
   `InRelease` und `Release.gpg`. Das Repo trägt nur einen Commit (Orphan + Force-Push), im

@@ -13,8 +13,7 @@ description: >
 
 # Clay in zid
 
-Clay ist CSS-nah, aber die Voreinstellungen unterscheiden sich an ein paar Stellen
-schmerzhaft. Die folgenden Punkte sind alle im Projekt aufgetreten.
+Clay ist CSS-nah, aber die Voreinstellungen unterscheiden sich an ein paar Stellen.
 
 ## Zuerst messen, dann ändern
 
@@ -26,8 +25,7 @@ result_json("element_bounds", ["mein_element"])       # {found, x, y, w, h}
 result_json("element_bounds_i", ["prefix", index])
 ```
 
-Eine einzige Messung hat den Picker-Fehler erklärt, nachdem drei Änderungen ins Leere
-gingen: Kasten 720 breit, Zeile 1236. Ohne die Zahl rät man an Symptomen herum.
+Ohne die gemessene Zahl rät man an Symptomen herum.
 
 `element_bounds` beantwortet **nicht** „existiert das Element gerade?" — Clay behält
 Daten verschwundener Elemente. Dafür `ui_state` nehmen.
@@ -62,8 +60,8 @@ schief, sobald zwei Schriftgrößen in einer Zeile stehen.
 ## Verschachteltes Clipping ersetzt das äußere
 
 `.clip` auf einem Kind eines bereits clippenden Containers **schneidet sich nicht** mit
-dem äußeren Bereich, es ersetzt ihn. Ein Clip auf der Zeile ließ die ganze Liste unten
-aus ihrem Kasten laufen. Also kein Clip als Notnagel gegen Überlauf — die Größe
+dem äußeren Bereich, es ersetzt ihn; ein Clip auf der Zeile lässt die Liste aus ihrem
+Kasten laufen. Also kein Clip als Notnagel gegen Überlauf — die Größe
 begrenzen.
 
 ## Kinder dürfen einen `.grow`-Container nie überragen
@@ -72,9 +70,7 @@ Clay reicht die **Mindesthöhe** der Kinder durch alle Eltern bis zur Wurzel, so
 Container auf der Achse nicht clippt. Ein `.grow`-Container wird dann nicht kleiner als
 sein Inhalt, und die Wurzel wächst über das Fenster hinaus. Wer die Kinderzahl aus der
 eigenen Bounding-Box des Vorframes ableitet (`getElementData(...).height`), baut damit
-eine Rückkopplung: die Minimap zeichnete `height / 2` Balken à 2 px plus 2 px Innenabstand,
-war also 2 px höher als der Editor, die Wurzel wuchs jeden zweiten Frame um 2 px, und nach
-Minuten zeichnete der Editor hunderte Zeilen (extrem langsam, besonders klein gezoomt).
+eine Rückkopplung, die das Layout Frame für Frame wachsen lässt.
 
 Regel: Wer Inhalt aus der gemessenen Höhe ableitet, zieht Innenabstände ab
 (`CodeEditor.minimapWindow`, unit-getestet) **und** clippt den Container auf der Achse
@@ -95,9 +91,8 @@ if (state.creating) |cs| renderCreateRow(arena, cs, …);   // FALSCH: cs ist ei
 if (state.creating) |*cs| renderCreateRow(arena, cs, …);  // richtig: Zeiger in den Zustand
 ```
 
-Mit der Kopie stand in der Anlege-Zeile des Explorers statt `copr` zufälliger Speicher
-(leere Kästchen). Dasselbe Muster traf vorher die Fortschrittsanzeige der KI-Einrichtung
-mit einem `bufPrint`-Puffer.
+Mit einer Kopie oder einem `bufPrint`-Stackpuffer zeichnet Clay zufälligen Speicher (leere
+Kästchen).
 
 Prüfen lässt sich das nur am **gezeichneten** Text, nicht am Zustand über RPC: headless
 mit `ZID_DEBUG=1` einen Screenshot ziehen, im Command-Dump steht je Textstück
@@ -124,20 +119,18 @@ Stattdessen `if … else` oder den Inhalt in eine eigene Funktion auslagern
 .id = clay.ElementId.IDI("indent", @intCast(index)),  // richtig
 ```
 
-Ohne Index meldet Clay `duplicate_id` — im Projekt 45 mal pro Frame. Wird das Element
+Ohne Index meldet Clay `duplicate_id`. Wird das Element
 nirgends abgefragt (Abstandhalter), einfach **keine ID** vergeben.
 
 Dasselbe gilt für Komponenten, die **mehrfach im Frame** stehen (Editor in zwei Panes):
-`IDI("code", zeile)` war in beiden Panes gleich, ~80 `duplicate_id` pro Frame, und
-`getElementData("scrollbar_track")` der zweiten Pane bekam die Box der ersten. Alle IDs eines
-Editors laufen deshalb über `CodeEditor.idi(name, index)`, das den Editor-Zeiger als Salz
+ungesalzen wären die IDs in beiden Panes gleich, und `getElementData` der zweiten Pane bekäme
+die Box der ersten. Alle IDs eines Editors laufen deshalb über `CodeEditor.idi(name, index)`, das den Editor-Zeiger als Salz
 addiert (unit-getestet). E2E: `element_bounds(_i)` sucht erst global, dann über die aktive
 Vorschau und den aktiven Editor, Skripte dürfen weiter `element_bounds_i("code", zeile)` fragen.
 
 PDF-, Bild- und Binäransicht (`PdfViewState.idi`, `ImageViewState.idi`, `binary_view.idi`) sind
-zustandslos und bekommen das Salz als Parameter: `UI.renderPane` reicht `paneSalt(pane)` durch.
-Ohne das meldete ein Split mit offenem PDF über 200 `duplicate_id`, und der Treffertest der
-Blätter-Schaltflächen las die Box der ersten Pane. Treffertests außerhalb von `renderPane`
+zustandslos und bekommen das Salz als Parameter: `UI.renderPane` reicht `paneSalt(pane)` durch,
+sonst liest der Treffertest der Blätter-Schaltflächen die Box der ersten Pane. Treffertests außerhalb von `renderPane`
 (Hand-Cursor in `getDesiredCursor`) nehmen `UI.activePaneSalt`, E2E-Abfragen über
 `lookupElement` in `src/e2e_server.zig` probieren dasselbe Salz als Fallback.
 
@@ -147,15 +140,11 @@ in zwei Panes. Chat und Terminal kopiert `TabBarState.cloneFrom` gar nicht erst,
 (Chat-Eingabe ist ein CodeEditor) kann nur einmal je Frame gezeichnet werden; sie bleiben in der
 ersten Hälfte, die die ursprüngliche Tab-Leiste übernimmt.
 
-Seit dem Clay-Patch nennt das Log die doppelte ID selbst:
-`duplicate_id id=… unter Elternelement id=…`, dazu beim ersten Auftreten einer Sitzung
-eine Liste aller mehrfach vergebenen IDs mit Box und Text (`UI.logDuplicateIds`).
-`python3 scripts/clay_id_decode.py <id> [--parent <eltern-id>]` löst beide auf.
-
-Historisch: `duplicate_id` nannte das Element nicht. `UI.clayError` loggt je Elternelement einmal dessen ID;
-`python3 scripts/clay_id_decode.py <id>` rechnet sie auf einen Namen zurück (nur ungesalzene IDs).
-Zuverlässiger: headless mit `ZID_DEBUG=1` einen Screenshot ziehen und im Command-Dump nach
-mehrfach vorkommenden `id=` suchen, Box und Text zeigen dann das Element.
+Das Log nennt die doppelte ID selbst: `duplicate_id id=… unter Elternelement id=…`, dazu beim
+ersten Auftreten einer Sitzung eine Liste aller mehrfach vergebenen IDs mit Box und Text
+(`UI.logDuplicateIds`). `python3 scripts/clay_id_decode.py <id> [--parent <eltern-id>]` rechnet
+sie auf Namen zurück (nur ungesalzene IDs). Für gesalzene IDs headless mit `ZID_DEBUG=1` einen
+Screenshot ziehen und im Command-Dump nach mehrfach vorkommenden `id=` suchen.
 
 ## Elementgrenze
 
@@ -178,9 +167,7 @@ Die Grenze anzuheben ist die zweitbeste Lösung. Die beste ist Virtualisierung.
 ## Fehler landen im Log, nicht nur im Fenster
 
 `clay.initialize(arena, dims, .{ .error_handler_function = clayError })`. Ohne Handler
-malt Clay die Meldung ins Fenster und headless sieht man gar nichts — ein Absturz beim
-User war deshalb nicht nachstellbar. Der Handler hat sofort einen zweiten, jahrealten
-Fehler sichtbar gemacht.
+malt Clay die Meldung nur ins Fenster, headless sieht man gar nichts.
 
 **Prüfe nach Layout-Arbeit das Log auf `error(ui): Clay:`.**
 `scripts/e2e_md_preview.py` tut das automatisch.
@@ -237,7 +224,7 @@ Ein langes Dokument nicht komplett anlegen. Muster in
 Noch nie gezeigte Blöcke brauchen eine Schätzung. `estimateBlockHeight` rechnet sie aus
 Blockart und Textlänge: Überschriften nach Ebene, Codeblöcke nach Zeilenumbrüchen (sie
 brechen nicht um), Fließtext aus Zeichenzahl geteilt durch Zeichen je Zeile, Container
-als Summe ihrer Kinder. Eine feste Zahl lag bei Tabellen und Codeblöcken weit daneben.
+als Summe ihrer Kinder; eine feste Zahl läge bei Tabellen und Codeblöcken weit daneben.
 
 Achtung: dasselbe Render-Verfahren wird oft an zwei Stellen benutzt (Vorschau und
 Chat). Virtualisieren nur dort, wo es einen echten Viewport gibt.

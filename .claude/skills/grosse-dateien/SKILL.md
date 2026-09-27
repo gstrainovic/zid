@@ -4,15 +4,12 @@ description: >
   Große und merkwürdige Dateien in zid (Binärdateien, Riesenzeilen, 5-MB-Dateien, Glyph-Batching, Spalten als Codepoints), E2E-Betrieb/Windows-Eigenheiten, plus die Use-after-free-Regel für Render-Commands (Segfault in hashText/renderText). Use when touching glyph_layout.zig, file_types.detectFileKind/looksBinary, ShapedRunCache/visibleSliceOf, renderText/renderExample/text_probe.zig, file_watcher_win.zig, conpty.zig, or scripts/e2e_odd_files.py, e2e_repro_text_uaf.py.
 ---
 
-Aus AGENTS.md hierher verschoben (21.09.2026), Wortlaut unverändert.
-
 ## Große und merkwürdige Dateien (Binärdateien, Riesenzeilen)
 
 - `gpu_renderer.renderText` arbeitet mit Stack-Puffern von `glyph_layout.max_batch_glyphs` (256)
   Glyphen. `shapeTextInto` liefert für Runs über 256 Glyphen einen owned Heap-Slice beliebiger
   Länge; die Glyphen werden deshalb blockweise verarbeitet, die Stiftposition läuft über
   Blockgrenzen weiter (`glyph_layout.computeGlyphDevicePositions` gibt sie zurück, unit-getestet).
-  Vorher: `index out of bounds: index 463, len 256` beim Öffnen einer `.traineddata`-Datei.
 - Headless rendert keinen GPU-Text (`renderFrameWithText` läuft nur mit Fenster). Glyph-Logik
   nach `src/text/glyph_layout.zig` ziehen und dort unit-testen (`types.zig` importiert
   `platform/mod.zig` (wio), deshalb nimmt das Modul die Glyphen als `anytype`). Ob die
@@ -37,11 +34,9 @@ Aus AGENTS.md hierher verschoben (21.09.2026), Wortlaut unverändert.
   UTF-8-Sequenz bei einer Spalte; `cursor.col`, `view.col`, `find_ops`, `wrap_ops`,
   `renderRowOverlays` und die LSP-Positionen rechnen alle so. Bytes bekommt man nur über
   `get_line_width_to_pos` (Spalte → Byte) und `pos_to_width` (Byte → Spalte); tree-sitter-Edits
-  (`pushEditForChange`) und die Highlight-Tags sind Byte-Offsets. Bis 18.09.2026 zählte
-  `egc_length` jedes Byte als Spalte (Rest eines Qwen-Fixes vom April): ←/→ liefen in zwei
-  Schritten durch ein „ü“, Tippen dazwischen zerschnitt die Sequenz (`a\xc3x\xbcb` im Buffer,
-  so gespeichert), und `visibleSliceOf` schnitt in schmalen Panes mitten im Gedankenstrich
-  (`warning(shaper): invalid UTF-8 text … "> **Tab 1 \xe2\x80"`). Wer Metriken schreibt, muss
+  (`pushEditForChange`) und die Highlight-Tags sind Byte-Offsets. Wer Bytes als Spalten zählt,
+  zerschneidet UTF-8-Sequenzen (Cursor, Tippen, `visibleSliceOf`; Symptom `warning(shaper):
+  invalid UTF-8 text`). Wer Metriken schreibt, muss
   `reparseFromBuffer` (flow-core) im Blick behalten: tree-sitter meldet Byte-Spalten, der
   Wrapper dort liest byteweise, unabhängig von der Spaltendefinition.
 - `python3 scripts/e2e_odd_files.py` legt unter `tmp/` eine 3-KB-Binärdatei ohne Zeilenumbruch,
@@ -51,7 +46,7 @@ Aus AGENTS.md hierher verschoben (21.09.2026), Wortlaut unverändert.
 - Der RPC-Socket bindet nur mit SO_REUSEADDR, nie mit SO_REUSEPORT (`Address.listen` mit
   `reuse_address` setzt beides). Sonst lauscht eine verwaiste Instanz weiter, der Kernel
   verteilt die Verbindungen, und ein Teil der RPC-Antworten kommt aus dem alten Prozess mit
-  altem Zustand. Ein zweiter Start meldet jetzt `Port 9999 ist belegt`.
+  altem Zustand. Ein zweiter Start meldet `Port 9999 ist belegt`.
 - E2E-Skripte starten zid nie über `zig build run`, sondern über `start_zid` aus
   `scripts/e2e_open_folder.py`: erst `zig build`, dann das Binary als direktes Kind. Bei `zig build
   run` ist zid ein Enkel, ein `kill` auf zig lässt zid auf dem Port zurück; Prozessgruppen
@@ -60,27 +55,24 @@ Aus AGENTS.md hierher verschoben (21.09.2026), Wortlaut unverändert.
 - **Nicht alle Suiten bauen selbst.** Nur wer `start_zid` nimmt, ruft vorher `zig build` auf.
   `e2e_scm_changes.py`, `e2e_scm_graph.py`, `e2e_timeline.py`, `e2e_git_diff.py`, `e2e_lsp.py`,
   `e2e_editor.py`, `e2e_picker.py` u. a. starten `zig-out/bin/zid` direkt: vor dem Lauf `zig build`,
-  sonst testet die Suite still das alte Binary (18.09.2026 so passiert, der Knopf zeigte noch
-  „Push 1↑").
+  sonst testet die Suite still das alte Binary.
 - **Suiten nacheinander, nie parallel** — auch nicht als zwei Hintergrund-Tasks. Alle nutzen
   Port 9999; ein zweiter Lauf redet mit der Instanz des ersten, und beide scheitern ohne
   erkennbaren Grund.
 - **Zeitfehler erst messen, dann erklären.** Kommt ein Tooltip oder Toast zu spät, zuerst mit
-  einem 100-ms-Polling-Probe die echte Dauer bestimmen (beim Tooltip-Fehler 1,5 s statt 0,7 s,
-  Ursache war die Frame-Uhr), nicht am Timeout des Tests schrauben.
+  einem 100-ms-Polling-Probe die echte Dauer bestimmen, nicht am Timeout des Tests schrauben.
 - **Fenster nur nach Rückfrage.** Auch Reproduktionen und Messungen laufen `--headless`. Braucht
   ein Befund zwingend ein Fenster (Present, Swapchain, DPI, Maximieren), das begründen und den
   User fragen oder ihn selbst starten lassen und das Log auswerten. Frame-Vergleiche per
   Screenshot-RPC zeigen kein Present-Flackern, das nur am Monitor sichtbar ist.
 - **Meldungen aus dem Fenster am echten Dokument nachstellen.** „Funktioniert nicht" hat oft eine
-  andere Ursache als vermutet (18.09.2026: „Word Wrap geht nicht" war Text in Listen, der an der
-  vollen statt der eingerückten Breite umbrach). Die Datei des Users aus dem Log holen (die
+  andere Ursache als vermutet. Die Datei des Users aus dem Log holen (die
   Ausgabe von `zig build run` zeigt geöffnete Pfade), headless öffnen, Zustand per RPC messen,
   notfalls in Zeilenbereiche schneiden, bevor eine Theorie entsteht. Ein Test muss den Effekt an
   dem prüfen, was der User sieht (Fliesstext), nicht nur an einem Sonderfall (Codeblock).
 - Verwaiste Headless-Prozesse: Linux `pkill -f '[v]ulkan-ed --headless'` — ohne die Klammer trifft
   das Muster die eigene Shell, die den Befehl enthält. Windows: **nie** `taskkill /IM zid.exe` —
-  das beendet auch die Fenster des Users samt ungespeicherter Änderungen (21.09.2026 so passiert).
+  das beendet auch die Fenster des Users samt ungespeicherter Änderungen.
   Nur Headless-Instanzen gezielt per PID:
   `Get-CimInstance Win32_Process -Filter "Name='zid.exe'" | ? CommandLine -match '--headless' |
   % { Stop-Process -Id $_.ProcessId -Force }`.
@@ -108,8 +100,7 @@ Aus AGENTS.md hierher verschoben (21.09.2026), Wortlaut unverändert.
   `e2e_open_folder.rmtree` (setzt Rechte auf `.git/objects`, sonst bleibt das Fixture unter
   Windows still stehen); die Suiten stellen stdout auf UTF-8 (Pfeile in Meldungen).
 - **Zeilenenden:** Git for Windows setzt systemweit `core.autocrlf=true`. Neue Git-Fixtures in
-  Zig-Tests und Suiten setzen `core.autocrlf false` (daran scheiterte
-  `git_worker.test.taskGitAction` bis 21.09.2026), Python-Suiten schreiben Dateien mit
+  Zig-Tests und Suiten setzen `core.autocrlf false`, Python-Suiten schreiben Dateien mit
   `newline="\n"`.
 - Umgebungsvariablen nur über `src/platform/env.zig` lesen, nie `std.posix.getenv` — das gibt
   es unter Windows nicht, und der Windows-Build bricht still, weil hauptsächlich unter Linux
@@ -139,28 +130,22 @@ Aus AGENTS.md hierher verschoben (21.09.2026), Wortlaut unverändert.
   von `renderExample` (`applyPendingDialogResult`).
 - `applyDeferredLayoutActions` läuft am Anfang von `renderExample` und wendet an, was das
   vorige Layout angefordert hat: Dialog-Klick/Enter (`pending_dialog_result`),
-  `pending_split`, `pending_tab_closes`, leere Panes. Vorher lief das direkt nach `endLayout`:
-  die Dialog-Nachricht wurde freigegeben, `performMove` → `refresh` → `loadDirectory` gab alle
-  Knotennamen frei, `closeTab`/`TabBarState.deinit` die Tab-Namen, während der Frame noch
-  gezeichnet wurde → `Segmentation fault` in `text_system.hashText` (Symptom:
-  Bilder per Drag & Drop in einen Ordner verschoben, Absturz beim nächsten Zeichnen).
+  `pending_split`, `pending_tab_closes`, leere Panes. Direkt nach `endLayout` würden
+  Dialog-Nachricht, Knotennamen (`loadDirectory`) und Tab-Namen freigegeben, während der Frame
+  noch gezeichnet wird → `Segmentation fault` in `text_system.hashText`.
 - Kein `clay.text(&.{byte}, …)`: Zeiger auf ein Stack-Temporary, beim Zeichnen längst
   überschrieben. Statische Literale nehmen (Git-Status-Buchstaben in `renderTreeEntry`).
 - Dasselbe für `var buf: [N]u8 = undefined` in einer `render`-Funktion mit `bufPrint` → `clay.text`:
   der Puffer gehört in die Frame-Arena (`arena.alloc(u8, N)`) oder das Ergebnis wird `arena.dupe`d.
   Symptom im Fenster (Debug-Build): der Text besteht aus 0xAA-Bytes (Zigs `undefined`-Muster,
   ein späterer Stack-Frame hat den Puffer neu initialisiert), im Log `warning(shaper): invalid
-  UTF-8 text … hex=aaaa…`, gezeichnet als lauter U+FFFD. Vor dem 18.09.2026 fiel dadurch der ganze
-  Frame aus (`renderClayLayout` brach ab, `endFrame` präsentierte trotzdem das alte Bild aus der
-  Swap-Chain): Source Control „zitterte“ beim Verbreitern des Explorers zwischen zwei Ständen,
-  weil `fitText` den Platzhalter des Commit-Felds erst ab ~360 px ungekürzt (= Stack-Zeiger)
-  durchreichte. Headless zeigt das nicht (kein GPU-Text; der memfd-Probe prüft nur Mapping, nicht
-  Inhalt). Seitdem dekodiert `SimpleShaper.shape` verlustbehaftet und `renderClayLayout`-Fehler
-  werden als `warning(rendering)` gemeldet.
+  UTF-8 text … hex=aaaa…`, gezeichnet als lauter U+FFFD. Headless zeigt das nicht (kein
+  GPU-Text; der memfd-Probe prüft nur Mapping, nicht Inhalt). `SimpleShaper.shape` dekodiert
+  verlustbehaftet, und `renderClayLayout`-Fehler werden als `warning(rendering)` gemeldet, statt
+  den Frame abzubrechen.
 - `Platform.setCursor` meldet nur Formwechsel an wio: unter Windows macht wio je Aufruf
   `GetCursorPos`+`SetCursorPos`, und bei gedrückter Maustaste erzeugt das ein `WM_MOUSEMOVE`, das
-  den nächsten Frame weckt — beim Splitter-Ziehen lief der Loop ohne Pause (`ZID_DEBUG=1`:
-  `mouse: … dx=0` in jedem Frame). Die Debug-Zeilen `mouse:` (main.zig, nur beim Ziehen),
+  den nächsten Frame weckt, und der Loop liefe beim Ziehen ohne Pause. Die Debug-Zeilen `mouse:` (main.zig, nur beim Ziehen),
   `splitter:` (Breite vorher/nachher) und `cursor:` (Formwechsel) bleiben für solche Diagnosen.
 - **Werkzeug:** Headless fasst jeden Text-Command per `pwrite` in ein memfd an
   (`src/debug/text_probe.zig`; `/dev/null` liest den Puffer nicht, EFAULT bleibt aus). Zeigt ein

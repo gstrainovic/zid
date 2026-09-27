@@ -4,13 +4,10 @@ description: >
   Die Tab-Leiste in zid: Neu-Menü, Beschriftung, keine Vorschau-Tabs, Ctrl+Tab (MRU), Tab-Picker (Ctrl+E), Scrollen, Drag & Drop, Pinnen, Ctrl+Shift+T. Use when touching src/ui/tab_mru.zig, TabBarState, tabLabel/openFile/mru/cloneFrom, UI.tab_switcher/closed_tabs, or scripts/e2e_tabs.py.
 ---
 
-Aus AGENTS.md hierher verschoben (21.09.2026), Wortlaut unverändert.
-
 ## Tab-Leiste
 
 - **„+“ (Neu-Menü) sitzt ganz links** vor dem scrollenden Tab-Streifen. Der Streifen hat `.w = .grow`
-  mit Clip; stand der Knopf dahinter, wanderte er an den Fensterrand und sein Dropdown wurde
-  abgeschnitten.
+  mit Clip; dahinter wandert der Knopf an den Fensterrand und sein Dropdown wird abgeschnitten.
 - **Beschriftung** (`tabLabel`): Markdown-Vorschauen heißen „Preview: name“; gleicher Dateiname in
   zwei Tabs derselben Art bekommt den Elternordner davor. Split (`cloneFrom`) kopiert Text-,
   Bild- und Vorschau-Tabs, aber nicht Chat und Terminal (ein Zustand, eine Zeichnung je Frame,
@@ -45,8 +42,8 @@ Aus AGENTS.md hierher verschoben (21.09.2026), Wortlaut unverändert.
   das Schließen überleben. Auto-Reveal: Tab-Wechsel auf eine Textdatei markiert sie im Explorer.
 - RPCs: `tab_bounds(index)`, `middle_click`, `mouse_down`/`mouse_up` (Drag), `move_mouse` hält die
   gedrückte Taste; Tab-JSON hat `pinned`. `python3 scripts/e2e_tabs.py` deckt alles ab.
-- Frame-Zeit: `ui_state.last_frame_ms`/`max_frame_ms` (Maximum seit dem letzten Abholen). Die
-  frühere „1–2 s Tipp-Latenz“ bei der 5-MB-Datei war der `editor_state`-RPC (5 MB JSON je Abfrage);
-  echte Frames liegen bei 1–4 ms. Fehler beim Laden/Speichern zeigt `UI.reportError` als Dialog.
-- Markdown-Preview hält je Sprache einen Highlighter (`code_highlighters`-Map); vorher wurde bei
-  jedem Sprachwechsel ein neuer Tree-sitter-Parser gebaut, viermal pro Frame bei vier Sprachen.
+- Frame-Zeit: `ui_state.last_frame_ms`/`max_frame_ms` (Maximum seit dem letzten Abholen). Echte
+  Frames liegen bei 1–4 ms; Latenz nie über `editor_state` messen, der RPC liefert bei einer
+  5-MB-Datei 5 MB JSON je Abfrage. Fehler beim Laden/Speichern zeigt `UI.reportError` als Dialog.
+- Markdown-Preview hält je Sprache einen Highlighter (`code_highlighters`-Map), damit nicht jeder
+  Sprachwechsel einen neuen Tree-sitter-Parser baut.
