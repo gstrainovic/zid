@@ -1,10 +1,17 @@
 ---
 name: editor
 description: >
-  Der Text-Editor in zid: Bearbeiten/Auto-Indent/Autoclose, Maus, Mehrfach-Cursor, Word-Wrap, Suche/Ersetzen, Statusleiste, Panes, externe Änderungen — und die zwei Sorten Textfelder (CodeEditor vs. line_edit). Use when touching src/editor/*, edit_ops.zig, wrap_ops.zig, find_ops.zig, tiny_regex.zig, code_editor.zig, keymap.zig, CodeEditor/line_edit/EditBuffer, or scripts/e2e_editor.py, e2e_find_preview.py, e2e_external_change.py, e2e_line_edit.py.
+  Der Text-Editor in zid: Bearbeiten/Auto-Indent/Autoclose, Maus, Mehrfach-Cursor, Word-Wrap, Suche/Ersetzen, Statusleiste, Panes, externe Änderungen — und die zwei Sorten Textfelder (CodeEditor vs. line_edit). Use when touching src/editor/*, edit_ops.zig, wrap_ops.zig, find_ops.zig, find_bar.zig, tiny_regex.zig, code_editor.zig (own test root code_editor_tests), keymap.zig, CodeEditor/line_edit/EditBuffer, or scripts/e2e_editor.py, e2e_find_preview.py, e2e_external_change.py, e2e_line_edit.py.
 ---
 
 Aus AGENTS.md hierher verschoben (21.09.2026), Wortlaut unverändert.
+
+## Unit-Tests in code_editor.zig
+
+Tests in `src/editor/code_editor.zig` laufen nur, weil die Datei eigenes Test-Root ist
+(`code_editor_tests` in build.zig, wio-Symbol-Hack unter `is_test` in der Datei). Tests in
+importierten Modulen führt der Runner nicht aus; `zig build test --summary all` zeigt die
+Zähler pro Modul, ein absichtlich kaputter Test ist der schnellste Beweis.
 
 ## Editor: Bearbeiten, Maus, Statusleiste, Panes
 
@@ -39,6 +46,13 @@ Aus AGENTS.md hierher verschoben (21.09.2026), Wortlaut unverändert.
   Toggle Minimap / Render Whitespace / Indent Guides (gemerkt in `user_state`).
 - **Backup vor dem Speichern** löst relative Pfade per `realpathAlloc` auf (`accessAbsolute` hat bei
   der relativen Standarddatei einen `unreachable`-Panic ausgelöst).
+- **Suchleiste** (`CodeEditor.find` = `find_bar.FindState`, Leiste `find_bar.render`, gemeinsam
+  mit der Markdown-Vorschau; Logik in `src/editor/find_ops.zig`): inkrementell beim Tippen,
+  Enter/Shift+Enter weiter/zurück mit Umbruch, Escape schließt, markierter Text wird Suchbegriff.
+  Ctrl+F bei offener Leiste markiert den Begriff neu. Die Widget-IDs (`find_widget`,
+  `find_input`, `replace_*`, `goto_*`) tragen das Editor-Salz (`idi`), sonst melden zwei Panes
+  mit offener Leiste duplicate_id. Breitzeichen zählen als eine Spalte.
+  E2E: `python3 scripts/e2e_find_preview.py` (Vorschau, Editor-Tab, Split).
 - Suchleiste: Ctrl+H zeigt die Ersetzen-Zeile, Tab wechselt das Feld, Enter ersetzt den Treffer,
   Alt+Enter alle (`replaceAll`, ein Undo-Schritt). Ctrl+G öffnet „Go to line“ (nur Ziffern).
 - **Suche:** Optionen Alt+C (Groß/Klein), Alt+W (Ganzwort), Alt+R (Regex) in der Suchleiste, Badges

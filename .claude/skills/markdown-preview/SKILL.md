@@ -1,7 +1,7 @@
 ---
 name: markdown-preview
 description: >
-  Markdown-Vorschau in zid: Tabellen, Umbruchbreite, Word Wrap, Balken, Textauswahl, Suche (Ctrl+F), Schriftgröße, abfragbare IDs für E2E. Use when touching src/ui/markdown_view.zig, md_select.zig, md_find.zig, word_wrap.zig, preview rendering or scrolling, or scripts/e2e_md_preview*.py, e2e_find_preview.py.
+  Markdown-Vorschau in zid: Tabellen, Umbruchbreite, Word Wrap, Balken, Textauswahl, Suche (Ctrl+F), Schriftgröße, abfragbare IDs für E2E. Use when touching src/ui/markdown_view.zig, md_select.zig, md_find.zig, word_wrap.zig, reloadMarkdownPreview, preview rendering or scrolling, zigdown styling limits (strikethrough, bold/italic), or scripts/e2e_md_preview*.py, e2e_find_preview.py.
 ---
 
 Aus AGENTS.md hierher verschoben (21.09.2026), Wortlaut unverändert.
@@ -134,7 +134,21 @@ Aus AGENTS.md hierher verschoben (21.09.2026), Wortlaut unverändert.
   Die wachsende Stream-Bubble ist nicht auswählbar (wird je Token neu gebaut). RPC
   `chat_line_bounds(msg, line)`; E2E `select_in_bubble` in `e2e_ai_chat.py`.
 
+- **Vorschau neu laden:** Speichern (Ctrl+S oder Autosave) baut eine offene Vorschau derselben
+  Datei neu auf (`UI.reloadMarkdownPreview`, liest die Datei, behält Scroll-Position, Folie und
+  Schriftgröße); Split „Editor links, Vorschau rechts“ zieht damit nach.
+  E2E: `python3 scripts/e2e_md_preview_reload.py`.
+
 - **Schriftgröße der Vorschau:** `UI.previewFontSize` (Editor minus 4, Standard 24 → 20).
   `setFontSizeAll` setzt sie bei jedem Zoom auf alle offenen `open_markdown_views`, und beide
   Stellen, die eine Vorschau anlegen (`src/main.zig` und der Render-Zweig in `mod.zig`),
   übernehmen sie — sonst blieb die Vorschau auf ihrer Startgröße stehen.
+
+## Bekannte Grenzen (kein Todo, bewusst so)
+
+- **Durchgestrichen:** `~~text~~` toggelt zigdown zweimal und bleibt ungestylt, `~text~`
+  funktioniert. Upstream-Verhalten in zigdown.
+- **Fett/Kursiv nur über Farbe:** Es gibt eine einzige Font-Face (JetBrainsMono-Regular).
+  Echte Schnitte bräuchten Font-IDs im Text-Renderer und eine zweite geladene Face.
+  MarkdownView zeigt Styles deshalb als Theme-Farben (fett=primary, kursiv=accent,
+  Code=warning, Link=blau, durchgestrichen=muted).

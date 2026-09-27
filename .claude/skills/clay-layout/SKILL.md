@@ -7,7 +7,8 @@ description: >
   Use when touching Clay layout code (clay.UI, clay.text, ElementId, sizing, clip),
   when a Clay error appears ("Layout elements exceeded", "duplicate_id"), when an
   element overflows its container, when text is clipped or misaligned, or when a
-  list renders a large document.
+  list renders a large document, or when touching the patched clay.h
+  (libs/clay-zig, vendor/clay.h, Clay hash map, text measure cache, scroll containers).
 ---
 
 # Clay in zid
@@ -183,6 +184,45 @@ Fehler sichtbar gemacht.
 
 **Prüfe nach Layout-Arbeit das Log auf `error(ui): Clay:`.**
 `scripts/e2e_md_preview.py` tut das automatisch.
+
+## Gepatchte clay.h unter libs/clay-zig/vendor
+
+Das Submodul zeigt auf den eigenen Fork `gstrainovic/clay-zig-bindings`, Branch `zid`
+(Upstream johan0A als Remote `upstream`). Dort liegen vier Fixes als Commits `598a5c7`
+(Scroll-Container), `27407cd` (Hash-Map), `7c66140` (Messcache) und `72d89dd` (Umbruch mit
+fremden Wörtern), alle Stellen mit „zid:“ markiert. Für eine neuere clay.h den Branch `zid` auf
+upstream rebasen. `libs/clay-zig/build.zig` legt `vendor/clay.h` vor die Abhängigkeit.
+
+- **Scroll-Container (`598a5c7`):** drei Stellen in `Clay_UpdateScrollContainers` gegenüber
+  v0.14: Swap-Remove ohne `i--` übersprang Einträge, `Clay__GetHashMapItem` liefert nie `NULL`
+  (sondern `&Clay_LayoutElementHashMapItem_DEFAULT`), und der Zeiger auf das Clip-Element wird
+  vor dem Zugriff geprüft (sonst Absturz „member access within null pointer of type
+  Clay_ClipElementConfig“, z. B. Multi-File-Diff nach Diff-Tab im selben Pane). zid benutzt
+  Clays Scroll-Positionen nicht, aber jedes `.clip`-Element legt dort einen Eintrag an, und nur
+  `UI.updateScroll` räumt die (10 Einträge große) Liste auf.
+- **Hash-Map der Element-IDs (`27407cd`):** sie liegt im persistenten Speicher, jede je gesehene
+  ID (auch anonyme Textstücke: Hash aus Eltern-ID und Kindindex) belegt einen Eintrag. Bei
+  voller Kapazität `maxElementCount` liefert `Clay__AddHashMapItem` still `NULL`: neue Elemente
+  haben keine Bounds, kein Hover, keinen Klick. `Clay__CompactLayoutElementsHashMap` läuft
+  deshalb in `Clay_BeginLayout`, sobald die Map zu drei Vierteln voll ist: behält Einträge der
+  letzten drei Frames, verdichtet `debugElementData` im Gleichschritt und baut die Buckets neu.
+  Für E2E: `element_bounds` verschwundener Elemente bleiben nur, bis verdichtet wird — darauf nie
+  bauen (siehe `visible_blocks` in `e2e_md_preview.py`). Bei „Element X nicht im Layout“, obwohl
+  X sichtbar ist: zuerst an diese Map denken.
+- **Messcache der Texte (`7c66140`):** Clay gibt Einträge nur frei, wenn ein Nachschlagen zufällig
+  über einen veralteten Eintrag im selben Bucket läuft; eine gestreamte Chat-Antwort (ein
+  wachsender Absatz) füllt so die Wortgrenze (16384, „run out of space in it's internal text
+  measurement cache“), danach bleibt Text ungemessen. `Clay__ResetMeasureTextCacheWhenFull`
+  leert den Cache in `Clay_BeginLayout`, sobald Wort- oder Eintragsliste zu drei Vierteln voll
+  ist. Unit-Test `src/ui/clay_cache_tests.zig` (eigenes Test-Root mit Clay, ohne UI).
+- **Umbruch mit fremden Wörtern (`72d89dd`):** der Messcache schlägt über einen 32-Bit-Hash des
+  Inhalts nach; der SIMD-Hash auf x86_64 bezieht die Länge nicht ein („ab“ und „ab\0\0“
+  kollidieren), und `Clay__MeasureTextCacheItem_DEFAULT` zeigt mit Wortindex 0 auf eine
+  beliebige Wortliste. Einträge tragen deshalb die Textlänge, DEFAULT wird ungebrochen
+  ausgegeben, Wörter hinter dem Textende beenden den Umbruch (sonst Lesen hinter dem Puffer,
+  bei leerem Text „applying non-zero offset to non-null pointer 0xffffffffffffffff“ in
+  `Clay__CalculateFinalLayout`). Test im selben Test-Root; dort teilen sich alle Tests einen
+  Clay-Puffer, weil der aktuelle Kontext nicht zurückgesetzt werden kann.
 
 ## Große Inhalte virtualisieren
 
