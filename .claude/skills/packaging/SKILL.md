@@ -25,6 +25,15 @@ Aus AGENTS.md hierher verschoben (21.09.2026), Wortlaut unverändert.
 - Die Version steht in `build.zig.zon` und kommt über die Build-Option `build_info.version`
   ins Binary (`zid --version`); AppStream-`<release>` von Hand nachziehen.
 
+## Fenster-Bibliotheken linken (wio)
+
+- wio lädt libX11, libXcursor und die Wayland-Libs per `dlopen`; `build.zig` linkt sie trotzdem,
+  weil die extern-Deklarationen der Import-Tabellen im Debug-Info stehen und der Linker sie
+  sonst als undefiniert meldet. Dasselbe gilt für `code_editor_tests`.
+- Der vendorte wio-Patch `fix(x11): GLX-Importe nur mit enable_opengl deklarieren` hält libGL
+  aus einem reinen Vulkan-Build heraus.
+- Backend-Wahl zur Laufzeit und WGPU-Surface: Skill `projektordner`.
+
 ## MuPDF: system oder bundled
 
 - `-Dmupdf=system` (Vorgabe) linkt System-`libmupdf`; der bundled Header darf dann nicht in

@@ -1,7 +1,7 @@
 ---
 name: explorer
 description: >
-  File-Explorer in zid: Fokus, Tastatur/Navigation, Mehrfachauswahl, Papierkorb, Anlegen/Umbenennen, .gitignore-Anzeige und Tab-Nachführung. Use when touching src/ui/file_explorer*, explorer_ops.zig, dialog_ops.zig, FileExplorerState, isIgnored/folderStatus, taskGitStatus/parseStatusOutput, pending_fs_change/applyFsChange, or scripts/e2e_explorer.py, e2e_symlink_dir.py, e2e_line_edit.py.
+  File-Explorer in zid: Fokus, Tastatur/Navigation, Mehrfachauswahl, Papierkorb, Anlegen/Umbenennen, .gitignore-Anzeige und Tab-Nachführung. Use when touching src/ui/file_explorer*, explorer_ops.zig, dialog_ops.zig, FileExplorerState, isIgnored/folderStatus/statusFor, git_status_mutex, RPC explorer_entries, taskGitStatus/parseStatusOutput, pending_fs_change/applyFsChange, or scripts/e2e_explorer.py, e2e_symlink_dir.py, e2e_line_edit.py.
 ---
 
 Aus AGENTS.md hierher verschoben (21.09.2026), Wortlaut unverändert.
@@ -82,6 +82,15 @@ Aus AGENTS.md hierher verschoben (21.09.2026), Wortlaut unverändert.
   In `renderExample` wird `ad.key_result` erst nach dem Übernehmen in `pending_dialog_result`
   geleert: `res = render(...) orelse ad.key_result` verwies unter Windows noch auf das Feld, das
   vorherige Nullen kam als null an und keine Taste schloss einen Dialog.
+- **Explorer testen:** `explorer_entries` liefert Viewport-Bounds, `row_height`, `scroll` und die
+  sichtbaren Zeilen mit Index; Zeilenmitte = `viewport.y + index*row_height + row_height/2 - scroll`.
+  Zeilen außerhalb des Viewports vorher mit `scroll x y lines` (negativ = runter) hereinholen.
+  Das ist die UI-Konvention aller `scrollLines` (positiv = hoch). Im Fenster spiegelt
+  `platform/wheel.zig` das wio-Delta (positiv = Rad nach unten, auf jeder Plattform gleich)
+  ohne OS-Sonderfall; der RPC umgeht diese Stelle, das Vorzeichen deckt nur der Unit-Test ab.
+  Beim Prüfen von Hand: das Touchpad hat unter GNOME Natural Scrolling, die Maus nicht.
+  Rechtsklick auf eine Zeile öffnet das Menü (Rename/Delete); F2/Entf wirken auf den markierten
+  Eintrag, aber nur wenn der letzte Klick im Explorer war (`ui_state.explorer_focused`).
 - `python3 scripts/e2e_explorer.py` fährt Fokus, Kürzel, Dialog-Tastatur, Papierkorb, Navigation,
   Anlegen/Umbenennen, Zwischenablage, Mehrfachauswahl und Kontextmenü headless durch.
 
@@ -96,6 +105,10 @@ Aus AGENTS.md hierher verschoben (21.09.2026), Wortlaut unverändert.
   kein Badge; `folderStatus` überspringt `I`, damit ein ignorierter Ordner keinen Status nach oben
   vererbt. RPC `explorer_entries[].ignored`; E2E-Schritt `step_gitignore` nutzt, dass `tmp/` im
   Projekt ignoriert ist.
+- **`file_explorer.git_status` hängt an `git_status_mutex`:** der Main-Thread ersetzt die Map in
+  `updateGitStatus` (Keys werden freigegeben), während `explorer_entries` sie gleichzeitig liest.
+  Zugriff nur über `statusFor`, `isIgnored`, `folderStatus`, nie direkt auf die Map (sonst
+  Segfault in `isIgnored`).
 
 ## Explorer: Umbenennen/Löschen und offene Tabs
 

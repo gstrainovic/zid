@@ -13,6 +13,9 @@ description: >
 
 # Lokales LLM in zid
 
+zid spricht ausschliesslich mit llama-server und nutzt nur lokale Backends; Cloud-Anbieter
+(Claude, OpenAI) hat der Projektinhaber ausgeschlossen.
+
 ## Backend-Wahl beim Start
 
 `UI.init`, sofern nicht `--ai=off`. Standard ist der llama.cpp-Vulkan-Build
@@ -228,7 +231,10 @@ für Nachmessungen.
 - **Ausführung** auf dem Main-Thread in `src/ui/agent_actions.zig` (`UI.driveAgentTools` in
   `update()`): `command` → `executeCommand`; Dateien nur innerhalb von `current_directory`
   (`ai_tools.resolveInProject`, `..` und fremde absolute Pfade → `{"error": "outside the project"}`).
-  Ergebnisse gehen als JSON in `tool`-Nachrichten.
+  Ergebnisse gehen als JSON in `tool`-Nachrichten. Ruft ein Modell einen Enum-Wert als
+  Werkzeugnamen (`toggle_explorer` statt `command{name}`, kleine Modelle tun das), führt
+  `agent_actions` ihn als Kommando aus (`ai_tools.commandFromToolName`) statt „unknown tool"
+  zu melden.
 - **Regeln in Code, nicht im Prompt** (Qwen3-4B hält Prompt-Regeln unzuverlässig ein, siehe
   replace_text-Umweg). Der Systemprompt nennt nur Rolle und "Pfade relativ zum Projekt".
   `ai_tools.choosePaneForFile` (unit-getestet) entscheidet für `open_file`: Chat nicht im
