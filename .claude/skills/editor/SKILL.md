@@ -4,8 +4,6 @@ description: >
   Der Text-Editor in zid: Bearbeiten/Auto-Indent/Autoclose, Maus, Mehrfach-Cursor, Word-Wrap, Suche/Ersetzen, Statusleiste, Panes, externe Änderungen — und die zwei Sorten Textfelder (CodeEditor vs. line_edit). Use when touching src/editor/*, edit_ops.zig, wrap_ops.zig, find_ops.zig, find_bar.zig, tiny_regex.zig, code_editor.zig (own test root code_editor_tests), keymap.zig, CodeEditor/line_edit/EditBuffer, or scripts/e2e_editor.py, e2e_find_preview.py, e2e_external_change.py, e2e_line_edit.py.
 ---
 
-Aus AGENTS.md hierher verschoben (21.09.2026), Wortlaut unverändert.
-
 ## Unit-Tests in code_editor.zig
 
 Tests in `src/editor/code_editor.zig` laufen nur, weil die Datei eigenes Test-Root ist
@@ -25,18 +23,17 @@ Zähler pro Modul, ein absichtlich kaputter Test ist der schnellste Beweis.
   mehrzeiliger Auswahl rückt ein). Zeilenoperationen laufen über `replaceLineSpan`.
 - **Ctrl+X ohne Auswahl schneidet die ganze Zeile aus** (VS Code, Zed): Zeile plus Umbruch in
   die Zwischenablage, dann `DeleteLine`. Mit Auswahl bleibt Cut wie gehabt.
-- **Metrik-Fix:** `egc_chunk_width` lieferte für jeden Chunk 1; `insert_chars` addiert die Chunk-
-  Breite zur Cursor-Spalte, der Cursor stand nach Einfügen/Autoclose eine Spalte zu weit links.
+- **Metrik:** `insert_chars` addiert die Chunk-Breite aus `egc_chunk_width` zur Cursor-Spalte;
+  die muss die echte Breite liefern, sonst steht der Cursor nach Einfügen/Autoclose falsch.
 - **Undo-Schritte und Undo-Cursor:** `snapshotForUndo` legt die Cursor-Position (`zeile:spalte`)
   als Metadaten in den flow-core-Undo-Stand; `afterUndoRedo` setzt den Cursor dorthin (begrenzt)
   statt an den Dateianfang und nimmt den Geändert-Status aus `Buffer.is_dirty()`. Eine Tipp-Gruppe
   endet, wenn der Cursor nicht mehr hinter dem zuletzt getippten Zeichen steht (`typing_end`), und
   beim Speichern (`markSaved`): nur dann ist der root des nächsten Undo-Stands `last_save`, und
-  Undo zurück dorthin macht den Tab sauber. Vorher lief eine Gruppe über Cursorsprünge hinweg, ein
-  Undo nahm auch weit entfernte Eingaben zurück.
+  Undo zurück dorthin macht den Tab sauber.
 - **Cursor-Spalte nach Tippen kommt aus `insert_chars`** (`result[1]`), nie aus der Byte-Länge: ein
-  Umlaut ist 2 Bytes, aber 1 Spalte. Mit Byte-Länge stand der Cursor danach im Chat-Eingabefeld
-  hinter dem Zeilenende und jede weitere Eingabe scheiterte still (`INSERT FAILED`).
+  Umlaut ist 2 Bytes, aber 1 Spalte; mit Byte-Länge landet der Cursor hinter dem Zeilenende und
+  jede weitere Eingabe scheitert still (`INSERT FAILED`).
 - **Anzeige im Editor** (`renderRowOverlays`, schwebende Elemente über dem Zeilentext, x = Spalte ×
   `charWidth`): Einrück-Guides je 4 Spalten führenden Whitespace, Whitespace-Punkte/Tab-Striche
   (`show_whitespace`, Standard aus), Klammerpaar am Cursor (`findBracketPair`, max. 2000 Zeilen,
@@ -44,8 +41,8 @@ Zähler pro Modul, ein absichtlich kaputter Test ist der schnellste Beweis.
   (`renderMinimap`, 2 px je Zeile, Fenster um den Viewport, Klick springt) und horizontale Scrollbar
   unten (`renderHScrollbar`, nur wenn eine sichtbare Zeile breiter als der Ausschnitt ist). View →
   Toggle Minimap / Render Whitespace / Indent Guides (gemerkt in `user_state`).
-- **Backup vor dem Speichern** löst relative Pfade per `realpathAlloc` auf (`accessAbsolute` hat bei
-  der relativen Standarddatei einen `unreachable`-Panic ausgelöst).
+- **Backup vor dem Speichern** löst relative Pfade per `realpathAlloc` auf, weil `accessAbsolute`
+  bei relativen Pfaden in `unreachable` läuft.
 - **Suchleiste** (`CodeEditor.find` = `find_bar.FindState`, Leiste `find_bar.render`, gemeinsam
   mit der Markdown-Vorschau; Logik in `src/editor/find_ops.zig`): inkrementell beim Tippen,
   Enter/Shift+Enter weiter/zurück mit Umbruch, Escape schließt, markierter Text wird Suchbegriff.
@@ -60,8 +57,8 @@ Zähler pro Modul, ein absichtlich kaputter Test ist der schnellste Beweis.
   `^ $`, `\d \w \s \b`, Gruppen, `|`; keine Rückverweise/Captures, keine lazy Quantoren; unit-getestet).
   `find_ops.findOpts` rechnet Spalten als Anzeigespalten (Tab = 4) und nimmt das Trefferende aus dem
   Treffer, nicht aus der Musterlänge. Der erste Tastendruck nach Ctrl+F ersetzt den alten Begriff
-  (`replace_on_type`), sonst hing er an. Watcher: identische Ereignisse werden nur innerhalb von 100 ms
-  zusammengefasst; ohne Zeitfenster ging eine zweite externe Änderung derselben Datei verloren.
+  (`replace_on_type`). Watcher: identische Ereignisse werden nur innerhalb von 100 ms
+  zusammengefasst, damit eine zweite externe Änderung derselben Datei nicht verloren geht.
 - Maus: Dreifachklick markiert die Zeile (`click_count`), Shift+Klick erweitert vom Anker, Ctrl+Klick/
   F12 springen zur ersten Definitionszeile des Worts im selben Buffer (kein LSP: der Client in
   `src/lsp` wird nirgends gestartet), Ziehen über den Rand scrollt (`autoScrollWhileDragging` im Render).
@@ -80,7 +77,7 @@ Zähler pro Modul, ein absichtlich kaputter Test ist der schnellste Beweis.
 - Panes: Ctrl+\ splittet, Ctrl+Alt+Pfeil oder Chord Ctrl+K dann Pfeil wechselt geometrisch
   (`focusPane` über die Pane-Bounds des letzten Frames), Ctrl+Shift+E fokussiert den Explorer,
   Ctrl+J wechselt zum Terminal-Tab und zurück (`terminal_return_index`). Ctrl+K erreicht die Shell
-  im Terminal nicht mehr.
+  im Terminal nicht.
 - RPCs: `key_press_alt(name, ctrl, shift, alt)`, `click_mods(x, y, ctrl, shift)`, `editor_state.selection`,
   `ui_state.active_pane_index`. `python3 scripts/e2e_editor.py` deckt alles ab.
 - **Mehrfach-Cursor:** Ctrl+D markiert das Wort unter dem Cursor, jedes weitere Ctrl+D fügt das
@@ -107,8 +104,8 @@ Zähler pro Modul, ein absichtlich kaputter Test ist der schnellste Beweis.
   (Daumen über `totalVisualRows`) und Ziehen benutzen sie.
   RPC `editor_state.word_wrap`, `editor_state.visual_rows` (Reihen der Cursor-Zeile).
 - **Neue Editoren erben Optionen:** `splitActivePane` kopiert Minimap/Whitespace/Guides/Wrap,
-  Schriftgröße und Theme vom Ausgangs-Editor (`copyEditorOptions`); vorher hatte der zweite Pane
-  Standardwerte, und `loadUserState` erreichte nur die beim Start vorhandenen Leaves.
+  Schriftgröße und Theme vom Ausgangs-Editor (`copyEditorOptions`), weil `loadUserState` nur die
+  beim Start vorhandenen Leaves erreicht.
 - **Clay `getElementData` vergisst nichts:** IDs, die nicht mehr gerendert werden, bleiben `found`
   mit alter Geometrie. E2E-Prüfungen auf „Element ist weg“ sind wertlos; Zustand per RPC prüfen.
   Für ausgeblendete Kontextmenü-Einträge geht es trotzdem: der Eintrag muss innerhalb des frisch
@@ -118,40 +115,35 @@ Zähler pro Modul, ein absichtlich kaputter Test ist der schnellste Beweis.
   `~/.config/zid/state` (Word-Wrap, Schriftgröße, Sidebar-Breite) messen Suiten Fremdzustand und
   überschreiben ihn. Neue Suiten starten zid deshalb über `start_zid`, nie per `Popen`.
 - **Split behält Chat und Terminal:** `splitActivePane` gibt die bisherige Tab-Leiste an die
-  erste Hälfte weiter, nur die neue Hälfte bekommt `cloneFrom` (ohne Chat und Terminal). Zwei
-  Kopien ließen Chat-Tabs und Terminal-Instanzen verschwinden. E2E: `e2e_tabs.py`.
+  erste Hälfte weiter, nur die neue Hälfte bekommt `cloneFrom` (ohne Chat und Terminal), sonst
+  verschwinden Chat-Tabs und Terminal-Instanzen. E2E: `e2e_tabs.py`.
 - **setText verwirft den Undo-Verlauf.** `libs/flow-core` gibt in `Buffer.load` die Leaf-Puffer des
-  vorherigen Ladevorgangs frei (Leak-Fix gegenüber upstream flow). Alle Undo-/Redo-Knoten zeigen aber
-  auf Bäume in genau diesen Puffern: Undo nach einem externen Reload endete in „switch on corrupt
-  value“ in `walk_from_line_begin_const_internal` (aufgefallen erst im vollen `e2e_editor.py`, weil
-  `typing_in_progress` über den Reload hinweg true blieb und der nächste Tastendruck deshalb keinen
-  frischen Snapshot legte). `CodeEditor.setText` setzt jetzt `undo_head`/`redo_head` auf null, beendet
-  die Tipp-Gruppe und löscht Extra-Cursor; Undo über einen Reload hinweg gibt es damit bewusst nicht.
+  vorherigen Ladevorgangs frei (Leak-Fix gegenüber upstream flow), auf deren Bäume alle
+  Undo-/Redo-Knoten zeigen (sonst „switch on corrupt value“ in
+  `walk_from_line_begin_const_internal`). `CodeEditor.setText` setzt deshalb
+  `undo_head`/`redo_head` auf null, beendet die Tipp-Gruppe und löscht Extra-Cursor; Undo über
+  einen Reload hinweg gibt es bewusst nicht.
 
 ## Textfelder: zwei Sorten, klar getrennt
 
 - **Mehrzeilig → `CodeEditor`**: Haupteditor, KI-Chat-Eingabe und das Commit-Feld der
   Source-Control-Ansicht. Damit gibt es dort Umbruch, Rückgängig, Mausauswahl,
-  Kontextmenü und unbegrenzte Länge. Das Commit-Feld war vorher ein eigener Puffer mit
-  2048 Bytes ohne Ctrl+Z; `scm_changes_view` zeichnete Zeilen, Auswahl und Schreibmarke
-  von Hand.
+  Kontextmenü und unbegrenzte Länge.
 - **Einzeilig → `line_edit` + `explorer_ops.EditBuffer`**: Umbenennen und Filter im
   Explorer, Schnellöffner, Ordner-Dialog. Klein gehalten, kein Umbruch
-  (`wrap_mode = .none`). Rückgängig gibt es dort seit Kurzem, aber nur **einen** Schritt
+  (`wrap_mode = .none`). Rückgängig gibt es dort nur **einen** Schritt
   (`undoEdit`/`redoEdit`): zusammenhängendes Tippen ist eine Gruppe, eine Cursorbewegung
   schliesst sie. Doppelklick markiert das Wort (`selectWordAtCursor`); die Zeit dafür kommt
   aus `std.time.milliTimestamp`, damit die Aufrufer keine Uhr durchreichen müssen.
 - **`line_edit` in einem Dialog braucht `Config.z_index` über dem Dialog.** Cursorstrich
   und Markierung sind schwebende Elemente, und Clay sortiert z-Indizes global, nicht relativ
-  zum Elternteil. Mit dem Standard 10 lagen sie unter Ordner-Dialog und Picker (z 2000) und
-  waren unsichtbar (bis 22.09.2026). Beide Felder stehen jetzt auf 2002; E2E prüft das Pixel
-  am Cursor in `e2e_open_folder.py`.
-- **`line_edit` scrollt waagrecht** (seit 22.09.2026): `EditBuffer.scroll_x` folgt dem
+  zum Elternteil. Mit dem Standard 10 liegen sie unter Ordner-Dialog und Picker (z 2000);
+  beide Felder stehen deshalb auf 2002. E2E prüft das Pixel am Cursor in `e2e_open_folder.py`.
+- **`line_edit` scrollt waagrecht:** `EditBuffer.scroll_x` folgt dem
   Cursor (`explorer_ops.followCaret`, unit-getestet), das Textelement ist selbst ein
   Clip-Container mit `child_offset`, Markierung und Strich ziehen den Versatz selbst ab
   (Clay versetzt schwebende Kinder nicht) und hängen mit `clip_to = .to_attached_parent`
-  am Feld; Klick und Ziehen rechnen `scroll_x` ein. Vorher lief ein langer Pfad im
-  Ordner-Dialog rechts hinaus, und der Cursorstrich stand ausserhalb des Dialogs. Der
+  am Feld; Klick und Ziehen rechnen `scroll_x` ein. Der
   Rahmen um das Feld darf **kein** `.clip` haben: Clay zieht `grow`-Kinder eines
   Clip-Elternteils auf Inhaltsbreite, das Feld wuchs dann mit dem Text mit. E2E: Schritt 2b
   in `e2e_open_folder.py`.
@@ -159,9 +151,9 @@ Zähler pro Modul, ein absichtlich kaputter Test ist der schnellste Beweis.
   `setShiftState` reichen sie an Chat **und** Commit-Feld weiter. Ohne das greift die
   Keymap des Editors nicht und Ctrl+Z tut nichts.
 - Ebenso Uhr und Zwischenablage: `time_ms` bekommt in `UI.update` der aktive Editor, der Chat
-  (`updateTimeMs`) und das Commit-Feld. Ohne Uhr galt jeder zweite Klick in dieselbe Zeile als
-  Doppelklick (bis 21.09.2026 im Commit-Feld). Copy/Cut/Paste laufen über `clipboard_hook`
-  (gesetzt in `ensureEditorHooks` für Panes, Chat und Commit-Feld) → `UI.setClipboard`; vorher
-  nur ans Fenster, headless kam nichts an. Neuer eingebetteter Editor: beides mitverdrahten.
+  (`updateTimeMs`) und das Commit-Feld; ohne Uhr gilt jeder zweite Klick in dieselbe Zeile als
+  Doppelklick. Copy/Cut/Paste laufen über `clipboard_hook` (gesetzt in `ensureEditorHooks` für
+  Panes, Chat und Commit-Feld) → `UI.setClipboard`, damit auch headless etwas ankommt. Neuer
+  eingebetteter Editor: beides mitverdrahten.
 - Die Auswahl eines `CodeEditor` hat kein eigenes Clay-Element (anders als `line_edit`,
   `<feld>_sel`). E2E prüfen den Text: `scm_state.changes.selected_text`, `editor_state.selection`.

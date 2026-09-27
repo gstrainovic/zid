@@ -4,8 +4,6 @@ description: >
   File-Explorer in zid: Fokus, Tastatur/Navigation, Mehrfachauswahl, Papierkorb, Anlegen/Umbenennen, .gitignore-Anzeige und Tab-Nachführung. Use when touching src/ui/file_explorer*, explorer_ops.zig, dialog_ops.zig, FileExplorerState, isIgnored/folderStatus/statusFor, git_status_mutex, RPC explorer_entries, taskGitStatus/parseStatusOutput, pending_fs_change/applyFsChange, or scripts/e2e_explorer.py, e2e_symlink_dir.py, e2e_line_edit.py.
 ---
 
-Aus AGENTS.md hierher verschoben (21.09.2026), Wortlaut unverändert.
-
 ## Explorer: Fokus, Tastatur, Auswahl, Papierkorb
 
 - **Symlink auf einen Ordner ist ein Ordner** (`explorer_ops.isDirectory` folgt dem Link, z. B.
@@ -31,8 +29,7 @@ Aus AGENTS.md hierher verschoben (21.09.2026), Wortlaut unverändert.
   `measureTextWidth`), ein Tooltip mit dem vollen Pfad erscheint nach 700 ms über einer Zeile
   (`hover_index`/`hover_since_ms`, Element `fx_tooltip`). Ordner erben die Git-Farbe ihrer Nachfahren
   (`folderStatus`, C > M > A > ?), Icons nach Endung (`fileIcon`-Tabelle). Versteckte Einträge zeigt
-  Taste `.` oder „Toggle Hidden Files" im View-Menü (`show_hidden`, gedämpft, mit Häkchen); die
-  Taste allein war nicht auffindbar. Das Filterfeld öffnet `/` (Name enthält Text, Elternordner
+  Taste `.` oder „Toggle Hidden Files" im View-Menü (`show_hidden`, gedämpft, mit Häkchen). Das Filterfeld öffnet `/` (Name enthält Text, Elternordner
   bleiben, Ordner mit Treffern gelten als aufgeklappt; nur geladene Knoten werden durchsucht; Enter
   behält den Filter, Escape leert ihn). Drag & Drop: Ziehen eines Eintrags auf einen Ordner (oder eine
   Datei darin) fragt „Move 'a' into 'b'?“ und ruft `performMove` (`drag`/`pending_move`).
@@ -44,8 +41,7 @@ Aus AGENTS.md hierher verschoben (21.09.2026), Wortlaut unverändert.
   `fx_menu_<command>`, gezeichnet über `context_menu.zig`); der Klick landet in `pending_command`,
   die UI führt `executeCommand` aus.
 - **Kleine Editierfelder** (Umbenennen, Anlegen, Filter, Picker-Suche, Pfad im Ordner-Dialog,
-  Commit-Nachricht) teilen `explorer_ops.EditBuffer` und `line_edit.zig`. Seit 18.09.2026 mit
-  Auswahl: `anchor` im Puffer, Shift+Pfeile/Pos1/Ende/↑↓ erweitern, Ctrl+←/→ wortweise
+  Commit-Nachricht) teilen `explorer_ops.EditBuffer` und `line_edit.zig`. Auswahl: `anchor` im Puffer, Shift+Pfeile/Pos1/Ende/↑↓ erweitern, Ctrl+←/→ wortweise
   (`moveWordLeft/Right`, Klassen Wort/Satzzeichen/Leerraum), Ctrl+A/C/X/V über
   `line_edit.Clipboard` (`UI.editClipboard`: Fenster oder headless `last_clipboard_text`),
   Shift+Klick und Ziehen (`handleClick(extend)`, `handleDrag`, `handleRelease`; `mouse_selecting`
@@ -64,7 +60,7 @@ Aus AGENTS.md hierher verschoben (21.09.2026), Wortlaut unverändert.
   Oberfläche zeigt, und „Wiederherstellen“ folgt dem Pfad in der `.trashinfo`.
   E2E-Skripte setzen `XDG_DATA_HOME=tmp/xdg`, damit der echte Papierkorb leer bleibt. Fehler von
   Explorer-Aktionen landen in `takeError` → Dialog „Error“ statt nur im Log.
-- **Windows** (seit 23.09.2026, `src/platform/recycle_bin.zig`): Recycle Bin über
+- **Windows** (`src/platform/recycle_bin.zig`): Recycle Bin über
   `SHFileOperationW` mit `FOF_ALLOWUNDO`, aber nur auf festen Laufwerken (`GetDriveTypeW ==
   DRIVE_FIXED`). Netz- und Wechsellaufwerke haben keinen Papierkorb, Windows würde dort mit
   `FOF_NOCONFIRMATION` still endgültig löschen; deshalb `FileExplorer.recycleViaStaging`: Kopie
@@ -72,16 +68,13 @@ Aus AGENTS.md hierher verschoben (21.09.2026), Wortlaut unverändert.
   Original entfernen. Die Datei liegt so im normalen Papierkorb; „Wiederherstellen“ legt sie in
   den Zwischenordner, nicht aufs Netzlaufwerk zurück (die API kennt keinen fremden
   Ursprungsort; das `$I`-Format selbst zu schreiben wäre undokumentiert). Die Statusmeldung nennt
-  den Ordner. Vorher lief auch Windows in den Linux-Pfad: `~/.local/share/Trash` + `gio` — vom
-  BM-Netzlaufwerk (`\\172.16.21.71\f`) schlug das Rename mit `Unexpected` fehl, dann `NoTrash`.
-  Ein gesetztes `XDG_DATA_HOME` erzwingt auch unter Windows die freedesktop-Ablage (E2E).
+  den Ordner. Ein gesetztes `XDG_DATA_HOME` erzwingt auch unter Windows die freedesktop-Ablage (E2E).
   `build.zig` linkt dafür `shell32`.
 - **Dialoge per Tastatur** (`dialog_ops.zig`, unit-getestet): Enter wählt den fokussierten Button
   (Start: erster = primär), Escape Cancel, Tab/Shift+Tab wandern, Anfangsbuchstabe wählt (`d` Delete,
   `s` Save, `n` Don't Save). Bei offenem Dialog erreicht keine Taste und kein Zeichen den Editor.
   In `renderExample` wird `ad.key_result` erst nach dem Übernehmen in `pending_dialog_result`
-  geleert: `res = render(...) orelse ad.key_result` verwies unter Windows noch auf das Feld, das
-  vorherige Nullen kam als null an und keine Taste schloss einen Dialog.
+  geleert, weil `res = render(...) orelse ad.key_result` auf das Feld verweisen kann.
 - **Explorer testen:** `explorer_entries` liefert Viewport-Bounds, `row_height`, `scroll` und die
   sichtbaren Zeilen mit Index; Zeilenmitte = `viewport.y + index*row_height + row_height/2 - scroll`.
   Zeilen außerhalb des Viewports vorher mit `scroll x y lines` (negativ = runter) hereinholen.

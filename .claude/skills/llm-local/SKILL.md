@@ -81,8 +81,8 @@ Verbindungszustand: Statuspunkt, Kopfzeile (`agentTitle`: Modell · Gerät) und
 `sendMessage` hängen daran. Warmup schickt „ping" mit `max_tokens = 1`, ohne Limit
 dauert der Start minutenlang.
 
-Fehlen Engine oder Modell, lädt der Chat sie auf Knopfdruck selbst nach; synchron wird
-nie geladen, das blockierte den Start minutenlang (`selfsetup.zig` arbeitet im eigenen
+Fehlen Engine oder Modell, lädt der Chat sie auf Knopfdruck selbst nach; nie synchron,
+das blockiert den Start minutenlang (`selfsetup.zig` arbeitet im eigenen
 Thread, der Fortschritt kommt aus der Grösse der `.part`-Datei).
 
 ## Chat-Eingabe ist der CodeEditor
@@ -119,8 +119,8 @@ RPC `chat_state`: Status, Detail, Titel, loading/initializing,
 
 ## Engines und Modelle
 
-**Layout:** `engines/` ist ignoriert, kein Submodul mehr (seit 20.09.2026). Ein lokaler
-Build unter `engines/llama.cpp-vulkan/build/` (bisher b10524 = `9ee9fc0`, `GGML_VULKAN=ON`,
+**Layout:** `engines/` ist ignoriert, kein Submodul. Ein lokaler
+Build unter `engines/llama.cpp-vulkan/build/` (b10524 = `9ee9fc0`, `GGML_VULKAN=ON`,
 derselbe Build für GPU und CPU) hat Vorrang; fehlt er, lädt die Selbsteinrichtung das
 Release `b11062`. Wer lokal baut, klont llama.cpp selbst dorthin. `models/` hält alle GGUFs flach
 (per `*.gguf` ignoriert, **nie committen**).
@@ -139,8 +139,8 @@ busy"). Nach jedem Neubau oder Verschieben erneut ausführen. Die Build-Verzeich
 selbst kann cmake nach einem Umzug nicht neu konfigurieren, ein Neubau muss von vorn
 beginnen.
 
-**`llm-bench/`** ist das frühere Repo `bitnet-colibri-bench` als `git subtree`.
-`results/*.md` sind historische Protokolle und werden nicht angefasst.
+**`llm-bench/`** ist das Repo `bitnet-colibri-bench` als `git subtree`.
+`results/*.md` sind Messprotokolle und werden nicht angefasst.
 
 ## Messregeln
 
@@ -165,8 +165,8 @@ aufgebaut ist.
   Perplexity nur mit `llm-bench/bench/ppl-corpus.txt` bei `-c 512`.
 - Entscheidungen des Projektinhabers und die Liste „nicht erneut aufrollen" stehen in
   `llm-bench/CLAUDE.md`.
-- **`models/` hält nur das Standardmodell** gemma-4-E2B-it Q4_0 (ggml-org). Alle anderen
-  Modelle der Messreihen sind gelöscht; ein erneuter Vergleich braucht den Download, Quelle und
+- **`models/` hält nur das Standardmodell** gemma-4-E2B-it Q4_0 (ggml-org). Ein erneuter
+  Vergleich mit anderen Modellen braucht den Download, Quelle und
   sha256 stehen in `llm-bench/results/` (Qwen3-4B-Instruct-2507: unsloth,
   `3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597`).
 
@@ -205,23 +205,12 @@ aufgebaut ist.
 - Die Release-Archive sind unterschiedlich gebaut: Windows-ZIP flach, Linux-Tar mit
   `llama-<tag>/` davor (`install.stripComponents`).
 
-## Engines und Modelle (`engines/`, `models/`, `llm-bench/`)
-
-Keine Engine im Repo. Layout, `fix-rpath.sh` und die Messregeln stehen in
-`.claude/skills/llm-local/SKILL.md`. Kurz: `engines/` ist ignoriert; ein lokaler Build unter
-`engines/llama.cpp-vulkan` hat beim Start Vorrang, fehlt er, richtet zid die Engine selbst ein
-(siehe oben). Das Submodul fiel am 20.09.2026 weg (`6295283` benannte es nach `_engines/` um,
-`905fa9e` nahm es heraus). `models/` hält GGUFs flach und ignoriert (nie committen),
-`llm-bench/` ist ein `git subtree` mit historischen Protokollen, die nicht angefasst werden. Die
-BitNet-Engine und ihr Modell liegen nicht im Repo; `llm-bench/setup/linux.sh` holt und baut sie
-für Nachmessungen.
-
 ## Agent-Werkzeuge: der Agent kann, was der Editor kann
 
 - **Natives Tool-Calling** (OpenAI `tools`-Feld, `tool_calls` in der Antwort, `role: tool` zurück).
   Geprüft mit llama-server b10524 + Qwen3-4B + `--jinja`: funktioniert nicht-streamend
   und streamend (`delta.tool_calls` je Index zusammensetzen), das Modell nutzt Tool-Ergebnisse.
-  Das alte JSON-im-Text-Verfahren (`tryExecuteToolCall`) ist entfernt. Kein MCP, kein RPC:
+  Kein MCP, kein RPC:
   Agent und Editor sind derselbe Prozess; MCP wäre nur für externe Agenten interessant.
 - **Definitionen** in `src/ai/tools.zig` (Modul `ai_tools`, unit-getestet): `command` (Enum aus
   `shortcuts.Command`, Beschreibung mit Label + Kürzel jedes Kommandos → jedes Menü/Kürzel ist
@@ -240,9 +229,8 @@ für Nachmessungen.
   `ai_tools.choosePaneForFile` (unit-getestet) entscheidet für `open_file`: Chat nicht im
   aktiven Pane → dort öffnen; Chat aktiv und zweites Pane vorhanden → dort; sonst vertikal
   splitten (Chat oben, Datei unten). Danach geht der Fokus zurück zum Chat-Pane, man kann
-  weiterschreiben. Dafür lädt main.zig Tab-Wechsel jetzt für **alle** Leaves
-  (`UI.leavesWithPendingSwitch`; der Block biegt `active_pane` pro Leaf kurz um), vorher nur
-  für das aktive Pane.
+  weiterschreiben. Dafür lädt main.zig Tab-Wechsel für **alle** Leaves
+  (`UI.leavesWithPendingSwitch`; der Block biegt `active_pane` pro Leaf kurz um).
 - `write_file`/`replace_text` auf eine offene Datei laden den Buffer und alle Editoren darauf
   neu (`UI.reloadFileFromDisk`: `setText`, `setLanguageFromPath`, `last_save = root`, Tabs
   gelten als gespeichert). Zed/VS Code lösen das Sichtbarkeitsproblem mit einem Chat-Dock

@@ -4,8 +4,6 @@ description: >
   Farbige Emoji in zid: Rückfall-Schrift (Linux CBDT über FreeType, Windows Segoe UI Emoji über DirectWrite-Farbschichten und MuPDFs HarfBuzz), Bitmap-Skalierung, Farbatlas, zusammengesetzte Zeichen. Use when touching src/text/emoji_font.zig, bitmap_scale.zig, src/text/backends/directwrite/*, emoji_hb.c, glyph cache color atlas, text_atlas.wgsl, or scripts/e2e_emoji.py.
 ---
 
-Aus AGENTS.md hierher verschoben (21.09.2026), Wortlaut unverändert.
-
 ## Farbige Emoji (`src/text/emoji_font.zig`, `bitmap_scale.zig`)
 
 - JetBrains Mono hat keine Emoji. `TextSystem.shapeText` prüft je Textstück, ob ein
@@ -26,17 +24,16 @@ Aus AGENTS.md hierher verschoben (21.09.2026), Wortlaut unverändert.
 - Zwei Atlanten: Text bleibt einkanalig, Emoji liegen in `GlyphCache.color_atlas` (RGBA).
   Der Vertex trägt einen Schalter (`location(3)`), `shaders/text_atlas.wgsl` mischt zwischen
   Maske und Farbbild. Die SVG-Schicht hat deshalb einen eigenen Shader
-  (`shaders/svg_atlas.wgsl`); vorher teilte sie sich den Text-Shader, und die neue
-  Vertexspalte liess die `svg_pipeline` beim Erzeugen abstürzen.
-- **Windows (seit 21.09.2026):** Rückfall ist Segoe UI Emoji (`seguiemj.ttf`, COLR, liegt
+  (`shaders/svg_atlas.wgsl`), weil die zusätzliche Vertexspalte nicht zur `svg_pipeline` passt.
+- **Windows:** Rückfall ist Segoe UI Emoji (`seguiemj.ttf`, COLR, liegt
   jedem Windows bei), kein Download. MuPDFs FreeType taugt dafür nicht (ohne PNG und
   eingebettete Bitmaps gebaut, `slimftoptions.h`). `DirectWriteFace` bietet `hasCodepoint`,
   `rawFace` (Zeiger auf die Face selbst), `isColorBitmapFont` (hier: hat COLR-Schichten,
   geprüft an 😀) und `renderColorGlyph`: `IDWriteFactory2.TranslateColorGlyphRun` liefert
   einfarbige Schichten, jede wird über die GDI-Bitmap in Graustufen gerastert und mit
   `bitmap_scale.blendLayer` eingefärbt übereinandergelegt; Masse aus der Em-Box. Glyphen ohne
-  Schichten (`DWRITE_E_NOCOLOR`, etwa ⚠ in Textform) kommen einfarbig — ein Fehler dort liess
-  vorher den ganzen Frame abbrechen. Formen: `SimpleShaper` kann keine Ligaturen, deshalb formt
+  Schichten (`DWRITE_E_NOCOLOR`, etwa ⚠ in Textform) kommen einfarbig statt als Fehler, der
+  den Frame abbräche. Formen: `SimpleShaper` kann keine Ligaturen, deshalb formt
   `DirectWriteFace.shapeRun` Emoji-Läufe mit dem HarfBuzz aus MuPDFs Drittbibliothek
   (`src/text/backends/directwrite/emoji_hb.c`: Symbole `fzhb_*`, Speicher über einen eigenen
   MuPDF-Kontext, jeder Aufruf zwischen `fz_hb_lock`/`fz_hb_unlock`). Damit gehen ZWJ-Folgen,
@@ -44,8 +41,7 @@ Aus AGENTS.md hierher verschoben (21.09.2026), Wortlaut unverändert.
   Länderflaggen, Windows zeigt sie selbst so. Der ZWJ wird wie die Variantenwähler beim
   Anhängen verworfen, sonst stünde er ohne Ligatur als Strich im Satz.
   `hasCodepoint` merkt sich die Antworten für die BMP (`cp_cache`, Bitfelder auf dem Heap):
-  ohne ihn kostete jedes Formen ohne Cache-Treffer einen COM-Aufruf je Zeichen über ASCII, die
-  Vorschau von AGENTS.md wurde so langsam, dass `e2e_md_preview` mitten im Scrollen mass.
+  ohne ihn kostet jedes Formen ohne Cache-Treffer einen COM-Aufruf je Zeichen über ASCII.
 - macOS (CoreText) hat keinen Rückfall (`emoji_fallback_supported`), Emoji bleiben leer.
 - Zusammengesetzte Zeichen dürfen nie getrennt geformt werden: U+FE0F verlangt die farbige
   Form (⚠️ gegen ⚠), U+20E3 macht eine Taste (1️⃣), ZWJ verbindet (👩‍💻), dazu Hautton und

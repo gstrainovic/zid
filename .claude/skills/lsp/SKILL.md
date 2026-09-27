@@ -4,16 +4,13 @@ description: >
   LSP-Anbindung in zid (zls): Protokoll, Client, Sprung zur Definition, Messwerte. Use when touching src/lsp/*, ensureLsp, lspGotoDefinition, or scripts/e2e_lsp.py.
 ---
 
-Aus AGENTS.md hierher verschoben (21.09.2026), Wortlaut unverändert.
-
 ## LSP (zls): Sprung zur Definition
 
 - **Aufbau:** `src/lsp/lsp_proto.zig` (reine Logik, unit-getestet: `Content-Length`-Rahmen,
   Request/Notification, `file://`-URIs, `firstLocation` für Location | Location[] | LocationLink[],
   `parseMessage`) und `src/lsp/lsp_client.zig` (Prozess über stdio, Reader-Thread, `id → Methode`,
   Antworten als `TaskResult` `lsp_definition` mit dem Ergebnis-JSON; Server-Requests werden sofort
-  mit `result: null` beantwortet). Der alte Client nutzte die std.json-API von 0.13 und gab Payloads
-  vor dem Lesen frei; er wurde ersetzt.
+  mit `result: null` beantwortet).
 - **Start:** lazy beim ersten F12/Ctrl+Klick in einer `.zig`-Datei (`UI.ensureLsp`): `ZLS_PATH`,
   sonst `~/.local/bin/zls`, sonst `zls` im PATH; `ZID_LSP=off` schaltet ab. Root ist
   `current_directory`. Solange `initialize` nicht beantwortet ist, springt der Editor per Textmuster
