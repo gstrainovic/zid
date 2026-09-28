@@ -603,7 +603,7 @@ pub fn createDispatcher(alloc: std.mem.Allocator, ctx: *E2EContext) !*zigjr.RpcD
     try rpc_dispatcher.addWithCtx("element_bounds", ctx, elementBounds);
     try rpc_dispatcher.addWithCtx("element_bounds_i", ctx, elementBoundsIndexed);
     try rpc_dispatcher.addWithCtx("folder_picker_state", ctx, folderPickerState);
-    try rpc_dispatcher.addWithCtx("slide_state", ctx, slideState);
+    try rpc_dispatcher.addWithCtx("marp_preview_state", ctx, marpPreviewState);
     try rpc_dispatcher.addWithCtx("marp_export_state", ctx, marpExportState);
     try rpc_dispatcher.addWithCtx("pdf_state", ctx, pdfState);
     try rpc_dispatcher.addWithCtx("git_diff_state", ctx, gitDiffState);
@@ -1432,17 +1432,31 @@ fn marpExportState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     return buf.written();
 }
 
-/// Zustand der Folienvorschau des aktiven Tabs. `deck` ist false, wenn der Tab
-/// keine Vorschau ist oder der Text kein Marp-Deck.
-fn slideState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
+/// Folienvorschau über marp-cli: Zustand des ersten Renderns wie bei `marp_export_state`,
+/// dazu die laufenden Vorschauen (Deck, PDF, ob ein Watch-Prozess läuft). Im Hauptthread:
+/// die Liste ändert `pollMarpPreview` pro Frame.
+fn marpPreviewState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
+    return onMain(ctx, dc, marpPreviewStateMain, .{});
+}
+
+fn marpPreviewStateMain(ctx: *E2EContext, dc: *zigjr.DispatchCtx) anyerror![]const u8 {
+    const ui = ctx.ui_system;
+    const job = &ui.marp_preview_job;
     var buf = std.Io.Writer.Allocating.init(dc.arena());
-    if (ctx.ui_system.activeSlideDeckView()) |v| {
-        try buf.writer.print(
-            \\{{"deck": true, "slides": {d}, "current": {d}, "scale": {d:.4}, "font_size": {d}}}
-        , .{ v.slideCount(), v.current_slide, v.slide_scale, v.slideFontSize() });
-    } else {
-        try buf.writer.writeAll("{\"deck\": false, \"slides\": 0, \"current\": 0}");
+    try buf.writer.print("{{\"state\": \"{t}\", \"last\": \"{t}\", \"message\": {f}, \"previews\": [", .{
+        job.currentState(),
+        ui.marp_preview_last,
+        std.json.fmt(job.message(), .{}),
+    });
+    for (ui.marp_previews.items, 0..) |p, i| {
+        if (i > 0) try buf.writer.writeAll(", ");
+        try buf.writer.print("{{\"md\": {f}, \"pdf\": {f}, \"watching\": {}}}", .{
+            std.json.fmt(p.md, .{}),
+            std.json.fmt(p.pdf, .{}),
+            p.watch != null,
+        });
     }
+    try buf.writer.writeAll("]}");
     return buf.written();
 }
 
@@ -1560,7 +1574,9 @@ fn requestQuitRpc(ctx: *E2EContext, _: *zigjr.DispatchCtx) ![]const u8 {
     return "ok";
 }
 
-fn closeActiveTabRpc(ctx: *E2EContext, _: *zigjr.DispatchCtx) !void {
+/// Liefert "ok": mit `!void` als Rückgabe schickte zigjr keine Antwort, der Aufrufer wartete
+/// bis zum Zeitlimit.
+fn closeActiveTabRpc(ctx: *E2EContext, _: *zigjr.DispatchCtx) ![]const u8 {
     log.info("RPC: close_active_tab()", .{});
     const tb = ctx.ui_system.getActiveTabBar();
     if (tb.active_index) |idx| {
@@ -1572,6 +1588,7 @@ fn closeActiveTabRpc(ctx: *E2EContext, _: *zigjr.DispatchCtx) !void {
         });
     }
     @import("wio").cancelWait();
+    return "ok";
 }
 
 /// Screenshot: rendert aktuellen Frame und speichert als PPM nach ./tmp/vulkan-screenshot.ppm

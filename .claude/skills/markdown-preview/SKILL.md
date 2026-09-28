@@ -112,12 +112,11 @@ description: >
   mit dem Bildlauf des Vorframes, `drawn_scroll_*`). Markierung in `textSel` über
   `md_find.segments` (`md_hit`, `md_hit_cur`, Auswahl `md_sel` hat Vorrang). Grenze: ein
   Begriff über einen weichen Umbruch hinweg zählt im Klartext, wird in den Zeilen aber nicht
-  gefunden. Speichern baut die Vorschau neu und übernimmt die Suche (`adoptFind`). Im Deck keine
-  Suche. RPC `md_find_state`, E2E `scripts/e2e_find_preview.py`.
+  gefunden. Speichern baut die Vorschau neu und übernimmt die Suche (`adoptFind`).
+  RPC `md_find_state`, E2E `scripts/e2e_find_preview.py`.
   RPC `md_selection` (`open`, `lines`, `text`), E2E in `scripts/e2e_md_preview.py`
   (`step_selection`).
-  **Deck (Marp):** dieselbe Auswahl auf der Folie (`beginSelection("md_slide", …)`, Block 0);
-  ein Folienwechsel hebt sie auf. E2E in `e2e_marp_pdf.py`.
+  **Marp-Decks** zeigt nicht `MarkdownView`, sondern das PDF aus marp-cli (Skill `marp`).
   **Chat-Bubbles:** jede Nachricht hat ihre eigene `MarkdownView`, `AIChatState.handleMouseDown`
   trifft die Bubble (`ai_msg_<idx>`) und startet dort die Auswahl (`sel_msg`, unter `mutex`, weil
   der Worker Nachrichten anhängt); Ctrl+C kopiert markierten Bubble-Text vor dem Eingabefeld,

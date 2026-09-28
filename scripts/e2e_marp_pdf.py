@@ -179,137 +179,70 @@ def step_not_a_deck():
     check(ui_state()["dialog"] is None, "Escape schliesst den Dialog")
 
 
-def color_pixels(name, rgb, tol=6):
-    """Pixel nahe `rgb` in einem PPM-Screenshot unter tmp/."""
-    with open(os.path.join(ROOT, "tmp", name), "rb") as f:
-        data = f.read()
-    fields, pos = [], 2
-    while len(fields) < 3:
-        while data[pos:pos + 1].isspace():
-            pos += 1
-        start = pos
-        while not data[pos:pos + 1].isspace():
-            pos += 1
-        fields.append(int(data[start:pos]))
-    px = data[pos + 1:]
-    return sum(
-        1 for i in range(0, len(px) - 2, 3)
-        if abs(px[i] - rgb[0]) <= tol and abs(px[i + 1] - rgb[1]) <= tol and abs(px[i + 2] - rgb[2]) <= tol
-    )
+def marp_preview_state():
+    return result_json("marp_preview_state")
 
 
-def slide_state():
-    return result_json("slide_state")
+def active_tab_path():
+    st = ui_state()
+    return st["tabs"][st["active_tab"]]["path"]
 
 
-def step_slide_preview():
-    print("--- Folienvorschau")
-    open_tab_menu("deck.md")
-    click_center("tab_menu_md_preview")
-    settle(30)
+def wait_for(pred, timeout, what):
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        v = pred()
+        if v:
+            return v
+        time.sleep(0.3)
+        settle(2)
+    check(False, f"{what} (nach {timeout} s)")
 
-    st = slide_state()
-    check(st["deck"], "Vorschau erkennt das Deck")
-    check(st["slides"] == 7, f"sieben Folien: {st['slides']}")
-    check(st["current"] == 0, "startet auf Folie 1")
 
-    rpc("key_press", ["right", False]); settle(10)
-    check(slide_state()["current"] == 1, "Pfeil rechts blaettert vor")
-    rpc("key_press", ["page_down", False]); settle(10)
-    check(slide_state()["current"] == 2, "Bild ab blaettert vor")
-    rpc("key_press", ["left", False]); settle(10)
-    check(slide_state()["current"] == 1, "Pfeil links blaettert zurueck")
-    rpc("key_press", ["end", False]); settle(10)
-    check(slide_state()["current"] == 6, "Ende springt auf die letzte Folie")
-    rpc("key_press", ["home", False]); settle(10)
-    check(slide_state()["current"] == 0, "Pos1 springt auf die erste")
+def step_deck_preview():
+    """Vorschau eines Decks ist das PDF aus marp-cli im Watch-Modus: Tab mit dem
+    Vorschau-PDF, Neuladen nach dem Speichern, Ende des Watch-Prozesses mit dem Tab."""
+    print("--- Folienvorschau ueber marp-cli")
+    rpc("open_file", [DECK]); settle(20)
+    click_center("menu_view")
+    click_center("menu_item_md_preview")
+    settle(4)
+    wait_for(lambda: marp_preview_state()["previews"], 120, "Vorschau laeuft")
+    st = marp_preview_state()
+    check(st["last"] == "done", f"erstes Rendern fertig: {st['last']} {st['message']!r}")
+    p = st["previews"][0]
+    check(p["md"].endswith("deck.md") and p["watching"], f"Watch-Prozess fuer deck.md: {p}")
+    check(os.path.join("tmp", "tools", "preview") in p["pdf"], f"Vorschau-PDF liegt im Cache: {p['pdf']}")
+    check(not os.path.exists(os.path.join(FX, "deck.preview.pdf")), "nichts neben dem Deck abgelegt")
+    wait_for(lambda: active_tab_path() == p["pdf"], 20, "Vorschau-PDF ist der aktive Tab")
+    wait_for(lambda: result_json("pdf_state")["pages"] == 8, 20, "Vorschau zeigt 8 Folien")
 
-    b = bounds("md_slide")
-    aspect = b["w"] / b["h"]
-    check(abs(aspect - 16 / 9) < 0.05, f"Rahmen ist 16:9 ({aspect:.3f})")
-    # Der Rahmen muss die Flaeche ausnutzen. Mit Clays aspect_ratio blieb er auf
-    # Inhaltsgroesse stehen und war im Fenster winzig.
-    root = bounds("markdown_view_root")
-    fill = b["w"] / root["w"]
-    check(fill > 0.6, f"Rahmen fuellt die Breite ({fill:.2f} von 1.0)")
-    check(b["h"] <= root["h"], "Rahmen bleibt in der Hoehe")
-    # Die Blaetterleiste muss unter dem Rahmen Platz haben, sonst ist sie
-    # abgeschnitten wie beim ersten Versuch mit fester Reserve.
-    bar = bounds("md_slide_bar")
-    check(
-        bar["y"] + bar["h"] <= root["y"] + root["h"] + 0.5,
-        f"Blaetterleiste bleibt im Bild ({bar['y'] + bar['h']:.0f} von {root['y'] + root['h']:.0f})",
-    )
-    # Gegen Rueckkopplung: die Groesse muss ueber Frames konstant bleiben.
-    first = bounds("md_slide")["w"]
-    for _ in range(6):
-        settle(1)
-        check(abs(bounds("md_slide")["w"] - first) < 0.5, "Rahmengroesse bleibt stabil")
-    st = slide_state()
-    expect = max(6, round(26 * st["scale"]))  # 6 px ist die Untergrenze im Renderer
-    check(st["font_size"] == expect, f"Schrift folgt dem Massstab: {st['font_size']} == {expect}")
-    check(st["scale"] < 1.0, f"Folie ist verkleinert dargestellt ({st['scale']:.3f})")
+    # Speichern (hier: Datei schreiben) rendert neu, der Tab laedt nach.
+    with open(DECK, "a") as f:
+        f.write("\n---\n\n# Noch eine\n\nNach dem Speichern.\n")
+    wait_for(lambda: result_json("pdf_state")["pages"] == 9, 30, "nach dem Speichern 9 Folien")
 
-    click_center("md_slide_next"); settle(10)
-    check(slide_state()["current"] == 1, "Schaltflaeche vor")
-    # Folie 2: `![bg right:40% contain]` wird Bildspalte rechts, der Inhalt
-    # bekommt den Rest. Die Textur kommt einen Frame spaeter.
+    # Zweiter Aufruf fuer dasselbe Deck: kein neuer Prozess, nur der Tab.
+    rpc("open_file", [DECK]); settle(20)
+    click_center("menu_view")
+    click_center("menu_item_md_preview")
     settle(20)
-    col, content, frame = bounds("md_slide_bg"), bounds("md_slide_content"), bounds("md_slide")
-    check(abs(col["w"] - 0.4 * frame["w"]) < 2, f"Bildspalte 40 % breit ({col['w']:.0f} von {frame['w']:.0f})")
-    check(abs(col["x"] + col["w"] - (frame["x"] + frame["w"])) < 2, "Bildspalte steht rechts")
-    check(content["x"] + content["w"] <= col["x"] + 1, "Inhalt endet vor der Bildspalte")
-    shot("e2e_marp_bg_split.ppm")
-    # Das Rechteck im <symbol> ist #a9bccf. Ohne Toenung am Bildelement kam es
-    # schwarz, ohne MuPDF (nanosvg kennt kein <use>) gar nicht.
-    n = color_pixels("e2e_marp_bg_split.ppm", (0xa9, 0xbc, 0xcf))
-    check(n > 2000, f"Skizze in ihren Farben gezeichnet ({n} Pixel #a9bccf)")
-    click_center("md_slide_prev"); settle(10)
-    check(slide_state()["current"] == 0, "Schaltflaeche zurueck")
-    check(bounds("md_slide_counter")["found"], "Zaehler ist im Layout")
-    shot("e2e_marp_slide.ppm")
+    check(len(marp_preview_state()["previews"]) == 1, "eine Vorschau je Deck")
+    check(active_tab_path() == p["pdf"], "zeigt wieder den Vorschau-Tab")
 
-    # Textauswahl auf der Folie: Ziehen markiert, Folienwechsel hebt auf
-    sel = result_json("md_selection")
-    check(sel["open"] and sel["lines"] > 0, f"Folie hat auswaehlbare Zeilen ({sel})")
-    l0 = bounds("md_line", 0)
-    rpc("mouse_down", [l0["x"] + 1, l0["y"] + l0["h"] / 2]); settle(4)
-    rpc("mouse_up", [l0["x"] + l0["w"] + 20, l0["y"] + l0["h"] / 2]); settle(6)
-    got = result_json("md_selection")["text"]
-    check(got and got.strip(), f"Auswahl auf der Folie: {got!r}")
-    click_center("md_slide_next"); settle(10)
-    check(result_json("md_selection")["text"] is None, "Folienwechsel hebt die Auswahl auf")
-    click_center("md_slide_prev"); settle(10)
-
-
-def step_wide_pane():
-    """Ohne Explorer ist die Flaeche breit, die Hoehe begrenzt den Rahmen. Genau
-    dort blaehte der Rahmen das Wurzelelement auf und der Zoom schwankte."""
-    print("--- Breites Pane: Hoehe begrenzt den Rahmen")
-    rpc("key_press", ["b", True]); settle(20)
-    root = bounds("markdown_view_root")
-    b = bounds("md_slide")
-    bar = bounds("md_slide_bar")
-    check(b["h"] < root["h"], f"Rahmen bleibt unter der Hoehe ({b['h']:.0f} < {root['h']:.0f})")
-    check(
-        bar["y"] + bar["h"] <= root["y"] + root["h"] + 0.5,
-        f"Blaetterleiste bleibt im Bild ({bar['y'] + bar['h']:.0f} von {root['y'] + root['h']:.0f})",
-    )
-    first = b["w"]
-    for _ in range(8):
-        settle(1)
-        w = bounds("md_slide")["w"]
-        check(abs(w - first) < 0.5, f"kein Zoom-Flackern ({w:.1f} vs {first:.1f})")
-    shot("e2e_marp_slide_wide.ppm")
-    rpc("key_press", ["b", True]); settle(20)
+    rpc("key_press", ["w", True]); settle(10)
+    check(active_tab_path() != p["pdf"], "Ctrl+W schliesst den Vorschau-Tab")
+    wait_for(lambda: not marp_preview_state()["previews"], 15, "Tab zu: Watch-Prozess beendet")
 
 
 def step_preview_without_deck():
     print("--- Vorschau einer gewoehnlichen Markdown-Datei")
-    open_tab_menu("plain.md")
-    click_center("tab_menu_md_preview")
+    rpc("open_file", [PLAIN]); settle(20)
+    click_center("menu_view")
+    click_center("menu_item_md_preview")
     settle(30)
-    check(not slide_state()["deck"], "kein Deck: keine Folienvorschau")
+    check(active_tab_path().startswith("preview://"), f"eigene Markdown-Vorschau: {active_tab_path()}")
+    check(not marp_preview_state()["previews"], "kein Deck: kein marp-cli")
 
 
 STEPS = [
@@ -318,10 +251,9 @@ STEPS = [
     step_pdf_tab,
     step_pdf_background,
     step_not_a_deck,
-    step_slide_preview,
-    step_wide_pane,
+    step_reexport_reloads_pdf,  # haengt eine Folie an (8 Folien)
+    step_deck_preview,          # haengt noch eine an (9 Folien)
     step_preview_without_deck,
-    step_reexport_reloads_pdf,  # zuletzt: ändert das Deck (8 Folien)
 ]
 
 

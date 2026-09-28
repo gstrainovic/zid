@@ -12,6 +12,27 @@ const AnimationManager = animation.AnimationManager;
 const PdfHandler = @import("../rendering/pdf_handler.zig").PdfHandler;
 const marp_cli = @import("marp_cli");
 const marp = @import("marp");
+
+/// Laufende Folienvorschau eines Decks: marp-cli im Watch-Modus schreibt `pdf` neu, sobald
+/// `md` gespeichert wird; die UI lädt den PDF-Tab nach, wenn sich die mtime ändert.
+const MarpPreview = struct {
+    md: []u8,
+    pdf: []u8,
+    watch: ?std.process.Child,
+    mtime: i128,
+    /// Bis dahin nicht aufräumen, auch wenn noch kein Tab das PDF zeigt (der Tab entsteht
+    /// erst im nächsten Frame).
+    keep_until_ms: f32,
+
+    fn deinit(self: *MarpPreview, allocator: std.mem.Allocator) void {
+        if (self.watch) |*c| {
+            marp_cli.stopWatch(c);
+            self.watch = null;
+        }
+        allocator.free(self.md);
+        allocator.free(self.pdf);
+    }
+};
 const PdfViewState = @import("pdf_view.zig").PdfViewState;
 const pdf_nav = @import("pdf_nav.zig");
 const editor_mod = @import("../editor/mod.zig");
@@ -207,6 +228,16 @@ pub const UI = struct {
     marp_export_seen: marp_cli.State = .idle,
     /// Ergebnis des letzten abgeschlossenen Exports (`done`/`failed`), für E2E.
     marp_export_last: marp_cli.State = .idle,
+    /// Folienvorschau eines Marp-Decks: erstes Rendern über marp-cli (lädt bei Bedarf
+    /// die Werkzeuge), danach hält je Deck ein Watch-Prozess das Vorschau-PDF aktuell.
+    marp_preview_job: marp_cli.Exporter,
+    marp_preview_seen: marp_cli.State = .idle,
+    marp_preview_last: marp_cli.State = .idle,
+    marp_previews: std.ArrayListUnmanaged(MarpPreview) = .empty,
+    /// Vorschau-PDFs aus einer früheren Sitzung, deren Wiederaufnahme schon versucht wurde.
+    marp_preview_restored: std.StringHashMapUnmanaged(void) = .empty,
+    /// `marp_cli.toolsRoot`, einmal berechnet (owned; null = unbekannt).
+    marp_tools: ?[]u8 = null,
     /// Offenes Tab-Kontextmenü (Rechtsklick auf einen Tab-Kopf)
     tab_menu: ?TabMenu = null,
     /// Ziel eines Tab-Kommandos aus dem Kontextmenü; null = aktiver Tab des aktiven Panes
@@ -515,6 +546,8 @@ pub const UI = struct {
             .open_pdfs = std.StringHashMap(*anyopaque).init(allocator),
             .open_markdown_views = std.StringHashMap(*markdown_view_mod.MarkdownView).init(allocator),
             .marp_export = .{ .allocator = allocator, .wake = &wio.cancelWait },
+            .marp_preview_job = .{ .allocator = allocator, .wake = &wio.cancelWait },
+            .marp_tools = marp_cli.toolsRoot(allocator) catch null,
             .pending_md_preview = null,
             .image_renderer = null,
             .mouse_pressed_this_frame = false,
@@ -532,6 +565,13 @@ pub const UI = struct {
     pub fn deinit(self: *Self) void {
         log.debug("UI.deinit: start", .{});
         self.marp_export.deinit();
+        self.marp_preview_job.deinit();
+        for (self.marp_previews.items) |*p| p.deinit(self.allocator);
+        self.marp_previews.deinit(self.allocator);
+        var restored = self.marp_preview_restored.keyIterator();
+        while (restored.next()) |k| self.allocator.free(k.*);
+        self.marp_preview_restored.deinit(self.allocator);
+        if (self.marp_tools) |t| self.allocator.free(t);
         if (self.lsp) |l| l.deinit();
         self.lsp = null;
         if (self.lsp_goto) |g| self.allocator.free(g.path);
@@ -796,16 +836,6 @@ pub const UI = struct {
         if (self.tab_menu != null and key == .escape) {
             self.tab_menu = null;
             return;
-        }
-        // Folienvorschau: Pfeile und Bild auf/ab blättern durch die Folien.
-        if (self.activeSlideDeckView()) |v| {
-            switch (key) {
-                .left, .page_up => return v.prevSlide(),
-                .right, .page_down => return v.nextSlide(),
-                .home => return v.showSlide(0),
-                .end => return v.showSlide(v.slideCount() - 1),
-                else => {},
-            }
         }
         // PDF-Vorschau: Pfeile und Bild auf/ab blättern durch die Seiten. Ctrl+F öffnet die
         // Suchleiste (dieselbe wie im Editor); ist sie offen, gehen Enter, Backspace, Escape
@@ -3402,9 +3432,10 @@ pub const UI = struct {
     }
 
     /// Markdown-Vorschau von `path` anfordern: main.zig öffnet `preview://<path>` im nächsten
-    /// Frame und gibt den String frei.
+    /// Frame und gibt den String frei. Marp-Decks zeigen stattdessen das PDF aus marp-cli.
     fn requestMarkdownPreview(self: *Self, path: []const u8) void {
         if (path.len == 0) return;
+        if (marp.isMarpDeckFile(path)) return self.startMarpPreview(path);
         const preview_path = std.fmt.allocPrint(self.allocator, "preview://{s}", .{path}) catch |err| {
             log.err("markdown preview for '{s}' failed: {}", .{ path, err });
             return;
@@ -3429,7 +3460,6 @@ pub const UI = struct {
         const new_v = self.allocator.create(markdown_view_mod.MarkdownView) catch return;
         new_v.* = markdown_view_mod.MarkdownView.init(self.allocator, content, source_path);
         new_v.scroll_offset_y = old.scroll_offset_y;
-        if (new_v.slideCount() > 0) new_v.current_slide = @min(old.current_slide, new_v.slideCount() - 1);
         new_v.font_size = old.font_size;
         new_v.adoptFind(old);
         old.deinit();
@@ -3449,13 +3479,6 @@ pub const UI = struct {
         const tab = tb.getActiveTab() orelse return null;
         if (tab.kind != .markdown_preview) return null;
         return self.open_markdown_views.get(tab.path);
-    }
-
-    /// Die Markdown-Vorschau des aktiven Tabs, falls sie ein Marp-Deck zeigt.
-    pub fn activeSlideDeckView(self: *Self) ?*markdown_view_mod.MarkdownView {
-        const v = self.activeMarkdownView() orelse return null;
-        if (v.slideCount() == 0) return null;
-        return v;
     }
 
     /// Pfad des aktiven PDF-Tabs, sonst null.
@@ -3569,6 +3592,171 @@ pub const UI = struct {
             return;
         };
         self.showToast("PDF wird erzeugt …", .{});
+    }
+
+    /// Folienvorschau eines Decks: läuft sie schon, nur den PDF-Tab zeigen; sonst erstes
+    /// Rendern über marp-cli starten (`pollMarpPreview` übernimmt danach).
+    fn startMarpPreview(self: *Self, md_path: []const u8) void {
+        const tools = self.marp_tools orelse {
+            self.reportError("Vorschau: Datenverzeichnis unbekannt", .{});
+            return;
+        };
+        for (self.marp_previews.items) |p| {
+            if (std.mem.eql(u8, p.md, md_path)) return self.showTab(p.pdf);
+        }
+        if (self.marp_preview_job.busy()) {
+            self.showToast("Vorschau wird bereits erzeugt", .{});
+            return;
+        }
+        const pdf = marp_cli.previewPath(self.allocator, tools, md_path) catch |err| {
+            self.reportError("Vorschau fehlgeschlagen: {t}", .{err});
+            return;
+        };
+        defer self.allocator.free(pdf);
+        // Pfad des Decks neben dem PDF: nach einem Neustart kann der Tab die Vorschau
+        // wieder aufnehmen.
+        const dir = std.fs.path.dirname(pdf).?;
+        std.fs.cwd().makePath(dir) catch {};
+        if (std.fs.path.join(self.allocator, &.{ dir, "source.txt" })) |src| {
+            defer self.allocator.free(src);
+            std.fs.cwd().writeFile(.{ .sub_path = src, .data = md_path }) catch {};
+        } else |_| {}
+        self.marp_preview_job.start(md_path, pdf) catch |err| {
+            self.reportError("Vorschau fehlgeschlagen: {t}", .{err});
+            return;
+        };
+        self.showToast("Vorschau wird mit marp-cli erzeugt …", .{});
+    }
+
+    /// `path` im aktiven Pane als Tab zeigen (öffnet ihn, falls nötig).
+    fn showTab(self: *Self, path: []const u8) void {
+        const owned = self.allocator.dupe(u8, path) catch return;
+        if (self.pending_tab_switch) |old| self.allocator.free(old);
+        self.pending_tab_switch = owned;
+    }
+
+    /// Je Frame: erstes Rendern abholen und Watch-Prozess starten, neu geschriebene
+    /// Vorschau-PDFs nachladen, Vorschauen ohne Tab beenden, Tabs aus einer früheren
+    /// Sitzung wieder aufnehmen.
+    fn pollMarpPreview(self: *Self) void {
+        const st = self.marp_preview_job.currentState();
+        if (st != self.marp_preview_seen) {
+            self.marp_preview_seen = st;
+            switch (st) {
+                .idle, .converting => {},
+                .loading_marp => self.showToast("Lade marp-cli für die Vorschau (49 MB) …", .{}),
+                .loading_browser => self.showToast("Kein Browser gefunden, lade chrome-headless-shell (121 MB) …", .{}),
+                .failed => {
+                    self.marp_preview_last = .failed;
+                    self.reportError("Vorschau fehlgeschlagen: {s}", .{self.marp_preview_job.message()});
+                    self.marp_preview_job.acknowledge();
+                    self.marp_preview_seen = .idle;
+                },
+                .done => {
+                    self.marp_preview_last = .done;
+                    self.beginMarpWatch();
+                    self.marp_preview_job.acknowledge();
+                    self.marp_preview_seen = .idle;
+                },
+            }
+        }
+
+        var i: usize = 0;
+        while (i < self.marp_previews.items.len) {
+            const p = &self.marp_previews.items[i];
+            if (self.ui_time_ms > p.keep_until_ms and !self.tabOpen(p.pdf)) {
+                log.info("Vorschau beendet (kein Tab mehr): {s}", .{p.md});
+                p.deinit(self.allocator);
+                _ = self.marp_previews.orderedRemove(i);
+                continue;
+            }
+            if (std.fs.cwd().statFile(p.pdf)) |s| {
+                if (s.mtime != p.mtime) {
+                    p.mtime = s.mtime;
+                    if (self.open_pdfs.getKey(p.pdf)) |key| self.requestPdfReload(key);
+                }
+            } else |_| {}
+            i += 1;
+        }
+
+        self.resumeMarpPreviews();
+    }
+
+    /// Nach dem ersten Rendern: Watch-Prozess starten und das PDF als Tab zeigen.
+    fn beginMarpWatch(self: *Self) void {
+        const job = &self.marp_preview_job;
+        const tools = self.marp_tools orelse return;
+        const exe = marp_cli.marpExe(self.allocator, tools) catch return;
+        defer self.allocator.free(exe);
+        const watch = marp_cli.spawnWatch(self.allocator, exe, job.md_path, job.out_path, job.browser_used) catch |err| blk: {
+            log.warn("marp --watch ließ sich nicht starten: {t}", .{err});
+            break :blk null;
+        };
+        const md = self.allocator.dupe(u8, job.md_path) catch return;
+        const pdf = self.allocator.dupe(u8, job.out_path) catch {
+            self.allocator.free(md);
+            return;
+        };
+        const mtime: i128 = if (std.fs.cwd().statFile(pdf)) |s| s.mtime else |_| 0;
+        self.marp_previews.append(self.allocator, .{
+            .md = md,
+            .pdf = pdf,
+            .watch = watch,
+            .mtime = mtime,
+            .keep_until_ms = self.ui_time_ms + 5000,
+        }) catch {
+            self.allocator.free(md);
+            self.allocator.free(pdf);
+            return;
+        };
+        // Schon offen (z. B. aus der letzten Sitzung): neu laden, sonst öffnen.
+        if (self.open_pdfs.getKey(pdf)) |key| self.requestPdfReload(key);
+        self.showTab(pdf);
+    }
+
+    /// Zeigt irgendein Pane einen Tab mit genau diesem Pfad?
+    fn tabOpen(self: *Self, path: []const u8) bool {
+        var buf: [32]*pane_mod.Pane = undefined;
+        var n: usize = 0;
+        collectLeaves(self.root_pane, &buf, &n);
+        for (buf[0..n]) |p| {
+            for (p.data.leaf.tab_bar.tabs.items) |tab| {
+                if (std.mem.eql(u8, tab.path, path)) return true;
+            }
+        }
+        return false;
+    }
+
+    /// Tabs mit einem Vorschau-PDF, zu dem kein Watch-Prozess läuft (frühere Sitzung):
+    /// Deck aus `source.txt` lesen und die Vorschau neu starten. Je PDF nur ein Versuch.
+    fn resumeMarpPreviews(self: *Self) void {
+        const tools = self.marp_tools orelse return;
+        if (self.marp_preview_job.busy()) return;
+        var buf: [32]*pane_mod.Pane = undefined;
+        var n: usize = 0;
+        collectLeaves(self.root_pane, &buf, &n);
+        for (buf[0..n]) |pane| {
+            for (pane.data.leaf.tab_bar.tabs.items) |tab| {
+                if (!marp_cli.isPreviewPath(tools, tab.path)) continue;
+                if (self.marp_preview_restored.contains(tab.path)) continue;
+                var running = false;
+                for (self.marp_previews.items) |p| {
+                    if (std.mem.eql(u8, p.pdf, tab.path)) running = true;
+                }
+                if (running) continue;
+                const key = self.allocator.dupe(u8, tab.path) catch return;
+                self.marp_preview_restored.put(self.allocator, key, {}) catch {
+                    self.allocator.free(key);
+                    return;
+                };
+                const src = std.fs.path.join(self.allocator, &.{ std.fs.path.dirname(tab.path).?, "source.txt" }) catch return;
+                defer self.allocator.free(src);
+                const md = std.fs.cwd().readFileAlloc(self.allocator, src, std.fs.max_path_bytes) catch continue;
+                defer self.allocator.free(md);
+                self.startMarpPreview(md);
+                return; // ein Job zur Zeit
+            }
+        }
     }
 
     /// Je Frame: Zustandswechsel des Marp-Exports melden, fertiges PDF öffnen.
@@ -3927,6 +4115,7 @@ pub const UI = struct {
 
     pub fn renderExample(self: *Self, image_data: ?*const anyopaque) []clay.RenderCommand {
         self.pollMarpExport();
+        self.pollMarpPreview();
         self.applyDeferredLayoutActions();
         self.beginLayout();
         tooltip.beginFrame(self.ui_time_ms);
@@ -4274,6 +4463,13 @@ pub const UI = struct {
                                     self.open_markdown_views.put(self.allocator.dupe(u8, tab.path) catch tab.path, new_v) catch {};
                                     md_view = new_v;
                                 }
+                                // Marp-Deck (etwa aus einer früheren Sitzung): die Vorschau ist
+                                // das PDF aus marp-cli; diesen Tab übergeben und schließen.
+                                if (md_view) |v| if (!v.handed_to_marp and marp.isMarpDeck(v.text)) {
+                                    v.handed_to_marp = true;
+                                    self.startMarpPreview(tab.path["preview://".len..]);
+                                    self.pending_tab_closes.append(self.allocator, .{ .pane = pane, .index = idx }) catch {};
+                                };
                                 if (md_view) |v| {
                                     // Dieselbe Vorschau kann in zwei Panes stehen (Split kopiert die
                                     // Tabs, Views hängen am Pfad): IDs zusätzlich je Pane salzen.
