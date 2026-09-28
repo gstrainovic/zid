@@ -18,6 +18,7 @@ const file_types = @import("file_types.zig");
 const explorer_ops = @import("explorer_ops.zig");
 const git_diff = @import("git_diff");
 const git_scm = @import("git_scm");
+const marp_cli = @import("marp_cli");
 const FileKind = file_types.FileKind;
 
 /// Ein geöffneter Tab (Datei)
@@ -38,6 +39,20 @@ pub const Tab = struct {
     serial: u32 = 0,
     /// Angepinnt: kein Schließen-Kreuz, von „Close Others/All/Saved“ ausgenommen
     pinned: bool = false,
+    /// Vorschau-PDF eines Marp-Decks (`marp_cli.isPreviewPath`): Pfad des Decks (owned).
+    /// Der Tab heißt dann „Preview: deck.md“ wie die Markdown-Vorschau.
+    preview_source: ?[]const u8 = null,
+
+    /// Vorschau im Sinn der Beschriftung: Markdown-Vorschau oder Marp-Vorschau-PDF.
+    pub fn isPreview(self: Tab) bool {
+        return self.kind == .markdown_preview or self.preview_source != null;
+    }
+
+    fn freeOwned(self: Tab, allocator: std.mem.Allocator) void {
+        allocator.free(self.path);
+        allocator.free(self.display_name);
+        if (self.preview_source) |s| allocator.free(s);
+    }
 };
 
 /// Tab-Bar State
@@ -89,8 +104,7 @@ pub const TabBarState = struct {
         for (self.tabs.items, 0..) |*tab, i| {
             log.debug("TabBarState.deinit: cleaning up tab {d}: {s}", .{ i, tab.path });
             // Buffer will be deinitialized by UI.open_buffers
-            self.allocator.free(tab.path);
-            self.allocator.free(tab.display_name);
+            tab.freeOwned(self.allocator);
         }
         self.tabs.deinit(self.allocator);
         log.debug("TabBarState.deinit: tabs list done", .{});
@@ -242,6 +256,10 @@ pub const TabBarState = struct {
             kind = .markdown_preview;
             display_name = std.fs.path.basename(path["preview://".len..]);
         }
+        // Marp-Vorschau-PDF im Cache: nach dem Deck benennen, nicht nach der PDF-Datei.
+        const preview_source: ?[]u8 = if (marp_cli.isPreviewPath(path)) marp_cli.previewSource(self.allocator, path) else null;
+        errdefer if (preview_source) |s| self.allocator.free(s);
+        if (preview_source) |s| display_name = std.fs.path.basename(s);
 
         // Dupe strings for tab
         const path_copy = try self.allocator.dupe(u8, path);
@@ -253,6 +271,7 @@ pub const TabBarState = struct {
             .modified = false,
             .is_active = false,
             .kind = kind,
+            .preview_source = preview_source,
         });
 
         // Neuen Tab aktivieren
@@ -261,10 +280,7 @@ pub const TabBarState = struct {
 
     pub fn cloneFrom(self: *Self, other: *const TabBarState) !void {
         // Clear current tabs
-        for (self.tabs.items) |tab| {
-            self.allocator.free(tab.path);
-            self.allocator.free(tab.display_name);
-        }
+        for (self.tabs.items) |tab| tab.freeOwned(self.allocator);
         self.tabs.clearRetainingCapacity();
 
         // Copy tabs from other. Chat und Terminal bleiben in der Quell-Pane: ihr Zustand
@@ -283,6 +299,7 @@ pub const TabBarState = struct {
                 .buffer = tab.buffer,
                 .serial = tab.serial,
                 .pinned = tab.pinned,
+                .preview_source = if (tab.preview_source) |s| try self.allocator.dupe(u8, s) else null,
             });
         }
         self.mru.deinit(self.allocator);
@@ -385,8 +402,7 @@ pub const TabBarState = struct {
             }
         }
 
-        self.allocator.free(tab.path);
-        self.allocator.free(tab.display_name);
+        tab.freeOwned(self.allocator);
 
         // Active Index anpassen
         if (self.active_index) |active| {
@@ -443,15 +459,19 @@ pub fn tabLabel(arena: std.mem.Allocator, state: *const TabBarState, index: usiz
     const tab = state.tabs.items[index];
     var duplicate = false;
     for (state.tabs.items, 0..) |other, i| {
-        if (i != index and other.kind == tab.kind and std.mem.eql(u8, other.display_name, tab.display_name)) duplicate = true;
+        if (i == index or !std.mem.eql(u8, other.display_name, tab.display_name)) continue;
+        // Vorschauen (Markdown und Marp) gelten als eine Art, sonst zählt die Dateiart.
+        if (if (tab.isPreview()) other.isPreview() else other.kind == tab.kind) duplicate = true;
     }
     const name = if (!duplicate) tab.display_name else blk: {
-        const dir = std.fs.path.dirname(tab.path) orelse break :blk tab.display_name;
+        // Ordner der eigentlichen Datei: bei der Marp-Vorschau der des Decks, nicht der Cache.
+        const source = tab.preview_source orelse if (std.mem.startsWith(u8, tab.path, "preview://")) tab.path["preview://".len..] else tab.path;
+        const dir = std.fs.path.dirname(source) orelse break :blk tab.display_name;
         const parent = std.fs.path.basename(dir);
         if (parent.len == 0) break :blk tab.display_name;
         break :blk std.fmt.allocPrint(arena, "{s}/{s}", .{ parent, tab.display_name }) catch tab.display_name;
     };
-    if (tab.kind != .markdown_preview) return name;
+    if (!tab.isPreview()) return name;
     return std.fmt.allocPrint(arena, "Preview: {s}", .{name}) catch name;
 }
 

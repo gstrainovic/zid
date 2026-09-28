@@ -92,7 +92,13 @@ Den Browser-Rückfall deckt die Suite nicht ab (121 MB): von Hand prüfen, indem
 (Windows); dann findet marp-cli keinen Browser. Vorher normal bauen, der Zig-Cache
 braucht das echte `LOCALAPPDATA`.
 
-## Grenzen
+**Beschriftung:** `TabBarState.openFile` erkennt Vorschau-PDFs am Pfad
+(`marp_cli.isPreviewPath`: `…/preview/<16 Hex>/<name>.pdf`) und merkt sich das Deck aus
+`source.txt` (`Tab.preview_source`). `tabLabel` zeigt dann „Preview: deck.md“ wie bei der
+Markdown-Vorschau; bei gleichem Namen steht der Ordner des Decks davor, nicht der
+Hash-Ordner. Markdown- und Marp-Vorschau zählen dabei als eine Art (`Tab.isPreview`).
+`ui_state` liefert je Tab `label`.
 
-- Ungespeicherte Änderungen erscheinen erst nach dem Speichern in der Vorschau.
-- Der Vorschau-Tab heißt wie das Deck mit `.pdf`, genau wie ein Export daneben.
+Wie die Markdown-Vorschau folgt auch diese dem Speichern (mit Autosave nach 1 s Ruhe
+praktisch dem Tippen); anders als jene zeigt sie beim Öffnen nicht den ungespeicherten
+Buffer, sondern die Datei.

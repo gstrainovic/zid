@@ -3730,14 +3730,13 @@ pub const UI = struct {
     /// Tabs mit einem Vorschau-PDF, zu dem kein Watch-Prozess läuft (frühere Sitzung):
     /// Deck aus `source.txt` lesen und die Vorschau neu starten. Je PDF nur ein Versuch.
     fn resumeMarpPreviews(self: *Self) void {
-        const tools = self.marp_tools orelse return;
         if (self.marp_preview_job.busy()) return;
         var buf: [32]*pane_mod.Pane = undefined;
         var n: usize = 0;
         collectLeaves(self.root_pane, &buf, &n);
         for (buf[0..n]) |pane| {
             for (pane.data.leaf.tab_bar.tabs.items) |tab| {
-                if (!marp_cli.isPreviewPath(tools, tab.path)) continue;
+                if (!marp_cli.isPreviewPath(tab.path)) continue;
                 if (self.marp_preview_restored.contains(tab.path)) continue;
                 var running = false;
                 for (self.marp_previews.items) |p| {
@@ -3749,9 +3748,7 @@ pub const UI = struct {
                     self.allocator.free(key);
                     return;
                 };
-                const src = std.fs.path.join(self.allocator, &.{ std.fs.path.dirname(tab.path).?, "source.txt" }) catch return;
-                defer self.allocator.free(src);
-                const md = std.fs.cwd().readFileAlloc(self.allocator, src, std.fs.max_path_bytes) catch continue;
+                const md = marp_cli.previewSource(self.allocator, tab.path) orelse continue;
                 defer self.allocator.free(md);
                 self.startMarpPreview(md);
                 return; // ein Job zur Zeit
