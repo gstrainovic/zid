@@ -7,7 +7,8 @@
 
 const std = @import("std");
 pub const setup = @import("setup.zig");
-const install = @import("install.zig");
+/// Auch vom Marp-Export genutzt (Auspacken von marp-cli und Browser).
+pub const install = @import("install.zig");
 const download = @import("download");
 
 const log = std.log.scoped(.ai_setup);

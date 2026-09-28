@@ -260,8 +260,7 @@ der von fancy-cat gepinnte Commit upstream nicht mehr erreichbar ist.
 mupdf-Makefile in Git Bash. Compiler ist `zig cc`, damit CRT-Header und
 Import-Bibliotheken zum Zig-Ziel `x86_64-windows-gnu` passen — mit
 winlibs-gcc gebaut fehlt beim Linken `__imp__setjmp`. `-msse4.1` braucht
-`deskew_sse.h`, `TOFU`/`TOFU_CJK` lassen nur die URW-Fonts drin (die HTML- und
-Story-Engine für den Marp-Export bleibt an):
+`deskew_sse.h`, `TOFU`/`TOFU_CJK` lassen nur die URW-Fonts drin:
 
 ```bash
 cd libs/fancy-cat/deps/mupdf
