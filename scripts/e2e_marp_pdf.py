@@ -183,9 +183,13 @@ def marp_preview_state():
     return result_json("marp_preview_state")
 
 
-def active_tab_path():
+def active_tab():
     st = ui_state()
-    return st["tabs"][st["active_tab"]]["path"]
+    return st["tabs"][st["active_tab"]]
+
+
+def active_tab_path():
+    return active_tab()["path"]
 
 
 def wait_for(pred, timeout, what):
@@ -215,6 +219,8 @@ def step_deck_preview():
     check(os.path.join("tmp", "tools", "preview") in p["pdf"], f"Vorschau-PDF liegt im Cache: {p['pdf']}")
     check(not os.path.exists(os.path.join(FX, "deck.preview.pdf")), "nichts neben dem Deck abgelegt")
     wait_for(lambda: active_tab_path() == p["pdf"], 20, "Vorschau-PDF ist der aktive Tab")
+    label = active_tab()["label"]
+    check(label == "Preview: deck.md", f"Tab heisst wie das Deck: {label!r}")
     wait_for(lambda: result_json("pdf_state")["pages"] == 8, 20, "Vorschau zeigt 8 Folien")
 
     # Speichern (hier: Datei schreiben) rendert neu, der Tab laedt nach.
@@ -230,6 +236,27 @@ def step_deck_preview():
     check(len(marp_preview_state()["previews"]) == 1, "eine Vorschau je Deck")
     check(active_tab_path() == p["pdf"], "zeigt wieder den Vorschau-Tab")
 
+    # Gleichnamiges Deck in einem anderen Ordner: beide Tabs tragen den Ordner des
+    # Decks, nicht den Hash-Ordner des Caches.
+    other_dir = os.path.join(FX, "anderes")
+    os.makedirs(other_dir, exist_ok=True)
+    other = os.path.join(other_dir, "deck.md")
+    shutil.copy(MARP_DECK, other)
+    rpc("open_file", [other]); settle(20)
+    click_center("menu_view")
+    click_center("menu_item_md_preview")
+    wait_for(lambda: len(marp_preview_state()["previews"]) == 2, 60, "zweite Vorschau laeuft")
+    wait_for(lambda: active_tab()["label"] == "Preview: anderes/deck.md", 20, "zweiter Tab mit Ordner des Decks")
+    labels = [t["label"] for t in ui_state()["tabs"] if t["label"].startswith("Preview: ")]
+    check("Preview: e2e_marp/deck.md" in labels, f"erster Tab ebenfalls mit Ordner: {labels}")
+    rpc("key_press", ["w", True]); settle(10)
+    wait_for(lambda: len(marp_preview_state()["previews"]) == 1, 15, "zweiter Tab zu: seine Vorschau endet")
+
+    # Erste Vorschau wieder nach vorn holen und schliessen.
+    rpc("open_file", [DECK]); settle(20)
+    click_center("menu_view")
+    click_center("menu_item_md_preview")
+    wait_for(lambda: active_tab_path() == p["pdf"], 20, "erste Vorschau wieder aktiv")
     rpc("key_press", ["w", True]); settle(10)
     check(active_tab_path() != p["pdf"], "Ctrl+W schliesst den Vorschau-Tab")
     wait_for(lambda: not marp_preview_state()["previews"], 15, "Tab zu: Watch-Prozess beendet")

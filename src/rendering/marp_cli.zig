@@ -102,12 +102,26 @@ pub fn previewPath(allocator: std.mem.Allocator, tools: []const u8, md_path: []c
     return std.fs.path.join(allocator, &.{ tools, "preview", hash, name });
 }
 
-/// Liegt `path` im Vorschau-Ordner? (Tabs aus einer früheren Sitzung.)
-pub fn isPreviewPath(tools: []const u8, path: []const u8) bool {
-    const dir = std.fs.path.dirname(std.fs.path.dirname(path) orelse return false) orelse return false;
-    return std.mem.endsWith(u8, dir, "preview") and
-        std.mem.startsWith(u8, dir, tools) and
-        std.ascii.endsWithIgnoreCase(path, ".pdf");
+/// Ist `path` ein Vorschau-PDF (`…/preview/<16 Hex-Zeichen>/<name>.pdf`)? Am Pfad erkannt,
+/// ohne Datenverzeichnis: die Tab-Leiste braucht das je Tab.
+pub fn isPreviewPath(path: []const u8) bool {
+    if (!std.ascii.endsWithIgnoreCase(path, ".pdf")) return false;
+    const hash_dir = std.fs.path.dirname(path) orelse return false;
+    const hash = std.fs.path.basename(hash_dir);
+    if (hash.len != 16) return false;
+    for (hash) |c| {
+        if (!std.ascii.isHex(c)) return false;
+    }
+    const parent = std.fs.path.dirname(hash_dir) orelse return false;
+    return std.mem.eql(u8, std.fs.path.basename(parent), "preview");
+}
+
+/// Pfad des Decks zu einem Vorschau-PDF (aus `source.txt` daneben); owned, null ohne Datei.
+pub fn previewSource(allocator: std.mem.Allocator, pdf_path: []const u8) ?[]u8 {
+    const dir = std.fs.path.dirname(pdf_path) orelse return null;
+    const src = std.fs.path.join(allocator, &.{ dir, "source.txt" }) catch return null;
+    defer allocator.free(src);
+    return std.fs.cwd().readFileAlloc(allocator, src, std.fs.max_path_bytes) catch null;
 }
 
 /// Zieldatei neben der Quelle: `deck.md` → `deck.pdf`.
@@ -454,9 +468,27 @@ test "previewPath: Hash trennt gleichnamige Decks, Name bleibt lesbar" {
     defer testing.allocator.free(b);
     try testing.expect(!std.mem.eql(u8, a, b));
     try testing.expectEqualStrings("deck.pdf", std.fs.path.basename(a));
-    try testing.expect(isPreviewPath("/t", a));
-    try testing.expect(!isPreviewPath("/t", "/x/deck.pdf"));
-    try testing.expect(!isPreviewPath("/anders", a));
+    try testing.expect(isPreviewPath(a));
+    try testing.expect(!isPreviewPath("/x/deck.pdf"));
+    try testing.expect(!isPreviewPath("/t/preview/kein-hash/deck.pdf"));
+    try testing.expect(!isPreviewPath("/t/anders/935a2a6d65a7e748/deck.pdf"));
+}
+
+test "previewSource liest den Deck-Pfad neben dem PDF" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const base = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(base);
+    const pdf = try previewPath(testing.allocator, base, "/x/deck.md");
+    defer testing.allocator.free(pdf);
+    try std.fs.cwd().makePath(std.fs.path.dirname(pdf).?);
+    try testing.expect(previewSource(testing.allocator, pdf) == null);
+    const src = try std.fs.path.join(testing.allocator, &.{ std.fs.path.dirname(pdf).?, "source.txt" });
+    defer testing.allocator.free(src);
+    try std.fs.cwd().writeFile(.{ .sub_path = src, .data = "/x/deck.md" });
+    const got = previewSource(testing.allocator, pdf).?;
+    defer testing.allocator.free(got);
+    try testing.expectEqualStrings("/x/deck.md", got);
 }
 
 test "Watch-Funktionen übersetzen auf jeder Plattform" {

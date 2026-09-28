@@ -1412,7 +1412,12 @@ fn uiState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
         if (i > 0) try buf.writer.writeAll(", ");
         // Pfad escapen: Diff-Tabs trennen ihre Felder mit 0x1f, Windows-Pfade enthalten
         // Backslashes — beides ist in JSON ungültig.
-        try buf.writer.print("{{\"path\": {f}, \"kind\": \"{s}\", \"modified\": {}}}", .{ std.json.fmt(tab.path, .{}), @tagName(tab.kind), tab.modified });
+        try buf.writer.print("{{\"path\": {f}, \"kind\": \"{s}\", \"modified\": {}, \"label\": {f}}}", .{
+            std.json.fmt(tab.path, .{}),
+            @tagName(tab.kind),
+            tab.modified,
+            std.json.fmt(@import("ui/tab_bar.zig").tabLabel(dc.arena(), tb, i), .{}),
+        });
     }
     try buf.writer.writeAll("]}");
     return buf.written();
