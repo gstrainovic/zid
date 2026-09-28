@@ -27,7 +27,9 @@ Kommentare ohne Direktiven werden Notizen. Das `Deck` hält eine eigene Arena, d
 Quelle darf danach freigegeben werden.
 
 **HTML:** über zigdowns `HtmlRenderer` mit `body_only`. Bewusst CSS 2.1 — MuPDFs
-Story-Engine kennt weder Flexbox noch Grid noch Custom Properties.
+Story-Engine kennt weder Flexbox noch Grid noch Custom Properties. Die Folie ist wie bei
+Marp ein `<section class="slide …">`, damit `style`-Regeln auf `section` greifen; MuPDFs
+HTML-Standardstil macht `section` nicht zum Block, das setzt der Grundstil.
 
 **PDF:** eine Seite je Folie in Foliengröße. Hintergrund, Kopf-/Fußzeile und Seitenzahl
 zeichnet das Modul selbst, weil MuPDFs CSS kein `position` kennt. Die
@@ -92,8 +94,7 @@ Fixture: `scripts/fixtures/marp_test.md` (eingecheckt, sieben Folien).
 - Im Front-Matter kennt der Parser nur `key: value` und Blockskalare (`style: |`,
   `>`, mit `-`/`+`); Listen und verschachtelte Maps nicht. Den Blockskalar prüft die
   E2E: sonst kommt `|` als CSS bei MuPDF an und jede Folie loggt „css syntax error“.
-- Marp-CSS zielt auf `section`, die Folie ist hier `<div class="slide">`: solche
-  Regeln aus `style` wirken im Export nicht.
+- `style` wirkt nur im Export und in `slideFits`; die Folienvorschau liest kein CSS.
 - `![bg]`-Hintergrundbilder bleiben im Markdown stehen.
 - Die Vorschau bildet den Umbruch nach, ist aber keine Pixelkopie: sie zeichnet mit der
   Editor-Schrift, das PDF mit MuPDFs Serifenloser. Über die Foliengrenze entscheidet

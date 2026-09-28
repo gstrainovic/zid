@@ -41,20 +41,23 @@ pub fn renderSlide(
 
     var out: std.Io.Writer.Allocating = .init(allocator);
     errdefer out.deinit();
+    // `<section>` wie bei Marp, damit `style`-Regeln des Decks (`section { … }`,
+    // `section.lead`) greifen.
     if (slide.local.class) |class| {
-        try out.writer.print("<div class=\"slide {s}\">\n", .{class});
+        try out.writer.print("<section class=\"slide {s}\">\n", .{class});
     } else {
-        try out.writer.writeAll("<div class=\"slide\">\n");
+        try out.writer.writeAll("<section class=\"slide\">\n");
     }
     try out.writer.writeAll(body.written());
-    try out.writer.writeAll("\n</div>\n");
+    try out.writer.writeAll("\n</section>\n");
     return out.toOwnedSlice();
 }
 
 /// Grundstil für alle Folien. Bewusst CSS 2.1: MuPDFs Story-Engine kennt
-/// weder Flexbox noch Grid noch Custom Properties.
+/// weder Flexbox noch Grid noch Custom Properties. MuPDFs HTML-Standardstil
+/// kennt `section` nicht als Block, daher `display: block`.
 const base_css =
-    \\.slide { margin: 0; padding: 0; }
+    \\section.slide { display: block; margin: 0; padding: 0; }
     \\body { font-family: sans-serif; line-height: 1.4; }
     \\h1 { font-size: 2.0em; margin: 0 0 0.4em 0; }
     \\h2 { font-size: 1.5em; margin: 0 0 0.4em 0; }
@@ -144,6 +147,17 @@ test "renderSlide ohne Klasse hat nur die Basisklasse" {
     defer testing.allocator.free(html);
 
     try testing.expect(std.mem.indexOf(u8, html, "class=\"slide\"") != null);
+}
+
+test "renderSlide rahmt die Folie wie Marp in section" {
+    var deck = try parseFirst(testing.allocator, "---\nmarp: true\n---\n\n# Titel\n");
+    defer deck.deinit();
+
+    const html = try renderSlide(testing.allocator, deck.global, deck.slides[0]);
+    defer testing.allocator.free(html);
+
+    try testing.expect(std.mem.startsWith(u8, html, "<section class=\"slide\">"));
+    try testing.expect(std.mem.endsWith(u8, html, "</section>\n"));
 }
 
 test "renderSlide maskiert spitze Klammern aus dem Markdown" {
