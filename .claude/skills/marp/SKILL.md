@@ -21,7 +21,7 @@ gewöhnliches Markdown.
 | `src/rendering/marp_pdf.zig` | — | Seiten schreiben über `fz_story` |
 
 **Parser:** Front-Matter, Folientrennung an `---` (nicht im Code-Zaun, nicht bei
-Setext-Überschriften), `headingDivider`, globale Direktiven (`theme`, `style`, `size`,
+Setext-Überschriften), YAML-Blockskalare im Front-Matter, `headingDivider`, globale Direktiven (`theme`, `style`, `size`,
 `headingDivider`) und lokale mit Vererbung (`_`-Präfix gilt nur für diese Folie).
 Kommentare ohne Direktiven werden Notizen. Das `Deck` hält eine eigene Arena, die
 Quelle darf danach freigegeben werden.
@@ -89,7 +89,11 @@ Fixture: `scripts/fixtures/marp_test.md` (eingecheckt, sieben Folien).
 - Inhalt, der nicht auf die Folie passt, wird abgeschnitten statt verkleinert.
 - zigdown maskiert nur Textstücke, die selbst eine spitze Klammer enthalten; ein
   alleinstehendes `&` bleibt roh.
-- Mehrzeiliges YAML im Front-Matter (`style: |`) wird nicht zusammengefasst.
+- Im Front-Matter kennt der Parser nur `key: value` und Blockskalare (`style: |`,
+  `>`, mit `-`/`+`); Listen und verschachtelte Maps nicht. Den Blockskalar prüft die
+  E2E: sonst kommt `|` als CSS bei MuPDF an und jede Folie loggt „css syntax error“.
+- Marp-CSS zielt auf `section`, die Folie ist hier `<div class="slide">`: solche
+  Regeln aus `style` wirken im Export nicht.
 - `![bg]`-Hintergrundbilder bleiben im Markdown stehen.
 - Die Vorschau bildet den Umbruch nach, ist aber keine Pixelkopie: sie zeichnet mit der
   Editor-Schrift, das PDF mit MuPDFs Serifenloser. Über die Foliengrenze entscheidet
