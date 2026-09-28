@@ -12,19 +12,3 @@ fz_device *fz_new_draw_device_z(fz_context *ctx, fz_matrix ctm, fz_pixmap *pix);
    Zeilenende als ' ', Blockende als '\n', beide mit leerer Box. Die Felder legt mupdf an
    (fz_malloc), freigeben mit fz_free. Rückgabe: Anzahl Zeichen, -1 bei Fehler. */
 int fz_page_text_z(fz_context *ctx, fz_document *doc, int page_number, int **codes_out, fz_rect **boxes_out);
-
-/* Schreibender Teil: HTML/CSS über die Story-Engine in ein PDF layouten.
-   Alle Funktionen kapseln fz_try/fz_catch; int-Rückgaben sind 0 = ok, -1 = Fehler. */
-fz_buffer *fz_new_buffer_from_copied_data_z(fz_context *ctx, const unsigned char *data, size_t size);
-fz_story *fz_new_story_z(fz_context *ctx, fz_buffer *buf, const char *user_css, float em, fz_archive *dir);
-int fz_place_story_z(fz_context *ctx, fz_story *story, fz_rect where, fz_rect *filled, int *more);
-int fz_draw_story_z(fz_context *ctx, fz_story *story, fz_device *dev, fz_matrix ctm);
-fz_document_writer *fz_new_document_writer_z(fz_context *ctx, const char *path, const char *format, const char *options);
-fz_device *fz_begin_page_z(fz_context *ctx, fz_document_writer *wri, fz_rect mediabox);
-int fz_end_page_z(fz_context *ctx, fz_document_writer *wri);
-int fz_close_document_writer_z(fz_context *ctx, fz_document_writer *wri);
-int fz_fill_rect_z(fz_context *ctx, fz_device *dev, fz_rect rect, fz_colorspace *cs, const float *color, float alpha);
-/* Bilddatei (SVG, PNG, JPEG … — alles, was MuPDF als Dokument öffnet): Größe der
-   ersten Seite, und diese Seite nach `dest` gestreckt, beschnitten auf `clip`. */
-int fz_doc_page_size_z(fz_context *ctx, const char *magic, const unsigned char *data, size_t size, float *w, float *h);
-int fz_draw_doc_page_z(fz_context *ctx, fz_device *dev, const char *magic, const unsigned char *data, size_t size, fz_rect clip, fz_rect dest);

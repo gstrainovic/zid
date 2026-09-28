@@ -36,8 +36,14 @@ pub fn extractTarGz(archive: []const u8, dest_dir: []const u8, strip: u32) !void
     });
 }
 
-/// `.zip` nach `dest_dir` auspacken. Zigs Entpacker kennt kein `strip_components`;
-/// das Windows-Archiv braucht es auch nicht, es liegt flach.
+/// `.zip` nach `dest_dir` auspacken (Ablage wie im Archiv, kein `strip_components`).
+///
+/// Eigene Schleife statt `std.zip.extract`: das nutzt `flate.Decompress` mit eigenem
+/// Fensterpuffer (indirekter Modus), und der endet in Zig 0.15.2 bei manchen Einträgen
+/// in „reached unreachable“ (`unreachableRebase` in `writeMatch`); beim Zip von
+/// chrome-headless-shell zuverlässig. Hier läuft der direkte Modus (leerer Puffer): der
+/// Dekompressor schreibt in den Datei-Writer, dessen Puffer den Verlauf (32 KiB) hält.
+/// Unterstützt `store` und `deflate`, wie `std.zip`.
 pub fn extractZip(archive: []const u8, dest_dir: []const u8) !void {
     var file = try std.fs.cwd().openFile(archive, .{});
     defer file.close();
@@ -48,7 +54,51 @@ pub fn extractZip(archive: []const u8, dest_dir: []const u8) !void {
     var dir = try std.fs.cwd().openDir(dest_dir, .{});
     defer dir.close();
 
-    try std.zip.extract(dir, &fr, .{});
+    var iter = try std.zip.Iterator.init(&fr);
+    var name_buf: [std.fs.max_path_bytes]u8 = undefined;
+    while (try iter.next()) |entry| {
+        if (entry.filename_len == 0 or entry.filename_len > name_buf.len) return error.ZipBadFilename;
+        const name = name_buf[0..entry.filename_len];
+        try fr.seekTo(entry.header_zip_offset + @sizeOf(std.zip.CentralDirectoryFileHeader));
+        try fr.interface.readSliceAll(name);
+        std.mem.replaceScalar(u8, name, '\\', '/');
+        if (!safeZipName(name)) return error.ZipBadFilename;
+
+        if (name[name.len - 1] == '/') {
+            try dir.makePath(name[0 .. name.len - 1]);
+            continue;
+        }
+        if (std.fs.path.dirname(name)) |parent| try dir.makePath(parent);
+
+        try fr.seekTo(entry.file_offset);
+        const local = try fr.interface.takeStruct(std.zip.LocalFileHeader, .little);
+        if (!std.mem.eql(u8, &local.signature, &std.zip.local_file_header_sig)) return error.ZipBadFileOffset;
+        try fr.seekTo(entry.file_offset + @sizeOf(std.zip.LocalFileHeader) + local.filename_len + local.extra_len);
+
+        var out = try dir.createFile(name, .{});
+        defer out.close();
+        var out_buf: [std.compress.flate.max_window_len]u8 = undefined;
+        var fw = out.writer(&out_buf);
+        switch (entry.compression_method) {
+            .store => try fr.interface.streamExact64(&fw.interface, entry.uncompressed_size),
+            .deflate => {
+                var inflate: std.compress.flate.Decompress = .init(&fr.interface, .raw, &.{});
+                try inflate.reader.streamExact64(&fw.interface, entry.uncompressed_size);
+            },
+            else => return error.UnsupportedCompressionMethod,
+        }
+        try fw.end();
+    }
+}
+
+/// Relativ und ohne `..`-Teil: ein Eintrag darf nicht aus `dest_dir` herausführen.
+fn safeZipName(name: []const u8) bool {
+    if (name.len == 0 or name[0] == '/' or std.mem.indexOfScalar(u8, name, ':') != null) return false;
+    var it = std.mem.splitScalar(u8, name, '/');
+    while (it.next()) |part| {
+        if (std.mem.eql(u8, part, "..")) return false;
+    }
+    return true;
 }
 
 /// Engine laden und auspacken. Danach liegt `llama-server` unter `engines/<tag>/`.
@@ -96,6 +146,15 @@ pub fn model(allocator: std.mem.Allocator, root: []const u8, progress: *download
 }
 
 const testing = std.testing;
+
+test "safeZipName lässt nur Pfade innerhalb des Ziels zu" {
+    try testing.expect(safeZipName("a/b.txt"));
+    try testing.expect(safeZipName("chrome-headless-shell-win64/chrome.dll"));
+    try testing.expect(!safeZipName("../x"));
+    try testing.expect(!safeZipName("a/../../x"));
+    try testing.expect(!safeZipName("/etc/passwd"));
+    try testing.expect(!safeZipName("C:/x"));
+}
 
 test "strip hängt an der Plattform: Windows flach, sonst eine Ebene" {
     const expected: u32 = if (builtin.os.tag == .windows) 0 else 1;

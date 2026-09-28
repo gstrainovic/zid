@@ -9,7 +9,6 @@ const find_bar = @import("../editor/find_bar.zig");
 const ui_mod = @import("mod.zig");
 const shortcuts = @import("shortcuts");
 const marp = @import("marp");
-const marp_pdf = @import("../rendering/marp_pdf.zig");
 const ctx_menu = @import("context_menu");
 const scrollbar = @import("scrollbar");
 const wio = @import("wio");
@@ -68,8 +67,6 @@ pub const MarkdownView = struct {
     current_slide: usize = 0,
     /// Maßstab Rahmen zu Foliengröße aus dem letzten Frame (1.0 = unbekannt).
     slide_scale: f32 = 1.0,
-    /// Inhalt der gezeigten Folie ragt über den Rahmen hinaus (wird im PDF abgeschnitten).
-    slide_overflow: bool = false,
     /// Parse-Ergebnis der gezeigten Folie. Eigene Arena, wird beim Folienwechsel
     /// verworfen — es ist immer nur eine Folie im Blick.
     slide_arena: ?*std.heap.ArenaAllocator = null,
@@ -915,7 +912,6 @@ pub const MarkdownView = struct {
         const clamped = @min(index, count - 1);
         if (clamped == self.current_slide and self.slide_parsed != null) return;
         self.current_slide = clamped;
-        self.slide_overflow = false;
         self.clearSelection();
         self.dropSlideDocument();
         self.scroll_offset_y = 0;
@@ -951,10 +947,6 @@ pub const MarkdownView = struct {
         };
         self.slide_arena = arena;
         self.slide_parsed = pr;
-        // Ob die Folie aufs Blatt passt, beantwortet die Story-Engine des
-        // Exports — Clay kann es nicht, weil der Rahmen den Inhalt abschneidet
-        // und die gemessene Höhe damit nie über die Innenhöhe geht.
-        self.slide_overflow = !marp_pdf.slideFits(self.allocator, d, self.current_slide);
         return &pr.parser.document;
     }
 
@@ -1224,8 +1216,8 @@ pub const MarkdownView = struct {
         }
         const bg_col_w: f32 = @round(frame_w * split.frac);
         const content_w = frame_w - bg_col_w;
-        const pad_x = scaled(pdf_margin_x, scale);
-        const pad_y = scaled(pdf_margin_y, scale);
+        const pad_x = scaled(slide_margin_x, scale);
+        const pad_y = scaled(slide_margin_y, scale);
 
         clay.UI()(.{
             .id = self.idi("markdown_view_root", 0),
@@ -1266,7 +1258,6 @@ pub const MarkdownView = struct {
                     .layout = .{
                         .sizing = .{ .w = .fixed(content_w), .h = .fixed(frame_h) },
                         .direction = .top_to_bottom,
-                        // Dieselben Ränder wie im PDF, nur im Maßstab des Rahmens.
                         .padding = .{ .left = pad_x, .right = pad_x, .top = pad_y, .bottom = pad_y },
                         .child_gap = scaled(10, scale),
                     },
@@ -1285,11 +1276,10 @@ pub const MarkdownView = struct {
                         var effective_theme = theme;
                         if (self.text_color) |cc| effective_theme.text = cc;
                         self.resetCounters();
-                        // Grundschrift wie im Export, skaliert auf den Rahmen. Die
-                        // Überschriften-Faktoren in renderBlock (2.0 / 1.5 / 1.2)
-                        // sind dieselben wie im Export-CSS.
+                        // Grundschrift skaliert auf den Rahmen; Überschriften-Faktoren
+                        // in renderBlock (2.0 / 1.5 / 1.2).
                         const outer = self.font_size;
-                        self.font_size = @max(6, scaled(pdf_content_em, scale));
+                        self.font_size = @max(6, scaled(slide_content_em, scale));
                         self.wrap_width_hint = @max(0, content_w - 2 * @as(f32, @floatFromInt(pad_x)));
                         self.beginBlock(0);
                         self.renderBlock(block, arena, effective_theme, ui_ptr);
@@ -1323,18 +1313,6 @@ pub const MarkdownView = struct {
                 });
                 self.renderSlideButton("md_slide_next", ">", self.current_slide + 1 < d.slides.len, theme);
             });
-
-            if (self.slide_overflow) {
-                clay.UI()(.{
-                    .id = self.idi("md_slide_overflow", 0),
-                    .layout = .{ .sizing = .{ .w = .fit, .h = .fit } },
-                })({
-                    clay.text("Inhalt passt nicht auf die Folie", .{
-                        .font_size = self.font_size - 4,
-                        .color = theme.warning,
-                    });
-                });
-            }
 
             // Die Fußzeile der Folie steht bewusst nicht unter dem Rahmen: sie
             // gehört ins PDF, nicht in die Bedienleiste der Vorschau.
@@ -1406,19 +1384,19 @@ pub const MarkdownView = struct {
         });
     }
 
-    /// Ränder und Schriftgrößen des Exports (`rendering/marp_pdf.zig`), damit
-    /// Vorschau und PDF denselben Umbruch zeigen.
-    const pdf_margin_x: f32 = 70;
-    const pdf_margin_y: f32 = 78;
-    const pdf_content_em: f32 = 26;
+    /// Ränder und Grundschrift der Folie in Foliengrößen-Einheiten. Die Vorschau
+    /// nähert Marps Standard-Theme an; maßgeblich ist das PDF aus marp-cli.
+    const slide_margin_x: f32 = 70;
+    const slide_margin_y: f32 = 78;
+    const slide_content_em: f32 = 26;
 
-    /// Rand um die Folie und Platz für Blätterleiste, Warnung und Fußzeile.
+    /// Rand um die Folie und Platz für die Blätterleiste.
     const root_padding: u16 = 24;
     const chrome_reserve: f32 = 110;
 
     /// Grundschriftgröße, in der die Folie gezeichnet wird (E2E-Sicht).
     pub fn slideFontSize(self: *const Self) u16 {
-        return @max(6, scaled(pdf_content_em, self.slide_scale));
+        return @max(6, scaled(slide_content_em, self.slide_scale));
     }
 
     fn scaled(value: f32, scale: f32) u16 {

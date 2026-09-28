@@ -83,20 +83,12 @@ pub fn build(b: *std.Build) void {
     });
     const zigdown_mod = zigdown_dep.module("zigdown");
 
-    // Marp: Deck-Parser und HTML-Aufbereitung. Eigene Module, weil sowohl das
-    // Executable als auch der PDF-Export sie brauchen.
+    // Marp: Deck-Parser als eigenes Modul, weil Executable und Editor-Tests ihn brauchen.
     const marp_mod = b.createModule(.{
         .root_source_file = b.path("src/ui/marp.zig"),
         .target = target,
         .optimize = optimize,
     });
-    const marp_html_mod = b.createModule(.{
-        .root_source_file = b.path("src/ui/marp_html.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    marp_html_mod.addImport("zigdown", zigdown_mod);
-    marp_html_mod.addImport("marp", marp_mod);
 
     const exe_mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
@@ -167,7 +159,6 @@ pub fn build(b: *std.Build) void {
     exe_mod.addImport("nanosvg", nanosvg_mod);
     exe_mod.addImport("zigdown", zigdown_mod);
     exe_mod.addImport("marp", marp_mod);
-    exe_mod.addImport("marp_html", marp_html_mod);
 
     // ghostty-vt: Terminal emulator library
     if (b.lazyDependency("ghostty", .{
@@ -509,6 +500,19 @@ pub fn build(b: *std.Build) void {
     });
     ai_selfsetup_mod.addImport("download", download_mod);
     exe_mod.addImport("ai_selfsetup", ai_selfsetup_mod);
+
+    // Marp-PDF-Export über marp-cli, das zid selbst einrichtet (Download wie oben).
+    const marp_cli_mod = b.createModule(.{
+        .root_source_file = b.path("src/rendering/marp_cli.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    marp_cli_mod.addImport("download", download_mod);
+    marp_cli_mod.addImport("ai_selfsetup", ai_selfsetup_mod);
+    exe_mod.addImport("marp_cli", marp_cli_mod);
+    const marp_cli_tests = b.addTest(.{ .root_module = marp_cli_mod });
+    const run_marp_cli_tests = b.addRunArtifact(marp_cli_tests);
+    run_marp_cli_tests.has_side_effects = true;
 
     const ai_history_mod = b.createModule(.{
         .root_source_file = b.path("src/ai/history.zig"),
@@ -916,10 +920,6 @@ pub fn build(b: *std.Build) void {
     const run_marp_tests = b.addRunArtifact(marp_tests);
     run_marp_tests.has_side_effects = true;
 
-    const marp_html_tests = b.addTest(.{ .root_module = marp_html_mod });
-    const run_marp_html_tests = b.addRunArtifact(marp_html_tests);
-    run_marp_html_tests.has_side_effects = true;
-
     const svg_fixup_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("src/rendering/svg_fixup.zig"),
         .target = target,
@@ -927,27 +927,6 @@ pub fn build(b: *std.Build) void {
     }) });
     const run_svg_fixup_tests = b.addRunArtifact(svg_fixup_tests);
     run_svg_fixup_tests.has_side_effects = true;
-
-    // PDF-Export: braucht dieselbe MuPDF-Anbindung wie das Executable.
-    const marp_pdf_mod = b.createModule(.{
-        .root_source_file = b.path("src/rendering/marp_pdf.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    marp_pdf_mod.addImport("marp", marp_mod);
-    marp_pdf_mod.addImport("marp_html", marp_html_mod);
-    marp_pdf_mod.addIncludePath(b.path("src/rendering/mupdf_wrapper"));
-    marp_pdf_mod.link_libc = true;
-    const marp_pdf_tests = b.addTest(.{ .root_module = marp_pdf_mod });
-    if (target.result.os.tag == .linux) {
-        marp_pdf_mod.linkSystemLibrary("mupdf", .{ .use_pkg_config = .no });
-        marp_pdf_tests.addCSourceFile(.{
-            .file = b.path("src/rendering/mupdf_wrapper/fitz-z.c"),
-            .flags = &[_][]const u8{ "-std=c99", "-w" },
-        });
-    }
-    const run_marp_pdf_tests = b.addRunArtifact(marp_pdf_tests);
-    run_marp_pdf_tests.has_side_effects = true;
 
     const test_step = b.step("test", "Run tests");
 
@@ -1011,9 +990,8 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_text_tests.step);
     test_step.dependOn(&run_path_display_tests.step);
     test_step.dependOn(&run_marp_tests.step);
-    test_step.dependOn(&run_marp_html_tests.step);
     test_step.dependOn(&run_svg_fixup_tests.step);
-    if (target.result.os.tag == .linux) test_step.dependOn(&run_marp_pdf_tests.step);
+    test_step.dependOn(&run_marp_cli_tests.step);
     test_step.dependOn(&run_file_types_tests.step);
     test_step.dependOn(&run_dialog_ops_tests.step);
     test_step.dependOn(&run_edit_ops_tests.step);

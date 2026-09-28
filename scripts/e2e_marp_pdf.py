@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Headless-E2E: Marp-Folienvorschau und Export nach PDF.
+"""Headless-E2E: Marp-Folienvorschau und Export nach PDF über marp-cli.
 
 Deckt ab: Export-Eintrag im Tab-Kontextmenü nur bei Marp-Decks (Preview bei jeder
-.md), Export schreibt ein PDF mit einer Seite je Folie, das Ergebnis landet als
+.md), Export über marp-cli (beim ersten Lauf von zid nach tmp/tools geladen)
+schreibt ein PDF mit einer Seite je Folie, das Ergebnis landet als
 PDF-Tab, eine Markdown-Datei ohne `marp: true` meldet über das View-Menü einen
 Fehlerdialog, und die Vorschau eines Decks zeigt
 einzelne Folien mit Blättern per Taste und Schaltfläche.
@@ -11,13 +12,12 @@ Aufruf: python3 scripts/e2e_marp_pdf.py
 """
 import os
 import shutil
-import subprocess
 import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from e2e_fixtures import MARP_DECK  # noqa: E402
-from e2e_open_folder import ROOT, rpc, result_json, wait_port, settle, bounds, click_center, check, shot, start_zid, stop_zid  # noqa: E402
+from e2e_open_folder import ROOT, rpc, result_json, wait_port, settle, bounds, click_center, check, shot, start_zid, stop_zid, isolated_env  # noqa: E402
 from e2e_shortcuts import ui_state  # noqa: E402
 
 FX = os.path.join(ROOT, "tmp", "e2e_marp")
@@ -67,17 +67,6 @@ def menu_entry_visible(command):
     return inside_x and inside_y
 
 
-def pdf_pages(path):
-    """Seitenzahl aus dem PDF. mutool wenn vorhanden, sonst /Type/Page zaehlen."""
-    if shutil.which("mutool"):
-        out = subprocess.run(["mutool", "info", path], capture_output=True, text=True).stdout
-        for line in out.splitlines():
-            if line.startswith("Pages:"):
-                return int(line.split(":")[1])
-    data = open(path, "rb").read()
-    return data.count(b"/Type/Page") - data.count(b"/Type/Pages")
-
-
 def step_menu_entry():
     print("--- Menueintrag nur bei Markdown")
     rpc("open_file", [NOTE])
@@ -93,19 +82,30 @@ def step_menu_entry():
     check(menu_entry_visible("md_export_pdf"), "deck.md: Export-Eintrag sichtbar")
 
 
+def wait_export(timeout=300):
+    """Export laeuft im Hintergrund: beim ersten Lauf laedt zid marp-cli (49 MB)
+    nach tmp/tools, danach dauert die Umwandlung einige Sekunden."""
+    t0 = time.time()
+    st = result_json("marp_export_state")
+    while (st["state"] != "idle" or st["last"] == "idle") and time.time() - t0 < timeout:
+        time.sleep(0.5)
+        settle(2)
+        st = result_json("marp_export_state")
+    return st
+
+
 def step_export():
-    print("--- Export ueber das Tab-Menue")
+    print("--- Export ueber das Tab-Menue (marp-cli)")
     check(not os.path.exists(DECK_PDF), "vor dem Export gibt es kein PDF")
     click_center("tab_menu_md_export_pdf")
-    settle(40)
-
-    t0 = time.time()
-    while time.time() - t0 < 20 and not os.path.exists(DECK_PDF):
-        time.sleep(0.1)
+    settle(4)
+    st = wait_export()
+    check(st["last"] == "done", f"Export abgeschlossen: {st}")
     check(os.path.exists(DECK_PDF), "deck.pdf wurde geschrieben")
     check(open(DECK_PDF, "rb").read(5) == b"%PDF-", "Datei ist ein PDF")
-    pages = pdf_pages(DECK_PDF)
-    check(pages == 7, f"eine Seite je Folie: {pages} von 7")
+    tools = os.path.join(ROOT, "tmp", "tools")
+    marp = [d for d in os.listdir(tools) if d.startswith("marp-cli-")]
+    check(marp, f"marp-cli unter tmp/tools eingerichtet: {marp}")
 
 
 def step_pdf_tab():
@@ -118,11 +118,14 @@ def step_pdf_tab():
         time.sleep(0.1)
     tabs = ui_state()["tabs"]
     check(any(t["path"].endswith("deck.pdf") for t in tabs), "PDF ist als Tab offen")
+    settle(20)
+    pages = result_json("pdf_state")["pages"]
+    check(pages == 7, f"eine Seite je Folie: {pages} von 7")
 
 
 def step_pdf_background():
-    """`![bg right:40%]` auf Folie 2: die SVG-Skizze steht im PDF, samt Text aus
-    einem `<symbol>`, das MuPDF ohne `svg_fixup` nicht skaliert."""
+    """`![bg right:40%]` auf Folie 2: die SVG-Skizze steht im PDF samt Text aus
+    einem `<symbol>` (marp-cli druckt das SVG als Vektor)."""
     print("--- Hintergrundbild im PDF")
     settle(20)
     rpc("key_press", ["f", True]); settle(8)
@@ -145,10 +148,9 @@ def step_reexport_reloads_pdf():
     rpc("open_file", [DECK]); settle(20)
     click_center("menu_view")
     click_center("menu_item_md_export_pdf")
-    t0 = time.time()
-    while time.time() - t0 < 20 and pdf_pages(DECK_PDF) != 8:
-        time.sleep(0.1)
-    check(pdf_pages(DECK_PDF) == 8, f"deck.pdf hat jetzt 8 Seiten (ist {pdf_pages(DECK_PDF)})")
+    settle(4)
+    st = wait_export()
+    check(st["last"] == "done", f"zweiter Export abgeschlossen: {st}")
     t0 = time.time()
     st = result_json("pdf_state")
     while time.time() - t0 < 10 and not (st["pdf"] and st["pages"] == 8):
@@ -302,20 +304,6 @@ def step_wide_pane():
     rpc("key_press", ["b", True]); settle(20)
 
 
-def step_overflow_warning():
-    print("--- Warnung, wenn der Inhalt nicht auf die Folie passt")
-    rpc("key_press", ["home", False]); settle(10)
-    check(not slide_state()["overflow"], "Titelfolie passt")
-    # Folie 4 traegt den Codeblock, der schon im PDF abgeschnitten wird.
-    for _ in range(3):
-        rpc("key_press", ["right", False])
-    settle(20)
-    st = slide_state()
-    check(st["current"] == 3, "auf der Code-Folie")
-    check(st["overflow"], "Ueberlauf wird gemeldet")
-    check(bounds("md_slide_overflow")["found"], "Warnung steht im Layout")
-
-
 def step_preview_without_deck():
     print("--- Vorschau einer gewoehnlichen Markdown-Datei")
     open_tab_menu("plain.md")
@@ -332,7 +320,6 @@ STEPS = [
     step_not_a_deck,
     step_slide_preview,
     step_wide_pane,
-    step_overflow_warning,
     step_preview_without_deck,
     step_reexport_reloads_pdf,  # zuletzt: ändert das Deck (8 Folien)
 ]
@@ -341,7 +328,10 @@ STEPS = [
 def main():
     setup()
     log = open(os.path.join(ROOT, "tmp", "e2e_marp_pdf.log"), "w")
-    proc = start_zid(["--headless", "--ai=off"], log)
+    # marp-cli (und falls kein Browser da ist chrome-headless-shell) bleibt unter
+    # tmp/tools liegen: nur der erste Lauf laedt.
+    env = dict(isolated_env("e2e_marp_pdf"), ZID_TOOLS_DIR=os.path.join(ROOT, "tmp", "tools"))
+    proc = start_zid(["--headless", "--ai=off"], log, env)
     try:
         wait_port(proc)
         settle(20)
@@ -350,11 +340,6 @@ def main():
     finally:
         stop_zid(proc)
         log.close()
-    # `style: |` im Fixture: als Blockskalar gelesen kommt reines CSS bei MuPDF an,
-    # sonst meldet MuPDF je Folie „css syntax error“ auf das einzelne `|`.
-    with open(log.name, encoding="utf-8", errors="replace") as f:
-        css_errors = [line for line in f if "css syntax error" in line]
-    check(not css_errors, f"keine CSS-Fehler im Log ({len(css_errors)} gefunden)")
     print("ALL PASSED")
 
 

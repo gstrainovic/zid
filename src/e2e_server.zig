@@ -282,7 +282,11 @@ fn writeScmJson(ui: *ui_mod.UI, w: *std.Io.Writer) !void {
     try std.json.Stringify.value(v.selected, .{}, w);
     try w.print(", \"menu_open\": {}, \"hover_visible\": {}, \"header\": {{\"x\": {d:.1}, \"y\": {d:.1}, \"w\": {d:.1}, \"h\": {d:.1}}}, \"body\": {{\"x\": {d:.1}, \"y\": {d:.1}, \"w\": {d:.1}, \"h\": {d:.1}}}, \"row_height\": {d:.1}, \"scroll\": {d:.1}", .{
         ui.scm_graph.menu != null, clay.getElementData(clay.ElementId.ID("sg_hover")).found and ui.scm_graph.hover_row != null and ui.scm_graph.now_ms - ui.scm_graph.hover_since_ms > 700,
-        header.x, header.y, header.width, header.height, body.x, body.y, body.width, body.height, sg.ROW_HEIGHT, v.scroll,
+        header.x,                  header.y,
+        header.width,              header.height,
+        body.x,                    body.y,
+        body.width,                body.height,
+        sg.ROW_HEIGHT,             v.scroll,
     });
     try w.writeAll(", \"commit_tab\": ");
     if (ui.activeGitCommit()) |ac| {
@@ -600,6 +604,7 @@ pub fn createDispatcher(alloc: std.mem.Allocator, ctx: *E2EContext) !*zigjr.RpcD
     try rpc_dispatcher.addWithCtx("element_bounds_i", ctx, elementBoundsIndexed);
     try rpc_dispatcher.addWithCtx("folder_picker_state", ctx, folderPickerState);
     try rpc_dispatcher.addWithCtx("slide_state", ctx, slideState);
+    try rpc_dispatcher.addWithCtx("marp_export_state", ctx, marpExportState);
     try rpc_dispatcher.addWithCtx("pdf_state", ctx, pdfState);
     try rpc_dispatcher.addWithCtx("git_diff_state", ctx, gitDiffState);
     try rpc_dispatcher.addWithCtx("timeline_state", ctx, timelineState);
@@ -1413,15 +1418,28 @@ fn uiState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     return buf.written();
 }
 
-/// Zustand des "Open Folder…"-Dialogs: offen, Pfadfeld, Fehlermeldung, Unterordner.
+/// Marp-PDF-Export über marp-cli: Zustand (`idle`, `loading_marp`, `loading_browser`,
+/// `converting`, `done`, `failed`) und Fehlertext. Nach `done`/`failed` holt die UI das
+/// Ergebnis im nächsten Frame ab und setzt auf `idle` zurück; `last` behält es.
+fn marpExportState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
+    const ex = &ctx.ui_system.marp_export;
+    var buf = std.Io.Writer.Allocating.init(dc.arena());
+    try buf.writer.print("{{\"state\": \"{t}\", \"last\": \"{t}\", \"message\": {f}}}", .{
+        ex.currentState(),
+        ctx.ui_system.marp_export_last,
+        std.json.fmt(ex.message(), .{}),
+    });
+    return buf.written();
+}
+
 /// Zustand der Folienvorschau des aktiven Tabs. `deck` ist false, wenn der Tab
 /// keine Vorschau ist oder der Text kein Marp-Deck.
 fn slideState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
     var buf = std.Io.Writer.Allocating.init(dc.arena());
     if (ctx.ui_system.activeSlideDeckView()) |v| {
         try buf.writer.print(
-            \\{{"deck": true, "slides": {d}, "current": {d}, "scale": {d:.4}, "font_size": {d}, "overflow": {}}}
-        , .{ v.slideCount(), v.current_slide, v.slide_scale, v.slideFontSize(), v.slide_overflow });
+            \\{{"deck": true, "slides": {d}, "current": {d}, "scale": {d:.4}, "font_size": {d}}}
+        , .{ v.slideCount(), v.current_slide, v.slide_scale, v.slideFontSize() });
     } else {
         try buf.writer.writeAll("{\"deck\": false, \"slides\": 0, \"current\": 0}");
     }

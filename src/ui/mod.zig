@@ -10,7 +10,7 @@ const Animation = animation.Animation;
 const AnimationType = animation.AnimationType;
 const AnimationManager = animation.AnimationManager;
 const PdfHandler = @import("../rendering/pdf_handler.zig").PdfHandler;
-const marp_pdf = @import("../rendering/marp_pdf.zig");
+const marp_cli = @import("marp_cli");
 const marp = @import("marp");
 const PdfViewState = @import("pdf_view.zig").PdfViewState;
 const pdf_nav = @import("pdf_nav.zig");
@@ -201,6 +201,12 @@ pub const UI = struct {
     max_frame_ms: f32 = 0,
     /// Pfade zuletzt geschlossener Datei-Tabs (owned, neueste hinten) für Ctrl+Shift+T
     closed_tabs: std.ArrayListUnmanaged([]u8) = .empty,
+    /// Marp-PDF-Export über marp-cli im Hintergrund; `pollMarpExport` holt Ergebnisse ab.
+    marp_export: marp_cli.Exporter,
+    /// Zuletzt gesehener Zustand des Exports (für Meldungen bei Wechseln).
+    marp_export_seen: marp_cli.State = .idle,
+    /// Ergebnis des letzten abgeschlossenen Exports (`done`/`failed`), für E2E.
+    marp_export_last: marp_cli.State = .idle,
     /// Offenes Tab-Kontextmenü (Rechtsklick auf einen Tab-Kopf)
     tab_menu: ?TabMenu = null,
     /// Ziel eines Tab-Kommandos aus dem Kontextmenü; null = aktiver Tab des aktiven Panes
@@ -508,6 +514,7 @@ pub const UI = struct {
             .open_images = std.StringHashMap(*anyopaque).init(allocator),
             .open_pdfs = std.StringHashMap(*anyopaque).init(allocator),
             .open_markdown_views = std.StringHashMap(*markdown_view_mod.MarkdownView).init(allocator),
+            .marp_export = .{ .allocator = allocator, .wake = &wio.cancelWait },
             .pending_md_preview = null,
             .image_renderer = null,
             .mouse_pressed_this_frame = false,
@@ -524,6 +531,7 @@ pub const UI = struct {
     /// UI aufräumen
     pub fn deinit(self: *Self) void {
         log.debug("UI.deinit: start", .{});
+        self.marp_export.deinit();
         if (self.lsp) |l| l.deinit();
         self.lsp = null;
         if (self.lsp_goto) |g| self.allocator.free(g.path);
@@ -3536,34 +3544,63 @@ pub const UI = struct {
         return true;
     }
 
-    /// Exportiert `path` als Marp-Deck nach PDF und öffnet das Ergebnis als Tab.
-    /// Nicht-Decks (kein `marp: true` im Front-Matter) melden das als Dialog.
+    /// Exportiert `path` als Marp-Deck über marp-cli nach PDF (im Hintergrund);
+    /// `pollMarpExport` öffnet das Ergebnis als Tab. Nicht-Decks (kein `marp: true`
+    /// im Front-Matter) melden das als Dialog.
     fn exportMarpPdf(self: *Self, path: []const u8) void {
         if (path.len == 0) return;
         const stripped = if (std.mem.startsWith(u8, path, "preview://")) path["preview://".len..] else path;
 
-        const out_path = marp_pdf.defaultOutputPath(self.allocator, stripped) catch |err| {
+        if (!marp.isMarpDeckFile(stripped)) {
+            self.reportError("Kein Marp-Deck: im Front-Matter fehlt 'marp: true'", .{});
+            return;
+        }
+        if (self.marp_export.busy()) {
+            self.showToast("PDF-Export läuft bereits", .{});
+            return;
+        }
+        const out_path = marp_cli.outputPath(self.allocator, stripped) catch |err| {
             self.reportError("PDF-Export fehlgeschlagen: {t}", .{err});
             return;
         };
         defer self.allocator.free(out_path);
-
-        marp_pdf.exportFile(self.allocator, stripped, out_path) catch |err| {
-            if (err == error.NotAMarpDeck) {
-                self.reportError("Kein Marp-Deck: im Front-Matter fehlt 'marp: true'", .{});
-            } else {
-                self.reportError("PDF-Export fehlgeschlagen: {t}", .{err});
-            }
+        self.marp_export.start(stripped, out_path) catch |err| {
+            self.reportError("PDF-Export fehlgeschlagen: {t}", .{err});
             return;
         };
-        log.info("Marp-PDF geschrieben: {s}", .{out_path});
-        // Schon offen: neu laden, sonst zeigt der Tab den alten Export
-        if (self.keyForPath(*anyopaque, &self.open_pdfs, out_path)) |key| self.requestPdfReload(key);
+        self.showToast("PDF wird erzeugt …", .{});
+    }
 
-        // Ergebnis im PDF-Tab zeigen — die Vorschau ist damit das, was rauskommt.
-        const owned = self.allocator.dupe(u8, out_path) catch return;
-        if (self.pending_tab_switch) |old| self.allocator.free(old);
-        self.pending_tab_switch = owned;
+    /// Je Frame: Zustandswechsel des Marp-Exports melden, fertiges PDF öffnen.
+    fn pollMarpExport(self: *Self) void {
+        const st = self.marp_export.currentState();
+        if (st == self.marp_export_seen) return;
+        self.marp_export_seen = st;
+        switch (st) {
+            .idle, .converting => {},
+            .loading_marp => self.showToast("Lade marp-cli für den PDF-Export (49 MB) …", .{}),
+            .loading_browser => self.showToast("Kein Browser gefunden, lade chrome-headless-shell (121 MB) …", .{}),
+            .failed => {
+                self.marp_export_last = .failed;
+                self.reportError("PDF-Export fehlgeschlagen: {s}", .{self.marp_export.message()});
+                self.marp_export.acknowledge();
+                self.marp_export_seen = .idle;
+            },
+            .done => {
+                self.marp_export_last = .done;
+                const out_path = self.marp_export.out_path;
+                self.showToast("PDF geschrieben: {s}", .{std.fs.path.basename(out_path)});
+                // Schon offen: neu laden, sonst zeigt der Tab den alten Export
+                if (self.keyForPath(*anyopaque, &self.open_pdfs, out_path)) |key| self.requestPdfReload(key);
+                // Ergebnis im PDF-Tab zeigen.
+                if (self.allocator.dupe(u8, out_path)) |owned| {
+                    if (self.pending_tab_switch) |old| self.allocator.free(old);
+                    self.pending_tab_switch = owned;
+                } else |_| {}
+                self.marp_export.acknowledge();
+                self.marp_export_seen = .idle;
+            },
+        }
     }
 
     /// Ziel eines Tab-Kommandos: Kontextmenü-Tab oder aktiver Tab des aktiven Panes.
@@ -3889,6 +3926,7 @@ pub const UI = struct {
     }
 
     pub fn renderExample(self: *Self, image_data: ?*const anyopaque) []clay.RenderCommand {
+        self.pollMarpExport();
         self.applyDeferredLayoutActions();
         self.beginLayout();
         tooltip.beginFrame(self.ui_time_ms);
