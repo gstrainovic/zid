@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 150" font-family="Arial, Helvetica, sans-serif">
+  <defs>
+    <symbol id="foto" viewBox="0 0 40 30" preserveAspectRatio="none">
+      <rect width="40" height="30" fill="#a9bccf"/>
+      <text x="20" y="18" text-anchor="middle" font-size="8">Skizzenwort</text>
+    </symbol>
+  </defs>
+  <text x="100" y="14" text-anchor="middle" font-size="12" font-weight="bold">Titelzeile</text>
+  <use href="#foto" x="20" y="30" width="160" height="110"/>
+</svg>

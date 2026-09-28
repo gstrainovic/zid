@@ -50,6 +50,17 @@ pub const PdfHandler = struct {
     reveal_hit: bool = false,
 
     pub fn init(allocator: std.mem.Allocator, path: []const u8) !*PdfHandler {
+        // Aus einer Kopie im Speicher öffnen, nicht über den Pfad: mupdf hielte die Datei
+        // sonst offen, und unter Windows scheitert dann jedes Ersetzen per Rename durch ein
+        // anderes Programm (LaTeX, Typst, Export) mit „Zugriff verweigert“.
+        const bytes = std.fs.cwd().readFileAlloc(allocator, path, 1 << 30) catch return error.FailedToOpenDocument;
+        defer allocator.free(bytes);
+        return initFromBytes(allocator, path, bytes);
+    }
+
+    /// Dokument aus Bytes; `path` bestimmt über die Endung den Dateityp und bleibt
+    /// als Name stehen. Die Bytes dürfen danach freigegeben werden.
+    pub fn initFromBytes(allocator: std.mem.Allocator, path: []const u8, bytes: []const u8) !*PdfHandler {
         // null terminated path for C
         const path_c = try allocator.dupeZ(u8, path);
         defer allocator.free(path_c);
@@ -60,12 +71,7 @@ pub const PdfHandler = struct {
         errdefer c.fz_drop_context(ctx);
 
         c.fz_register_document_handlers(ctx);
-        
-        // Aus einer Kopie im Speicher öffnen, nicht über den Pfad: mupdf hielte die Datei
-        // sonst offen, und unter Windows scheitert dann jedes Ersetzen per Rename durch ein
-        // anderes Programm (LaTeX, Typst, Export) mit „Zugriff verweigert“.
-        const bytes = std.fs.cwd().readFileAlloc(allocator, path, 1 << 30) catch return error.FailedToOpenDocument;
-        defer allocator.free(bytes);
+
         const doc = c.fz_open_document_from_bytes_z(ctx, path_c.ptr, bytes.ptr, bytes.len) orelse {
             return error.FailedToOpenDocument;
         };
@@ -114,20 +120,34 @@ pub const PdfHandler = struct {
             self.requested_scale = scale;
         }
         const scale_final = @min(scale, @sqrt(max_pixels / (pw * ph)), max_edge / @max(pw, ph));
-        return self.renderScaled(page, bound, scale_final);
+        return self.renderScaled(page, bound, scale_final, false);
     }
 
-    fn renderScaled(self: *PdfHandler, page: *c.fz_page, bound: c.fz_rect, scale: f32) !Rendered {
+    /// Erste Seite mit transparentem Grund, längste Kante `edge_px` Pixel. Für
+    /// Bilddateien, die MuPDF besser kann als nanosvg (SVG mit `<text>`, `<use>`).
+    pub fn renderImage(self: *PdfHandler, edge_px: f32) !Rendered {
+        const page = c.fz_load_page_z(self.ctx, self.doc, 0) orelse return error.FailedToLoadPage;
+        defer c.fz_drop_page(self.ctx, page);
+        const bound = c.fz_bound_page(self.ctx, page);
+        const pw = bound.x1 - bound.x0;
+        const ph = bound.y1 - bound.y0;
+        if (pw <= 0 or ph <= 0) return error.FailedToLoadPage;
+        return self.renderScaled(page, bound, @min(edge_px, max_edge) / @max(pw, ph), true);
+    }
+
+    fn renderScaled(self: *PdfHandler, page: *c.fz_page, bound: c.fz_rect, scale: f32, alpha: bool) !Rendered {
         const width = @max(1, @as(u32, @intFromFloat((bound.x1 - bound.x0) * scale)));
         const height = @max(1, @as(u32, @intFromFloat((bound.y1 - bound.y0) * scale)));
 
         const bbox = c.fz_make_irect(0, 0, @intCast(width), @intCast(height));
-        const pix = c.fz_new_pixmap_with_bbox_z(self.ctx, c.fz_device_rgb(self.ctx), bbox, null, 0) orelse {
+        const pix = c.fz_new_pixmap_with_bbox_z(self.ctx, c.fz_device_rgb(self.ctx), bbox, null, @intFromBool(alpha)) orelse {
             return error.FailedToCreatePixmap;
         };
         defer c.fz_drop_pixmap(self.ctx, pix);
 
-        c.fz_clear_pixmap_with_value(self.ctx, pix, 0xFF);
+        // `fz_clear_pixmap_with_value` setzt Alpha immer auf deckend; transparent
+        // leert nur `fz_clear_pixmap`.
+        if (alpha) c.fz_clear_pixmap(self.ctx, pix) else c.fz_clear_pixmap_with_value(self.ctx, pix, 0xFF);
 
         // Seiten mit Ursprung ungleich (0,0) (MediaBox verschoben) an die Pixmap-Ecke rücken
         const ctm = c.fz_pre_translate(c.fz_scale(scale, scale), -bound.x0, -bound.y0);
@@ -135,17 +155,30 @@ pub const PdfHandler = struct {
             return error.FailedToCreateDevice;
         };
         defer c.fz_drop_device(self.ctx, dev);
-        
+
         c.fz_run_page_z(self.ctx, page, dev, c.fz_identity, null);
         c.fz_close_device(self.ctx, dev);
 
         const samples = c.fz_pixmap_samples(self.ctx, pix);
-        
+
         const pixels = try self.allocator.alloc(u8, width * height * 4);
         errdefer self.allocator.free(pixels);
 
-        // Convert RGB to RGBA (optimized loop)
         const total_pixels = width * height;
+        if (alpha) {
+            // MuPDF liefert vormultipliziertes RGBA, die Textur erwartet gerades Alpha.
+            for (0..total_pixels) |i| {
+                const p = i * 4;
+                const a = samples[p + 3];
+                for (0..3) |k| {
+                    pixels[p + k] = if (a == 0) 0 else @intCast(@min(255, @as(u32, samples[p + k]) * 255 / a));
+                }
+                pixels[p + 3] = a;
+            }
+            return .{ .pixels = pixels, .width = width, .height = height };
+        }
+
+        // Convert RGB to RGBA (optimized loop)
         for (0..total_pixels) |i| {
             const src_idx = i * 3;
             const dst_idx = i * 4;

@@ -42,13 +42,59 @@ pub const Local = struct {
     background_repeat: ?[]const u8 = null,
 };
 
+/// Hintergrundbild aus `![bg …](src)` (https://marpit.marp.app/image-syntax).
+pub const Background = struct {
+    pub const Side = enum { full, left, right };
+    pub const Fit = enum { cover, contain, auto };
+
+    src: []const u8,
+    /// `left`/`right` teilt die Folie: Bild auf dieser Seite, Inhalt daneben.
+    side: Side = .full,
+    /// Anteil der Folienbreite für das Bild bei `left`/`right` (`right:55%`).
+    split: f32 = 0.5,
+    /// `contain` und `fit` zeigen das ganze Bild, `cover` füllt die Fläche.
+    fit: Fit = .cover,
+    /// `50%` o. ä.: feste Skalierung statt `fit`.
+    scale: ?f32 = null,
+
+    /// Bildgröße in einer Box: `cover` füllt (Überstand wird beschnitten),
+    /// `contain` und `auto` zeigen das ganze Bild. `scale` bezieht sich auf die
+    /// contain-Größe, nicht wie bei Marp auf die natürliche Bildgröße.
+    pub fn fitSize(self: Background, img_w: f32, img_h: f32, box_w: f32, box_h: f32) [2]f32 {
+        if (img_w <= 0 or img_h <= 0) return .{ box_w, box_h };
+        const contain = @min(box_w / img_w, box_h / img_h);
+        const s = if (self.scale) |f| contain * f else switch (self.fit) {
+            .cover => @max(box_w / img_w, box_h / img_h),
+            .contain, .auto => contain,
+        };
+        return .{ img_w * s, img_h * s };
+    }
+};
+
+/// Aufteilung einer Folie durch `![bg left/right]`: das erste solche Bild
+/// bestimmt Seite und Anteil. `side == .full` heißt ungeteilt.
+pub const Split = struct {
+    side: Background.Side = .full,
+    /// Anteil der Folienbreite für die Bildspalte.
+    frac: f32 = 0,
+
+    pub fn of(bgs: []const Background) Split {
+        for (bgs) |bg| {
+            if (bg.side != .full) return .{ .side = bg.side, .frac = std.math.clamp(bg.split, 0.05, 0.95) };
+        }
+        return .{};
+    }
+};
+
 pub const Slide = struct {
-    /// Folieninhalt ohne Direktiv-Kommentare und ohne Notizen.
+    /// Folieninhalt ohne Direktiv-Kommentare, Notizen und `![bg]`-Bilder.
     markdown: []const u8,
     /// Kommentare, die keine Direktiven sind — Marp behandelt sie als
     /// Präsentationsnotizen und rendert sie nicht.
     notes: []const []const u8,
     local: Local,
+    /// Zeilen, die nur aus `![bg …](…)` bestehen, landen hier statt im Markdown.
+    backgrounds: []const Background = &.{},
 };
 
 pub const Deck = struct {
@@ -126,6 +172,7 @@ pub fn parse(allocator: std.mem.Allocator, source: []const u8) ParseError!Deck {
     var slides: std.ArrayListUnmanaged(Slide) = .empty;
     var body: std.ArrayListUnmanaged(u8) = .empty;
     var notes: std.ArrayListUnmanaged([]const u8) = .empty;
+    var bgs: std.ArrayListUnmanaged(Background) = .empty;
     var effective = running;
 
     // Beendet die laufende Folie und beginnt eine neue.
@@ -135,6 +182,7 @@ pub fn parse(allocator: std.mem.Allocator, source: []const u8) ParseError!Deck {
             out: *std.ArrayListUnmanaged(Slide),
             buf: *std.ArrayListUnmanaged(u8),
             nts: *std.ArrayListUnmanaged([]const u8),
+            bg: *std.ArrayListUnmanaged(Background),
             local: Local,
         ) !void {
             const text = std.mem.trim(u8, buf.items, " \t\r\n");
@@ -142,6 +190,7 @@ pub fn parse(allocator: std.mem.Allocator, source: []const u8) ParseError!Deck {
                 .markdown = try a.dupe(u8, text),
                 .notes = try nts.toOwnedSlice(a),
                 .local = local,
+                .backgrounds = try bg.toOwnedSlice(a),
             });
             buf.clearRetainingCapacity();
         }
@@ -171,7 +220,7 @@ pub fn parse(allocator: std.mem.Allocator, source: []const u8) ParseError!Deck {
             // `---` trennt nur, wenn davor eine Leerzeile steht — sonst ist es
             // in Markdown die Unterstreichung einer Setext-Überschrift.
             if (isRuler(line.text) and isBlankTail(body.items)) {
-                try flush(arena, &slides, &body, &notes, effective);
+                try flush(arena, &slides, &body, &notes, &bgs, effective);
                 effective = running;
                 continue;
             }
@@ -180,21 +229,84 @@ pub fn parse(allocator: std.mem.Allocator, source: []const u8) ParseError!Deck {
                 headingLevel(line.text) <= global.heading_divider and
                 std.mem.trim(u8, body.items, " \t\r\n").len > 0)
             {
-                try flush(arena, &slides, &body, &notes, effective);
+                try flush(arena, &slides, &body, &notes, &bgs, effective);
                 effective = running;
             }
+            if (try parseBackgroundLine(arena, line.text, &bgs)) continue;
         }
 
         try body.appendSlice(arena, line.text);
         try body.append(arena, '\n');
     }
-    try flush(arena, &slides, &body, &notes, effective);
+    try flush(arena, &slides, &body, &notes, &bgs, effective);
 
     return .{
         .arena = arena_state,
         .global = global,
         .slides = try slides.toOwnedSlice(arena),
     };
+}
+
+// --- Hintergrundbilder ---------------------------------------------------
+
+/// Besteht die Zeile nur aus `![bg …](src)`-Bildern, hängt sie diese an `out`
+/// und liefert true. Sonst bleibt `out` unverändert.
+fn parseBackgroundLine(
+    arena: std.mem.Allocator,
+    line: []const u8,
+    out: *std.ArrayListUnmanaged(Background),
+) !bool {
+    var rest = std.mem.trim(u8, line, " \t");
+    if (!std.mem.startsWith(u8, rest, "![")) return false;
+    const start = out.items.len;
+    while (rest.len > 0) {
+        const parsed = parseBackgroundImage(rest) orelse {
+            out.shrinkRetainingCapacity(start);
+            return false;
+        };
+        try out.append(arena, parsed.bg);
+        rest = std.mem.trimLeft(u8, rest[parsed.len..], " \t");
+    }
+    return true;
+}
+
+fn parseBackgroundImage(s: []const u8) ?struct { bg: Background, len: usize } {
+    if (!std.mem.startsWith(u8, s, "![")) return null;
+    const alt_end = std.mem.indexOfPos(u8, s, 2, "](") orelse return null;
+    const src_end = std.mem.indexOfScalarPos(u8, s, alt_end + 2, ')') orelse return null;
+    // Titel wie `(bild.svg "Titel")` abschneiden.
+    var src = std.mem.trim(u8, s[alt_end + 2 .. src_end], " \t");
+    if (std.mem.indexOfAny(u8, src, " \t")) |sp| src = src[0..sp];
+
+    var words = std.mem.tokenizeAny(u8, s[2..alt_end], " \t");
+    const first = words.next() orelse return null;
+    if (!std.mem.eql(u8, first, "bg")) return null;
+
+    var bg: Background = .{ .src = src };
+    while (words.next()) |w| {
+        if (std.mem.startsWith(u8, w, "left") or std.mem.startsWith(u8, w, "right")) {
+            bg.side = if (w[0] == 'l') .left else .right;
+            if (std.mem.indexOfScalar(u8, w, ':')) |colon| {
+                if (parsePercent(w[colon + 1 ..])) |p| bg.split = p;
+            }
+        } else if (std.mem.eql(u8, w, "contain") or std.mem.eql(u8, w, "fit")) {
+            bg.fit = .contain;
+        } else if (std.mem.eql(u8, w, "cover")) {
+            bg.fit = .cover;
+        } else if (std.mem.eql(u8, w, "auto")) {
+            bg.fit = .auto;
+        } else if (parsePercent(w)) |p| {
+            bg.scale = p;
+        }
+    }
+    return .{ .bg = bg, .len = src_end + 1 };
+}
+
+fn parsePercent(s: []const u8) ?f32 {
+    if (s.len < 2 or s[s.len - 1] != '%') return null;
+    const v = std.fmt.parseFloat(f32, s[0 .. s.len - 1]) catch return null;
+    if (v <= 0) return null;
+    return v / 100;
 }
 
 // --- Front-Matter --------------------------------------------------------
@@ -560,6 +672,70 @@ test "parse liest style als YAML-Blockskalar" {
         deck.global.style.?,
     );
     try testing.expect(deck.slides[0].local.paginate);
+}
+
+test "bg-Bilder wandern aus dem Markdown in backgrounds" {
+    const src =
+        \\---
+        \\marp: true
+        \\---
+        \\
+        \\## Titel
+        \\
+        \\![bg right:55% contain](bilder/a.svg)
+        \\
+        \\- Punkt
+        \\
+        \\---
+        \\
+        \\![bg](voll.png) ![bg left 50%](b.png "Titel")
+        \\
+        \\![Foto](inline.png)
+        \\
+    ;
+    var deck = try parse(testing.allocator, src);
+    defer deck.deinit();
+
+    const s0 = deck.slides[0];
+    try testing.expectEqual(@as(usize, 1), s0.backgrounds.len);
+    try testing.expectEqualStrings("bilder/a.svg", s0.backgrounds[0].src);
+    try testing.expectEqual(Background.Side.right, s0.backgrounds[0].side);
+    try testing.expectApproxEqAbs(@as(f32, 0.55), s0.backgrounds[0].split, 1e-6);
+    try testing.expectEqual(Background.Fit.contain, s0.backgrounds[0].fit);
+    try testing.expect(std.mem.indexOf(u8, s0.markdown, "bg") == null);
+    try testing.expect(std.mem.indexOf(u8, s0.markdown, "- Punkt") != null);
+
+    const s1 = deck.slides[1];
+    try testing.expectEqual(@as(usize, 2), s1.backgrounds.len);
+    try testing.expectEqual(Background.Side.full, s1.backgrounds[0].side);
+    try testing.expectEqual(Background.Fit.cover, s1.backgrounds[0].fit);
+    try testing.expectEqualStrings("b.png", s1.backgrounds[1].src);
+    try testing.expectEqual(Background.Side.left, s1.backgrounds[1].side);
+    try testing.expectApproxEqAbs(@as(f32, 0.5), s1.backgrounds[1].scale.?, 1e-6);
+    // Gewöhnliche Bilder bleiben im Markdown.
+    try testing.expectEqualStrings("![Foto](inline.png)", s1.markdown);
+}
+
+test "fitSize und Split" {
+    const cover: Background = .{ .src = "" };
+    const contain: Background = .{ .src = "", .fit = .contain };
+    // Bild 2:1 in quadratischer Box 100x100.
+    try testing.expectEqual([2]f32{ 200, 100 }, cover.fitSize(40, 20, 100, 100));
+    try testing.expectEqual([2]f32{ 100, 50 }, contain.fitSize(40, 20, 100, 100));
+    const half: Background = .{ .src = "", .scale = 0.5 };
+    try testing.expectEqual([2]f32{ 50, 25 }, half.fitSize(40, 20, 100, 100));
+
+    try testing.expectEqual(Background.Side.full, Split.of(&.{cover}).side);
+    const s = Split.of(&.{ cover, .{ .src = "", .side = .right, .split = 0.55 } });
+    try testing.expectEqual(Background.Side.right, s.side);
+    try testing.expectApproxEqAbs(@as(f32, 0.55), s.frac, 1e-6);
+}
+
+test "Zeile mit bg und Text bleibt Markdown" {
+    var deck = try parse(testing.allocator, "---\nmarp: true\n---\n\n![bg](a.png) und Text\n");
+    defer deck.deinit();
+    try testing.expectEqual(@as(usize, 0), deck.slides[0].backgrounds.len);
+    try testing.expectEqualStrings("![bg](a.png) und Text", deck.slides[0].markdown);
 }
 
 test "parse faltet Blockskalar mit >" {

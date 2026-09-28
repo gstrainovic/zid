@@ -16,7 +16,7 @@ gewöhnliches Markdown.
 
 | Datei | Modul | Aufgabe |
 | --- | --- | --- |
-| `src/ui/marp.zig` | `marp` | Deck-Parser, rein, 15 Tests |
+| `src/ui/marp.zig` | `marp` | Deck-Parser, rein, unit-getestet |
 | `src/ui/marp_html.zig` | `marp_html` | Folie → HTML-Fragment plus CSS |
 | `src/rendering/marp_pdf.zig` | — | Seiten schreiben über `fz_story` |
 
@@ -35,6 +35,19 @@ HTML-Standardstil macht `section` nicht zum Block, das setzt der Grundstil.
 zeichnet das Modul selbst, weil MuPDFs CSS kein `position` kennt. Die
 setjmp-Kapselung der Schreibfunktionen steht in `mupdf_wrapper/fitz-z.c`, gleiches
 Muster wie beim Lesen.
+
+**Hintergrundbilder:** Zeilen nur aus `![bg …](src)` nimmt der Parser aus dem Markdown
+heraus und legt sie als `Slide.backgrounds` ab (Seite `left`/`right` mit Anteil, `cover`/
+`contain`/`fit`/`auto`, `N%`). `marp.Split.of` liefert die Teilung, `Background.fitSize`
+die Bildgröße; Vorschau und Export rechnen beide damit. Bei geteilter Folie bekommt die
+Bildspalte ihren Anteil, der Inhalt den Rest samt Rändern (`contentRect` im Export, auch für
+`slideFits`). Der Export zeichnet Bilder als Vektoren über `fz_draw_doc_page_z` (MuPDF
+öffnet SVG, PNG, JPEG als Dokument), relative Pfade ab dem Ordner der Markdown-Datei.
+
+**SVG-Bilder** rastert die Vorschau über MuPDF, nicht nanosvg: nanosvg kennt weder
+`<text>` noch `<use>`/`<symbol>`. MuPDF selbst liest die `viewBox` eines Symbols vom
+`<use>` und erbt `font-family` nicht vom `<svg>`; `src/rendering/svg_fixup.zig` schreibt
+beides vor dem Öffnen um (Vorschau und Export). nanosvg bleibt Rückfall.
 
 ## Folienvorschau
 
@@ -59,6 +72,13 @@ denselben Konstanten wie der Export (`pdf_margin_x`, `pdf_margin_y`, `pdf_conten
 gespiegelt aus `marp_pdf.zig`); die Überschriftenfaktoren in `renderBlock`
 (2.0 / 1.5 / 1.2) entsprechen dem Export-CSS. Untergrenze 6 px.
 
+**Bildspalte und Hintergrund:** `md_slide` ist eine Zeile aus Bildspalte
+(`md_slide_bg`) und Inhalt (`md_slide_content`). Ein volles `![bg]` liegt im Fluss, der
+Inhalt schwebt darüber (`z_index` 1): in Clay zeichnet nur ein schwebendes Element über
+ein Geschwister. Am Bildelement ist `background_color` die Tönung des Bildes, keine
+Füllung — ohne Weiß dort wird das Bild schwarz; der weiße Grund unter transparenten
+Skizzen kommt aus einer eigenen Hülle.
+
 **Passt die Folie?** `marp_pdf.slideFits` legt sie mit `fz_place_story` aus und zeichnet
 nichts. Bleibt Inhalt übrig, zeigt die Vorschau „Inhalt passt nicht auf die Folie"
 (`md_slide_overflow`). Clay kann das nicht beantworten, weil der Rahmen clippt und die
@@ -82,7 +102,9 @@ python3 scripts/e2e_marp_pdf.py            # headless, deckt alles ab
 mutool draw -F txt -o - DATEI.pdf SEITE    # einzelne Seite als Text
 ```
 
-Fixture: `scripts/fixtures/marp_test.md` (eingecheckt, sieben Folien).
+Fixture: `scripts/fixtures/marp_test.md` (eingecheckt, sieben Folien), Folie 2 mit
+`![bg right:40% contain](marp_skizze.svg)`. Die E2E prüft Spaltenbreite, Farbe der
+Skizze im Screenshot und den Skizzentext im PDF (Suche im PDF-Tab).
 
 ## Grenzen
 
@@ -95,7 +117,9 @@ Fixture: `scripts/fixtures/marp_test.md` (eingecheckt, sieben Folien).
   `>`, mit `-`/`+`); Listen und verschachtelte Maps nicht. Den Blockskalar prüft die
   E2E: sonst kommt `|` als CSS bei MuPDF an und jede Folie loggt „css syntax error“.
 - `style` wirkt nur im Export und in `slideFits`; die Folienvorschau liest kein CSS.
-- `![bg]`-Hintergrundbilder bleiben im Markdown stehen.
+- `![bg]` wird nur erkannt, wenn die Zeile aus nichts anderem besteht. Filter (`blur`,
+  `sepia` …) und `vertical` fehlen; `N%` skaliert relativ zur contain-Größe, nicht zur
+  natürlichen Bildgröße. Volle Hintergründe gelten nur auf ungeteilten Folien.
 - Die Vorschau bildet den Umbruch nach, ist aber keine Pixelkopie: sie zeichnet mit der
   Editor-Schrift, das PDF mit MuPDFs Serifenloser. Über die Foliengrenze entscheidet
   `slideFits`, nicht das Auge.

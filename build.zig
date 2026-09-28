@@ -920,6 +920,14 @@ pub fn build(b: *std.Build) void {
     const run_marp_html_tests = b.addRunArtifact(marp_html_tests);
     run_marp_html_tests.has_side_effects = true;
 
+    const svg_fixup_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("src/rendering/svg_fixup.zig"),
+        .target = target,
+        .optimize = optimize,
+    }) });
+    const run_svg_fixup_tests = b.addRunArtifact(svg_fixup_tests);
+    run_svg_fixup_tests.has_side_effects = true;
+
     // PDF-Export: braucht dieselbe MuPDF-Anbindung wie das Executable.
     const marp_pdf_mod = b.createModule(.{
         .root_source_file = b.path("src/rendering/marp_pdf.zig"),
@@ -1004,6 +1012,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_path_display_tests.step);
     test_step.dependOn(&run_marp_tests.step);
     test_step.dependOn(&run_marp_html_tests.step);
+    test_step.dependOn(&run_svg_fixup_tests.step);
     if (target.result.os.tag == .linux) test_step.dependOn(&run_marp_pdf_tests.step);
     test_step.dependOn(&run_file_types_tests.step);
     test_step.dependOn(&run_dialog_ops_tests.step);

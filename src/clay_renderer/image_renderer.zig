@@ -14,9 +14,9 @@ const log = std.log.scoped(.image_renderer);
 /// Vertex für Textured Quad Rendering
 /// 2 floats position + 2 floats UV + 4 floats color = 8 floats = 32 bytes
 pub const TexturedVertex = extern struct {
-    position: [2]f32,   // NDC coordinates (-1 to 1)
-    tex_coord: [2]f32,  // UV coordinates (0 to 1)
-    color: [4]f32,      // Tint color with alpha
+    position: [2]f32, // NDC coordinates (-1 to 1)
+    tex_coord: [2]f32, // UV coordinates (0 to 1)
+    color: [4]f32, // Tint color with alpha
 };
 
 /// Eine Image-Textur die gerendert werden kann
@@ -291,7 +291,12 @@ pub const ImageRenderer = struct {
         log.debug("Loading image from path: {s}", .{path});
 
         if (std.ascii.endsWithIgnoreCase(path, ".svg")) {
-            return self.createTextureFromSvg(allocator, path);
+            // MuPDF zuerst: nanosvg kennt weder `<text>` noch `<use>`/`<symbol>`,
+            // Beschriftungen und wiederverwendete Teile fehlten sonst.
+            return self.createTextureFromSvgMupdf(allocator, path) catch |err| {
+                log.warn("SVG über MuPDF fehlgeschlagen ({s}), nanosvg: {s}", .{ @errorName(err), path });
+                return self.createTextureFromSvg(allocator, path);
+            };
         }
 
         const file_data = try std.fs.cwd().readFileAlloc(allocator, path, 64 * 1024 * 1024);
@@ -349,7 +354,27 @@ pub const ImageRenderer = struct {
         return ViewBox{ .w = w, .h = h };
     }
 
-    /// Lade SVG-Datei und rastere zu RGBA-Textur.
+    /// SVG über MuPDF rastern, nach `svg_fixup`; transparenter Grund, gerades Alpha.
+    fn createTextureFromSvgMupdf(self: *Self, allocator: std.mem.Allocator, path: []const u8) !ImageTexture {
+        const PdfHandler = @import("../rendering/pdf_handler.zig").PdfHandler;
+        const svg_fixup = @import("../rendering/svg_fixup.zig");
+        const raw = try std.fs.cwd().readFileAlloc(allocator, path, 8 * 1024 * 1024);
+        defer allocator.free(raw);
+        const svg = try svg_fixup.fixup(allocator, raw);
+        defer allocator.free(svg);
+        const handler = try PdfHandler.initFromBytes(allocator, path, svg);
+        defer handler.deinit();
+        const img = try handler.renderImage(svg_edge_px);
+        defer allocator.free(img.pixels);
+        log.info("Rendering SVG via MuPDF to texture {d}x{d}", .{ img.width, img.height });
+        return self.createTextureFromPixels(img.pixels, img.width, img.height);
+    }
+
+    /// Längste Kante gerasterter SVG-Bilder: scharf auch auf einer Folie über die
+    /// volle Fensterbreite, ohne Riesentexturen.
+    const svg_edge_px: f32 = 2048;
+
+    /// Lade SVG-Datei und rastere zu RGBA-Textur (nanosvg, Rückfall).
     /// Output: weiße Pixel mit Alpha-Mask — Tint-Farbe liefert image_view via background_color.
     /// Rasterisiert im Quadrat (max-dim = 512), extrahiert danach den Content-Rect
     /// in eine aspect-korrekte Textur.
@@ -365,7 +390,7 @@ pub const ImageRenderer = struct {
         const null_terminated_data = try allocator.allocSentinel(u8, file_data.len, 0);
         defer allocator.free(null_terminated_data);
         @memcpy(null_terminated_data, file_data);
-        
+
         const image = nanosvg.parse(null_terminated_data, "px", 96);
         defer image.delete();
 
@@ -373,15 +398,15 @@ pub const ImageRenderer = struct {
         const scale: f32 = 4.0;
         const w = @as(u32, @intFromFloat(image.width * scale));
         const h = @as(u32, @intFromFloat(image.height * scale));
-        
-        // Wir nutzen den SvgRendererGPU via SvgAtlas, um echte Vektorgeometrie 
+
+        // Wir nutzen den SvgRendererGPU via SvgAtlas, um echte Vektorgeometrie
         // in die Textur zu rasterisieren. Das eliminiert die Blockbildung.
         const pixels = try allocator.alloc(u8, w * h * 4);
         defer allocator.free(pixels);
         @memset(pixels, 0); // Transparent background
-        
+
         log.info("Rendering full-color SVG to texture {d}x{d}", .{ w, h });
-        
+
         const rast = nanosvg.createRasterizer();
         defer nanosvg.deleteRasterizer(rast);
 
@@ -459,7 +484,7 @@ pub const ImageRenderer = struct {
         if (self.vertex_buffer == null or self.vertex_buffer_size < total_needed) {
             const new_capacity = @max(total_needed * 2, 65536);
             if (self.vertex_buffer) |buf| buf.release();
-            
+
             self.vertex_buffer = self.device.createBuffer(&wgpu.BufferDescriptor{
                 .label = wgpu.StringView.fromSlice("image_vertex_buffer"),
                 .size = new_capacity,
