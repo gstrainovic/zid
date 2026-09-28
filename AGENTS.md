@@ -9,9 +9,9 @@
      nach (`submodule update --init`), prüft MuPDF und die Referenz-Repos.
   3. `./scripts/sync.sh --push`: erst Submodul-Forks, dann das Hauptrepo.
 
-  `pull` allein lässt die Submodule auf dem alten Pin; Build und Tests liefen dann gegen
-  veraltetes clay-zig oder zigdown. Nach `submodule update` stehen die Forks ohne Branch
-  da: vor Arbeit in `libs/clay-zig` usw. den Branch aus `.gitmodules` auschecken.
+  `pull` allein lässt die Submodule auf dem alten Pin. Nach `submodule update` stehen die
+  Forks ohne Branch da: vor Arbeit in `libs/clay-zig` usw. den Branch aus `.gitmodules`
+  auschecken.
 
 ## Logging
 
