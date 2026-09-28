@@ -24,3 +24,7 @@ fz_device *fz_begin_page_z(fz_context *ctx, fz_document_writer *wri, fz_rect med
 int fz_end_page_z(fz_context *ctx, fz_document_writer *wri);
 int fz_close_document_writer_z(fz_context *ctx, fz_document_writer *wri);
 int fz_fill_rect_z(fz_context *ctx, fz_device *dev, fz_rect rect, fz_colorspace *cs, const float *color, float alpha);
+/* Bilddatei (SVG, PNG, JPEG … — alles, was MuPDF als Dokument öffnet): Größe der
+   ersten Seite, und diese Seite nach `dest` gestreckt, beschnitten auf `clip`. */
+int fz_doc_page_size_z(fz_context *ctx, const char *magic, const unsigned char *data, size_t size, float *w, float *h);
+int fz_draw_doc_page_z(fz_context *ctx, fz_device *dev, const char *magic, const unsigned char *data, size_t size, fz_rect clip, fz_rect dest);

@@ -19,7 +19,10 @@ Fixture für `src/ui/marp.zig` und später für die Folienvorschau.
 
 ## Spot-Direktive
 
-Diese Folie ist `lead`, die nächste wieder nicht.
+![bg right:40% contain](marp_skizze.svg)
+
+Diese Folie ist `lead`, die nächste wieder nicht. Rechts steht eine Skizze mit
+`<symbol>`, `<use>` und `<text>` als Bildspalte.
 
 ---
 

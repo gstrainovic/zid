@@ -11,6 +11,7 @@
 const std = @import("std");
 const marp = @import("marp");
 const marp_html = @import("marp_html");
+const svg_fixup = @import("svg_fixup.zig");
 
 const c = @cImport({
     @cInclude("fitz-z.h");
@@ -34,10 +35,112 @@ const chrome_h: f32 = 40;
 const content_em: f32 = 26;
 const chrome_em: f32 = 14;
 
-/// Schreibt das Deck als PDF nach `out_path`.
+/// Fläche für den Folieninhalt. Eine Bildspalte aus `![bg left/right]` nimmt
+/// ihren Anteil der Breite weg, der Inhalt behält daneben seine Ränder.
+fn contentRect(deck: marp.Deck, slide: marp.Slide) c.fz_rect {
+    const page_w: f32 = @floatFromInt(deck.global.size.w);
+    const page_h: f32 = @floatFromInt(deck.global.size.h);
+    const split = marp.Split.of(slide.backgrounds);
+    const col = page_w * split.frac;
+    return .{
+        .x0 = margin_x + (if (split.side == .left) col else 0),
+        .y0 = margin_y + chrome_h,
+        .x1 = page_w - margin_x - (if (split.side == .right) col else 0),
+        .y1 = page_h - margin_y - chrome_h,
+    };
+}
+
+/// Zeichnet die `![bg]`-Bilder: volle Folie oder Bildspalte, mehrere Bilder
+/// derselben Fläche nebeneinander. Relative Pfade gelten ab `base_dir`.
+/// Unlesbare Bilder werden übersprungen, wie Marp ein kaputtes Bild auslässt.
+fn drawBackgrounds(
+    ctx: *c.fz_context,
+    allocator: std.mem.Allocator,
+    dev: *c.fz_device,
+    deck: marp.Deck,
+    slide: marp.Slide,
+    base_dir: []const u8,
+) !void {
+    const page_w: f32 = @floatFromInt(deck.global.size.w);
+    const page_h: f32 = @floatFromInt(deck.global.size.h);
+    const split = marp.Split.of(slide.backgrounds);
+    const col = page_w * split.frac;
+
+    for ([_]marp.Background.Side{ .full, .left, .right }) |side| {
+        // Volle Hintergründe nur ohne Teilung, wie in der Vorschau.
+        if (side == .full and split.side != .full) continue;
+        if (side != .full and side != split.side) continue;
+        var n: usize = 0;
+        for (slide.backgrounds) |bg| {
+            if (bg.side == side) n += 1;
+        }
+        if (n == 0) continue;
+        const area: c.fz_rect = switch (side) {
+            .full => .{ .x0 = 0, .y0 = 0, .x1 = page_w, .y1 = page_h },
+            .left => .{ .x0 = 0, .y0 = 0, .x1 = col, .y1 = page_h },
+            .right => .{ .x0 = page_w - col, .y0 = 0, .x1 = page_w, .y1 = page_h },
+        };
+        const each = (area.x1 - area.x0) / @as(f32, @floatFromInt(n));
+        var i: usize = 0;
+        for (slide.backgrounds) |bg| {
+            if (bg.side != side) continue;
+            const box: c.fz_rect = .{
+                .x0 = area.x0 + each * @as(f32, @floatFromInt(i)),
+                .y0 = area.y0,
+                .x1 = area.x0 + each * @as(f32, @floatFromInt(i + 1)),
+                .y1 = area.y1,
+            };
+            i += 1;
+            drawBackground(ctx, allocator, dev, bg, base_dir, box) catch |err| {
+                std.log.scoped(.marp_pdf).warn("Hintergrundbild {s}: {s}", .{ bg.src, @errorName(err) });
+            };
+        }
+    }
+}
+
+fn drawBackground(
+    ctx: *c.fz_context,
+    allocator: std.mem.Allocator,
+    dev: *c.fz_device,
+    bg: marp.Background,
+    base_dir: []const u8,
+    box: c.fz_rect,
+) !void {
+    const path = if (std.fs.path.isAbsolute(bg.src))
+        try allocator.dupe(u8, bg.src)
+    else
+        try std.fs.path.join(allocator, &.{ base_dir, bg.src });
+    defer allocator.free(path);
+    const path_z = try allocator.dupeZ(u8, path);
+    defer allocator.free(path_z);
+
+    const raw = try std.fs.cwd().readFileAlloc(allocator, path, 64 * 1024 * 1024);
+    defer allocator.free(raw);
+    // SVG wie in der Vorschau aufbereiten (MuPDF: `<symbol>`, geerbte Schrift).
+    const data = if (std.ascii.endsWithIgnoreCase(path, ".svg")) try svg_fixup.fixup(allocator, raw) else try allocator.dupe(u8, raw);
+    defer allocator.free(data);
+
+    var w: f32 = 0;
+    var h: f32 = 0;
+    if (c.fz_doc_page_size_z(ctx, path_z.ptr, data.ptr, data.len, &w, &h) != 0) return error.PageFailed;
+    const box_w = box.x1 - box.x0;
+    const box_h = box.y1 - box.y0;
+    const fit = bg.fitSize(w, h, box_w, box_h);
+    const dest: c.fz_rect = .{
+        .x0 = box.x0 + (box_w - fit[0]) / 2,
+        .y0 = box.y0 + (box_h - fit[1]) / 2,
+        .x1 = box.x0 + (box_w + fit[0]) / 2,
+        .y1 = box.y0 + (box_h + fit[1]) / 2,
+    };
+    if (c.fz_draw_doc_page_z(ctx, dev, path_z.ptr, data.ptr, data.len, box, dest) != 0) return error.PageFailed;
+}
+
+/// Schreibt das Deck als PDF nach `out_path`. Relative Bildpfade gelten ab
+/// `base_dir` (Ordner der Markdown-Datei).
 pub fn exportDeck(
     allocator: std.mem.Allocator,
     deck: marp.Deck,
+    base_dir: []const u8,
     out_path: []const u8,
 ) !void {
     const path_z = try allocator.dupeZ(u8, out_path);
@@ -69,12 +172,8 @@ pub fn exportDeck(
             }
         }
 
-        try drawStory(ctx, allocator, dev, html, css, content_em, .{
-            .x0 = margin_x,
-            .y0 = margin_y + chrome_h,
-            .x1 = page_w - margin_x,
-            .y1 = page_h - margin_y - chrome_h,
-        });
+        try drawBackgrounds(ctx, allocator, dev, deck, slide, base_dir);
+        try drawStory(ctx, allocator, dev, html, css, content_em, contentRect(deck, slide));
 
         if (slide.local.header) |text| {
             try drawText(ctx, allocator, dev, text, css, .{
@@ -121,7 +220,7 @@ pub fn exportFile(
     var deck = try marp.parse(allocator, source);
     defer deck.deinit();
 
-    try exportDeck(allocator, deck, out_path);
+    try exportDeck(allocator, deck, std.fs.path.dirname(md_path) orelse ".", out_path);
 }
 
 /// Standardpfad für den Export: Markdown-Pfad mit `.pdf` statt `.md`.
@@ -153,16 +252,9 @@ pub fn slideFits(allocator: std.mem.Allocator, deck: marp.Deck, index: usize) bo
     const story = c.fz_new_story_z(ctx, buf, css_z.ptr, content_em, null) orelse return true;
     defer c.fz_drop_story(ctx, story);
 
-    const page_w: f32 = @floatFromInt(deck.global.size.w);
-    const page_h: f32 = @floatFromInt(deck.global.size.h);
     var filled: c.fz_rect = undefined;
     var more: c_int = 0;
-    if (c.fz_place_story_z(ctx, story, .{
-        .x0 = margin_x,
-        .y0 = margin_y + chrome_h,
-        .x1 = page_w - margin_x,
-        .y1 = page_h - margin_y - chrome_h,
-    }, &filled, &more) != 0) return true;
+    if (c.fz_place_story_z(ctx, story, contentRect(deck, slide), &filled, &more) != 0) return true;
 
     // more != 0: es bliebe Inhalt für eine weitere Seite übrig, das PDF
     // schneidet ihn ab.

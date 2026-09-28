@@ -1210,6 +1210,23 @@ pub const MarkdownView = struct {
         const scale: f32 = frame_w / deck_w;
         self.slide_scale = scale;
 
+        // `![bg left/right]` teilt die Folie in Bildspalte und Inhalt; volles
+        // `![bg]` liegt hinter dem Inhalt.
+        const bgs: []const marp.Background = if (self.current_slide < d.slides.len)
+            d.slides[self.current_slide].backgrounds
+        else
+            &.{};
+        const split = marp.Split.of(bgs);
+        const split_side = split.side;
+        var has_full = false;
+        for (bgs) |bg| {
+            if (bg.side == .full) has_full = true;
+        }
+        const bg_col_w: f32 = @round(frame_w * split.frac);
+        const content_w = frame_w - bg_col_w;
+        const pad_x = scaled(pdf_margin_x, scale);
+        const pad_y = scaled(pdf_margin_y, scale);
+
         clay.UI()(.{
             .id = self.idi("markdown_view_root", 0),
             .layout = .{
@@ -1227,28 +1244,41 @@ pub const MarkdownView = struct {
                 .id = self.idi("md_slide", 0),
                 .layout = .{
                     .sizing = .{ .w = .fixed(frame_w), .h = .fixed(frame_h) },
-                    .direction = .top_to_bottom,
-                    // Dieselben Ränder wie im PDF, nur im Maßstab des Rahmens.
-                    .padding = .{
-                        .left = scaled(pdf_margin_x, scale),
-                        .right = scaled(pdf_margin_x, scale),
-                        .top = scaled(pdf_margin_y, scale),
-                        .bottom = scaled(pdf_margin_y, scale),
-                    },
-                    .child_gap = scaled(10, scale),
+                    .direction = .left_to_right,
+                    .child_alignment = .{ .x = .center, .y = .center },
                 },
                 .clip = .{ .vertical = true, .horizontal = true },
                 .background_color = theme.surface,
                 .border = .{ .color = theme.border, .width = .all(1) },
                 .corner_radius = .all(theme.radius_sm),
             })({
+                if (split_side == .left) self.renderBgColumn(bgs, .left, bg_col_w, frame_h, ui_ptr);
+                // Volles Hintergrundbild im Fluss, der Inhalt schwebt darüber: in
+                // Clay zeichnet nur ein schwebendes Element über ein Geschwister.
+                if (has_full and split_side == .full) {
+                    for (bgs) |bg| if (bg.side == .full) {
+                        self.renderBgImage(bg, frame_w, frame_h, ui_ptr);
+                        break;
+                    };
+                }
                 clay.UI()(.{
                     .id = self.idi("md_slide_content", 0),
                     .layout = .{
-                        .sizing = .{ .w = .grow, .h = .fit },
+                        .sizing = .{ .w = .fixed(content_w), .h = .fixed(frame_h) },
                         .direction = .top_to_bottom,
+                        // Dieselben Ränder wie im PDF, nur im Maßstab des Rahmens.
+                        .padding = .{ .left = pad_x, .right = pad_x, .top = pad_y, .bottom = pad_y },
                         .child_gap = scaled(10, scale),
                     },
+                    // Schwebend erbt der Inhalt nur den Clip-Bereich um die Folie,
+                    // daher clippt er selbst auf den Rahmen.
+                    .clip = .{ .vertical = true, .horizontal = true },
+                    .floating = if (has_full and split_side == .full) .{
+                        .attach_to = .to_parent,
+                        .z_index = 1,
+                        .clip_to = .to_attached_parent,
+                        .pointer_capture_mode = .passthrough,
+                    } else .{},
                 })({
                     const doc = self.cachedSlideDocument();
                     if (doc) |block| {
@@ -1260,13 +1290,14 @@ pub const MarkdownView = struct {
                         // sind dieselben wie im Export-CSS.
                         const outer = self.font_size;
                         self.font_size = @max(6, scaled(pdf_content_em, scale));
-                        self.wrap_width_hint = @max(0, frame_w - 2 * @as(f32, @floatFromInt(scaled(pdf_margin_x, scale))));
+                        self.wrap_width_hint = @max(0, content_w - 2 * @as(f32, @floatFromInt(pad_x)));
                         self.beginBlock(0);
                         self.renderBlock(block, arena, effective_theme, ui_ptr);
                         self.endBlock();
                         self.font_size = outer;
                     }
                 });
+                if (split_side == .right) self.renderBgColumn(bgs, .right, bg_col_w, frame_h, ui_ptr);
             });
 
             // Blätterleiste: ‹ Folie / Gesamt ›
@@ -1310,6 +1341,69 @@ pub const MarkdownView = struct {
         });
 
         self.renderContextMenu(theme);
+    }
+
+    /// Bildspalte einer geteilten Folie; mehrere Bilder derselben Seite teilen
+    /// sich die Spalte nebeneinander wie bei Marp.
+    fn renderBgColumn(self: *Self, bgs: []const marp.Background, side: marp.Background.Side, w: f32, h: f32, ui_ptr: *ui_mod.UI) void {
+        var n: usize = 0;
+        for (bgs) |bg| {
+            if (bg.side == side) n += 1;
+        }
+        if (n == 0) return;
+        clay.UI()(.{
+            .id = self.idi("md_slide_bg", 0),
+            .layout = .{ .sizing = .{ .w = .fixed(w), .h = .fixed(h) }, .direction = .left_to_right },
+            .clip = .{ .vertical = true, .horizontal = true },
+        })({
+            const each = w / @as(f32, @floatFromInt(n));
+            for (bgs) |bg| {
+                if (bg.side == side) self.renderBgImage(bg, each, h, ui_ptr);
+            }
+        });
+    }
+
+    /// Ein Hintergrundbild, in `box_w`×`box_h` nach `cover`/`contain` eingepasst
+    /// und mittig beschnitten. Lädt die Textur beim ersten Aufruf nach.
+    fn renderBgImage(self: *Self, bg: marp.Background, box_w: f32, box_h: f32, ui_ptr: *ui_mod.UI) void {
+        var path: []const u8 = bg.src;
+        const arena = self.frame_arena orelse return;
+        if (!std.fs.path.isAbsolute(path) and self.base_path.len > 0) {
+            const dir = std.fs.path.dirname(self.base_path) orelse ".";
+            path = std.fs.path.join(arena, &.{ dir, bg.src }) catch bg.src;
+        }
+        const size = blk: {
+            const texture_ptr = ui_ptr.open_images.get(path) orelse {
+                _ = ui_ptr.getOrCreateTexture(path);
+                break :blk null;
+            };
+            const tex: *const ImageTexture = @ptrCast(@alignCast(texture_ptr));
+            const fit = bg.fitSize(@floatFromInt(tex.width), @floatFromInt(tex.height), box_w, box_h);
+            break :blk .{ texture_ptr, [2]f32{ @round(fit[0]), @round(fit[1]) } };
+        };
+        clay.UI()(.{
+            .layout = .{
+                .sizing = .{ .w = .fixed(box_w), .h = .fixed(box_h) },
+                .child_alignment = .{ .x = .center, .y = .center },
+            },
+            .clip = .{ .vertical = true, .horizontal = true },
+        })({
+            if (size) |s| {
+                // Transparente Skizzen auf Weiß wie auf einer Marp-Folie, sonst
+                // verschwindet dunkle Schrift auf der dunklen Folie. Eigene Hülle:
+                // am Bildelement ist `background_color` die Tönung des Bildes.
+                clay.UI()(.{
+                    .layout = .{ .sizing = .{ .w = .fixed(s[1][0]), .h = .fixed(s[1][1]) } },
+                    .background_color = .{ 255, 255, 255, 255 },
+                })({
+                    clay.UI()(.{
+                        .layout = .{ .sizing = .grow },
+                        .background_color = .{ 255, 255, 255, 255 },
+                        .image = .{ .image_data = s[0] },
+                    })({});
+                });
+            }
+        });
     }
 
     /// Ränder und Schriftgrößen des Exports (`rendering/marp_pdf.zig`), damit
@@ -1906,7 +2000,7 @@ pub const MarkdownView = struct {
     /// geformt ergäbe das eine 1 neben einem leeren Kasten statt der Taste.
     fn appendPiece(pieces: *std.ArrayListUnmanaged(Piece), arena: std.mem.Allocator, piece: Piece) void {
         if (piece.text.len > 0 and pieces.items.len > 0) {
-            const first = std.unicode.utf8Decode(piece.text[0..std.unicode.utf8ByteSequenceLength(piece.text[0]) catch 1]) catch 0;
+            const first = std.unicode.utf8Decode(piece.text[0 .. std.unicode.utf8ByteSequenceLength(piece.text[0]) catch 1]) catch 0;
             const prev = &pieces.items[pieces.items.len - 1];
             if (emoji_font.continuesCluster(first) and !prev.is_space) {
                 prev.text = std.mem.concat(arena, u8, &.{ prev.text, piece.text }) catch prev.text;

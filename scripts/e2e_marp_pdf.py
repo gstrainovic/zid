@@ -31,6 +31,7 @@ def setup():
     shutil.rmtree(FX, ignore_errors=True)
     os.makedirs(FX)
     shutil.copy(MARP_DECK, DECK)
+    shutil.copy(os.path.join(os.path.dirname(MARP_DECK), "marp_skizze.svg"), FX)
     with open(PLAIN, "w") as f:
         f.write("# Gewoehnliches Markdown\n\nOhne Front-Matter.\n")
     with open(NOTE, "w") as f:
@@ -119,6 +120,22 @@ def step_pdf_tab():
     check(any(t["path"].endswith("deck.pdf") for t in tabs), "PDF ist als Tab offen")
 
 
+def step_pdf_background():
+    """`![bg right:40%]` auf Folie 2: die SVG-Skizze steht im PDF, samt Text aus
+    einem `<symbol>`, das MuPDF ohne `svg_fixup` nicht skaliert."""
+    print("--- Hintergrundbild im PDF")
+    settle(20)
+    rpc("key_press", ["f", True]); settle(8)
+    rpc("type_text", ["Skizzenwort"])
+    t0 = time.time()
+    st = result_json("pdf_state")
+    while (st["searching"] or st["hits"] == 0) and time.time() - t0 < 10:
+        settle(6)
+        st = result_json("pdf_state")
+    check(st["hits"] == 1 and st["hit_page"] == 1, f"Text der Skizze auf Seite 2: {st}")
+    rpc("key_press", ["escape", False]); settle(8)
+
+
 def step_reexport_reloads_pdf():
     print("--- Erneuter Export: der offene PDF-Tab zeigt den neuen Stand")
     with open(DECK, "a") as f:
@@ -158,6 +175,25 @@ def step_not_a_deck():
     check(title is not None, f"Fehlerdialog erscheint: {title!r}")
     rpc("key_press", ["escape", False]); settle(10)
     check(ui_state()["dialog"] is None, "Escape schliesst den Dialog")
+
+
+def color_pixels(name, rgb, tol=6):
+    """Pixel nahe `rgb` in einem PPM-Screenshot unter tmp/."""
+    with open(os.path.join(ROOT, "tmp", name), "rb") as f:
+        data = f.read()
+    fields, pos = [], 2
+    while len(fields) < 3:
+        while data[pos:pos + 1].isspace():
+            pos += 1
+        start = pos
+        while not data[pos:pos + 1].isspace():
+            pos += 1
+        fields.append(int(data[start:pos]))
+    px = data[pos + 1:]
+    return sum(
+        1 for i in range(0, len(px) - 2, 3)
+        if abs(px[i] - rgb[0]) <= tol and abs(px[i + 1] - rgb[1]) <= tol and abs(px[i + 2] - rgb[2]) <= tol
+    )
 
 
 def slide_state():
@@ -214,6 +250,18 @@ def step_slide_preview():
 
     click_center("md_slide_next"); settle(10)
     check(slide_state()["current"] == 1, "Schaltflaeche vor")
+    # Folie 2: `![bg right:40% contain]` wird Bildspalte rechts, der Inhalt
+    # bekommt den Rest. Die Textur kommt einen Frame spaeter.
+    settle(20)
+    col, content, frame = bounds("md_slide_bg"), bounds("md_slide_content"), bounds("md_slide")
+    check(abs(col["w"] - 0.4 * frame["w"]) < 2, f"Bildspalte 40 % breit ({col['w']:.0f} von {frame['w']:.0f})")
+    check(abs(col["x"] + col["w"] - (frame["x"] + frame["w"])) < 2, "Bildspalte steht rechts")
+    check(content["x"] + content["w"] <= col["x"] + 1, "Inhalt endet vor der Bildspalte")
+    shot("e2e_marp_bg_split.ppm")
+    # Das Rechteck im <symbol> ist #a9bccf. Ohne Toenung am Bildelement kam es
+    # schwarz, ohne MuPDF (nanosvg kennt kein <use>) gar nicht.
+    n = color_pixels("e2e_marp_bg_split.ppm", (0xa9, 0xbc, 0xcf))
+    check(n > 2000, f"Skizze in ihren Farben gezeichnet ({n} Pixel #a9bccf)")
     click_center("md_slide_prev"); settle(10)
     check(slide_state()["current"] == 0, "Schaltflaeche zurueck")
     check(bounds("md_slide_counter")["found"], "Zaehler ist im Layout")
@@ -280,6 +328,7 @@ STEPS = [
     step_menu_entry,
     step_export,
     step_pdf_tab,
+    step_pdf_background,
     step_not_a_deck,
     step_slide_preview,
     step_wide_pane,

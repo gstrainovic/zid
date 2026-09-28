@@ -200,6 +200,65 @@ int fz_close_document_writer_z(fz_context *ctx, fz_document_writer *wri) {
   return rc;
 }
 
+int fz_doc_page_size_z(fz_context *ctx, const char *magic, const unsigned char *data, size_t size, float *w, float *h) {
+  int rc = -1;
+  fz_document *doc = fz_open_document_from_bytes_z(ctx, magic, data, size);
+  fz_page *page = NULL;
+  if (!doc) return -1;
+  fz_var(page);
+  fz_try(ctx) {
+    page = fz_load_page(ctx, doc, 0);
+    fz_rect b = fz_bound_page(ctx, page);
+    *w = b.x1 - b.x0;
+    *h = b.y1 - b.y0;
+    rc = 0;
+  }
+  fz_always(ctx) {
+    fz_drop_page(ctx, page);
+    fz_drop_document(ctx, doc);
+  }
+  fz_catch(ctx) {}
+  return rc;
+}
+
+int fz_draw_doc_page_z(fz_context *ctx, fz_device *dev, const char *magic, const unsigned char *data, size_t size, fz_rect clip, fz_rect dest) {
+  int rc = -1;
+  int clipped = 0;
+  fz_document *doc = fz_open_document_from_bytes_z(ctx, magic, data, size);
+  fz_page *page = NULL;
+  fz_path *path = NULL;
+  if (!doc) return -1;
+  fz_var(page);
+  fz_var(path);
+  fz_var(clipped);
+  fz_try(ctx) {
+    page = fz_load_page(ctx, doc, 0);
+    fz_rect b = fz_bound_page(ctx, page);
+    path = fz_new_path(ctx);
+    fz_moveto(ctx, path, clip.x0, clip.y0);
+    fz_lineto(ctx, path, clip.x1, clip.y0);
+    fz_lineto(ctx, path, clip.x1, clip.y1);
+    fz_lineto(ctx, path, clip.x0, clip.y1);
+    fz_closepath(ctx, path);
+    fz_clip_path(ctx, dev, path, 0, fz_identity, clip);
+    clipped = 1;
+    fz_matrix ctm = fz_pre_translate(
+      fz_concat(fz_scale((dest.x1 - dest.x0) / (b.x1 - b.x0), (dest.y1 - dest.y0) / (b.y1 - b.y0)),
+                fz_translate(dest.x0, dest.y0)),
+      -b.x0, -b.y0);
+    fz_run_page(ctx, page, dev, ctm, NULL);
+    rc = 0;
+  }
+  fz_always(ctx) {
+    if (clipped) fz_pop_clip(ctx, dev);
+    fz_drop_path(ctx, path);
+    fz_drop_page(ctx, page);
+    fz_drop_document(ctx, doc);
+  }
+  fz_catch(ctx) {}
+  return rc;
+}
+
 int fz_fill_rect_z(fz_context *ctx, fz_device *dev, fz_rect rect, fz_colorspace *cs, const float *color, float alpha) {
   int rc = -1;
   fz_try(ctx) {
