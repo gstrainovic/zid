@@ -298,10 +298,15 @@ def main():
         settle(20)
         for step in STEPS:
             step()
-        print("ALL PASSED")
     finally:
         stop_zid(proc)
         log.close()
+    # `style: |` im Fixture: als Blockskalar gelesen kommt reines CSS bei MuPDF an,
+    # sonst meldet MuPDF je Folie „css syntax error“ auf das einzelne `|`.
+    with open(log.name, encoding="utf-8", errors="replace") as f:
+        css_errors = [line for line in f if "css syntax error" in line]
+    check(not css_errors, f"keine CSS-Fehler im Log ({len(css_errors)} gefunden)")
+    print("ALL PASSED")
 
 
 if __name__ == "__main__":

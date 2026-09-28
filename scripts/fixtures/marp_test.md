@@ -4,6 +4,9 @@ theme: default
 size: 16:9
 paginate: true
 footer: zid
+style: |
+  section { font-size: 24px; }
+  table { font-size: 22px; }
 ---
 
 # Marp-Testdeck

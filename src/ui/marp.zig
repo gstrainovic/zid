@@ -103,8 +103,12 @@ pub fn parse(allocator: std.mem.Allocator, source: []const u8) ParseError!Deck {
             is_marp = std.mem.eql(u8, kv.value, "true");
             continue;
         }
-        if (try applyGlobal(&global, kv.key, kv.value, arena)) continue;
-        _ = try applyLocal(&running, kv.key, kv.value, arena);
+        const value = if (blockScalarStyle(kv.value)) |folded|
+            try blockScalar(arena, &yaml_it, indentOf(raw), folded)
+        else
+            kv.value;
+        if (try applyGlobal(&global, kv.key, value, arena)) continue;
+        _ = try applyLocal(&running, kv.key, value, arena);
     }
     if (!is_marp) return error.NotAMarpDeck;
 
@@ -216,6 +220,60 @@ fn frontMatter(source: []const u8) ?FrontMatter {
         idx = nl + 1;
     }
     return null;
+}
+
+fn indentOf(line: []const u8) usize {
+    return line.len - std.mem.trimLeft(u8, line, " ").len;
+}
+
+/// `|` oder `>` samt Chomping-/Einzugsangabe leitet einen YAML-Blockskalar
+/// ein (`style: |` mit CSS in den Folgezeilen). Liefert, ob er gefaltet wird.
+fn blockScalarStyle(value: []const u8) ?bool {
+    const v = if (std.mem.indexOf(u8, value, " #")) |c| std.mem.trimRight(u8, value[0..c], " \t") else value;
+    if (v.len == 0 or (v[0] != '|' and v[0] != '>')) return null;
+    for (v[1..]) |c| {
+        if (c != '+' and c != '-' and !std.ascii.isDigit(c)) return null;
+    }
+    return v[0] == '>';
+}
+
+/// Sammelt die Folgezeilen eines Blockskalars: alle, die tiefer eingerückt
+/// sind als der Schlüssel, oder leer. Der Einzug der ersten Zeile wird
+/// abgezogen; `>` faltet Zeilen zu Leerzeichen, Leerzeilen bleiben Umbrüche.
+fn blockScalar(
+    arena: std.mem.Allocator,
+    it: *std.mem.SplitIterator(u8, .scalar),
+    key_indent: usize,
+    folded: bool,
+) ![]const u8 {
+    var out: std.ArrayListUnmanaged(u8) = .empty;
+    var block_indent: ?usize = null;
+    var pending_blank: usize = 0;
+    while (it.peek()) |peeked| {
+        const raw = std.mem.trimRight(u8, peeked, "\r");
+        const blank = std.mem.trim(u8, raw, " \t").len == 0;
+        if (!blank and indentOf(raw) <= key_indent) break;
+        _ = it.next();
+        if (blank) {
+            pending_blank += 1;
+            continue;
+        }
+        const ind = block_indent orelse blk: {
+            block_indent = indentOf(raw);
+            break :blk indentOf(raw);
+        };
+        const text = raw[@min(ind, indentOf(raw))..];
+        if (out.items.len > 0) {
+            if (folded and pending_blank == 0) {
+                try out.append(arena, ' ');
+            } else {
+                try out.appendNTimes(arena, '\n', pending_blank + @intFromBool(!folded));
+            }
+        }
+        pending_blank = 0;
+        try out.appendSlice(arena, text);
+    }
+    return out.toOwnedSlice(arena);
 }
 
 // --- Zeilen und Kommentare -----------------------------------------------
@@ -478,6 +536,37 @@ test "isMarpDeckFile liest nur den Dateikopf und erkennt Decks auf der Platte" {
 
 test "parse verweigert Nicht-Decks" {
     try testing.expectError(error.NotAMarpDeck, parse(testing.allocator, "# Nur Markdown\n"));
+}
+
+test "parse liest style als YAML-Blockskalar" {
+    const src =
+        \\---
+        \\marp: true
+        \\style: |
+        \\  section { font-size: 24px; }
+        \\
+        \\  table { font-size: 22px; }
+        \\paginate: true
+        \\---
+        \\
+        \\# Eins
+        \\
+    ;
+    var deck = try parse(testing.allocator, src);
+    defer deck.deinit();
+
+    try testing.expectEqualStrings(
+        "section { font-size: 24px; }\n\ntable { font-size: 22px; }",
+        deck.global.style.?,
+    );
+    try testing.expect(deck.slides[0].local.paginate);
+}
+
+test "parse faltet Blockskalar mit >" {
+    const src = "---\nmarp: true\nfooter: >-\n  Stand\n  heute\n---\n\n# Eins\n";
+    var deck = try parse(testing.allocator, src);
+    defer deck.deinit();
+    try testing.expectEqualStrings("Stand heute", deck.slides[0].local.footer.?);
 }
 
 test "parse trennt Folien an --- und lässt das Front-Matter weg" {
