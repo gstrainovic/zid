@@ -118,7 +118,9 @@ cmd_pull() {
     local BEHIND
     BEHIND=$(git rev-list --count HEAD..origin/main 2>/dev/null || echo "0")
     if [[ "$BEHIND" != "0" ]]; then
-        git pull --no-recurse-submodules
+        # --rebase: lokale Commits (etwa ein vorgefundener Stand) bleiben ohne
+        # Merge-Commit auf origin/main obendrauf.
+        git pull --rebase --no-recurse-submodules
         ok "Pulled $BEHIND commits"
     else
         ok "Already up to date"
