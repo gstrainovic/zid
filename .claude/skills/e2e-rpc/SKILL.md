@@ -44,6 +44,8 @@ echo -e "open ./README.md\nget-state\nshutdown" | zig build run -- --interactive
 - Handler laufen im Server-Thread. `click`, `right_click`, `move_mouse`, `key_press`,
   `type_text` und `screenshot` werden gepuffert und vom Main-Thread pro Frame angewendet
   (`drainInputs` / `serviceScreenshot`); `close_active_tab` geht über `pending_tab_closes`.
+- Ein Handler braucht einen Rückgabewert (etwa `"ok"`): mit `!void` schickt zigjr keine
+  Antwort, und der Aufrufer wartet bis zum Zeitlimit.
 - `open_file` prüft nur IsDir synchron und legt den Tab gepuffert an, weil ein `tabs.append` aus
   dem Server-Thread `renderTabBar` mitten in der Iteration trifft. Nach `open_file` also
   `settle`, bevor Tabs abgefragt werden. `open_folder` läuft ebenso gepuffert im Main-Thread,

@@ -90,6 +90,26 @@ pub fn chromeExe(allocator: std.mem.Allocator, tools: []const u8, platform: []co
     return std.fs.path.join(allocator, &.{ tools, "chrome-headless-shell-" ++ chrome_version, sub, "chrome-headless-shell" ++ exe_suffix });
 }
 
+/// Ablage der Vorschau-PDFs: `<tools>/preview/<hash>/<name>.pdf`. Der Hash des Deck-Pfads
+/// trennt gleichnamige Decks; der Dateiname bleibt der des Decks, damit der Tab lesbar ist.
+/// Neben dem PDF liegt `source.txt` mit dem Pfad des Decks (Wiederaufnahme nach Neustart).
+pub fn previewPath(allocator: std.mem.Allocator, tools: []const u8, md_path: []const u8) ![]u8 {
+    var hash_buf: [16]u8 = undefined;
+    const hash = std.fmt.bufPrint(&hash_buf, "{x:0>16}", .{std.hash.Wyhash.hash(0, md_path)}) catch unreachable;
+    const stem = std.fs.path.stem(md_path);
+    const name = try std.fmt.allocPrint(allocator, "{s}.pdf", .{stem});
+    defer allocator.free(name);
+    return std.fs.path.join(allocator, &.{ tools, "preview", hash, name });
+}
+
+/// Liegt `path` im Vorschau-Ordner? (Tabs aus einer früheren Sitzung.)
+pub fn isPreviewPath(tools: []const u8, path: []const u8) bool {
+    const dir = std.fs.path.dirname(std.fs.path.dirname(path) orelse return false) orelse return false;
+    return std.mem.endsWith(u8, dir, "preview") and
+        std.mem.startsWith(u8, dir, tools) and
+        std.ascii.endsWithIgnoreCase(path, ".pdf");
+}
+
 /// Zieldatei neben der Quelle: `deck.md` → `deck.pdf`.
 pub fn outputPath(allocator: std.mem.Allocator, md_path: []const u8) ![]u8 {
     const ext = std.fs.path.extension(md_path);
@@ -111,6 +131,46 @@ pub fn argv(
     if (browser_path) |p| try list.appendSlice(allocator, &.{ "--browser", "chrome", "--browser-path", p });
     try list.appendSlice(allocator, &.{ md_path, "-o", out_path });
     return list.toOwnedSlice(allocator);
+}
+
+/// marp-cli im Watch-Modus: rendert `md_path` bei jeder Änderung neu nach `out_path`,
+/// der Browser bleibt offen (rund 1 s statt 3 s je Durchlauf). Ausgaben werden
+/// verworfen: eine volle Pipe hielte den Prozess an.
+pub fn spawnWatch(
+    allocator: std.mem.Allocator,
+    exe: []const u8,
+    md_path: []const u8,
+    out_path: []const u8,
+    browser_path: ?[]const u8,
+) !std.process.Child {
+    const base = try argv(allocator, exe, md_path, out_path, browser_path);
+    defer allocator.free(base);
+    var args: std.ArrayList([]const u8) = .empty;
+    defer args.deinit(allocator);
+    try args.append(allocator, base[0]);
+    try args.append(allocator, "--watch");
+    try args.appendSlice(allocator, base[1..]);
+
+    var child = std.process.Child.init(args.items, allocator);
+    child.stdin_behavior = .Ignore;
+    child.stdout_behavior = .Ignore;
+    child.stderr_behavior = .Ignore;
+    child.cwd = std.fs.path.dirname(md_path);
+    // Eigene Prozessgruppe: `stopWatch` beendet marp samt Browser.
+    if (builtin.os.tag != .windows) child.pgid = 0;
+    try child.spawn();
+    return child;
+}
+
+/// Watch-Prozess beenden. Unter Linux/macOS die ganze Prozessgruppe, sonst liefe der von
+/// marp gestartete Browser verwaist weiter; unter Windows beendet sich der Browser mit marp.
+pub fn stopWatch(child: *std.process.Child) void {
+    if (builtin.os.tag != .windows) {
+        std.posix.kill(-child.id, std.posix.SIG.TERM) catch {};
+        _ = child.wait() catch {};
+        return;
+    }
+    _ = child.kill() catch {};
 }
 
 /// marp-cli fand keinen Browser (Chrome, Edge, Firefox).
@@ -143,6 +203,9 @@ pub const Exporter = struct {
     out_path: []u8 = &.{},
     message_buf: [512]u8 = undefined,
     message_len: usize = 0,
+    /// Nach `done`: der selbst geladene Browser, falls marp-cli ihn brauchte (owned).
+    /// Ein Watch-Prozess für dasselbe Deck bekommt ihn mit.
+    browser_used: ?[]u8 = null,
     /// Weckt den Frame-Loop, wenn sich der Zustand ändert (im Fenster `wio.cancelWait`).
     wake: ?*const fn () void = null,
 
@@ -152,6 +215,7 @@ pub const Exporter = struct {
         if (self.thread) |t| t.join();
         self.allocator.free(self.md_path);
         self.allocator.free(self.out_path);
+        if (self.browser_used) |b| self.allocator.free(b);
     }
 
     pub fn currentState(self: *const Self) State {
@@ -248,6 +312,8 @@ pub const Exporter = struct {
         if (!result.ok) return self.fail("marp-cli: {s}", .{errorLine(result.stderr)});
         if (!setup.present(self.out_path)) return self.fail("marp-cli hat kein PDF geschrieben.", .{});
         log.info("PDF geschrieben: {s}", .{self.out_path});
+        if (self.browser_used) |b| a.free(b);
+        self.browser_used = if (browser) |b| a.dupe(u8, b) catch null else null;
         self.setState(.done);
     }
 
@@ -379,6 +445,24 @@ test "Pfade liegen versioniert unter tools" {
         "/t" ++ sep ++ "chrome-headless-shell-" ++ chrome_version ++ sep ++ "chrome-headless-shell-linux64" ++ sep ++ "chrome-headless-shell" ++ exe_suffix,
         c,
     );
+}
+
+test "previewPath: Hash trennt gleichnamige Decks, Name bleibt lesbar" {
+    const a = try previewPath(testing.allocator, "/t", "/x/deck.md");
+    defer testing.allocator.free(a);
+    const b = try previewPath(testing.allocator, "/t", "/y/deck.md");
+    defer testing.allocator.free(b);
+    try testing.expect(!std.mem.eql(u8, a, b));
+    try testing.expectEqualStrings("deck.pdf", std.fs.path.basename(a));
+    try testing.expect(isPreviewPath("/t", a));
+    try testing.expect(!isPreviewPath("/t", "/x/deck.pdf"));
+    try testing.expect(!isPreviewPath("/anders", a));
+}
+
+test "Watch-Funktionen übersetzen auf jeder Plattform" {
+    // Nur Analyse erzwingen (Cross-Compile prüft so den Zweig der anderen Plattform).
+    _ = &spawnWatch;
+    _ = &stopWatch;
 }
 
 test "outputPath ersetzt die Endung" {

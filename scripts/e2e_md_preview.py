@@ -22,8 +22,25 @@ from e2e_open_folder import (  # noqa: E402
 from e2e_pdf_pager import pixel  # noqa: E402
 from e2e_shortcuts import ui_state  # noqa: E402
 
-TARGET = "AGENTS.md"
+# Langes Dokument als Fixture unter tmp/: eine Repo-Datei (früher AGENTS.md) wird irgendwann
+# gekürzt, dann gibt es nichts mehr hereinzuscrollen.
+TARGET = os.path.join("tmp", "e2e_md_preview_long.md")
 LOG = os.path.join(ROOT, "tmp", "e2e_md_preview.log")
+
+
+def write_long_doc():
+    """Rund 240 Blöcke gemischter Art: Überschriften, Absätze, Listen, Code, Tabellen."""
+    parts = []
+    for i in range(40):
+        parts.append(f"## Abschnitt {i}\n")
+        parts.append(f"Absatz {i} mit **fettem** und `code` Text, lang genug, dass er in einem "
+                     f"schmalen Pane umbricht und mehr als eine Zeile belegt.\n")
+        parts.append(f"- Punkt {i}a\n- Punkt {i}b\n  - eingerueckt\n")
+        parts.append(f"```zig\nconst x{i} = {i};\n```\n")
+        parts.append(f"| Spalte | Wert |\n| --- | --- |\n| a{i} | {i} |\n")
+        parts.append(f"> Zitat {i}\n")
+    with open(os.path.join(ROOT, TARGET), "w", encoding="utf-8") as f:
+        f.write("# Langes Testdokument\n\n" + "\n".join(parts))
 
 
 def open_preview(name):
@@ -347,6 +364,7 @@ def step_no_clay_errors():
 
 
 def main():
+    write_long_doc()
     log = open(LOG, "w")
     proc = start_zid(["--headless", "--ai=off"], log)
     try:

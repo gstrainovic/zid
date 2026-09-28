@@ -61,17 +61,6 @@ pub const MarkdownView = struct {
     measured_from: usize = 0,
     measured_to: usize = 0,
 
-    /// Marp-Deck, falls `text` eines ist (`marp: true` im Front-Matter). Dann
-    /// zeigt die Vorschau Folien statt eines durchgehenden Dokuments.
-    deck: ?marp.Deck = null,
-    current_slide: usize = 0,
-    /// Maßstab Rahmen zu Foliengröße aus dem letzten Frame (1.0 = unbekannt).
-    slide_scale: f32 = 1.0,
-    /// Parse-Ergebnis der gezeigten Folie. Eigene Arena, wird beim Folienwechsel
-    /// verworfen — es ist immer nur eine Folie im Blick.
-    slide_arena: ?*std.heap.ArenaAllocator = null,
-    slide_parsed: ?*zigdown.parser.ParseResult = null,
-
     /// View for scrolling
     view: flow_core.View,
 
@@ -107,6 +96,9 @@ pub const MarkdownView = struct {
     show_context_menu: bool = false,
     context_menu_x: f32 = 0,
     context_menu_y: f32 = 0,
+
+    /// Der Text ist ein Marp-Deck und seine Vorschau ging an marp-cli (Tab wird geschlossen).
+    handed_to_marp: bool = false,
 
     pending_split_v: bool = false,
     pending_split_h: bool = false,
@@ -197,8 +189,6 @@ pub const MarkdownView = struct {
             .allocator = allocator,
             .text = lf,
             .base_path = allocator.dupe(u8, base_path) catch "",
-            // Kein Deck ist der Normalfall, nicht der Fehlerfall.
-            .deck = marp.parse(allocator, lf) catch null,
             .view = .{},
         };
     }
@@ -210,11 +200,6 @@ pub const MarkdownView = struct {
         var lt = self.line_texts.valueIterator();
         while (lt.next()) |v| self.allocator.free(v.text);
         self.line_texts.deinit(self.allocator);
-        self.dropSlideDocument();
-        if (self.deck) |*d| {
-            d.deinit();
-            self.deck = null;
-        }
         if (self.parsed) |pr| {
             self.allocator.destroy(pr);
             self.parsed = null;
@@ -244,11 +229,6 @@ pub const MarkdownView = struct {
     }
 
     pub fn scrollLines(self: *Self, delta: i32) void {
-        // Im Deck blättert das Rad, es gibt nichts zu scrollen.
-        if (self.deck != null) {
-            if (delta < 0) self.nextSlide() else if (delta > 0) self.prevSlide();
-            return;
-        }
         const scroll_speed: f32 = 60.0;
         if (delta > 0) {
             self.scroll_offset_y = @max(0, self.scroll_offset_y - @as(f32, @floatFromInt(delta)) * scroll_speed);
@@ -268,14 +248,12 @@ pub const MarkdownView = struct {
     /// Shift+Rad bzw. Touchpad waagrecht: 60 px je Schritt, positiv = nach links (wie
     /// `CodeEditor.scrollColumns`).
     pub fn scrollColumns(self: *Self, delta: i32) void {
-        if (self.deck != null) return;
         const max_x = @max(0, self.content_width - self.viewport_width);
         self.scroll_offset_x = std.math.clamp(self.scroll_offset_x - @as(f32, @floatFromInt(delta)) * 60.0, 0, max_x);
     }
 
     /// Modell des senkrechten Balkens (Pixel als Einheiten), null wenn alles hineinpasst.
     fn vModel(self: *const Self) ?scrollbar.Model {
-        if (self.deck != null) return null;
         const over = self.content_height - self.viewport_height;
         if (over <= 0.5 or self.viewport_height <= 0) return null;
         return .{
@@ -296,13 +274,11 @@ pub const MarkdownView = struct {
     pub fn cursorAt(self: *const Self, x: f32, y: f32) ?wio.Cursor {
         if (self.scrollbar_hovered or self.vdrag != null or self.hdrag != null) return .arrow;
         if (self.show_context_menu) return .arrow;
-        if (self.deck != null) return null;
         return if (self.hitElement("md_viewport", x, y)) .text else null;
     }
 
     /// Modell des waagrechten Balkens (Pixel als Einheiten), null wenn nichts überragt.
     fn hModel(self: *const Self) ?scrollbar.Model {
-        if (self.deck != null) return null;
         const over = self.content_width - self.viewport_width;
         if (over <= 0.5 or self.viewport_width <= 0) return null;
         // rechts bleibt der senkrechte Balken frei
@@ -337,18 +313,6 @@ pub const MarkdownView = struct {
 
         // Suchleiste liegt über dem Text: Klicks dort erreichen weder Auswahl noch Balken.
         if (self.find.active and self.hitElement("md_find_widget", x, y)) return true;
-
-        if (self.deck != null) {
-            if (self.hitElement("md_slide_prev", x, y)) {
-                self.prevSlide();
-                return true;
-            }
-            if (self.hitElement("md_slide_next", x, y)) {
-                self.nextSlide();
-                return true;
-            }
-            return self.beginSelection("md_slide", x, y);
-        }
 
         // Scrollbalken zuerst, jeder andere Klick gilt dem Text (Auswahl).
         if (self.hModel()) |m| switch (scrollbar.hitTest(m, x, y)) {
@@ -412,9 +376,8 @@ pub const MarkdownView = struct {
     // ---- Suche (Ctrl+F) --------------------------------------------------------------
 
     /// Ctrl+F: Leiste öffnen wie im Editor (`FindState.open`): markierter Text aus einer Zeile
-    /// wird Suchbegriff, das erste getippte Zeichen ersetzt den alten. Im Deck keine Suche.
+    /// wird Suchbegriff, das erste getippte Zeichen ersetzt den alten.
     pub fn openFind(self: *Self) void {
-        if (self.deck != null) return;
         const sel = self.selectedText(self.allocator);
         defer if (sel) |t| self.allocator.free(t);
         const one_line: ?[]const u8 = if (sel) |t| (if (t.len > 0 and std.mem.indexOfScalar(u8, t, '\n') == null) t else null) else null;
@@ -847,10 +810,11 @@ pub const MarkdownView = struct {
         self.context_menu_y = y;
     }
 
-    /// Export to PDF nur, wenn die Vorschau ein Marp-Deck zeigt.
+    /// Export to PDF nur bei Marp-Decks (deren Vorschau ist sonst das PDF aus marp-cli,
+    /// eine `MarkdownView` zeigt sie nur, solange es noch entsteht).
     fn menuHidden(self: *const Self) ctx_menu.Hidden {
         var hidden = ctx_menu.none;
-        if (self.deck == null) hidden.insert(.md_export_pdf);
+        if (!marp.isMarpDeck(self.text)) hidden.insert(.md_export_pdf);
         if (!self.hasSelection()) hidden.insert(.copy);
         return hidden;
     }
@@ -884,69 +848,6 @@ pub const MarkdownView = struct {
         std.log.scoped(.markdown).debug("parsed markdown once: {d} bytes in {d:.2} ms", .{ self.text.len, pr.time_s * 1000.0 });
         self.doc_arena = arena;
         self.parsed = pr;
-        return &pr.parser.document;
-    }
-
-    /// Anzahl Folien; 0 wenn der Text kein Marp-Deck ist.
-    pub fn slideCount(self: *const Self) usize {
-        const d = self.deck orelse return 0;
-        return d.slides.len;
-    }
-
-    fn dropSlideDocument(self: *Self) void {
-        if (self.slide_parsed) |pr| {
-            self.allocator.destroy(pr);
-            self.slide_parsed = null;
-        }
-        if (self.slide_arena) |arena| {
-            arena.deinit();
-            self.allocator.destroy(arena);
-            self.slide_arena = null;
-        }
-    }
-
-    /// Blättert zur Folie `index` (geklemmt) und wirft den alten Parse weg.
-    pub fn showSlide(self: *Self, index: usize) void {
-        const count = self.slideCount();
-        if (count == 0) return;
-        const clamped = @min(index, count - 1);
-        if (clamped == self.current_slide and self.slide_parsed != null) return;
-        self.current_slide = clamped;
-        self.clearSelection();
-        self.dropSlideDocument();
-        self.scroll_offset_y = 0;
-    }
-
-    pub fn nextSlide(self: *Self) void {
-        if (self.current_slide + 1 < self.slideCount()) self.showSlide(self.current_slide + 1);
-    }
-
-    pub fn prevSlide(self: *Self) void {
-        if (self.current_slide > 0) self.showSlide(self.current_slide - 1);
-    }
-
-    /// Wie `cachedDocument`, nur für die gerade gezeigte Folie.
-    fn cachedSlideDocument(self: *Self) ?*Block {
-        if (self.slide_parsed) |pr| return &pr.parser.document;
-        const d = self.deck orelse return null;
-        if (self.current_slide >= d.slides.len) return null;
-
-        const arena = self.allocator.create(std.heap.ArenaAllocator) catch return null;
-        arena.* = std.heap.ArenaAllocator.init(self.allocator);
-        const pr = self.allocator.create(zigdown.parser.ParseResult) catch {
-            arena.deinit();
-            self.allocator.destroy(arena);
-            return null;
-        };
-        pr.* = zigdown.parser.timedParse(arena.allocator(), d.slides[self.current_slide].markdown, false) catch |err| {
-            std.log.scoped(.markdown).err("Failed to parse slide: {any}", .{err});
-            self.allocator.destroy(pr);
-            arena.deinit();
-            self.allocator.destroy(arena);
-            return null;
-        };
-        self.slide_arena = arena;
-        self.slide_parsed = pr;
         return &pr.parser.document;
     }
 
@@ -1173,255 +1074,6 @@ pub const MarkdownView = struct {
         if (shift != 0) self.scroll_offset_y = @max(0, self.scroll_offset_y + shift);
     }
 
-    /// Folienvorschau: eine Folie im 16:9-Rahmen plus Blätterleiste. Der Rahmen
-    /// hat die Seitenverhältnisse des Decks, damit man sieht, was ins PDF passt.
-    fn renderDeck(self: *Self, arena: std.mem.Allocator, theme: Theme, ui_ptr: *ui_mod.UI) void {
-        const d = self.deck.?;
-        const deck_w: f32 = @floatFromInt(d.global.size.w);
-        const aspect: f32 = if (d.global.size.h > 0)
-            deck_w / @as(f32, @floatFromInt(d.global.size.h))
-        else
-            16.0 / 9.0;
-
-        // Rahmengröße selbst rechnen statt Clays Aspect-Ratio zu überlassen:
-        // mit `.w = .grow` blieb der Rahmen auf Inhaltsgröße stehen, also winzig.
-        // Grundlage ist die Fläche des Wurzelelements aus dem letzten Frame; das
-        // Wurzelelement clippt, sonst wüchse es mit dem Rahmen mit und der
-        // nächste Frame rechnete daraus einen noch größeren Rahmen.
-        const root = clay.getElementData(self.idi("markdown_view_root", 0));
-        const bar = clay.getElementData(self.idi("md_slide_bar", 0));
-        const reserve: f32 = if (bar.found) bar.bounding_box.height + 16 else chrome_reserve;
-        const avail_w = if (root.found) @max(120.0, root.bounding_box.width - 2 * root_padding) else deck_w;
-        const avail_h = if (root.found)
-            @max(80.0, root.bounding_box.height - 2 * root_padding - reserve)
-        else
-            deck_w / aspect;
-        const frame_w = @min(avail_w, avail_h * aspect);
-        const frame_h = frame_w / aspect;
-
-        const scale: f32 = frame_w / deck_w;
-        self.slide_scale = scale;
-
-        // `![bg left/right]` teilt die Folie in Bildspalte und Inhalt; volles
-        // `![bg]` liegt hinter dem Inhalt.
-        const bgs: []const marp.Background = if (self.current_slide < d.slides.len)
-            d.slides[self.current_slide].backgrounds
-        else
-            &.{};
-        const split = marp.Split.of(bgs);
-        const split_side = split.side;
-        var has_full = false;
-        for (bgs) |bg| {
-            if (bg.side == .full) has_full = true;
-        }
-        const bg_col_w: f32 = @round(frame_w * split.frac);
-        const content_w = frame_w - bg_col_w;
-        const pad_x = scaled(slide_margin_x, scale);
-        const pad_y = scaled(slide_margin_y, scale);
-
-        clay.UI()(.{
-            .id = self.idi("markdown_view_root", 0),
-            .layout = .{
-                .sizing = .grow,
-                .direction = .top_to_bottom,
-                .padding = .all(root_padding),
-                .child_gap = 16,
-                .child_alignment = .{ .x = .center, .y = .center },
-            },
-            // Clippt, damit der Rahmen das Wurzelelement nicht aufblähen kann.
-            .clip = .{ .vertical = true, .horizontal = true },
-            .background_color = theme.bg,
-        })({
-            clay.UI()(.{
-                .id = self.idi("md_slide", 0),
-                .layout = .{
-                    .sizing = .{ .w = .fixed(frame_w), .h = .fixed(frame_h) },
-                    .direction = .left_to_right,
-                    .child_alignment = .{ .x = .center, .y = .center },
-                },
-                .clip = .{ .vertical = true, .horizontal = true },
-                .background_color = theme.surface,
-                .border = .{ .color = theme.border, .width = .all(1) },
-                .corner_radius = .all(theme.radius_sm),
-            })({
-                if (split_side == .left) self.renderBgColumn(bgs, .left, bg_col_w, frame_h, ui_ptr);
-                // Volles Hintergrundbild im Fluss, der Inhalt schwebt darüber: in
-                // Clay zeichnet nur ein schwebendes Element über ein Geschwister.
-                if (has_full and split_side == .full) {
-                    for (bgs) |bg| if (bg.side == .full) {
-                        self.renderBgImage(bg, frame_w, frame_h, ui_ptr);
-                        break;
-                    };
-                }
-                clay.UI()(.{
-                    .id = self.idi("md_slide_content", 0),
-                    .layout = .{
-                        .sizing = .{ .w = .fixed(content_w), .h = .fixed(frame_h) },
-                        .direction = .top_to_bottom,
-                        .padding = .{ .left = pad_x, .right = pad_x, .top = pad_y, .bottom = pad_y },
-                        .child_gap = scaled(10, scale),
-                    },
-                    // Schwebend erbt der Inhalt nur den Clip-Bereich um die Folie,
-                    // daher clippt er selbst auf den Rahmen.
-                    .clip = .{ .vertical = true, .horizontal = true },
-                    .floating = if (has_full and split_side == .full) .{
-                        .attach_to = .to_parent,
-                        .z_index = 1,
-                        .clip_to = .to_attached_parent,
-                        .pointer_capture_mode = .passthrough,
-                    } else .{},
-                })({
-                    const doc = self.cachedSlideDocument();
-                    if (doc) |block| {
-                        var effective_theme = theme;
-                        if (self.text_color) |cc| effective_theme.text = cc;
-                        self.resetCounters();
-                        // Grundschrift skaliert auf den Rahmen; Überschriften-Faktoren
-                        // in renderBlock (2.0 / 1.5 / 1.2).
-                        const outer = self.font_size;
-                        self.font_size = @max(6, scaled(slide_content_em, scale));
-                        self.wrap_width_hint = @max(0, content_w - 2 * @as(f32, @floatFromInt(pad_x)));
-                        self.beginBlock(0);
-                        self.renderBlock(block, arena, effective_theme, ui_ptr);
-                        self.endBlock();
-                        self.font_size = outer;
-                    }
-                });
-                if (split_side == .right) self.renderBgColumn(bgs, .right, bg_col_w, frame_h, ui_ptr);
-            });
-
-            // Blätterleiste: ‹ Folie / Gesamt ›
-            clay.UI()(.{
-                .id = self.idi("md_slide_bar", 0),
-                .layout = .{
-                    .sizing = .{ .w = .fit, .h = .fit },
-                    .child_gap = 16,
-                    .child_alignment = .{ .x = .center, .y = .center },
-                },
-            })({
-                self.renderSlideButton("md_slide_prev", "<", self.current_slide > 0, theme);
-                var buf: [48]u8 = undefined;
-                const label = std.fmt.bufPrint(&buf, "{d} / {d}", .{ self.current_slide + 1, d.slides.len }) catch "";
-                clay.UI()(.{
-                    .id = self.idi("md_slide_counter", 0),
-                    .layout = .{ .sizing = .{ .w = .fit, .h = .fit } },
-                })({
-                    clay.text(arena.dupe(u8, label) catch "", .{
-                        .font_size = self.font_size,
-                        .color = theme.subtext,
-                    });
-                });
-                self.renderSlideButton("md_slide_next", ">", self.current_slide + 1 < d.slides.len, theme);
-            });
-
-            // Die Fußzeile der Folie steht bewusst nicht unter dem Rahmen: sie
-            // gehört ins PDF, nicht in die Bedienleiste der Vorschau.
-        });
-
-        self.renderContextMenu(theme);
-    }
-
-    /// Bildspalte einer geteilten Folie; mehrere Bilder derselben Seite teilen
-    /// sich die Spalte nebeneinander wie bei Marp.
-    fn renderBgColumn(self: *Self, bgs: []const marp.Background, side: marp.Background.Side, w: f32, h: f32, ui_ptr: *ui_mod.UI) void {
-        var n: usize = 0;
-        for (bgs) |bg| {
-            if (bg.side == side) n += 1;
-        }
-        if (n == 0) return;
-        clay.UI()(.{
-            .id = self.idi("md_slide_bg", 0),
-            .layout = .{ .sizing = .{ .w = .fixed(w), .h = .fixed(h) }, .direction = .left_to_right },
-            .clip = .{ .vertical = true, .horizontal = true },
-        })({
-            const each = w / @as(f32, @floatFromInt(n));
-            for (bgs) |bg| {
-                if (bg.side == side) self.renderBgImage(bg, each, h, ui_ptr);
-            }
-        });
-    }
-
-    /// Ein Hintergrundbild, in `box_w`×`box_h` nach `cover`/`contain` eingepasst
-    /// und mittig beschnitten. Lädt die Textur beim ersten Aufruf nach.
-    fn renderBgImage(self: *Self, bg: marp.Background, box_w: f32, box_h: f32, ui_ptr: *ui_mod.UI) void {
-        var path: []const u8 = bg.src;
-        const arena = self.frame_arena orelse return;
-        if (!std.fs.path.isAbsolute(path) and self.base_path.len > 0) {
-            const dir = std.fs.path.dirname(self.base_path) orelse ".";
-            path = std.fs.path.join(arena, &.{ dir, bg.src }) catch bg.src;
-        }
-        const size = blk: {
-            const texture_ptr = ui_ptr.open_images.get(path) orelse {
-                _ = ui_ptr.getOrCreateTexture(path);
-                break :blk null;
-            };
-            const tex: *const ImageTexture = @ptrCast(@alignCast(texture_ptr));
-            const fit = bg.fitSize(@floatFromInt(tex.width), @floatFromInt(tex.height), box_w, box_h);
-            break :blk .{ texture_ptr, [2]f32{ @round(fit[0]), @round(fit[1]) } };
-        };
-        clay.UI()(.{
-            .layout = .{
-                .sizing = .{ .w = .fixed(box_w), .h = .fixed(box_h) },
-                .child_alignment = .{ .x = .center, .y = .center },
-            },
-            .clip = .{ .vertical = true, .horizontal = true },
-        })({
-            if (size) |s| {
-                // Transparente Skizzen auf Weiß wie auf einer Marp-Folie, sonst
-                // verschwindet dunkle Schrift auf der dunklen Folie. Eigene Hülle:
-                // am Bildelement ist `background_color` die Tönung des Bildes.
-                clay.UI()(.{
-                    .layout = .{ .sizing = .{ .w = .fixed(s[1][0]), .h = .fixed(s[1][1]) } },
-                    .background_color = .{ 255, 255, 255, 255 },
-                })({
-                    clay.UI()(.{
-                        .layout = .{ .sizing = .grow },
-                        .background_color = .{ 255, 255, 255, 255 },
-                        .image = .{ .image_data = s[0] },
-                    })({});
-                });
-            }
-        });
-    }
-
-    /// Ränder und Grundschrift der Folie in Foliengrößen-Einheiten. Die Vorschau
-    /// nähert Marps Standard-Theme an; maßgeblich ist das PDF aus marp-cli.
-    const slide_margin_x: f32 = 70;
-    const slide_margin_y: f32 = 78;
-    const slide_content_em: f32 = 26;
-
-    /// Rand um die Folie und Platz für die Blätterleiste.
-    const root_padding: u16 = 24;
-    const chrome_reserve: f32 = 110;
-
-    /// Grundschriftgröße, in der die Folie gezeichnet wird (E2E-Sicht).
-    pub fn slideFontSize(self: *const Self) u16 {
-        return @max(6, scaled(slide_content_em, self.slide_scale));
-    }
-
-    fn scaled(value: f32, scale: f32) u16 {
-        const px = @round(value * scale);
-        if (px <= 0) return 0;
-        return @intFromFloat(@min(px, 4000));
-    }
-
-    fn renderSlideButton(self: *Self, id: []const u8, label: []const u8, enabled: bool, theme: Theme) void {
-        clay.UI()(.{
-            .id = self.idi(id, 0),
-            .layout = .{
-                .sizing = .{ .w = .fixed(36), .h = .fixed(28) },
-                .child_alignment = .{ .x = .center, .y = .center },
-            },
-            .background_color = if (enabled) theme.overlay else theme.bg,
-            .corner_radius = .all(theme.radius_sm),
-        })({
-            clay.text(label, .{
-                .font_size = 20,
-                .color = if (enabled) theme.text else theme.muted,
-            });
-        });
-    }
-
     pub fn render(self: *Self, arena: std.mem.Allocator, theme: Theme, ui_ptr: *ui_mod.UI) void {
         self.frame_arena = arena;
         self.sel_color = .{ theme.primary[0], theme.primary[1], theme.primary[2], 110 };
@@ -1432,7 +1084,6 @@ pub const MarkdownView = struct {
             if (self.sel_layout_key >= 0) self.clearSelection();
             self.sel_layout_key = layout_key;
         }
-        if (self.deck != null) return self.renderDeck(arena, theme, ui_ptr);
 
         // Update layout info from previous frame
         const clip_data = clay.getElementData(self.idi("md_viewport", 0));
