@@ -195,7 +195,22 @@ def check_code(name):
     check(differs(inside, outside, 4), f"Codeblock hat Hintergrund ({inside} gegen {outside})")
 
 
-TARGETED = {"quote.md": check_quote, "list.md": check_list, "code.md": check_code}
+def check_task(name):
+    """Aufgabenliste (`- [ ]`): Kästchen statt Punkt, gezeichnet. Die Nummer zählt alle
+    Listeneinträge des Frames, die nummerierte Liste davor belegt 1–3."""
+    n = next((i for i in range(1, 20) if result_json("element_bounds", [f"md_check_{i}"])["found"]), None)
+    check(n is not None, "Aufgabenliste hat ein Kästchen")
+    c = result_json("element_bounds", [f"md_check_{n}"])
+    check(c["w"] > 0, "Kästchen hat eine Fläche")
+    row = bounds("md_li", n)
+    bg = pixel(name, row["x"] - 4, c["y"] + 1)
+    ink = [pixel(name, c["x"] + dx, c["y"] + dy)
+           for dx in range(int(c["w"])) for dy in range(int(c["h"]))]
+    check(any(differs(p, bg, 40) for p in ink), "Kästchen ist gezeichnet")
+
+
+TARGETED = {"quote.md": check_quote, "list.md": check_list, "code.md": check_code,
+            "spaced-list.md": check_task}
 
 
 def step_all_examples(proc):

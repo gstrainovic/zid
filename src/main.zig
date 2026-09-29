@@ -1073,9 +1073,10 @@ pub fn main() !void {
 
             if (headless_mode) {
                 std.Thread.sleep(16 * std.time.ns_per_ms);
-            } else if (has_more_work or e2e_ctx != null or ui_system.wantsFrameSoon()) {
+            } else if (has_more_work or e2e_ctx != null or ui_system.wantsFrameSoon() or svg_atlas.hasDeferredWork()) {
                 // Tooltip oder Hover-Panel steht aus: ohne Timeout käme der nächste Frame erst
                 // bei der nächsten Mausbewegung, der Tooltip nie bei stillstehender Maus.
+                // Ebenso SVG-Icons, die das Rasterbudget je Frame (4) auf später schiebt.
                 wio.wait(.{ .timeout_ns = 16 * 1000 * 1000 });
             } else {
                 wio.wait(.{});

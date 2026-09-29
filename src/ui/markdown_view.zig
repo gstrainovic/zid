@@ -16,6 +16,7 @@ const Theme = ui_mod.Theme;
 const ImageTexture = @import("../clay_renderer/image_renderer.zig").ImageTexture;
 const flow_core = @import("flow_core");
 const emoji_font = @import("../text/emoji_font.zig");
+const svg = @import("components/svg.zig");
 const Block = zigdown.Block;
 const Inline = zigdown.Inline;
 
@@ -1345,7 +1346,7 @@ pub const MarkdownView = struct {
                     .layout = layout_options,
                     .border = if (container.content == .Quote) .{ .width = .{ .left = 4 }, .color = theme.accent } else .{},
                 })({
-                    for (container.children.items) |*child| {
+                    for (container.children.items, 0..) |*child, idx| {
                         if (container.content == .List) {
                             self.list_item_counter += 1;
                             const n = self.list_item_counter;
@@ -1353,11 +1354,28 @@ pub const MarkdownView = struct {
                                 .id = self.idi("md_li", n),
                                 .layout = .{ .sizing = .{ .w = .grow, .h = .fit }, .direction = .left_to_right, .child_gap = 8 },
                             })({
-                                clay.UI()(.{ .id = self.idi("md_bullet", n), .layout = .{ .sizing = .{ .w = .fit, .h = .fit } } })({
-                                    clay.text("•", .{ .font_size = self.font_size, .color = theme.text });
+                                // Aufgabenliste (`- [ ]`/`- [x]`): Kästchen statt Punkt, zigdown hat
+                                // die Klammern schon aus dem Text genommen
+                                const task: ?bool = if (container.content.List.kind == .task and child.* == .Container and child.Container.content == .ListItem)
+                                    child.Container.content.ListItem.checked
+                                else
+                                    null;
+                                const fs: f32 = @floatFromInt(self.font_size);
+                                const list = container.content.List;
+                                const marker: []const u8 = if (list.kind == .ordered)
+                                    std.fmt.allocPrint(arena, "{d}.", .{list.start + idx}) catch "•"
+                                else
+                                    "•";
+                                clay.UI()(.{ .id = self.idi("md_bullet", n), .layout = .{ .sizing = .{ .w = .fit, .h = .fit }, .padding = .{ .top = if (task != null) @intFromFloat(fs * 0.15) else 0 } } })({
+                                    if (task) |checked| {
+                                        const icon_id = std.fmt.allocPrint(arena, "md_check_{d}", .{n}) catch "md_check";
+                                        svg.SvgStroke(arena, icon_id, if (checked) svg.Lucide.square_check else svg.Lucide.square, fs, if (checked) theme.accent else theme.text);
+                                    } else {
+                                        clay.text(marker, .{ .font_size = self.font_size, .color = theme.text });
+                                    }
                                 });
-                                // Punkt plus child_gap nehmen dem Text Breite weg
-                                const bullet_w = ui_mod.measureTextWidth("•", @floatFromInt(self.font_size)) + 0.25 + 8;
+                                // Punkt bzw. Kästchen plus child_gap nehmen dem Text Breite weg
+                                const bullet_w = (if (task != null) fs else ui_mod.measureTextWidth(marker, fs) + 0.25) + 8;
                                 self.indent += bullet_w;
                                 defer self.indent -= bullet_w;
                                 self.renderBlock(child, arena, theme, ui_ptr);
