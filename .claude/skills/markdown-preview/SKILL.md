@@ -23,6 +23,12 @@ description: >
   Tabellen scrollen nie waagrecht, nur Codeblöcke (siehe unten). Fixture: `libs/zigdown/test/table.md`,
   geprüft in `scripts/e2e_md_preview.py`. Spaltenausrichtung (`alignment`) wird nicht umgesetzt.
 
+- **Listenzeichen:** `renderBlock` setzt vor jeden Eintrag `md_bullet`: „•“ bei `unordered`,
+  „N.“ ab `List.start` bei `ordered`, bei `task` (`- [ ]`/`- [x]`, Klammern nimmt zigdown aus
+  dem Text) ein Lucide-Kästchen (`square`/`square_check`, angehakt in Akzentfarbe) mit der ID
+  `md_check_<n>`, n wie bei `md_li`. Die Breite des Zeichens geht in `indent` ein. Geprüft in
+  `e2e_md_preview.check_task` an `libs/zigdown/test/spaced-list.md`.
+
 - **Abfragbare IDs der Vorschau (E2E):** `md_tcell` mit Index Tabelle × 100000 + Zeile × ncol
   + Spalte (Tabellen ab 1), `md_quote`, `md_li`/`md_bullet` und `md_code` mit laufender
   Nummer ab 1. Alle Zähler setzt `resetCounters` zu Beginn jedes Frames zurück.
