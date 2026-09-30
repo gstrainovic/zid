@@ -345,6 +345,68 @@ pub fn utf8_sanitize(allocator: std.mem.Allocator, input: []const u8) error{
     return output.toOwnedSlice(allocator);
 }
 
+/// Windows-1252 für 0x80–0x9F; 0 = in 1252 unbelegt, dann wie Latin-1 (U+0080–U+009F).
+/// Dieselbe Tabelle steht in zids `src/git/git_diff.zig` (anderes Modul).
+const cp1252_high = [32]u21{
+    0x20AC, 0,      0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021, 0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0,      0x017D, 0,
+    0,      0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014, 0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0,      0x017E, 0x0178,
+};
+
+fn cp1252Decode(b: u8) u21 {
+    return if (b >= 0x80 and b <= 0x9f and cp1252_high[b - 0x80] != 0) cp1252_high[b - 0x80] else b;
+}
+
+/// Datei ohne gültiges UTF-8 als Windows-1252 lesen: jedes Byte ergibt genau ein Zeichen,
+/// `cp1252_encode` macht daraus wieder dieselben Bytes.
+pub fn cp1252_decode(allocator: std.mem.Allocator, input: []const u8) error{OutOfMemory}![]u8 {
+    var output: std.ArrayListUnmanaged(u8) = try .initCapacity(allocator, input.len + input.len / 8);
+    errdefer output.deinit(allocator);
+    var buf: [4]u8 = undefined;
+    for (input) |b| {
+        const n = std.unicode.utf8Encode(cp1252Decode(b), &buf) catch unreachable;
+        try output.appendSlice(allocator, buf[0..n]);
+    }
+    return output.toOwnedSlice(allocator);
+}
+
+/// Umkehrung von `cp1252_decode`. Zeichen, die Windows-1252 nicht kennt, sind ein Fehler:
+/// ein stilles „?“ wie in VS Code veränderte die Datei, ohne dass es jemand merkt.
+pub fn cp1252_encode(allocator: std.mem.Allocator, utf8: []const u8) error{ OutOfMemory, InvalidUtf8, NotInWindows1252 }![]u8 {
+    var output: std.ArrayListUnmanaged(u8) = try .initCapacity(allocator, utf8.len);
+    errdefer output.deinit(allocator);
+    var it = (std.unicode.Utf8View.init(utf8) catch return error.InvalidUtf8).iterator();
+    outer: while (it.nextCodepoint()) |cp| {
+        if (cp < 0x80 or (cp >= 0xa0 and cp <= 0xff)) {
+            try output.append(allocator, @intCast(cp));
+            continue;
+        }
+        for (cp1252_high, 0..) |mapped, i| {
+            if ((mapped != 0 and mapped == cp) or (mapped == 0 and cp == 0x80 + i)) {
+                try output.append(allocator, @intCast(0x80 + i));
+                continue :outer;
+            }
+        }
+        return error.NotInWindows1252;
+    }
+    return output.toOwnedSlice(allocator);
+}
+
+test "cp1252: jedes Byte übersteht Lesen und Schreiben, Unbekanntes ist ein Fehler" {
+    const a = std.testing.allocator;
+    var all: [256]u8 = undefined;
+    for (&all, 0..) |*b, i| b.* = @intCast(i);
+    const text = try cp1252_decode(a, &all);
+    defer a.free(text);
+    const back = try cp1252_encode(a, text);
+    defer a.free(back);
+    try std.testing.expectEqualSlices(u8, &all, back);
+
+    const umlaut = try cp1252_decode(a, "Gr\xf6sse \x80 \x84x\x93");
+    defer a.free(umlaut);
+    try std.testing.expectEqualStrings("Grösse € „x“", umlaut);
+    try std.testing.expectError(error.NotInWindows1252, cp1252_encode(a, "Emoji 😀"));
+}
+
 pub const TransformError = error{
     OutOfMemory,
     Utf8CannotEncodeSurrogateHalf,
