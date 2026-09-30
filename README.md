@@ -1,5 +1,7 @@
 # zid
 
+[![Sponsor](https://img.shields.io/github/sponsors/gstrainovic?label=Sponsor&logo=githubsponsors&color=ea4aaa)](https://github.com/sponsors/gstrainovic)
+
 Editor mit Vulkan/WGPU-Rendering, wio-Platform-Layer und Clay-UI. Unterstützt
 Code-Editing, eingebettete Terminals (ghostty-vt + PTY/ConPTY), Bild- und
 PDF-Anzeige (mupdf).
