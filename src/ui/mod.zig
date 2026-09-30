@@ -1699,7 +1699,7 @@ pub const UI = struct {
                 self.reloadMarkdownPreview(ed.buffer.get_file_path());
             }
             // Autosave: 1 s nach der letzten Änderung, nur für Dateien mit Pfad
-            if (self.autosave and ed.is_modified and ed.buffer.get_file_path().len > 0 and (ed.time_ms - ed.last_edit_ms) > 1000) {
+            if (self.autosave and ed.is_modified and ed.buffer.get_file_path().len > 0 and (ed.time_ms - ed.last_edit_ms) > 1000 and ed.save_failed_edit_ms != ed.last_edit_ms) {
                 if (self.getActiveTabBar().getActiveTab()) |tab| {
                     if (tab.kind == .text) ed.dispatchAction(.Save);
                 }
@@ -3131,8 +3131,10 @@ pub const UI = struct {
             }
         }
         const eol: []const u8 = if (ed.buffer.file_eol_mode == .crlf) "CRLF" else "LF";
-        return std.fmt.allocPrint(arena, "Ln {d}, Col {d}{s}    {s}    UTF-8    {s}    Spaces: 4", .{
-            ed.cursor.row + 1, ed.cursor.col + 1, sel_text, eol, edit_ops.languageNameForPath(tab.path),
+        // Bezeichnung wie VS Code; Windows-1252 = als 1252 geladen, wird so gespeichert
+        const encoding: []const u8 = if (ed.buffer.file_utf8_sanitized) "Windows 1252" else "UTF-8";
+        return std.fmt.allocPrint(arena, "Ln {d}, Col {d}{s}    {s}    {s}    {s}    Spaces: 4", .{
+            ed.cursor.row + 1, ed.cursor.col + 1, sel_text, eol, encoding, edit_ops.languageNameForPath(tab.path),
         }) catch "";
     }
 
@@ -3151,8 +3153,7 @@ pub const UI = struct {
         const buf = self.open_buffers.get(path) orelse return;
         const content = std.fs.cwd().readFileAlloc(self.allocator, path, 64 * 1024 * 1024) catch return;
         defer self.allocator.free(content);
-        const current = buf.store_to_string_cached(buf.root, buf.file_eol_mode);
-        if (std.mem.eql(u8, content, current)) return; // eigener Save oder gleicher Inhalt
+        if (buf.matches_file_bytes(content)) return; // eigener Save oder gleicher Inhalt
         if (!self.anyTabModified(path)) {
             _ = self.reloadFileFromDisk(path, content);
             return;
@@ -4990,7 +4991,9 @@ pub const UI = struct {
         switch (res) {
             .yes => {
                 leaf.code_editor.save() catch |err| {
-                    log.err("Failed to save during close: {}", .{err});
+                    // Tab bleibt offen: sonst ginge genau die Änderung verloren
+                    ui.reportError("Could not save '{s}': {s}", .{ std.fs.path.basename(leaf.code_editor.buffer.get_file_path()), if (err == error.NotInWindows1252) "the file is Windows 1252 and the text contains a character it cannot store" else @errorName(err) });
+                    return;
                 };
                 ui.pending_tab_closes.append(ui.allocator, .{ .pane = p, .index = idx }) catch {};
             },

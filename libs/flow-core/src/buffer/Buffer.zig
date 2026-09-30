@@ -45,6 +45,7 @@ last_save: ?Root = null,
 file_exists: bool = true,
 file_eol_mode: EolMode = .lf,
 last_save_eol_mode: EolMode = .lf,
+/// Datei war kein gültiges UTF-8 und ist als Windows-1252 geladen; Speichern schreibt 1252
 file_utf8_sanitized: bool = false,
 hidden: bool = false,
 ephemeral: bool = false,
@@ -1338,8 +1339,11 @@ pub fn load(self: *const Self, reader: *std.Io.Reader, eol_mode: *EolMode, utf8_
     try reader.appendRemainingUnlimited(self.external_allocator, &read_buffer);
     var buf = try read_buffer.toOwnedSlice(self.external_allocator);
 
+    // Kein gültiges UTF-8: als Windows-1252 lesen (ASP-Dateien unter Windows). Das Flag hält
+    // die Kodierung fest, `store_to_file_const` schreibt dann wieder Windows-1252.
+    utf8_sanitized.* = false;
     if (!std.unicode.utf8ValidateSlice(buf)) {
-        const converted = try unicode.utf8_sanitize(self.external_allocator, buf);
+        const converted = try unicode.cp1252_decode(self.external_allocator, buf);
         self.external_allocator.free(buf);
         buf = converted;
         utf8_sanitized.* = true;
@@ -1499,6 +1503,23 @@ pub fn store_to_string_cached(self: *Self, root: *const Node, eol_mode: EolMode)
     return self.store_cached_text(&self.cache, root.to_ref(), eol_mode, s.toOwnedSliceSentinel(0) catch @panic("OOM store_to_string_cached"));
 }
 
+/// Stimmen diese Datei-Bytes mit dem aktuellen Text oder dem zuletzt gespeicherten Stand
+/// überein? Vergleicht in der Kodierung der Datei (Windows-1252 oder UTF-8), sonst hielte der
+/// Watcher jeden eigenen Save für eine Änderung. Der gespeicherte Stand zählt, weil das
+/// Ereignis des eigenen Saves verspätet kommt, wenn schon weitergetippt wurde.
+pub fn matches_file_bytes(self: *Self, bytes: []const u8) bool {
+    if (self.encoded_equals(bytes, self.store_to_string_cached(self.root, self.file_eol_mode))) return true;
+    const saved = self.store_last_save_to_string_cached(self.last_save_eol_mode) orelse return false;
+    return self.encoded_equals(bytes, saved);
+}
+
+fn encoded_equals(self: *Self, bytes: []const u8, text: []const u8) bool {
+    if (!self.file_utf8_sanitized) return std.mem.eql(u8, bytes, text);
+    const encoded = unicode.cp1252_encode(self.external_allocator, text) catch return false;
+    defer self.external_allocator.free(encoded);
+    return std.mem.eql(u8, bytes, encoded);
+}
+
 pub fn store_last_save_to_string_cached(self: *Self, eol_mode: EolMode) ?[]const u8 {
     const root = self.last_save orelse return null;
     if (get_cached_text(self.last_save_cache, root.to_ref(), eol_mode)) |text| return text;
@@ -1536,7 +1557,22 @@ const StringCache = struct {
 };
 
 fn store_to_file_const(self: *const Self, writer: *std.Io.Writer) StoreToFileError!void {
-    try self.root.store(writer, self.file_eol_mode);
+    if (self.file_utf8_sanitized) {
+        // Als Windows-1252 geladen: so zurückschreiben, sonst würde jede Datei beim ersten
+        // Speichern still nach UTF-8 umkodiert
+        var s: std.Io.Writer.Allocating = .init(self.external_allocator);
+        defer s.deinit();
+        self.root.store(&s.writer, self.file_eol_mode) catch return error.OutOfMemory;
+        const encoded = unicode.cp1252_encode(self.external_allocator, s.written()) catch |e| switch (e) {
+            error.OutOfMemory => return error.OutOfMemory,
+            error.InvalidUtf8 => return error.InvalidUtf8,
+            error.NotInWindows1252 => return error.NotInWindows1252,
+        };
+        defer self.external_allocator.free(encoded);
+        try writer.writeAll(encoded);
+    } else {
+        try self.root.store(writer, self.file_eol_mode);
+    }
     try writer.flush();
 }
 
@@ -1582,6 +1618,8 @@ pub const StoreToFileError = error{
     PermissionDenied,
     MessageTooBig,
     WriteFailed,
+    /// Datei ist Windows-1252, der Text enthält ein Zeichen, das es dort nicht gibt
+    NotInWindows1252,
 };
 
 /// Unter Windows liefert readLink auf einer normalen Datei STATUS_NOT_A_REPARSE_POINT als
@@ -1636,7 +1674,6 @@ pub fn store_to_file_and_clean(self: *Self, file_path: []const u8) StoreToFileEr
     self.last_save = self.root;
     self.last_save_eol_mode = self.file_eol_mode;
     self.file_exists = true;
-    self.file_utf8_sanitized = false;
     if (self.ephemeral) {
         self.ephemeral = false;
         self.set_file_path(file_path);

@@ -1,7 +1,7 @@
 ---
 name: editor
 description: >
-  Der Text-Editor in zid: Bearbeiten/Auto-Indent/Autoclose, Maus, Mehrfach-Cursor, Word-Wrap, Suche/Ersetzen, Statusleiste, Panes, externe Änderungen — und die zwei Sorten Textfelder (CodeEditor vs. line_edit). Use when touching src/editor/*, edit_ops.zig, wrap_ops.zig, find_ops.zig, find_bar.zig, tiny_regex.zig, code_editor.zig (own test root code_editor_tests), keymap.zig, CodeEditor/line_edit/EditBuffer, or scripts/e2e_editor.py, e2e_find_preview.py, e2e_external_change.py, e2e_line_edit.py.
+  Der Text-Editor in zid: Bearbeiten/Auto-Indent/Autoclose, Maus, Mehrfach-Cursor, Word-Wrap, Suche/Ersetzen, Statusleiste, Panes, externe Änderungen, Kodierung (Windows-1252 laden/speichern) — und die zwei Sorten Textfelder (CodeEditor vs. line_edit). Use when touching src/editor/*, flow-core Buffer load/store or unicode.zig, file encodings, edit_ops.zig, wrap_ops.zig, find_ops.zig, find_bar.zig, tiny_regex.zig, code_editor.zig (own test root code_editor_tests), keymap.zig, CodeEditor/line_edit/EditBuffer, or scripts/e2e_editor.py, e2e_find_preview.py, e2e_external_change.py, e2e_line_edit.py, e2e_encoding.py.
 ---
 
 ## Unit-Tests in code_editor.zig
@@ -41,6 +41,16 @@ Zähler pro Modul, ein absichtlich kaputter Test ist der schnellste Beweis.
   (`renderMinimap`, 2 px je Zeile, Fenster um den Viewport, Klick springt) und horizontale Scrollbar
   unten (`renderHScrollbar`, nur wenn eine sichtbare Zeile breiter als der Ausschnitt ist). View →
   Toggle Minimap / Render Whitespace / Indent Guides (gemerkt in `user_state`).
+- **Kodierung:** Dateien ohne gültiges UTF-8 lädt flow-core als Windows-1252
+  (`unicode.cp1252_decode`, Flag `Buffer.file_utf8_sanitized`) und speichert sie wieder so
+  (`store_to_file_const` → `cp1252_encode`). Jedes Byte ist ein Zeichen, unveränderte Bytes
+  bleiben exakt. Ein Zeichen außerhalb von 1252 lässt das Speichern mit
+  `error.NotInWindows1252` scheitern; Datei unverändert, Meldung im Editor, Tab-Schließen bleibt
+  offen, Autosave wartet auf die nächste Änderung (`save_failed_edit_ms`). Der Watcher vergleicht
+  über `Buffer.matches_file_bytes` in der Kodierung der Datei, sonst lüde jeder eigene Save neu
+  und verwürfe Undo. Statusleiste „Windows 1252“ wie VS Code. Nicht abgedeckt: Suchen/Ersetzen
+  im Projekt und die Agent-Werkzeuge schreiben UTF-8-Bytes direkt in die Datei. E2E
+  `python3 scripts/e2e_encoding.py`.
 - **Backup vor dem Speichern** löst relative Pfade per `realpathAlloc` auf, weil `accessAbsolute`
   bei relativen Pfaden in `unreachable` läuft.
 - **Suchleiste** (`CodeEditor.find` = `find_bar.FindState`, Leiste `find_bar.render`, gemeinsam
@@ -62,7 +72,7 @@ Zähler pro Modul, ein absichtlich kaputter Test ist der schnellste Beweis.
 - Maus: Dreifachklick markiert die Zeile (`click_count`), Shift+Klick erweitert vom Anker, Ctrl+Klick/
   F12 springen zur ersten Definitionszeile des Worts im selben Buffer (kein LSP: der Client in
   `src/lsp` wird nirgends gestartet), Ziehen über den Rand scrollt (`autoScrollWhileDragging` im Render).
-- Statusleiste (oben, neben dem Branch): `UI.statusText` — Ln/Col, Auswahl, LF/CRLF, UTF-8,
+- Statusleiste (oben, neben dem Branch): `UI.statusText` — Ln/Col, Auswahl, LF/CRLF, Kodierung,
   Sprache, „Spaces: 4“; RPC `ui_state.status_text`.
 - Datei außerhalb geändert: Watcher-`file_changed` oder `file_created` (atomares Ersetzen per
   rename meldet IN_MOVED_TO) → `UI.handleExternalChange`: gleicher Inhalt (eigener Save)

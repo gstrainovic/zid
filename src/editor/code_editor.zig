@@ -223,6 +223,8 @@ pub const CodeEditor = struct {
     text_color: clay.Color = .{ 202, 211, 245, 255 },
     /// Zeitpunkt der letzten Änderung (Autosave nach Ruhe) und Zähler gespeicherter Dateien (Toast)
     last_edit_ms: f32 = 0,
+    /// `last_edit_ms` beim letzten gescheiterten Speichern: Autosave wiederholt nicht je Frame
+    save_failed_edit_ms: ?f32 = null,
     saved_event: bool = false,
     /// Anzeigeoptionen (View-Menü, gemerkt)
     show_indent_guides: bool = true,
@@ -1629,7 +1631,14 @@ pub const CodeEditor = struct {
             .Save => {
                 self.save() catch |err| {
                     std.log.scoped(.editor).err("Failed to save file: {}", .{err});
-                    self.setError("Cannot save '{s}': {s}", .{ std.fs.path.basename(self.buffer.get_file_path()), @errorName(err) });
+                    // Autosave versucht es erst nach der nächsten Änderung wieder
+                    self.save_failed_edit_ms = self.last_edit_ms;
+                    const name = std.fs.path.basename(self.buffer.get_file_path());
+                    if (err == error.NotInWindows1252) {
+                        self.setError("Cannot save '{s}': the file is Windows 1252 and the text contains a character it cannot store", .{name});
+                    } else {
+                        self.setError("Cannot save '{s}': {s}", .{ name, @errorName(err) });
+                    }
                 };
             },
         }
