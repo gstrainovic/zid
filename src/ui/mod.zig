@@ -2086,6 +2086,7 @@ pub const UI = struct {
                 self.showToast("Autosave {s}", .{if (self.autosave) "on" else "off"});
                 self.saveUserState();
             },
+            .save_as_utf8 => self.saveAsUtf8(),
             .toggle_minimap => self.toggleEditorOption(.minimap),
             .toggle_whitespace => self.toggleEditorOption(.whitespace),
             .toggle_word_wrap => self.toggleEditorOption(.word_wrap),
@@ -2274,11 +2275,12 @@ pub const UI = struct {
             total.files += o.files;
             total.skipped_dirty += o.skipped_dirty;
             total.failed += o.failed;
+            total.unencodable += o.unencodable;
         }
         ui.finishReplace(total);
     }
 
-    const ReplaceOutcome = struct { replaced: usize = 0, files: usize = 0, skipped_dirty: usize = 0, failed: usize = 0 };
+    const ReplaceOutcome = struct { replaced: usize = 0, files: usize = 0, skipped_dirty: usize = 0, failed: usize = 0, unencodable: usize = 0 };
 
     /// Ersetzungen einer Datei auf der Platte. Ist sie offen und ungespeichert, bleibt sie
     /// unberührt (VS Code ersetzt dort im Buffer; hier gingen sonst Undo und die Änderungen
@@ -2290,7 +2292,28 @@ pub const UI = struct {
         if (key) |k| if (self.open_buffers.get(k)) |buf| if (buf.is_dirty()) return .{ .skipped_dirty = 1 };
         const content = std.fs.cwd().readFileAlloc(self.allocator, abs, 256 * 1024 * 1024) catch return .{ .failed = 1 };
         defer self.allocator.free(content);
-        const updated = project_search.applyEdits(self.allocator, content, edits) catch {
+        // Datei in Windows-1252 (wie der Editor sie liest): Ersatztext ebenfalls in 1252,
+        // sonst stünden UTF-8-Bytes mitten in der Datei
+        var converted: std.ArrayListUnmanaged(project_search.Edit) = .empty;
+        defer {
+            for (converted.items) |e| self.allocator.free(e.replacement);
+            converted.deinit(self.allocator);
+        }
+        var effective = edits;
+        if (!std.unicode.utf8ValidateSlice(content)) {
+            for (edits) |e| {
+                const r = @import("flow_core").Buffer.unicode.cp1252_encode(self.allocator, e.replacement) catch {
+                    log.warn("replace: '{s}' is Windows 1252, replacement not representable", .{abs});
+                    return .{ .unencodable = 1 };
+                };
+                converted.append(self.allocator, .{ .start = e.start, .end = e.end, .expect = e.expect, .replacement = r }) catch {
+                    self.allocator.free(r);
+                    return .{ .failed = 1 };
+                };
+            }
+            effective = converted.items;
+        }
+        const updated = project_search.applyEdits(self.allocator, content, effective) catch {
             log.warn("replace: '{s}' changed since the search, skipped", .{abs});
             return .{ .failed = 1 };
         };
@@ -2303,8 +2326,29 @@ pub const UI = struct {
         return .{ .replaced = edits.len, .files = 1 };
     }
 
+    /// „Save with Encoding: UTF-8“: Windows-1252-Datei des aktiven Tabs als UTF-8 speichern.
+    /// Nur so bewusst; normales Speichern behält die Kodierung der Datei.
+    fn saveAsUtf8(self: *Self) void {
+        const tab = self.getActiveTabBar().getActiveTab() orelse return;
+        if (tab.kind != .text) return;
+        const ed = self.getActiveEditor();
+        const name = std.fs.path.basename(ed.buffer.get_file_path());
+        if (!ed.buffer.file_utf8_sanitized) {
+            self.showToast("{s} is already UTF-8", .{name});
+            return;
+        }
+        ed.buffer.file_utf8_sanitized = false;
+        ed.save() catch |err| {
+            ed.buffer.file_utf8_sanitized = true;
+            self.reportError("Could not save '{s}': {s}", .{ name, @errorName(err) });
+            return;
+        };
+    }
+
     fn finishReplace(self: *Self, o: ReplaceOutcome) void {
-        if (o.skipped_dirty > 0) {
+        if (o.unencodable > 0) {
+            self.showToast("Replaced {d} in {d} {s}; skipped {d} Windows 1252 {s}: replacement has characters it cannot store", .{ o.replaced, o.files, if (o.files == 1) "file" else "files", o.unencodable, if (o.unencodable == 1) "file" else "files" });
+        } else if (o.skipped_dirty > 0) {
             self.showToast("Replaced {d} in {d} {s}; skipped {d} with unsaved changes", .{ o.replaced, o.files, if (o.files == 1) "file" else "files", o.skipped_dirty });
         } else if (o.failed > 0) {
             self.showToast("Replaced {d} in {d} {s}; {d} changed on disk, search again", .{ o.replaced, o.files, if (o.files == 1) "file" else "files", o.failed });

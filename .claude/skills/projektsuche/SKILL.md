@@ -15,6 +15,12 @@ description: Suche und Ersetzen im ganzen Projekt (Ctrl+Shift+F / Ctrl+Shift+H) 
   `sidebar_focus = .search`), Felder über `line_edit`, Umschalter über `tooltip.iconButton`,
   virtualisierte Liste mit `scrollbar.zig`. Gibt `Action`s zurück; Dateizugriffe macht
   `UI` (`runSearchAction`, `replaceInFile`, `openSearchMatch`).
+- **Windows-1252-Dateien** (kein gültiges UTF-8, wie der Editor sie liest): `replaceInFile`
+  kodiert den Ersatztext nach 1252, sonst stünden UTF-8-Bytes mitten in der Datei; kennt 1252
+  ein Zeichen nicht, bleibt die Datei unberührt (`ReplaceOutcome.unencodable`, eigener Toast).
+  Die Trefferliste dekodiert solche Zeilen nur zur Anzeige, Offsets bleiben an den rohen Bytes.
+  Ein UTF-8-Suchbegriff mit Umlauten findet in 1252-Dateien nichts (rg sucht Bytes). E2E
+  `python3 scripts/e2e_encoding.py`.
 - Sprung zum Treffer über `lsp_goto` mit `select_to` → `CodeEditor.jumpToSelect`. Spalten
   aus `find_ops.colOfByte` (Tab = 4), wie die Ctrl+F-Suche.
 

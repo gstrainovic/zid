@@ -48,8 +48,12 @@ Zähler pro Modul, ein absichtlich kaputter Test ist der schnellste Beweis.
   `error.NotInWindows1252` scheitern; Datei unverändert, Meldung im Editor, Tab-Schließen bleibt
   offen, Autosave wartet auf die nächste Änderung (`save_failed_edit_ms`). Der Watcher vergleicht
   über `Buffer.matches_file_bytes` in der Kodierung der Datei, sonst lüde jeder eigene Save neu
-  und verwürfe Undo. Statusleiste „Windows 1252“ wie VS Code. Nicht abgedeckt: Suchen/Ersetzen
-  im Projekt und die Agent-Werkzeuge schreiben UTF-8-Bytes direkt in die Datei. E2E
+  und verwürfe Undo; er zählt auch den zuletzt gespeicherten Stand als eigen, weil sein
+  Ereignis verspätet kommt, wenn schon weitergetippt wurde. Statusleiste „Windows 1252“ wie
+  VS Code. Umwandeln nach UTF-8 nur bewusst: Command Palette „Save with Encoding: UTF-8“
+  (`save_as_utf8`, `UI.saveAsUtf8`). Alle anderen Schreibwege halten die Kodierung der Datei
+  ebenso: Ersetzen im Projekt (`replaceInFile` kodiert den Ersatz, Trefferliste dekodiert zur
+  Anzeige) und die Agent-Werkzeuge (`decodeFile`/`encodeFor` in `agent_actions.zig`). E2E
   `python3 scripts/e2e_encoding.py`.
 - **Backup vor dem Speichern** löst relative Pfade per `realpathAlloc` auf, weil `accessAbsolute`
   bei relativen Pfaden in `unreachable` läuft.
