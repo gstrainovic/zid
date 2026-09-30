@@ -235,9 +235,10 @@ pub const GitCommitView = struct {
             s.needed = true;
             self.renderHeader(arena, theme, salt, i, s, mouse_x, mouse_y);
             if (s.collapsed) continue;
-            if (!s.view.state.loaded) {
+            if (!s.view.state.loaded or s.view.binary) {
+                const note = if (s.view.state.error_text != null) "Could not load diff" else if (s.view.binary) "Binary file or unsupported text encoding — not shown" else "Loading…";
                 clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow, .h = .fixed(self.row_height) }, .padding = .{ .left = 16 } } })({
-                    clay.text(if (s.view.state.error_text != null) "Could not load diff" else "Loading…", .{ .font_size = 14, .color = theme.muted, .wrap_mode = .none });
+                    clay.text(note, .{ .font_size = 14, .color = theme.muted, .wrap_mode = .none });
                 });
                 continue;
             }

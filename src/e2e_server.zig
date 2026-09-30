@@ -403,7 +403,7 @@ fn writeGitDiffJson(d: ui_mod.UI.ActiveDiff, w: *std.Io.Writer) !void {
     };
     try w.writeAll("{\"active\": true, \"view\": \"diff\", \"title\": ");
     try std.json.Stringify.value(s.title_text, .{}, w);
-    try w.print(", \"loaded\": {}, \"loading\": {}, \"error\": ", .{ s.loaded, s.loading });
+    try w.print(", \"loaded\": {}, \"loading\": {}, \"binary\": {}, \"error\": ", .{ s.loaded, s.loading, d.view.binary });
     try std.json.Stringify.value(s.error_text, .{}, w);
     try w.print(", \"layout\": \"{s}\", \"mode\": \"{s}\", \"collapse\": {}, \"old_lines\": {d}, \"new_lines\": {d}, \"rows\": {d}, \"items\": {d}, \"folds\": {d}, \"changes\": {d}, \"added\": {d}, \"removed\": {d}, \"current_row\": ", .{
         @tagName(layout), @tagName(s.mode), s.collapse_unchanged, s.old_lines.len, s.new_lines.len, s.rows(layout).len, items.len, folds, st.changes, st.added, st.removed,

@@ -13,6 +13,7 @@ Prüft:
   6. Wurzel-Commit: linke Seite leer, alles hinzugefügt
   7. Umbenennung: Zeilen paarweise statt komplett neu
   8. Split: schmales Pane schaltet automatisch auf untereinander, keine Clay-Fehler
+  9. UTF-16-Datei (BOM FF FE): Hinweis wie VS Code, kein ungültiges UTF-8 an den Shaper
 Aufruf: python3 scripts/e2e_git_diff.py
 """
 import os, shutil, subprocess, sys, time
@@ -44,8 +45,14 @@ def source(changed=False):
 
 
 def write(name, text):
-    with open(os.path.join(FX, name), "w") as f:
+    with open(os.path.join(FX, name), "w", encoding="utf-8") as f:
         f.write(text)
+
+
+def write_utf16(name, text):
+    """UTF-16LE mit BOM, wie Windows-Logdateien (PowerShell 5 `>`)."""
+    with open(os.path.join(FX, name), "wb") as f:
+        f.write(b"\xff\xfe" + text.encode("utf-16-le"))
 
 
 def setup_fixture():
@@ -54,8 +61,10 @@ def setup_fixture():
     os.makedirs(FX)
     git("init", "-q", "-b", "main")
     write("calc.zig", source())
-    git("add", "calc.zig"); git("commit", "-q", "-m", "anlegen")
+    write_utf16("debug.log", "DEBUG 28.09.2026 08:00 start\r\n")
+    git("add", "calc.zig", "debug.log"); git("commit", "-q", "-m", "anlegen")
     write("calc.zig", source(changed=True))
+    write_utf16("debug.log", "DEBUG 28.09.2026 08:00 start\r\nDEBUG 30.09.2026 08:00 weiter\r\n")
     git("commit", "-q", "-am", "ändern")
     git("mv", "calc.zig", "rechner.zig")
     text = source(changed=True).replace("return x + 0;", "return x;")
@@ -166,6 +175,18 @@ def step_root_and_rename():
     shot("e2e_git_diff_rename.ppm")
 
 
+def step_utf16():
+    print("--- 9. UTF-16-Datei: Hinweis statt Zeilen")
+    open_diff("HEAD~1", "debug.log", "debug.log")
+    s = wait(lambda s: s["loaded"] and s["binary"], "UTF-16 gilt als binär")
+    check(s["rendered_rows"] == 0, f"keine Zeilen gezeichnet ({s['rendered_rows']})")
+    settle(4)
+    with open(LOG, errors="replace") as f:
+        bad = [l for l in f if "invalid UTF-8" in l]
+    check(not bad, f"kein ungültiges UTF-8 an den Shaper ({bad[:1]})")
+    shot("e2e_git_diff_utf16.ppm")
+
+
 def step_split_auto_inline():
     print("--- 8. Split: schmales Pane → untereinander")
     before = st()["body"]["w"]
@@ -190,7 +211,7 @@ def main():
     try:
         wait_port(proc)
         settle(20)
-        for step in (step_side_by_side, step_navigation, step_collapse_inline, step_root_and_rename, step_split_auto_inline):
+        for step in (step_side_by_side, step_navigation, step_collapse_inline, step_root_and_rename, step_utf16, step_split_auto_inline):
             step()
         print("ALL PASSED")
     finally:

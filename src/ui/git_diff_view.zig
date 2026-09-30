@@ -11,6 +11,10 @@ const Theme = ui.Theme;
 const git_diff = @import("git_diff");
 const svg = @import("components/svg.zig");
 const tooltip = @import("components/tooltip.zig");
+const file_types = @import("file_types.zig");
+
+/// Text wie VS Codes `TextFileEditor`/`BinaryEditor` bei Binärdateien
+pub const binary_message = "The file is not displayed in the diff editor because it is either binary or uses an unsupported text encoding.";
 
 const TOOLBAR_HEIGHT: f32 = 34;
 const OVERSCAN: usize = 10;
@@ -26,6 +30,9 @@ pub const GitDiffView = struct {
     row_height: f32 = 24,
     /// Im letzten Frame gezeichnete Zeilen (E2E prüft die Virtualisierung)
     rendered_rows: usize = 0,
+    /// Eine Seite ist binär oder UTF-16 (`file_types.looksBinary`): nur Hinweis wie VS Code,
+    /// keine Zeilen. Der Shaper bekäme sonst ungültiges UTF-8 je Zeile.
+    binary: bool = false,
 
     const Self = @This();
 
@@ -53,9 +60,12 @@ pub const GitDiffView = struct {
     /// Ergebnis anwenden und beide Seiten einmal parsen (Main-Thread, vor dem Layout).
     pub fn apply(self: *Self, ok: bool, payload: []const u8) !void {
         try self.state.apply(ok, payload);
+        self.binary = false;
         if (!self.state.loaded) return;
         self.destroyHighlighters();
         const c = git_diff.decodeContents(self.state.body).?;
+        self.binary = file_types.looksBinary(c.old) or file_types.looksBinary(c.new);
+        if (self.binary) return;
         self.old_hl = buildHighlighter(self.state.alloc, self.state.spec.previous_path, c.old);
         self.new_hl = buildHighlighter(self.state.alloc, self.state.spec.path, c.new);
     }
@@ -210,6 +220,8 @@ pub const GitDiffView = struct {
                     message(std.fmt.allocPrint(arena, "git: {s}", .{e}) catch "git failed", theme);
                 } else if (!s.loaded) {
                     message("Loading…", theme);
+                } else if (self.binary) {
+                    message(binary_message, theme);
                 } else {
                     self.renderRows(arena, theme, salt, layout, width, fs);
                 }
@@ -233,7 +245,7 @@ pub const GitDiffView = struct {
         })({
             // Wie VS Codes Breadcrumb unter dem Tab: Pfad im Repo
             clay.text(s.spec.path, .{ .font_size = 14, .color = theme.subtext, .wrap_mode = .none });
-            if (s.loaded) {
+            if (s.loaded and !self.binary) {
                 clay.text(std.fmt.allocPrint(arena, "  +{d} \u{2212}{d}", .{ st.added, st.removed }) catch "", .{ .font_size = 14, .color = theme.muted, .wrap_mode = .none });
             }
             clay.UI()(.{ .layout = .{ .sizing = .{ .w = .grow } } })({});
@@ -259,7 +271,7 @@ pub const GitDiffView = struct {
 
     /// Anzahl der Anzeigeeinträge (Zeilen und Faltbalken) im Layout; 0 solange nicht geladen.
     pub fn itemCount(self: *Self, layout: git_diff.Layout) usize {
-        if (!self.state.loaded) return 0;
+        if (!self.state.loaded or self.binary) return 0;
         return (self.state.items(layout) catch return 0).len;
     }
 
