@@ -43,6 +43,12 @@ description: >
   Makefile mit `TOFU` und lässt sie aus dem Archiv. Die Linux-Archive (Bauanleitung im README)
   haben sie drin; ein zweites Mal übersetzt gibt `duplicate symbol: _binary_Dingbats_cff`,
   und zwar erst beim ReleaseSafe-Link, nicht im Debug-Build.
+- **MuPDF-`make` unter Windows** schreibt eingecheckte Dateien neu: `generated/resources/fonts/urw/*.cff.c`
+  mit LF (deshalb klont `sync.sh` mupdf mit `core.autocrlf=false` und setzt es in allen
+  mupdf-Repos lokal, sonst gilt der Baum nach jedem Build als geändert) und in
+  `thirdparty/extract/src/{docx,odt}_template.{c,h}` Zip-Pfade mit Backslash
+  (`"docProps\app.xml"`, in C ein `\a`): DOCX/ODT-Ausgabe dieses Archivs wäre kaputt. zid
+  schreibt kein DOCX/ODT; die Vorlagen nach dem Build per `git checkout --` zurückholen.
 - E2E mit bundled MuPDF: `ZID_BUILD_ARGS=-Dmupdf=bundled python3 scripts/e2e_pdf_pager.py`.
   `ZID_BUILD_ARGS` reicht Build-Optionen an den `zig build`-Aufruf der Suiten durch.
 
