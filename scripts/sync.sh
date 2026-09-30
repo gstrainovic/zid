@@ -144,6 +144,13 @@ cmd_pull() {
     cmd_status || true
 }
 
+# mupdf und seine Submodule (thirdparty/*) ohne Zeilenende-Umwandlung; `-c` beim Klonen
+# gilt nur für den Klon selbst, deshalb danach je Repo in die lokale Config
+mupdf_no_autocrlf() {
+    git -C "$1" config core.autocrlf false
+    git -C "$1" submodule foreach -q 'git config core.autocrlf false' >/dev/null 2>&1 || true
+}
+
 cmd_mupdf() {
     # fancy-cat/deps/mupdf: Pin im upstream nicht erreichbar (force-push).
     # Daher klonen wir mupdf direkt auf einen verfügbaren Tag, anstatt den
@@ -152,14 +159,18 @@ cmd_mupdf() {
     local MUPDF_TAG="1.26.5"
     if [[ -d "$MUPDF_PATH/.git" ]] || [[ -f "$MUPDF_PATH/.git" ]]; then
         if git -C "$MUPDF_PATH" cat-file -e HEAD 2>/dev/null && [[ -d "$MUPDF_PATH/include/mupdf" ]]; then
+            mupdf_no_autocrlf "$MUPDF_PATH"
             ok "fancy-cat/deps/mupdf (already present)"
             return
         fi
     fi
     rm -rf "$MUPDF_PATH"
     echo "  clone mupdf $MUPDF_TAG (Pin im upstream nicht erreichbar)"
-    git clone --depth 1 --branch "$MUPDF_TAG" --recurse-submodules --shallow-submodules \
+    # autocrlf=false: sonst checkt Windows-git (scoop: systemweit true) CRLF aus, `make`
+    # schreibt die generierten Dateien mit LF neu und der Baum gilt als geändert
+    git -c core.autocrlf=false clone --depth 1 --branch "$MUPDF_TAG" --recurse-submodules --shallow-submodules \
         https://github.com/ArtifexSoftware/mupdf.git "$MUPDF_PATH" >/dev/null 2>&1 \
+        && mupdf_no_autocrlf "$MUPDF_PATH" \
         && ok "fancy-cat/deps/mupdf ($MUPDF_TAG)" \
         || err "fancy-cat/deps/mupdf clone failed"
 }
