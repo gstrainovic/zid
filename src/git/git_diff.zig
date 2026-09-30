@@ -319,6 +319,29 @@ pub fn encodeContents(alloc: std.mem.Allocator, old: []const u8, new: []const u8
     return std.mem.concat(alloc, u8, &.{ header, old, new, hunks });
 }
 
+/// Windows-1252 für 0x80–0x9F (in Latin-1 Steuerzeichen); 0 = in 1252 unbelegt, dann wie Latin-1.
+const cp1252_high = [32]u21{
+    0x20AC, 0,      0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021, 0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0,      0x017D, 0,
+    0,      0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014, 0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0,      0x017E, 0x0178,
+};
+
+/// Dateiinhalt als UTF-8 (owned). Gültiges UTF-8 bleibt unverändert; sonst wird die ganze
+/// Datei als Windows-1252 gelesen wie VS Codes Rückfall bei `files.autoGuessEncoding`
+/// (ASP-Dateien unter Windows). Jedes Byte ergibt genau ein Zeichen, Zeilenumbrüche bleiben
+/// an Ort und Stelle: die Zeilennummern der Hunks passen weiter.
+pub fn toUtf8(alloc: std.mem.Allocator, bytes: []const u8) ![]u8 {
+    if (std.unicode.utf8ValidateSlice(bytes)) return alloc.dupe(u8, bytes);
+    var out = try std.ArrayListUnmanaged(u8).initCapacity(alloc, bytes.len + bytes.len / 8);
+    errdefer out.deinit(alloc);
+    for (bytes) |b| {
+        const cp: u21 = if (b >= 0x80 and b <= 0x9f and cp1252_high[b - 0x80] != 0) cp1252_high[b - 0x80] else b;
+        var buf: [4]u8 = undefined;
+        const n = std.unicode.utf8Encode(cp, &buf) catch unreachable;
+        try out.appendSlice(alloc, buf[0..n]);
+    }
+    return out.toOwnedSlice(alloc);
+}
+
 pub const Contents = struct { old: []const u8, new: []const u8, hunks: []const u8 };
 
 pub fn decodeContents(payload: []const u8) ?Contents {
@@ -573,6 +596,16 @@ pub fn splitLines(alloc: std.mem.Allocator, text: []const u8) ![][]const u8 {
         start = if (nl) |i| i + 1 else text.len;
     }
     return lines.toOwnedSlice(alloc);
+}
+
+test "toUtf8: UTF-8 bleibt, Windows-1252 wird umgewandelt, Zeilen bleiben" {
+    const a = testing.allocator;
+    const utf8 = try toUtf8(a, "eingefügt\n");
+    defer a.free(utf8);
+    try testing.expectEqualStrings("eingefügt\n", utf8);
+    const cp = try toUtf8(a, "eingef\xfcgt\n\x80 \x93x\x94 \x81\n");
+    defer a.free(cp);
+    try testing.expectEqualStrings("eingefügt\n€ “x” \u{81}\n", cp);
 }
 
 test "parseHunks: Zählung fehlt = 1, 0 bei reinem Einfügen/Löschen, andere Zeilen ignoriert" {

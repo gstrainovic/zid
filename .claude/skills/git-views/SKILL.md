@@ -22,7 +22,11 @@ description: >
   eigener Prozessgruppe (`pgid = 0`), `kill(-pid)` trifft auch Hooks, die sonst die
   stderr-Pipe offen hielten. E2E `python3 scripts/e2e_git_shutdown.py`: ein
   `core.fsmonitor = sleep 30` im Fixture lässt `git status` hängen, zid muss sich in unter
-  2 s ohne zurückgelassenen Worker beenden.
+  2 s ohne zurückgelassenen Worker beenden. Ein so abgebrochener Aufruf ist kein Fehler:
+  `taskGitStatus`/`runGitCwd` geben bei `isStopping()` `error.Canceled` zurück, das der
+  Scheduler nicht loggt; der Test verlangt ein Log ohne `error(`-Zeilen.
+- Branch über `symbolic-ref --short -q HEAD` (geht auch ohne ersten Commit), nur bei
+  losgelöstem HEAD `rev-parse --abbrev-ref HEAD`.
 - **Fremde Repos („detected dubious ownership“):** Gehört das Repo einem anderen Benutzer
   (Netzlaufwerk, anderes Konto), verweigert git jeden Befehl. `taskGitStatus` meldet dann
   `git_unsafe_repo` mit dem Wert, den git selbst für `safe.directory` vorschlägt
@@ -58,6 +62,10 @@ description: >
   der Hinweis wie VS Code, keine Zeilen, kein Highlighter — sonst ginge je Zeile ungültiges
   UTF-8 an den Shaper. Im Multi-File-Diff eine Hinweiszeile je Abschnitt. RPC
   `git_diff_state.binary`.
+- Kein gültiges UTF-8 (ASP-Dateien in Windows-1252): `taskGitFileDiff` wandelt beide Seiten
+  mit `git_diff.toUtf8` als ganze Datei aus Windows-1252 um. Ein Byte ergibt ein Zeichen, die
+  Zeilen und damit die Hunk-Nummern bleiben gleich. RPC `git_diff_state.new_head` zeigt die ersten
+  drei neuen Zeilen.
 - Tab-Pfade enthalten 0x1f: RPC-JSON immer über `std.json.Stringify` schreiben (`ui_state.tabs`).
 - E2E `python3 scripts/e2e_git_diff.py` (öffnet den Tab per `open_file` mit gebautem Pfad), Zustand
   über `git_diff_state`.

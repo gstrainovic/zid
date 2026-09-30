@@ -409,6 +409,9 @@ fn writeGitDiffJson(d: ui_mod.UI.ActiveDiff, w: *std.Io.Writer) !void {
         @tagName(layout), @tagName(s.mode), s.collapse_unchanged, s.old_lines.len, s.new_lines.len, s.rows(layout).len, items.len, folds, st.changes, st.added, st.removed,
     });
     try std.json.Stringify.value(s.current_row, .{}, w);
+    // Anfang der neuen Seite, damit Tests die Umwandlung nach UTF-8 prüfen können
+    try w.writeAll(", \"new_head\": ");
+    try std.json.Stringify.value(s.new_lines[0..@min(s.new_lines.len, 3)], .{}, w);
     const kinds = s.rows(layout);
     var modified: usize = 0;
     for (kinds) |r| {

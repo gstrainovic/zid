@@ -6,8 +6,7 @@ Hook ist ein Kindprozess von git, wie der echte git unter dem Windows-Launcher `
 Prüft:
   1. zid beendet sich in unter 2 s (der Scheduler wartet höchstens 2 s auf seine Worker)
   2. kein Worker zurückgelassen („workers stuck“), keine Leck-Liste des Allocators
-Vorher lief der git weiter, der Worker wurde zurückgelassen und der Allocator meldete dessen
-Speicher als Leck (22.09.2026).
+  3. der abgebrochene git status steht nicht als Fehler im Log
 Aufruf: python3 scripts/e2e_git_shutdown.py (startet zig-out/bin/zid, vorher `zig build`)
 """
 import os, subprocess, sys, time
@@ -62,6 +61,8 @@ def main():
     check(took < 2.0, f"Beenden in unter 2 s ({took:.1f} s)")
     check("workers stuck" not in text, "kein Worker zurückgelassen")
     check("leaked" not in text, "keine Leck-Liste")
+    errors = [l for l in text.splitlines() if l.startswith("error(")]
+    check(not errors, f"Abbruch beim Beenden ist kein Fehler im Log ({errors[:2]})")
     check(proc.returncode == 0, f"Exit-Code 0 ({proc.returncode})")
     print("ALL PASSED")
 
