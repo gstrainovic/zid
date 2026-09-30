@@ -13,7 +13,34 @@ const UI = ui_mod.UI;
 
 const log = std.log.scoped(.agent_actions);
 
+const cp1252 = @import("flow_core").Buffer.unicode;
+
 const max_read_bytes: usize = 200 * 1024;
+
+/// Dateiinhalt als UTF-8 fürs Modell; Dateien ohne gültiges UTF-8 sind Windows-1252 wie im
+/// Editor. `windows1252` sagt, in welcher Kodierung zurückgeschrieben werden muss.
+const FileText = struct { text: []u8, windows1252: bool };
+
+fn decodeFile(alloc: std.mem.Allocator, bytes: []const u8) !FileText {
+    if (std.unicode.utf8ValidateSlice(bytes)) return .{ .text = try alloc.dupe(u8, bytes), .windows1252 = false };
+    return .{ .text = try cp1252.cp1252_decode(alloc, bytes), .windows1252 = true };
+}
+
+/// UTF-8 vom Modell in die Kodierung der Datei; null, wenn 1252 ein Zeichen nicht kennt.
+fn encodeFor(alloc: std.mem.Allocator, text: []const u8, windows1252: bool) !?[]u8 {
+    if (!windows1252) return try alloc.dupe(u8, text);
+    return cp1252.cp1252_encode(alloc, text) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.InvalidUtf8, error.NotInWindows1252 => return null,
+    };
+}
+
+/// Kodierung einer vorhandenen Datei (false = UTF-8 oder nicht vorhanden).
+fn isWindows1252File(alloc: std.mem.Allocator, path: []const u8) bool {
+    const bytes = std.fs.cwd().readFileAlloc(alloc, path, 64 * 1024 * 1024) catch return false;
+    defer alloc.free(bytes);
+    return !std.unicode.utf8ValidateSlice(bytes);
+}
 const max_list_entries: usize = 200;
 
 pub const Outcome = union(enum) {
@@ -124,7 +151,7 @@ fn executeInner(ui: *UI, alloc: std.mem.Allocator, call: *const ai_tools.ToolCal
         defer alloc.free(content);
         // Klartext ohne Kopf: als JSON-String sah das Modell `\n` und `\"` statt echter Zeilen,
         // ein Kopf (`path:`) galt ihm als erste Dateizeile
-        return .{ .done = try alloc.dupe(u8, content) };
+        return .{ .done = (try decodeFile(alloc, content)).text };
     }
 
     if (std.mem.eql(u8, call.name, "write_file")) {
@@ -136,10 +163,14 @@ fn executeInner(ui: *UI, alloc: std.mem.Allocator, call: *const ai_tools.ToolCal
         if (exists and !confirmed) {
             return .{ .needs_confirm = try std.fmt.allocPrint(alloc, "The AI agent wants to overwrite '{s}' ({d} bytes). Allow?", .{ rel, content.len }) };
         }
+        // Vorhandene Windows-1252-Datei bleibt 1252 (wie beim Speichern im Editor)
+        const bytes = (try encodeFor(alloc, content, exists and isWindows1252File(alloc, path))) orelse
+            return .{ .done = errorJson(alloc, "{s} is Windows 1252 and the content has characters it cannot store", .{rel}) };
+        defer alloc.free(bytes);
         if (std.fs.path.dirname(path)) |dir| std.fs.cwd().makePath(dir) catch {};
-        try std.fs.cwd().writeFile(.{ .sub_path = path, .data = content });
+        try std.fs.cwd().writeFile(.{ .sub_path = path, .data = bytes });
         ui.file_explorer.refresh(path);
-        const reloaded = ui.reloadFileFromDisk(path, content);
+        const reloaded = ui.reloadFileFromDisk(path, bytes);
         log.info("agent: write_file {s} ({d} bytes, reloaded={})", .{ path, content.len, reloaded });
         var buf: [128]u8 = undefined;
         const msg = std.fmt.bufPrint(&buf, "wrote {d} bytes{s}", .{ content.len, if (reloaded) "; open tab reloaded" else "" }) catch "written";
@@ -152,13 +183,20 @@ fn executeInner(ui: *UI, alloc: std.mem.Allocator, call: *const ai_tools.ToolCal
         const new = strArg(args, "new") orelse return .{ .done = errorJson(alloc, "missing 'new'", .{}) };
         const path = (try ai_tools.resolveInProject(alloc, root, rel)) orelse return .{ .done = outsideJson(alloc, rel) };
         defer alloc.free(path);
-        const content = std.fs.cwd().readFileAlloc(alloc, path, 10 * 1024 * 1024) catch return .{ .done = errorJson(alloc, "file not found: {s}", .{rel}) };
-        defer alloc.free(content);
+        const raw = std.fs.cwd().readFileAlloc(alloc, path, 10 * 1024 * 1024) catch return .{ .done = errorJson(alloc, "file not found: {s}", .{rel}) };
+        defer alloc.free(raw);
+        // Ersetzen im UTF-8-Text, den auch read_file liefert; zurück in der Kodierung der Datei
+        const file = try decodeFile(alloc, raw);
+        defer alloc.free(file.text);
+        const content = file.text;
         const idx = std.mem.indexOf(u8, content, old) orelse return .{ .done = errorJson(alloc, "old text not found in {s}", .{rel}) };
         if (ai_tools.replaceCountsAsRewrite(content.len, old.len) and !confirmed) {
             return .{ .needs_confirm = try std.fmt.allocPrint(alloc, "The AI agent wants to replace {d} of {d} bytes in '{s}' (most of the file). Allow?", .{ old.len, content.len, rel }) };
         }
-        const updated = try std.mem.concat(alloc, u8, &.{ content[0..idx], new, content[idx + old.len ..] });
+        const updated_text = try std.mem.concat(alloc, u8, &.{ content[0..idx], new, content[idx + old.len ..] });
+        defer alloc.free(updated_text);
+        const updated = (try encodeFor(alloc, updated_text, file.windows1252)) orelse
+            return .{ .done = errorJson(alloc, "{s} is Windows 1252 and 'new' has characters it cannot store", .{rel}) };
         defer alloc.free(updated);
         try std.fs.cwd().writeFile(.{ .sub_path = path, .data = updated });
         ui.file_explorer.refresh(path);

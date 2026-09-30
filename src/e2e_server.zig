@@ -600,6 +600,7 @@ pub fn createDispatcher(alloc: std.mem.Allocator, ctx: *E2EContext) !*zigjr.RpcD
     try rpc_dispatcher.addWithCtx("chat_state", ctx, chatState);
     try rpc_dispatcher.addWithCtx("focus_chat", ctx, focusChat);
     try rpc_dispatcher.addWithCtx("file_text", ctx, fileText);
+    try rpc_dispatcher.addWithCtx("agent_tool", ctx, agentTool);
     try rpc_dispatcher.addWithCtx("get_active_tab", ctx, getActiveTabDebug);
     try rpc_dispatcher.addWithCtx("explorer_open", ctx, explorerOpen);
     try rpc_dispatcher.addWithCtx("explorer_entries", ctx, explorerEntries);
@@ -1247,6 +1248,22 @@ fn chatLineBounds(ctx: *E2EContext, dc: *zigjr.DispatchCtx, msg: i64, line: i64)
     if (msg < 0 or @as(usize, @intCast(msg)) >= chat.messages.items.len) return boundsJson(dc, .{ .found = false, .bounding_box = .{ .x = 0, .y = 0, .width = 0, .height = 0 } });
     const v = &chat.messages.items[@intCast(msg)].md;
     return boundsJson(dc, clay.getElementData(v.idi("md_line", @intCast(line))));
+}
+
+/// Agent-Werkzeug direkt ausführen, ohne Modell und ohne Rückfrage (bestätigt):
+/// `agent_tool(name, arguments_json)` liefert das Ergebnis, das ans Modell ginge.
+fn agentTool(ctx: *E2EContext, dc: *zigjr.DispatchCtx, name: []const u8, arguments: []const u8) ![]const u8 {
+    return onMain(ctx, dc, agentToolMain, .{ name, arguments });
+}
+
+fn agentToolMain(ctx: *E2EContext, dc: *zigjr.DispatchCtx, name: []const u8, arguments: []const u8) anyerror![]const u8 {
+    const agent_actions = @import("ui/agent_actions.zig");
+    const alloc = dc.arena();
+    const call: @import("ai_tools").ToolCall = .{ .id = try alloc.dupe(u8, "e2e"), .name = try alloc.dupe(u8, name), .arguments = try alloc.dupe(u8, arguments) };
+    return switch (agent_actions.execute(ctx.ui_system, alloc, &call, true)) {
+        .done => |out| out,
+        .needs_confirm => |q| q,
+    };
 }
 
 /// Inhalt des offenen Buffers zu `path` (wie ihn der Editor zeigt), oder open=false.

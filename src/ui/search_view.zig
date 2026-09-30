@@ -721,7 +721,15 @@ pub const SearchView = struct {
                 .match => |m| {
                     const line = self.results.files.items[m.file].lines.items[m.line];
                     const sub = line.subs[m.sub];
-                    const p = ps.preview(line.line, sub, PREVIEW_BEFORE);
+                    var p = ps.preview(line.line, sub, PREVIEW_BEFORE);
+                    // Zeile aus einer Windows-1252-Datei: zur Anzeige nach UTF-8 (wie der Editor);
+                    // die Offsets fürs Ersetzen bleiben an den rohen Bytes
+                    if (!std.unicode.utf8ValidateSlice(line.line)) {
+                        const dec = @import("flow_core").Buffer.unicode.cp1252_decode;
+                        p.before = dec(arena, p.before) catch p.before;
+                        p.match = dec(arena, p.match) catch p.match;
+                        p.after = dec(arena, p.after) catch p.after;
+                    }
                     const rep: ?[]const u8 = if (self.searched_with_replace and self.replace_open) (sub.replacement orelse self.replaceText()) else null;
                     var room = inner;
                     if (p.elided) {

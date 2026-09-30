@@ -63,6 +63,9 @@ echo -e "open ./README.md\nget-state\nshutdown" | zig build run -- --interactive
 
 ## RPC-Referenz
 
+- `agent_tool(name, arguments_json)` führt ein Agent-Werkzeug (`read_file`, `write_file`,
+  `replace_text`, …) direkt aus, bestätigt und ohne Modell; Pfade relativ zum Projektordner.
+  Ergebnis ist der Text, der ans Modell ginge (`e2e_encoding.py`).
 - `explorer_open <path>` simuliert einen Klick im File-Explorer (setzt `file_to_open`),
   `open_file` geht nur über die Tab-Leiste.
 - `get_active_tab` liefert pro Tab `modified` sowie `editor_modified` und `editor_file`

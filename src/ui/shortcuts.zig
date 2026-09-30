@@ -112,6 +112,8 @@ pub const Command = enum {
     zoom_out,
     zoom_reset,
     toggle_autosave,
+    /// Windows-1252-Datei bewusst nach UTF-8 umwandeln (VS Code „Save with Encoding“)
+    save_as_utf8,
     toggle_minimap,
     toggle_whitespace,
     toggle_indent_guides,
@@ -383,6 +385,7 @@ pub fn label(command: Command) []const u8 {
         .zoom_out => "Zoom Out",
         .zoom_reset => "Reset Zoom",
         .toggle_autosave => "Toggle Autosave",
+        .save_as_utf8 => "Save with Encoding: UTF-8",
         .toggle_minimap => "Toggle Minimap",
         .toggle_whitespace => "Toggle Render Whitespace",
         .toggle_word_wrap => "Toggle Word Wrap",
