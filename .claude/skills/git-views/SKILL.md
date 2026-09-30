@@ -54,6 +54,10 @@ description: >
   `src/ui/git_diff_view.zig`. Die Zeilen-Ausrichtung übernimmt git (Hunks), zid berechnet keinen Diff.
 - Beide Seiten nutzen den Tree-sitter-Highlighter wie die Markdown-Codeblöcke; Hälften sind
   `.percent(0.5)`, weil feste Breiten aus dem Vorframe im neuen Pane den Container aufziehen.
+- Binär und UTF-16 (`file_types.looksBinary` auf einer der Seiten, `GitDiffView.binary`): nur
+  der Hinweis wie VS Code, keine Zeilen, kein Highlighter — sonst ginge je Zeile ungültiges
+  UTF-8 an den Shaper. Im Multi-File-Diff eine Hinweiszeile je Abschnitt. RPC
+  `git_diff_state.binary`.
 - Tab-Pfade enthalten 0x1f: RPC-JSON immer über `std.json.Stringify` schreiben (`ui_state.tabs`).
 - E2E `python3 scripts/e2e_git_diff.py` (öffnet den Tab per `open_file` mit gebautem Pfad), Zustand
   über `git_diff_state`.
