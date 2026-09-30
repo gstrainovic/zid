@@ -257,7 +257,8 @@ pub const Scheduler = struct {
         while (true) {
             const task = self.work_queue.popWait(&self.should_stop) orelse break;
             const result = task.func(self.allocator, task.data) catch |err| {
-                log.err("task failed: {}", .{err});
+                // Canceled: beim Beenden abgebrochen (git_worker.killRunning), kein Fehler
+                if (err != error.Canceled) log.err("task failed: {}", .{err});
                 continue;
             };
             if (!self.result_queue.push(result)) {

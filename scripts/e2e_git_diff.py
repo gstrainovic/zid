@@ -14,6 +14,7 @@ Prüft:
   7. Umbenennung: Zeilen paarweise statt komplett neu
   8. Split: schmales Pane schaltet automatisch auf untereinander, keine Clay-Fehler
   9. UTF-16-Datei (BOM FF FE): Hinweis wie VS Code, kein ungültiges UTF-8 an den Shaper
+ 10. Windows-1252-Datei: Umlaute, € und typografische Zeichen korrekt als UTF-8
 Aufruf: python3 scripts/e2e_git_diff.py
 """
 import os, shutil, subprocess, sys, time
@@ -55,6 +56,12 @@ def write_utf16(name, text):
         f.write(b"\xff\xfe" + text.encode("utf-16-le"))
 
 
+def write_cp1252(name, text):
+    """Windows-1252 wie ASP-Dateien unter Windows (Umlaute, €, typografische Zeichen)."""
+    with open(os.path.join(FX, name), "wb") as f:
+        f.write(text.encode("cp1252"))
+
+
 def setup_fixture():
     rmtree(FX)
     shutil.rmtree(XDG_CONFIG, ignore_errors=True)
@@ -62,9 +69,11 @@ def setup_fixture():
     git("init", "-q", "-b", "main")
     write("calc.zig", source())
     write_utf16("debug.log", "DEBUG 28.09.2026 08:00 start\r\n")
-    git("add", "calc.zig", "debug.log"); git("commit", "-q", "-m", "anlegen")
+    write_cp1252("seite.asp", "<% ' Grösse prüfen %>\r\n<p>Übersicht</p>\r\n")
+    git("add", "calc.zig", "debug.log", "seite.asp"); git("commit", "-q", "-m", "anlegen")
     write("calc.zig", source(changed=True))
     write_utf16("debug.log", "DEBUG 28.09.2026 08:00 start\r\nDEBUG 30.09.2026 08:00 weiter\r\n")
+    write_cp1252("seite.asp", "<% ' Grösse prüfen %>\r\n<p>Übersicht – „neu“ 5 €</p>\r\n")
     git("commit", "-q", "-am", "ändern")
     git("mv", "calc.zig", "rechner.zig")
     text = source(changed=True).replace("return x + 0;", "return x;")
@@ -185,6 +194,18 @@ def step_utf16():
         bad = [l for l in f if "invalid UTF-8" in l]
     check(not bad, f"kein ungültiges UTF-8 an den Shaper ({bad[:1]})")
     shot("e2e_git_diff_utf16.ppm")
+
+    print("--- 10. Windows-1252 (ASP): als UTF-8 angezeigt")
+    open_diff("HEAD~1", "seite.asp", "seite.asp")
+    s = wait(lambda s: s["loaded"] and s["new_lines"] == 2, "cp1252-Datei geladen")
+    check(not s["binary"], "kein Binär-Hinweis")
+    check(s["new_head"] == ["<% ' Grösse prüfen %>", "<p>Übersicht – „neu“ 5 €</p>"], f"Umlaute, €, typografische Zeichen: {s['new_head']}")
+    check(s["changes"] == 1 and s["modified_rows"] == 1, f"eine geänderte Zeile ({s['changes']})")
+    settle(4)
+    with open(LOG, errors="replace") as f:
+        bad = [l for l in f if "invalid UTF-8" in l]
+    check(not bad, f"kein ungültiges UTF-8 an den Shaper ({bad[:1]})")
+    shot("e2e_git_diff_cp1252.ppm")
 
 
 def step_split_auto_inline():

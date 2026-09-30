@@ -41,6 +41,15 @@ pub fn taskGitBranch(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.Tas
     const params: *Params = @ptrCast(@alignCast(data.?));
     defer params.deinit();
 
+    // symbolic-ref kennt den Branch auch ohne ersten Commit (rev-parse HEAD scheitert dort);
+    // bei losgelöstem HEAD scheitert es still, dann liefert rev-parse wie bisher „HEAD“
+    switch (runGitCapture(alloc, params.repo_path, &.{ "symbolic-ref", "--short", "-q", "HEAD" })) {
+        .ok => |out| {
+            defer alloc.free(out);
+            return .{ .tag = .git_branch, .payload = try alloc.dupe(u8, std.mem.trimRight(u8, out, "\n\r")), .allocator = alloc };
+        },
+        .failed => |msg| alloc.free(msg),
+    }
     // Fremdes Repo: die Rückfrage kommt vom Status-Task, der Branch bleibt leer
     const out = runGit(alloc, params.repo_path, &.{ "rev-parse", "--abbrev-ref", "HEAD" }) catch |err| switch (err) {
         error.GitUnsafeRepo => return .{ .tag = .git_branch, .payload = try alloc.dupe(u8, ""), .allocator = alloc },
@@ -76,6 +85,7 @@ pub fn taskGitStatus(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.Tas
                 log.warn("git status in '{s}': Repo gehört einem anderen Benutzer (safe.directory)", .{params.repo_path});
                 return .{ .tag = .git_unsafe_repo, .payload = try alloc.dupe(u8, dir), .allocator = alloc };
             }
+            if (isStopping()) return error.Canceled;
             log.err("git status in '{s}': {s}", .{ params.repo_path, msg });
             return error.GitFailed;
         },
@@ -312,11 +322,16 @@ pub fn taskGitFileDiff(alloc: std.mem.Allocator, data: ?*anyopaque) !scheduler.T
     var args_buf: [16][]const u8 = undefined;
     var spec_buf: [2 * std.fs.max_path_bytes + 64]u8 = undefined;
 
-    const old = contentOrEmpty(alloc, spec.repo, git_diff.contentArgs(&args_buf, &spec_buf, spec.parent, spec.previous_path));
-    defer alloc.free(old);
+    const old_raw = contentOrEmpty(alloc, spec.repo, git_diff.contentArgs(&args_buf, &spec_buf, spec.parent, spec.previous_path));
+    defer alloc.free(old_raw);
     // Arbeitskopie (Source Control „Changes“): Datei von der Platte, fehlt sie (gelöscht) leer
     const worktree = std.mem.eql(u8, spec.hash, git_diff.worktree_ref);
-    const new = if (worktree) readWorktreeFile(alloc, spec.repo, spec.path) else contentOrEmpty(alloc, spec.repo, git_diff.contentArgs(&args_buf, &spec_buf, spec.hash, spec.path));
+    const new_raw = if (worktree) readWorktreeFile(alloc, spec.repo, spec.path) else contentOrEmpty(alloc, spec.repo, git_diff.contentArgs(&args_buf, &spec_buf, spec.hash, spec.path));
+    defer alloc.free(new_raw);
+    // Windows-1252 (ASP-Dateien) als UTF-8, sonst bekäme der Shaper ungültige Bytes
+    const old = try git_diff.toUtf8(alloc, old_raw);
+    defer alloc.free(old);
+    const new = try git_diff.toUtf8(alloc, new_raw);
     defer alloc.free(new);
 
     // Untracked: git kennt die Datei nicht, der Hunk-Kopf kommt aus der Zeilenzahl
@@ -580,6 +595,7 @@ fn runGitCwd(alloc: std.mem.Allocator, cwd: []const u8, args: []const []const u8
                 log.warn("git {s} in '{s}': Repo gehört einem anderen Benutzer (safe.directory)", .{ args[0], cwd });
                 return error.GitUnsafeRepo;
             }
+            if (isStopping()) return error.Canceled;
             // stderr mitloggen: „git exited 128" allein sagt nicht, ob der Ordner
             // kein Repo ist, die Datei fehlt oder git etwas anderes bemängelt.
             log.err("git {s} in '{s}': {s}", .{ args[0], cwd, msg });
@@ -674,6 +690,14 @@ pub fn killRunning() void {
         terminateLocked(id);
         slot.* = null;
     };
+}
+
+/// Läuft das Beenden? Dann ist ein gescheiterter git-Aufruf abgebrochen worden (von
+/// `killRunning` oder gar nicht erst gestartet) und kein Fehler, der ins Log gehört.
+fn isStopping() bool {
+    running_mutex.lock();
+    defer running_mutex.unlock();
+    return stopping;
 }
 
 fn runGitCapture(alloc: std.mem.Allocator, cwd: []const u8, args: []const []const u8) GitRun {
