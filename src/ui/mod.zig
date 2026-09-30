@@ -5000,7 +5000,10 @@ pub const UI = struct {
                 if (std.fs.cwd().readFileAlloc(ui.allocator, path, 64 * 1024 * 1024)) |content| {
                     defer ui.allocator.free(content);
                     _ = ui.reloadFileFromDisk(path, content);
-                } else |_| {}
+                } else |err| {
+                    // Nie gespeichert (New File): ohne Datei auf der Platte zurück auf leer
+                    if (err == error.FileNotFound) _ = ui.reloadFileFromDisk(path, "");
+                }
                 ui.pending_tab_closes.append(ui.allocator, .{ .pane = p, .index = idx }) catch {};
             },
             .cancel => {},

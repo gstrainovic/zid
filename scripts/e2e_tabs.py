@@ -147,6 +147,28 @@ def step_dot_and_middle_click():
     check(not dialog_open() and "four.txt" not in tab_names(), "d = Don't Save schließt ohne Speichern")
 
 
+def step_new_file_dont_save_is_empty():
+    print("--- New File, Don't Save: die nächste neue Datei ist leer")
+    stray = os.path.join(ROOT, "New File.txt")
+    check(not os.path.exists(stray), "New File.txt liegt nicht auf der Platte")
+    key("n", ctrl=True); settle(10)
+    check(active_name() == "New File.txt", "Ctrl+N öffnet New File.txt")
+    rpc("click", [700, 400]); settle()
+    rpc("type_text", ["verworfen"]); settle(10)
+    rpc("middle_click", [*tab_center("New File.txt")]); settle(10)
+    check(dialog_open(), "Schließen fragt nach")
+    key("d"); settle(10)
+    check("New File.txt" not in tab_names(), "Don't Save schließt den Tab")
+    key("n", ctrl=True); settle(10)
+    text = result_json("editor_state")["text"]
+    check(text == "", f"neue Datei ist leer (Inhalt: {text!r})")
+    check(not [t for t in tabs() if t["name"] == "New File.txt"][0]["modified"], "neue Datei gilt als unverändert")
+    rpc("middle_click", [*tab_center("New File.txt")]); settle(10)
+    check(not os.path.exists(stray), "nichts auf die Platte geschrieben")
+    with open(os.path.join(ROOT, "tmp", "e2e_tabs.log")) as f:
+        check("no highlighter" not in f.read(), ".txt ohne Highlighter warnt nicht im Log")
+
+
 def step_context_menu_and_reopen():
     print("--- Tab-Kontextmenü, Close Others, Ctrl+Shift+T, Ctrl+1, Ctrl+PgDn, Pin")
     reveal_fixture()
@@ -297,7 +319,7 @@ def step_split_keeps_chat_and_terminal():
         check(n == 1, f"{name} bleibt genau einmal erhalten ({n}x): {after['all_tabs']}")
 
 
-STEPS = [step_default_own_tab, step_recent_switch_and_picker, step_dot_and_middle_click, step_context_menu_and_reopen, step_drag_reorder, step_scroll_active_into_view, step_reveal, step_md_preview_from_tab_menu, step_split_keeps_chat_and_terminal]
+STEPS = [step_default_own_tab, step_recent_switch_and_picker, step_dot_and_middle_click, step_new_file_dont_save_is_empty, step_context_menu_and_reopen, step_drag_reorder, step_scroll_active_into_view, step_reveal, step_md_preview_from_tab_menu, step_split_keeps_chat_and_terminal]
 
 
 def main():

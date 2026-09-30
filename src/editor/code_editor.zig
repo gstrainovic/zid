@@ -514,7 +514,11 @@ pub const CodeEditor = struct {
             file_path,
             content,
         ) catch |err| {
-            log.warn("no highlighter for '{s}': {s}", .{ file_path, @errorName(err) });
+            // NotFound = Sprache ohne Highlighter (etwa .txt), kein Fehler
+            if (err == error.NotFound)
+                log.debug("no highlighter for '{s}'", .{file_path})
+            else
+                log.warn("no highlighter for '{s}': {s}", .{ file_path, @errorName(err) });
             return;
         };
 
