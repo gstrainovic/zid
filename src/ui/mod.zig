@@ -1205,6 +1205,16 @@ pub const UI = struct {
         self.getActiveEditor().setCtrlState(pressed);
     }
 
+    /// Fenster verliert den Tastaturfokus (wio `.unfocused`, RPC `window_unfocus`). Das
+    /// Loslassen gehaltener Modifier geht dann an das andere Fenster; ohne Zurücksetzen galt
+    /// Alt nach Alt+Tab weiter als gedrückt und jedes getippte F/E/V/H öffnete ein Menü.
+    pub fn handleFocusLost(self: *Self) void {
+        self.setCtrlState(false);
+        self.setShiftState(false);
+        self.setAltState(false);
+        self.chord_k_until_ms = -1;
+    }
+
     pub fn setAltState(self: *Self, pressed: bool) void {
         self.is_alt_down = pressed;
         self.ai_chat.setAltState(pressed);

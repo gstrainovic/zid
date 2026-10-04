@@ -627,6 +627,13 @@ pub fn main() !void {
                         .focused => {
                             plat.setTextInput(true);
                         },
+                        // wio meldet beim Fokusverlust kein Loslassen gehaltener Tasten (Alt+Tab)
+                        .unfocused => {
+                            shift_held = false;
+                            ctrl_held = false;
+                            alt_held = false;
+                            ui_system.handleFocusLost();
+                        },
                         .scroll_vertical => |delta| {
                             scroll_delta_y = @floatCast(delta);
                             const lines_delta = wheel.wheelLines(scroll_delta_y);

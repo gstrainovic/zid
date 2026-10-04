@@ -42,6 +42,8 @@ pub const InputEvent = union(enum) {
     /// hold: Modifier nach der Taste gedrückt lassen (Ctrl+Tab-Umschalter), bis `mods_release`
     key: struct { btn: @import("wio").Button, ctrl: bool, shift: bool = false, alt: bool = false, hold: bool = false },
     mods_release,
+    /// Fenster verliert den Tastaturfokus (Alt+Tab): wio meldet kein Loslassen der Modifier
+    unfocus,
     char: u21,
     /// Mausrad an Position: lines > 0 hoch, < 0 runter
     scroll: struct { x: f32, y: f32, lines: i32 },
@@ -557,6 +559,7 @@ fn applyInput(ctx: *E2EContext, ev: InputEvent) void {
             ui.setShiftState(false);
             ui.setAltState(false);
         },
+        .unfocus => ui.handleFocusLost(),
         .char => |cp| ui.handleChar(cp),
         .request_quit => ui.requestQuit(),
         .scroll => |sc| {
@@ -594,6 +597,7 @@ pub fn createDispatcher(alloc: std.mem.Allocator, ctx: *E2EContext) !*zigjr.RpcD
     try rpc_dispatcher.addWithCtx("key_press_alt", ctx, keyPressAlt);
     try rpc_dispatcher.addWithCtx("key_press_hold", ctx, keyPressHold);
     try rpc_dispatcher.addWithCtx("mods_release", ctx, modsRelease);
+    try rpc_dispatcher.addWithCtx("window_unfocus", ctx, windowUnfocus);
     try rpc_dispatcher.addWithCtx("open_terminal", ctx, openTerminalRpc);
     try rpc_dispatcher.addWithCtx("open_chat", ctx, openChatRpc);
     try rpc_dispatcher.addWithCtx("get_chat_input", ctx, getChatInput);
@@ -828,6 +832,12 @@ pub fn keyPressHold(ctx: *E2EContext, _: *zigjr.DispatchCtx, key_name: []const u
 
 pub fn modsRelease(ctx: *E2EContext, _: *zigjr.DispatchCtx) ![]const u8 {
     dispatchInput(ctx, .mods_release);
+    return "ok";
+}
+
+/// Wie das Ereignis `unfocused` des Fensters (Alt+Tab in ein anderes Programm)
+pub fn windowUnfocus(ctx: *E2EContext, _: *zigjr.DispatchCtx) ![]const u8 {
+    dispatchInput(ctx, .unfocus);
     return "ok";
 }
 
@@ -1393,8 +1403,8 @@ fn uiState(ctx: *E2EContext, dc: *zigjr.DispatchCtx) ![]const u8 {
         try buf.writer.writeAll("null");
     }
     try buf.writer.print(
-        \\, "explorer_focused": {}, "show_file_explorer": {}, "picker_open": {}, "shortcuts_open": {}, "tab_count": {d}, "active_tab":
-    , .{ ui.explorer_focused, ui.show_file_explorer, ui.folder_picker.visible, ui.shortcuts_dialog_open, tb.count() });
+        \\, "mods_down": {{"ctrl": {}, "shift": {}, "alt": {}}}, "explorer_focused": {}, "show_file_explorer": {}, "picker_open": {}, "shortcuts_open": {}, "tab_count": {d}, "active_tab":
+    , .{ ui.is_ctrl_down, ui.is_shift_down, ui.is_alt_down, ui.explorer_focused, ui.show_file_explorer, ui.folder_picker.visible, ui.shortcuts_dialog_open, tb.count() });
     if (tb.active_index) |idx| {
         try buf.writer.print("{d}", .{idx});
     } else {

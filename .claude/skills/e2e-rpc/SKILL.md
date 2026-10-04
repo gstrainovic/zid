@@ -72,9 +72,11 @@ echo -e "open ./README.md\nget-state\nshutdown" | zig build run -- --interactive
   (Buffer, den der Editor gerade zeigt).
 - `key_press(name, ctrl)` kennt alle Buchstaben a–z sowie enter, backspace, escape, delete, tab,
   grave, up/down/left/right, home/end, page_up/page_down, f1, f2; `key_press_mods(name, ctrl, shift)`
-  zusätzlich Shift (Ctrl+Shift+Tab). Modifier werden nach der Taste wieder gelöscht.
-  `key_press_alt` und `click_mods`: Skill `editor`.
-- `ui_state` liefert Dialog-Titel, offenes Menü, Explorer-Fokus, Explorer sichtbar,
+  zusätzlich Shift (Ctrl+Shift+Tab). Modifier werden vor und nach der Taste gesetzt bzw.
+  gelöscht, ein hängender Modifier lässt sich mit ihnen also nicht nachstellen.
+  `key_press_hold` hält sie bis `mods_release`; `window_unfocus` spielt den Fokusverlust des
+  Fensters nach (Alt+Tab). `key_press_alt` und `click_mods`: Skill `editor`.
+- `ui_state` liefert Dialog-Titel, offenes Menü, gehaltene Modifier (`mods_down`), Explorer-Fokus, Explorer sichtbar,
   Picker/Shortcut-Dialog offen, Tabs (Pfad, Art, geändert) und aktiven Tab, `tooltip` (Text im
   letzten Frame), `last_frame_ms`/`max_frame_ms` (Layout-Zeit; headless rendert nur beim
   Screenshot), die Glyph-Cache-Diagnose `glyph_rasterized`, `glyph_cache_clears`,

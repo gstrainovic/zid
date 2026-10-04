@@ -21,6 +21,10 @@ description: >
   Select All, Delete Line Ctrl+Shift+K, Find Ctrl+F).
 - Globale Kürzel greifen vor Terminal/Chat: Ctrl+W, Ctrl+N, Ctrl+O, Ctrl+B, Ctrl+` und
   Ctrl+Tab kommen im Terminal bewusst nicht an der Shell an (wie in Zed).
+- **Fokusverlust lässt alle Modifier los** (`UI.handleFocusLost` auf wio `.unfocused`): wio
+  meldet dann kein Loslassen, nach Alt+Tab galt Alt sonst weiter als gedrückt und jedes
+  getippte F/E/V/H (auch im Explorer-Filter) öffnete ein Menü. E2E-Schritt
+  `step_filter_after_alt_tab` in `e2e_explorer.py`.
 - Menü per Tastatur (Alt+F/E/V/H) und Scrollen im Kürzel-Dialog: Skill `theme-zoom`.
 
 ## Ein Kontextmenü für alles
