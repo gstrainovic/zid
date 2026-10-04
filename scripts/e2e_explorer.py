@@ -311,6 +311,26 @@ def step_hidden_and_filter():
     check(explorer()["filter"] == "" and "renamed.md" in names(), "Escape leert den Filter")
 
 
+def step_filter_after_alt_tab():
+    print("--- Alt+Tab: Fokusverlust lässt Alt los, Tippen im Filter öffnet kein Menü")
+    # Alt+Tab nach außen: das Loslassen von Alt geht an das andere Fenster, zid bekommt nur
+    # „unfocused“. Vorher galt Alt weiter als gedrückt und „f“ öffnete das File-Menü.
+    rpc("key_press_hold", ["tab", True, True, True]); settle()
+    check(ui_state()["mods_down"] == {"ctrl": True, "shift": True, "alt": True}, "Modifier gehalten")
+    rpc("window_unfocus"); settle()
+    check(ui_state()["mods_down"] == {"ctrl": False, "shift": False, "alt": False}, f"Fokusverlust lässt alle Modifier los: {ui_state()['mods_down']}")
+    reveal("gamma.txt", ["tmp", "e2e_fx2"])
+    explorer_click("gamma.txt")
+    key("slash")
+    for ch in "fev":
+        key(ch)
+        rpc("type_text", [ch]); settle()
+    check(ui_state()["open_menu"] is None, f"kein Menü offen ({ui_state()['open_menu']})")
+    check(explorer()["filter"] == "fev", f"Buchstaben landen im Filter: {explorer()['filter']}")
+    key("escape")
+    key("escape")
+
+
 def rows_in_view(*paths):
     """Zeilenmitten mehrerer Einträge aus EINEM Snapshot, nach Pfad statt Name gesucht.
     Zwei getrennte explorer_row_center-Aufrufe scrollen je für sich: die erste Position
@@ -438,7 +458,7 @@ def step_scrollbar():
     key("escape")
 
 
-STEPS = [step_focus_and_letters, step_dialog_keyboard_trash, step_navigation, step_create_rename, step_clipboard, step_multi_select, step_context_menu, step_hidden_and_filter, step_drag_drop, step_gitignore, step_scrollbar, step_sidebar_width_persist]
+STEPS = [step_focus_and_letters, step_dialog_keyboard_trash, step_navigation, step_create_rename, step_clipboard, step_multi_select, step_context_menu, step_hidden_and_filter, step_filter_after_alt_tab, step_drag_drop, step_gitignore, step_scrollbar, step_sidebar_width_persist]
 
 
 def main():
