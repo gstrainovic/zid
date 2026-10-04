@@ -12,6 +12,31 @@
   `pull` allein lässt die Submodule auf dem alten Pin. Nach `submodule update` stehen die
   Forks ohne Branch da: vor Arbeit in `libs/clay-zig` usw. den Branch aus `.gitmodules`
   auschecken.
+- **Fertige, verifizierte Arbeit sofort selbst committen** (ein Commit pro Thema), direkt auf
+  `main`, keine Feature-Branches oder PRs, ausser es existiert schon ein Branch oder Goran will es.
+  Nicht uncommittet liegen lassen und anbieten.
+- **Worktree nur für lange Messläufe** (etwa `scripts/e2e_ai_read_limits.py`): `git worktree add
+  <scratchpad>/measure <commit>`, Pfad beim Anlegen nennen, dort nur messen, nie editieren oder
+  committen, danach `git worktree remove`. Gearbeitet wird im Hauptordner.
+
+## Zig-Version
+
+Gepinnt auf 0.15.2 (`minimum_zig_version` in `build.zig.zon`); `~/.local/bin/zig` ist anyzig und
+wählt die Version danach, das Fedora-`zig` ist neuer. Stabile Zig-Releases mit Verzögerung
+nachziehen, nie master. Die Migration auf 0.16 ist ein eigener Meilenstein: erst die Fork-Libs
+einzeln portieren, dann den Projektcode, nie nebenbei.
+
+## Werkzeuge
+
+Fehlt ein übliches CLI-Werkzeug (copr-cli, rpmbuild …), mit `sudo dnf install` installieren
+(passwortloses sudo ist eingerichtet) statt einen Ersatz aus curl oder Skripten zu bauen. Vorher
+fragen nur bei echten Nebenwirkungen (Systemumbau, fremde Paketquellen).
+
+## Async
+
+Hintergrundarbeit (git, LSP, Dateiwächter, Build) läuft über einen Thread-Pool mit gemeinsamer
+Ergebnis-Queue (`src/async/scheduler.zig`), kein Actor-Modell. Der Main-Loop holt Ergebnisse
+nicht blockierend mit `pollResults()`; ein neues Feature erweitert nur `ResultTag`.
 
 ## Logging
 
@@ -50,6 +75,12 @@ Befunde gehören in die Skill ihres Bereichs, nicht hierher.
   `scripts/fixtures/`.
 - Die UI-Uhr läuft in Echtzeit: Tests, die auf Tooltips, Toasts oder Hover warten, rechnen in
   echter Zeit, nicht in Frames.
+- UI-Änderungen am Screenshot prüfen (`tmp/*.ppm` nach PNG wandeln und ansehen), bevor «fertig»
+  gemeldet wird. Verhältnis-Assertions reichen nicht: pro neuem Element mindestens eine absolute
+  Grössen- oder Positionsprüfung. Passt ein Wert nicht zur Erwartung, die Ursache klären, nie den
+  beobachteten Wert in die Erwartung schreiben.
+- Springen Messwerte unerklärlich, zuerst verwaiste zid-Prozesse auf Port 9999 ausschliessen
+  (Skill `grosse-dateien`), dann erst die Logik verdächtigen.
 - Jeder RPC, der veränderlichen UI-Zustand liest (Buffer, Editoren, Listen), läuft per `onMain`
   im Hauptthread.
 - RPC-Referenz, Threading und Koordinaten: Skill `e2e-rpc`; Suitenbetrieb und Windows: Skill
