@@ -176,12 +176,19 @@ pub fn spawnWatch(
     return child;
 }
 
-/// Watch-Prozess beenden. Unter Linux/macOS die ganze Prozessgruppe, sonst liefe der von
-/// marp gestartete Browser verwaist weiter; unter Windows beendet sich der Browser mit marp.
+/// Watch-Prozess beenden, ohne den Aufrufer (Hauptthread) unbegrenzt zu blockieren.
+/// Unter Linux/macOS SIGINT an die Prozessgruppe: Solange der Browser offen ist, fängt
+/// puppeteer SIGTERM ab und schliesst nur den Browser, marp liefe weiter; auf SIGINT
+/// beendet es Browser (eigene Gruppe) und Prozess. Reagiert marp nicht, SIGKILL.
+/// Unter Windows beendet sich der Browser mit marp.
 pub fn stopWatch(child: *std.process.Child) void {
     if (builtin.os.tag != .windows) {
-        std.posix.kill(-child.id, std.posix.SIG.TERM) catch {};
-        _ = child.wait() catch {};
+        std.posix.kill(-child.id, std.posix.SIG.INT) catch {};
+        var waited_ms: u32 = 0;
+        while (std.posix.waitpid(child.id, std.posix.W.NOHANG).pid == 0) : (waited_ms += 20) {
+            if (waited_ms == 2000) std.posix.kill(-child.id, std.posix.SIG.KILL) catch {};
+            std.Thread.sleep(20 * std.time.ns_per_ms);
+        }
         return;
     }
     _ = child.kill() catch {};
@@ -495,6 +502,32 @@ test "Watch-Funktionen übersetzen auf jeder Plattform" {
     // Nur Analyse erzwingen (Cross-Compile prüft so den Zweig der anderen Plattform).
     _ = &spawnWatch;
     _ = &stopWatch;
+}
+
+/// Startet `script` per `sh` in eigener Prozessgruppe wie `spawnWatch`, ruft `stopWatch`
+/// und liefert die Dauer in ms.
+fn stopWatchMs(script: []const u8) !i64 {
+    var child = std.process.Child.init(&.{ "sh", "-c", script }, testing.allocator);
+    child.stdin_behavior = .Ignore;
+    child.pgid = 0;
+    try child.spawn();
+    std.Thread.sleep(300 * std.time.ns_per_ms); // trap ist gesetzt
+    const t0 = std.time.milliTimestamp();
+    stopWatch(&child);
+    return std.time.milliTimestamp() - t0;
+}
+
+test "stopWatch beendet marp, auch wenn puppeteer SIGTERM abfängt" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
+    // puppeteer fängt SIGTERM ab, solange der Browser offen ist, und schliesst nur ihn.
+    const ms = try stopWatchMs("trap ':' TERM; while :; do sleep 0.05; done");
+    try testing.expect(ms < 1000);
+}
+
+test "stopWatch blockiert nicht, wenn der Prozess jedes höfliche Signal ignoriert" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
+    const ms = try stopWatchMs("trap '' TERM INT HUP; while :; do sleep 0.05; done");
+    try testing.expect(ms < 5000);
 }
 
 test "outputPath ersetzt die Endung" {
