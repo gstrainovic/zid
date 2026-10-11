@@ -93,6 +93,11 @@ KI-Punkte: Wirkung vorab schätzen, vorher/nachher messen (`scripts/e2e_ai_read_
 1. **Referenz-Klone löschen:** `reference/KrillClaw`, `reference/pls`, `reference/lite-xl`,
    `reference/flow`, `reference/gooey`, sobald die übernommenen Punkte oben umgesetzt sind.
 
+2. **`llm-bench`: alte Pfade und veraltete GLM-Grösse.** `README.md` (Zeilen 95, 116–131),
+   `FAZIT.md:40`, `HANDOFF-zid.md:39` und `results/logs/build-ref.sh:6` nennen noch
+   `~/projects/bitnet-colibri-bench`; das Repo liegt unter `zid/llm-bench`. `README.md:33` nennt
+   GLM-5.2 int4 mit 372 GB, colibri gibt heute 429 GB an.
+
 ## Verteilung
 
 Stand: v0.1.1 liegt als Release (Linux-Tarball, Windows-Zip), COPR hat 0.1.1-1
