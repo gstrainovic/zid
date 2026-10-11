@@ -63,6 +63,12 @@ KI-Punkte: Wirkung vorab schätzen, vorher/nachher messen (`scripts/e2e_ai_read_
     `~/llm-test/`). Werkzeugwahl mit `llm-bench/bench/agent_eval.py` gegen gemma4-E2B messen,
     dann entscheiden, ob es als Option für Rechner mit viel RAM in zid kommt.
 
+11. **Offen, Entscheid Goran: Nachladen von der Platte mit colibri statt llama.cpp messen?**
+    Die Messung in `llm-bench/results/linux-i7-8850H-ram-gegen-platte.md` lief mit llama.cpp
+    (mmap). colibri hat einen eigenen Expertencache; laut README läuft Qwen3-Coder-30B-A3B mit
+    begrenztem Cache (32 Experten je Schicht) mit 5.1 tok/s statt 8.5–9.6. colibri neu
+    installieren und diesen Modus auf dem i7-8850H messen.
+
 ## 4. Komfort
 
 1. **Leerzeichen am Zeilenende beim Speichern entfernen** (abschaltbar, wie Autosave gemerkt).
