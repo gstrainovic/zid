@@ -63,10 +63,12 @@ KI-Punkte: Wirkung vorab schätzen, vorher/nachher messen (`scripts/e2e_ai_read_
     `~/llm-test/`). Werkzeugwahl mit `llm-bench/bench/agent_eval.py` gegen gemma4-E2B messen,
     dann entscheiden, ob es als Option für Rechner mit viel RAM in zid kommt.
 
-11. **Offen, Entscheid Goran: colibri wieder löschen?** Gemessen (Ergebnis in
-    `llm-bench/results/linux-i7-8850H-ram-gegen-platte.md`): 1.3 tok/s ganz im RAM gegen
-    11.7 mit llama.cpp. Liegt unter `~/llm-test/colibri` und `~/llm-test/colibri-models`
-    (19 GB); `coli tune` ist nicht versucht.
+11. **Offen, Entscheid Goran: grösseres Modell mit colibri von der Platte messen?** colibri
+    (unter `~/llm-test/colibri`, Modell 19 GB in `~/llm-test/colibri-models`) liefert beim
+    Nachladen 2.7 tok/s, siebenmal llama.cpp
+    (`llm-bench/results/linux-i7-8850H-ram-gegen-platte.md`). `coli setup --list` meldet
+    `deepseek-v4-flash-reap` (85 GB, Experten von der Platte) als passend; das wäre der erste
+    echte Test mit einem Modell, das nicht in den RAM passt.
 
 ## 4. Komfort
 

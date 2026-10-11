@@ -47,18 +47,28 @@ erreicht auf der CPU 11.7 tok/s, Werkzeugwahl (`bench/agent_eval.py`) nicht geme
 
 ```
 colibri v2.0.0, Commit bf2442915d6e3dd4cdfd2eb9c2a3d2aa44a25850, Engine qwen36, CPU-Build -march=native
-Modell  Justvugg/Qwen3-Coder-30B-A3B-colibri-int4 (19.4 GB), --cap 128 (alle Experten im Cache)
-Messung coli serve, OpenAI-Streaming, 128 Token, temperature 0, Seitencache vor Lauf 1 geleert
+Modell  Justvugg/Qwen3-Coder-30B-A3B-colibri-int4 (19.4 GB)
+Messung coli serve --model <dir> --cap N, OpenAI-Streaming, 128 Token, temperature 0,
+        Seitencache vor Lauf 1 geleert, Läufe 2 und 3 warm
 ```
 
-| Lauf | erstes Token | Decode |
-|---|---|---|
-| 1 (kalt) | 24.1 s | 1.27 tok/s |
-| 2 | 21.0 s | 1.29 tok/s |
-| 3 | 20.8 s | 1.32 tok/s |
+| Einstellung | Lauf 1 (kalt) | Lauf 2/3 (warm) | erstes Token warm | RSS |
+|---|---|---|---|---|
+| `--cap 128` (alle Experten) | 7.49 tok/s | **12.72 / 12.74** | 1.3 s | 14.4 GB |
+| `--cap 32` | 2.63 | 2.67 / 2.76 | 9.3 s | 6.2 GB |
+| `--cap 32`, `MemoryMax=9G` | 2.59 | 2.64 / 2.70 | 9.6 s | 6.2 GB |
 
-Engine-RSS danach 3.4 GB. Schon ganz im RAM ist colibri hier neunmal langsamer als llama.cpp
-mit einem Modell gleicher Bauart, das README nennt auf einem Ryzen 7 PRO 8700GE (AVX512)
-8.5–9.6 tok/s. Die CPU hat nur AVX2/FMA, kein VNNI; ob das die Ursache ist, ist nicht untersucht.
-Die Läufe mit 32 Experten je Schicht wurden deshalb abgebrochen: langsamer als 1.3 tok/s
-bringt keine Erkenntnis für den Einsatz.
+Ganz im RAM ist colibri so schnell wie llama.cpp (Modelle verwandt, nicht identisch). Beim
+Nachladen von der Platte liefert es 2.7 tok/s gegen 0.39 von llama.cpp per mmap; die Grenzen
+sind nicht gleich (9 GB gegen 6 GB), der Abstand ist trotzdem gross. Das README nennt für
+`--cap 32` 5.1 tok/s auf einem Ryzen 7 PRO 8700GE mit NVMe-RAID. Mit oder ohne Speichergrenze
+bleibt `--cap 32` gleich schnell, der Seitencache hilft colibri also nicht.
+
+**`--cap` gehört hinter den Unterbefehl** (`coli serve --cap 128`). Als `coli --cap 128 serve`
+wird es ohne Meldung ignoriert, die Engine startet mit `cache=8/layer` (Kopfzeile im Log) und
+liefert 1.3 tok/s bei 3 GB RSS.
+
+**`coli tune` scheitert bei Qwen3-Coder** mit «engine reported no decode speed»: Die
+tune-Vorlage der Qwen3.6-Familie endet auf `<think>\n`, Qwen3-Coder denkt nicht und gibt sofort
+das Ende aus. Ohne `<think>` in `tune_prompt_template` (`c/family_registry.py`) läuft es; einzig
+geprüfter Kandidat war `omp-3`, die Grundeinstellung blieb (kein Gewinn über 3 %).
