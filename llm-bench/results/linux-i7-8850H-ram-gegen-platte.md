@@ -42,3 +42,23 @@ Hochrechnung, nicht gemessen: rund 40 Mrd. aktive Parameter bei durchschnittlich
 
 Der RAM ist der Vorteil: MoE-Modelle bis gut 40 GB laufen ganz im Speicher. Qwen3-30B-A3B
 erreicht auf der CPU 11.7 tok/s, Werkzeugwahl (`bench/agent_eval.py`) nicht gemessen.
+
+## Gegenprobe mit colibri
+
+```
+colibri v2.0.0, Commit bf2442915d6e3dd4cdfd2eb9c2a3d2aa44a25850, Engine qwen36, CPU-Build -march=native
+Modell  Justvugg/Qwen3-Coder-30B-A3B-colibri-int4 (19.4 GB), --cap 128 (alle Experten im Cache)
+Messung coli serve, OpenAI-Streaming, 128 Token, temperature 0, Seitencache vor Lauf 1 geleert
+```
+
+| Lauf | erstes Token | Decode |
+|---|---|---|
+| 1 (kalt) | 24.1 s | 1.27 tok/s |
+| 2 | 21.0 s | 1.29 tok/s |
+| 3 | 20.8 s | 1.32 tok/s |
+
+Engine-RSS danach 3.4 GB. Schon ganz im RAM ist colibri hier neunmal langsamer als llama.cpp
+mit einem Modell gleicher Bauart, das README nennt auf einem Ryzen 7 PRO 8700GE (AVX512)
+8.5–9.6 tok/s. Die CPU hat nur AVX2/FMA, kein VNNI; ob das die Ursache ist, ist nicht untersucht.
+Die Läufe mit 32 Experten je Schicht wurden deshalb abgebrochen: langsamer als 1.3 tok/s
+bringt keine Erkenntnis für den Einsatz.
