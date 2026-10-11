@@ -64,6 +64,27 @@ sind nicht gleich (9 GB gegen 6 GB), der Abstand ist trotzdem gross. Das README 
 `--cap 32` 5.1 tok/s auf einem Ryzen 7 PRO 8700GE mit NVMe-RAID. Mit oder ohne Speichergrenze
 bleibt `--cap 32` gleich schnell, der Seitencache hilft colibri also nicht.
 
+### Mit der Quadro P1000 (Vulkan)
+
+colibri mit `make qwen36 VK=1` und `COLI_VULKAN=1`; llama.cpp b11062 mit `-dev Vulkan1 -ngl 99`,
+die Experten von `-ncmoe` Schichten auf der CPU, `llama-bench -p 64 -n 64 -r 2`.
+
+| Einstellung | Decode (warm) |
+|---|---|
+| llama.cpp, nur CPU | 11.67 tok/s |
+| llama.cpp, `-ncmoe 48` (alle Experten auf der CPU) | 14.61 |
+| llama.cpp, `-ncmoe 44` | 14.70 |
+| llama.cpp, `-ncmoe 40` | **15.21** |
+| colibri `--cap 128`, nur CPU | 12.74 |
+| colibri `--cap 128`, Vulkan (Dense-Kette an, Standard) | 12.78 (GPU ausgefallen) |
+| colibri `--cap 128`, Vulkan, `COLI_VK_CHAIN=0` | 9.99 (41 % der Experten auf der GPU) |
+
+Mit der Dense-Kette verliert colibri die Karte beim ersten Prompt: `[VK] chain: fence wait
+failed (-4): the device is lost`, im Kernel `NVRM: Xid 13, Graphics Exception:
+SKEDCHECK18_L1_CONFIG_TOO_SMALL` (ein Shader verlangt mehr gemeinsamen Speicher, als Pascal
+hergibt). colibri rechnet danach auf der CPU weiter. Ohne Kette läuft die GPU, ist aber langsamer
+als die CPU allein. Auf dieser Maschine ist llama.cpp mit P1000 der schnellste Weg.
+
 **`--cap` gehört hinter den Unterbefehl** (`coli serve --cap 128`). Als `coli --cap 128 serve`
 wird es ohne Meldung ignoriert, die Engine startet mit `cache=8/layer` (Kopfzeile im Log) und
 liefert 1.3 tok/s bei 3 GB RSS.
