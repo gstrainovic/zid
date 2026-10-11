@@ -63,11 +63,6 @@ KI-Punkte: Wirkung vorab schätzen, vorher/nachher messen (`scripts/e2e_ai_read_
     `~/llm-test/`). Werkzeugwahl mit `llm-bench/bench/agent_eval.py` gegen gemma4-E2B messen,
     dann entscheiden, ob es als Option für Rechner mit viel RAM in zid kommt.
 
-11. **Offen, Entscheid Goran: colibri löschen?** Gemessen in
-    `llm-bench/results/linux-i7-8850H-ram-gegen-platte.md`: im RAM so schnell wie llama.cpp,
-    beim Nachladen siebenmal schneller (2.7 tok/s, für die Arbeit zu langsam), mit der P1000
-    langsamer als llama.cpp (Pascal-Absturz der Dense-Kette). Liegt unter `~/llm-test/colibri`
-    und `~/llm-test/colibri-models` (19 GB).
 
 ## 4. Komfort
 
