@@ -59,10 +59,10 @@ KI-Punkte: Wirkung vorab schätzen, vorher/nachher messen (`scripts/e2e_ai_read_
     ab** (NUL in den ersten 512 Bytes).
 
 10. **KI: grösseres MoE-Modell im RAM prüfen.** Qwen3-30B-A3B Q4_K_M läuft ganz im RAM mit
-    11.7 tok/s auf der CPU (`llm-bench/results/linux-i7-8850H-ram-gegen-platte.md`, Datei in
-    `~/llm-test/`). Werkzeugwahl mit `llm-bench/bench/agent_eval.py` gegen gemma4-E2B messen,
-    dann entscheiden, ob es als Option für Rechner mit viel RAM in zid kommt.
-
+    11.7 tok/s auf der CPU, 15.2 mit der P1000 (`-ngl 99 -ncmoe 40`), Messung in
+    `llm-bench/results/linux-i7-8850H-ram-gegen-platte.md`, Datei in `~/llm-test/`.
+    Werkzeugwahl mit `llm-bench/bench/agent_eval.py` gegen gemma4-E2B messen, dann entscheiden,
+    ob es als Option für Rechner mit viel RAM in zid kommt.
 
 ## 4. Komfort
 
