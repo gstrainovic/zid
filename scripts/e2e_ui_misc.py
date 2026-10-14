@@ -7,6 +7,7 @@ import os, shutil, subprocess, sys, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from e2e_open_folder import ROOT, rpc, result_json, wait_port, settle, bounds, click_center, check, shot  # noqa: E402
 from e2e_shortcuts import key, ui_state, dialog_open  # noqa: E402
+from e2e_pdf_pager import pixel  # noqa: E402
 
 FX = os.path.join(ROOT, "tmp", "e2e_misc")
 SRC = os.path.join(FX, "note.txt")
@@ -45,7 +46,7 @@ def setup():
 def step_theme_zoom():
     print("--- Theme und Zoom")
     check(not ui_state()["light_theme"], "Start: dunkles Theme")
-    palette("toggle light")
+    palette("Toggle Light/Dark Theme")
     check(ui_state()["light_theme"], "Command Palette → helles Theme")
     shot("e2e_misc_light.ppm")
     key("equals", ctrl=True); key("equals", ctrl=True)
@@ -57,7 +58,7 @@ def step_theme_zoom():
     check(ui_state()["font_size"] == 24, "Ctrl+0 setzt zurück")
     state_file = os.path.join(XDG_CONFIG, "zid", "state")
     check(os.path.exists(state_file) and "theme=light" in open(state_file).read(), "Theme steht in der State-Datei")
-    palette("toggle light")
+    palette("Toggle Light/Dark Theme")
     check(not ui_state()["light_theme"], "zurück auf dunkel")
 
 
@@ -76,7 +77,20 @@ def step_autosave_toast():
     # Zustand sichtbar: Häkchen im File-Menü und Feld in der Statusleiste
     click_center("menu_file"); settle()
     check(bounds("menu_check_toggle_autosave")["found"], "File-Menü zeigt ein Häkchen vor Toggle Autosave")
-    shot("e2e_autosave_menu_check.ppm")
+    mark = bounds("menu_check_toggle_autosave")
+    visible = False
+    # Neue Explorer-Icons und das Menü teilen sich das begrenzte Rasterbudget.
+    # Auf tatsächliche Pixel warten; Clay-Bounds allein beweisen kein sichtbares Häkchen.
+    for _ in range(8):
+        shot("e2e_autosave_menu_check.ppm")
+        background = pixel("e2e_autosave_menu_check.ppm", mark["x"] - 2, mark["y"])
+        visible = any(max(abs(a - b) for a, b in zip(pixel("e2e_autosave_menu_check.ppm", mark["x"] + x, mark["y"] + y), background)) > 30
+                      for x in range(2, 16) for y in range(2, 16))
+        if visible:
+            break
+    check(mark["w"] == 18 and mark["h"] == 18 and visible, "Autosave-Häkchen ist als 18-Pixel-Kontur sichtbar")
+    interior = pixel("e2e_autosave_menu_check.ppm", mark["x"] + 7, mark["y"] + 9)
+    check(max(abs(a - b) for a, b in zip(interior, background)) < 20, "Häkchen besteht aus zwei Strichen statt einem gefüllten Dreieck")
     key("escape"); settle()
     check(bounds("status_autosave")["found"], "Statusleiste zeigt das Autosave-Feld")
     rpc("click", [700, 300]); settle()
