@@ -2952,7 +2952,10 @@ pub const CodeEditor = struct {
         if (delta > 0) {
             self.view.col = self.view.col -| @as(usize, @intCast(delta));
         } else if (delta < 0) {
-            self.view.col += @as(usize, @intCast(-delta));
+            const cols = if (self.view.cols > 0) self.view.cols else self.visibleColCount();
+            const width = self.maxLineWidth();
+            const max_col = if (width > cols) width - cols + 1 else 0;
+            self.view.col = @min(self.view.col +| @as(usize, @intCast(-@as(i64, delta))), max_col);
         }
     }
 
@@ -4039,6 +4042,22 @@ test "lange Zeile: Cursor am Ende scrollt die Ansicht horizontal, sichtbarer Aus
     t.ed.scrollColumns(-8);
     try std.testing.expectEqual(@as(usize, 8), t.ed.view.col);
     t.ed.scrollColumns(20);
+    try std.testing.expectEqual(@as(usize, 0), t.ed.view.col);
+}
+
+test "Shift-Mausrad endet an der längsten Zeile und lässt kurze Dateien links" {
+    var t = try testEditor(std.testing.allocator, "kurz\n" ++ "x" ** 120);
+    defer t.buffer.deinit();
+    defer t.ed.deinit();
+    t.ed.view.cols = 20;
+    t.ed.scrollColumns(-1000);
+    try std.testing.expectEqual(@as(usize, 101), t.ed.view.col);
+    t.ed.scrollColumns(-1000);
+    try std.testing.expectEqual(@as(usize, 101), t.ed.view.col);
+    t.ed.scrollColumns(1000);
+    try std.testing.expectEqual(@as(usize, 0), t.ed.view.col);
+    t.ed.setText("kurz");
+    t.ed.scrollColumns(-1000);
     try std.testing.expectEqual(@as(usize, 0), t.ed.view.col);
 }
 

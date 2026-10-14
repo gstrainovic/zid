@@ -422,6 +422,14 @@ def step_hscrollbar():
     rpc("mouse_up", [gx - 400, gy]); settle()
     check(ed()["view_col"] == 0, f"Thumb nach links ziehen scrollt zurück (view_col {ed()['view_col']})")
     check(ed()["row"] == 59, "Klicks auf die Leiste versetzen den Cursor nicht")
+    # Shift+Rad darf die Datei nicht vollständig aus dem Ausschnitt schieben.
+    rpc("key_press_hold", ["left", False, True, False]); settle()
+    rpc("scroll", [EDITOR_X, EDITOR_Y, -1000]); settle()
+    rpc("mods_release"); settle()
+    check(ed()["view_col"] == len(long_line) - cols + 1,
+          f"Shift+Rad endet an der längsten Zeile ({ed()['view_col']})")
+    shot("e2e_editor_hscroll_end.ppm")
+    rpc("scroll", [EDITOR_X, EDITOR_Y, 1000]); settle()
 
 
 STEPS = [step_autoclose_and_indent, step_comment_move_duplicate, step_goto_replace, step_undo_cursor_dirty, step_mouse, step_status_bar, step_panes, step_external_change, step_visuals, step_search_options, step_multicursor, step_word_wrap, step_hscrollbar]
