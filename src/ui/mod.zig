@@ -4153,7 +4153,7 @@ pub const UI = struct {
                     clay.UI()(.{ .layout = .{ .sizing = .{ .w = .fixed(18), .h = .fixed(18) }, .child_alignment = .{ .x = .center, .y = .center } } })({
                         if (self.toggleState(cmd) == true) {
                             const svg = @import("components/svg.zig");
-                            svg.Svg(self.frame_arena.allocator(), menuCheckId(cmd), svg.Lucide.check, 18, fg);
+                            svg.SvgStroke(self.frame_arena.allocator(), menuCheckId(cmd), svg.Lucide.check, 18, fg);
                         }
                     });
                     clay.text(shortcuts.label(cmd), .{ .font_size = 20, .wrap_mode = .none, .color = fg });
