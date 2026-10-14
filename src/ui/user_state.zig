@@ -12,6 +12,7 @@ pub const State = struct {
     light_theme: bool = false,
     font_size: u16 = 24,
     autosave: bool = false,
+    trim_trailing_whitespace: bool = true,
     minimap: bool = true,
     whitespace: bool = false,
     indent_guides: bool = true,
@@ -42,6 +43,8 @@ pub fn parse(text: []const u8) State {
             if (f >= 10 and f <= 48) st.font_size = f;
         } else if (std.mem.eql(u8, key, "autosave")) {
             st.autosave = std.mem.eql(u8, value, "true") or std.mem.eql(u8, value, "1");
+        } else if (std.mem.eql(u8, key, "trim_trailing_whitespace")) {
+            st.trim_trailing_whitespace = std.mem.eql(u8, value, "true") or std.mem.eql(u8, value, "1");
         } else if (std.mem.eql(u8, key, "minimap")) {
             st.minimap = std.mem.eql(u8, value, "true") or std.mem.eql(u8, value, "1");
         } else if (std.mem.eql(u8, key, "word_wrap")) {
@@ -58,12 +61,13 @@ pub fn parse(text: []const u8) State {
 }
 
 pub fn format(alloc: std.mem.Allocator, st: State) ![]u8 {
-    return std.fmt.allocPrint(alloc, "# zid state\nsidebar_width={d}\nshow_hidden={s}\ntheme={s}\nfont_size={d}\nautosave={s}\nminimap={s}\nwhitespace={s}\nindent_guides={s}\nword_wrap={s}\ntimeline_expanded={s}\n", .{
+    return std.fmt.allocPrint(alloc, "# zid state\nsidebar_width={d}\nshow_hidden={s}\ntheme={s}\nfont_size={d}\nautosave={s}\ntrim_trailing_whitespace={s}\nminimap={s}\nwhitespace={s}\nindent_guides={s}\nword_wrap={s}\ntimeline_expanded={s}\n", .{
         @as(u32, @intFromFloat(@round(st.sidebar_width))), if (st.show_hidden) "true" else "false",
-        if (st.light_theme) "light" else "dark",                 st.font_size,
-        if (st.autosave) "true" else "false",                    if (st.minimap) "true" else "false",
-        if (st.whitespace) "true" else "false",                  if (st.indent_guides) "true" else "false",
-        if (st.word_wrap) "true" else "false",                   if (st.timeline_expanded) "true" else "false",
+        if (st.light_theme) "light" else "dark",           st.font_size,
+        if (st.autosave) "true" else "false",              if (st.trim_trailing_whitespace) "true" else "false",
+        if (st.minimap) "true" else "false",               if (st.whitespace) "true" else "false",
+        if (st.indent_guides) "true" else "false",         if (st.word_wrap) "true" else "false",
+        if (st.timeline_expanded) "true" else "false",
     });
 }
 
@@ -115,7 +119,7 @@ test "format und loadFrom/saveTo sind umkehrbar" {
     const a = testing.allocator;
     const text = try format(a, .{ .sidebar_width = 301.4, .show_hidden = true });
     defer a.free(text);
-    try testing.expectEqualStrings("# zid state\nsidebar_width=301\nshow_hidden=true\ntheme=dark\nfont_size=24\nautosave=false\nminimap=true\nwhitespace=false\nindent_guides=true\nword_wrap=false\ntimeline_expanded=false\n", text);
+    try testing.expectEqualStrings("# zid state\nsidebar_width=301\nshow_hidden=true\ntheme=dark\nfont_size=24\nautosave=false\ntrim_trailing_whitespace=true\nminimap=true\nwhitespace=false\nindent_guides=true\nword_wrap=false\ntimeline_expanded=false\n", text);
     const st3 = parse("minimap=false\nwhitespace=true\nindent_guides=0\nword_wrap=true\n");
     try testing.expect(!st3.minimap and st3.whitespace and !st3.indent_guides and st3.word_wrap);
     const st2 = parse("theme=light\nfont_size=30\nautosave=1\nfont_size=99\n");

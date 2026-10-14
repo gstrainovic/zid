@@ -36,7 +36,6 @@ const MarpPreview = struct {
 const PdfViewState = @import("pdf_view.zig").PdfViewState;
 const pdf_nav = @import("pdf_nav.zig");
 const editor_mod = @import("../editor/mod.zig");
-const backup = @import("../editor/backup.zig");
 const lsp_client = @import("lsp_client");
 const tab_mru = @import("tab_mru.zig");
 const lsp_proto = @import("lsp_proto");
@@ -2097,6 +2096,15 @@ pub const UI = struct {
                 self.saveUserState();
             },
             .save_as_utf8 => self.saveAsUtf8(),
+            .toggle_trim_trailing_whitespace => {
+                const enabled = !self.getActiveEditor().trim_trailing_whitespace;
+                var buf: [32]*pane_mod.Pane = undefined;
+                var n: usize = 0;
+                collectLeaves(self.root_pane, &buf, &n);
+                for (buf[0..n]) |p| p.data.leaf.code_editor.trim_trailing_whitespace = enabled;
+                self.showToast("Trim trailing whitespace {s}", .{if (enabled) "on" else "off"});
+                self.saveUserState();
+            },
             .toggle_minimap => self.toggleEditorOption(.minimap),
             .toggle_whitespace => self.toggleEditorOption(.whitespace),
             .toggle_word_wrap => self.toggleEditorOption(.word_wrap),
@@ -2987,6 +2995,7 @@ pub const UI = struct {
         dst.show_whitespace = src.show_whitespace;
         dst.show_indent_guides = src.show_indent_guides;
         dst.word_wrap = src.word_wrap;
+        dst.trim_trailing_whitespace = src.trim_trailing_whitespace;
         dst.setFontSize(src.font_size);
         dst.applyTheme(theme);
     }
@@ -3399,6 +3408,7 @@ pub const UI = struct {
             .light_theme = self.isLightTheme(),
             .font_size = self.getActiveEditor().font_size,
             .autosave = self.autosave,
+            .trim_trailing_whitespace = self.getActiveEditor().trim_trailing_whitespace,
             .minimap = self.getActiveEditor().show_minimap,
             .whitespace = self.getActiveEditor().show_whitespace,
             .indent_guides = self.getActiveEditor().show_indent_guides,
@@ -3428,6 +3438,7 @@ pub const UI = struct {
             e.show_whitespace = st.whitespace;
             e.show_indent_guides = st.indent_guides;
             e.word_wrap = st.word_wrap;
+            e.trim_trailing_whitespace = st.trim_trailing_whitespace;
         }
     }
 
@@ -4066,6 +4077,7 @@ pub const UI = struct {
         const ed = self.getActiveEditor();
         return switch (cmd) {
             .toggle_autosave => self.autosave,
+            .toggle_trim_trailing_whitespace => ed.trim_trailing_whitespace,
             .toggle_explorer => self.show_file_explorer,
             .toggle_terminal => self.isTerminalActive(),
             .toggle_theme => self.isLightTheme(),
@@ -5000,8 +5012,7 @@ pub const UI = struct {
                 while (it.next()) |buf| {
                     if (!buf.*.is_dirty()) continue;
                     const path = buf.*.get_file_path();
-                    backup.backup(ui.allocator, path) catch |err| log.warn("backup for '{s}' failed: {}", .{ path, err });
-                    buf.*.store_to_file_and_clean(path) catch |err| {
+                    ui.saveBuffer(buf.*) catch |err| {
                         // Nicht beenden: sonst ginge genau die Änderung verloren
                         ui.reportError("Could not save '{s}': {s}", .{ path, @errorName(err) });
                         return;
@@ -5012,6 +5023,21 @@ pub const UI = struct {
             .no => ui.quit_confirmed = true,
             .cancel => {},
         }
+    }
+
+    /// Auch nicht sichtbare Tabs über denselben Speicherweg und dieselben Optionen speichern.
+    fn saveBuffer(self: *Self, buffer: *@import("flow_core").Buffer) !void {
+        var leaves: [32]*pane_mod.Pane = undefined;
+        var count: usize = 0;
+        collectLeaves(self.root_pane, &leaves, &count);
+        for (leaves[0..count]) |p| {
+            const ed = p.data.leaf.code_editor;
+            if (ed.buffer == buffer) return ed.save();
+        }
+        var ed = editor_mod.CodeEditor.init(self.allocator, buffer);
+        defer ed.deinit();
+        ed.trim_trailing_whitespace = self.getActiveEditor().trim_trailing_whitespace;
+        try ed.save();
     }
 
     fn showSaveConfirmationDialog(self: *Self, pane: *pane_mod.Pane, tab_index: usize) void {

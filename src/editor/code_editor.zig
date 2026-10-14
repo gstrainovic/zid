@@ -226,6 +226,7 @@ pub const CodeEditor = struct {
     /// `last_edit_ms` beim letzten gescheiterten Speichern: Autosave wiederholt nicht je Frame
     save_failed_edit_ms: ?f32 = null,
     saved_event: bool = false,
+    trim_trailing_whitespace: bool = true,
     /// Anzeigeoptionen (View-Menü, gemerkt)
     show_indent_guides: bool = true,
     show_whitespace: bool = false,
@@ -333,11 +334,44 @@ pub const CodeEditor = struct {
 
         // Sicherung der alten Version (eine je Datei unter ~/.local/share/zid/backup)
         backup.backup(self.allocator, path) catch |err| std.log.scoped(.editor).warn("backup for '{s}' failed: {}", .{ path, err });
+        if (self.trim_trailing_whitespace) try self.trimTrailingWhitespace();
         try self.buffer.store_to_file_and_clean(path);
 
         self.markSaved();
         self.saved_event = true;
         std.log.scoped(.editor).info("Saved file: {s}", .{path});
+    }
+
+    /// Bereinigung als eigener Undo-Schritt; Zeilenenden und Dateikodierung bleiben im Buffer.
+    fn trimTrailingWhitespace(self: *Self) !void {
+        var changed = false;
+        var row: usize = 0;
+        while (row < self.lineCount()) : (row += 1) {
+            const line = self.getLine(row);
+            const trimmed = std.mem.trimEnd(u8, line, " \t");
+            if (trimmed.len == line.len) continue;
+            if (!changed) {
+                self.snapshotForUndo();
+                self.typing_in_progress = false;
+                changed = true;
+            }
+            var columns: std.ArrayList(usize) = .empty;
+            defer columns.deinit(self.allocator);
+            try self.buffer.root.get_line_width_map(row, &columns, self.allocator, self.metrics());
+            const begin = columns.items[trimmed.len];
+            self.pushEditForChange(row, begin, line[trimmed.len..], "");
+            self.buffer.root = try self.buffer.root.delete_bytes(row, trimmed.len, line.len - trimmed.len, self.buffer.allocator, self.metrics());
+            self.markDirty(row, row + 1);
+        }
+        if (changed) {
+            self.clampCols();
+            for (self.extra_cursors.items) |*c| {
+                c.cursor.col = @min(c.cursor.col, self.lineWidth(c.cursor.row));
+                c.cursor.target = c.cursor.col;
+                if (c.anchor) |*a| a.col = @min(a.col, self.lineWidth(a.row));
+            }
+            self.ensureCursorVisible();
+        }
     }
 
     /// Stand nach erfolgreichem Speichern (Buffer hat `last_save` schon gesetzt).
@@ -4043,6 +4077,28 @@ test "lange Zeile: Cursor am Ende scrollt die Ansicht horizontal, sichtbarer Aus
     try std.testing.expectEqual(@as(usize, 8), t.ed.view.col);
     t.ed.scrollColumns(20);
     try std.testing.expectEqual(@as(usize, 0), t.ed.view.col);
+}
+
+test "Fehlgeschlagenes Speichern nach Bereinigung bleibt geändert und rückgängig machbar" {
+    var t = try testEditor(std.testing.allocator, "Grösse  \n\t  \nletzte\t ");
+    defer t.buffer.deinit();
+    defer t.ed.deinit();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try tmp.dir.realpathAlloc(std.testing.allocator, ".");
+    defer std.testing.allocator.free(dir);
+    try tmp.dir.writeFile(.{ .sub_path = "fehlend", .data = "Datei statt Verzeichnis" });
+    const path = try std.fs.path.join(std.testing.allocator, &.{ dir, "fehlend", "datei.txt" });
+    defer std.testing.allocator.free(path);
+    t.buffer.set_file_path(path);
+    t.buffer.last_save = t.buffer.root;
+    t.ed.is_modified = false;
+    try std.testing.expectError(error.NotDir, t.ed.save());
+    try std.testing.expect(t.ed.is_modified and t.buffer.is_dirty());
+    try std.testing.expectEqualStrings("Grösse\n\nletzte", t.buffer.store_to_string_cached(t.buffer.root, .lf));
+    t.ed.dispatchAction(.Undo);
+    try std.testing.expectEqualStrings("Grösse  \n\t  \nletzte\t ", t.buffer.store_to_string_cached(t.buffer.root, .lf));
+    try std.testing.expect(!t.ed.is_modified);
 }
 
 test "Shift-Mausrad endet an der längsten Zeile und lässt kurze Dateien links" {
