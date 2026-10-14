@@ -57,6 +57,15 @@ Zähler pro Modul, ein absichtlich kaputter Test ist der schnellste Beweis.
   `python3 scripts/e2e_encoding.py`.
 - **Backup vor dem Speichern** löst relative Pfade per `realpathAlloc` auf, weil `accessAbsolute`
   bei relativen Pfaden in `unreachable` läuft.
+- **Leerzeichen am Zeilenende:** `CodeEditor.save` entfernt standardmässig Leerzeichen und Tabs
+  vor dem Schreiben als eigenen Undo-Schritt; Bytebereiche werden direkt im Rope gelöscht,
+  Kodierung und Zeilenenden bleiben erhalten. File → Toggle Trim Trailing Whitespace schaltet
+  die Option für alle Panes um (`user_state.trim_trailing_whitespace`, beim Split übernommen).
+  Autosave, Tab-Schliessen und Save All beim Beenden verwenden denselben Speicherweg;
+  `UI.saveBuffer` nimmt für einen nicht sichtbaren Buffer einen temporären Editor.
+  E2E: `scripts/e2e_save_whitespace.py` (CRLF/Windows-1252, Undo, aus/an, Neustart, Autosave,
+  neuer Pane, nicht sichtbarer Tab bei Save All). Ein Schreibfehler lässt die Bereinigung
+  als ungespeicherte Änderung samt Undo-Verlauf bestehen.
 - **Suchleiste** (`CodeEditor.find` = `find_bar.FindState`, Leiste `find_bar.render`, gemeinsam
   mit der Markdown-Vorschau; Logik in `src/editor/find_ops.zig`): inkrementell beim Tippen,
   Enter/Shift+Enter weiter/zurück mit Umbruch, Escape schließt, markierter Text wird Suchbegriff.
