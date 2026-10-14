@@ -12,8 +12,6 @@ KI-Punkte: Wirkung vorab schätzen, vorher/nachher messen (`scripts/e2e_ai_read_
    Schnittmenge wie gooey `scene.zig` `pushClip`/`popClip`.
 2. **`corner_radius` wird ignoriert:** 69 Stellen in `src/` werden eckig gezeichnet. SDF-Shader
    aus gooey `platform/wgpu/shaders/unified.wgsl` (WGSL, übertragbar), dazu Rahmen mit Radius.
-3. **Horizontales Scrollen ohne Grenze:** `scrollColumns` (`code_editor.zig`) erhöht `view.col`
-   endlos; flow klemmt auf `longest_line_len - cols + 1`, `maxLineWidth()` gibt es schon.
 4. **Unicode-Fallfaltung fehlerhaft** (`libs/flow-core/src/buffer/unicode.zig`: × → ÷, ß → ÿ,
    Σ/Τ, Č/Š/Ž und Kyrillisch fehlen). Heute ungenutzt; vor Groß-/Kleinschreibung (4.2) auf uucode
    umstellen wie flow.
