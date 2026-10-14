@@ -53,9 +53,6 @@ KI-Punkte: Wirkung vorab schätzen, vorher/nachher messen (`scripts/e2e_ai_read_
    nächsten/vorigen Änderung.
 8. **Inkrementelles Highlighting nach Undo/Redo/Reload:** alten gegen neuen Text diffen und als
    tree-sitter-Edits melden statt `resetTree()` (flow `editor.zig:6256-6285`).
-9. **KI: `list_files` sortiert, ohne `.git/` und `.zig-cache/`; `read_file` lehnt Binärdateien
-    ab** (NUL in den ersten 512 Bytes).
-
 10. **KI: grösseres MoE-Modell im RAM prüfen.** Qwen3-30B-A3B Q4_K_M läuft ganz im RAM mit
     11.7 tok/s auf der CPU, 15.2 mit der P1000 (`-ngl 99 -ncmoe 40`), Messung in
     `llm-bench/results/linux-i7-8850H-ram-gegen-platte.md`, Datei in `~/llm-test/`.
