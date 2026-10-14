@@ -149,6 +149,8 @@ fn executeInner(ui: *UI, alloc: std.mem.Allocator, call: *const ai_tools.ToolCal
             else => return err,
         };
         defer alloc.free(content);
+        if (std.mem.indexOfScalar(u8, content[0..@min(content.len, 512)], 0) != null)
+            return .{ .done = errorJson(alloc, "binary file: {s}", .{rel}) };
         // Klartext ohne Kopf: als JSON-String sah das Modell `\n` und `\"` statt echter Zeilen,
         // ein Kopf (`path:`) galt ihm als erste Dateizeile
         return .{ .done = (try decodeFile(alloc, content)).text };
@@ -212,6 +214,33 @@ fn executeInner(ui: *UI, alloc: std.mem.Allocator, call: *const ai_tools.ToolCal
         defer alloc.free(path);
         var dir = std.fs.cwd().openDir(path, .{ .iterate = true }) catch return .{ .done = errorJson(alloc, "folder not found: {s}", .{rel}) };
         defer dir.close();
+        // Nur die alphabetisch ersten 200 Namen behalten, unabhängig von der
+        // Reihenfolge des Dateisystems und ohne unbegrenzten Speicherverbrauch.
+        var entries: std.ArrayList([]u8) = .empty;
+        defer {
+            for (entries.items) |entry| alloc.free(entry);
+            entries.deinit(alloc);
+        }
+        var it = dir.iterate();
+        var truncated = false;
+        while (try it.next()) |entry| {
+            if (std.mem.eql(u8, entry.name, ".git") or std.mem.eql(u8, entry.name, ".zig-cache")) continue;
+            const shown = try std.fmt.allocPrint(alloc, "{s}{s}", .{ entry.name, if (entry.kind == .directory) "/" else "" });
+            var index: usize = 0;
+            while (index < entries.items.len and std.mem.lessThan(u8, entries.items[index], shown)) : (index += 1) {}
+            if (entries.items.len == max_list_entries) {
+                truncated = true;
+                if (index == max_list_entries) {
+                    alloc.free(shown);
+                    continue;
+                }
+                alloc.free(entries.pop().?);
+            }
+            entries.insert(alloc, index, shown) catch |err| {
+                alloc.free(shown);
+                return err;
+            };
+        }
         var out: std.Io.Writer.Allocating = .init(alloc);
         errdefer out.deinit();
         var jw: std.json.Stringify = .{ .writer = &out.writer, .options = .{} };
@@ -220,21 +249,9 @@ fn executeInner(ui: *UI, alloc: std.mem.Allocator, call: *const ai_tools.ToolCal
         try jw.write(path);
         try jw.objectField("entries");
         try jw.beginArray();
-        var it = dir.iterate();
-        var n: usize = 0;
-        var name_buf: [std.fs.max_name_bytes + 1]u8 = undefined;
-        while (try it.next()) |entry| {
-            if (n >= max_list_entries) break;
-            if (entry.kind == .directory) {
-                const shown = try std.fmt.bufPrint(&name_buf, "{s}/", .{entry.name});
-                try jw.write(shown);
-            } else {
-                try jw.write(entry.name);
-            }
-            n += 1;
-        }
+        for (entries.items) |entry| try jw.write(entry);
         try jw.endArray();
-        if (n >= max_list_entries) {
+        if (truncated) {
             try jw.objectField("truncated");
             try jw.write(true);
         }
