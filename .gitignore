@@ -1,4 +1,6 @@
 .cache
+# Fremd-Skill zig (rudedogg/zig-skills, ohne Lizenz): nur lokale Verknüpfung auf ~/.agents/skills/zig
+.claude/skills/zig
 # Build outputs
 zig-out/
 .zig-cache/

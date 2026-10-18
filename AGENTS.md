@@ -61,6 +61,10 @@ Hier stehen nur Regeln, die überall gelten. Wissen zu einzelnen Bereichen liegt
 `.claude/skills/<name>/SKILL.md`: vor Arbeit an einem Bereich die passende Skill laden. Neue
 Befunde gehören in die Skill ihres Bereichs, nicht hierher.
 
+Die Skill `zig` (Sprachstand 0.15, aus `rudedogg/zig-skills`) ist nicht eingecheckt, weil das Fremd-Repo keine
+Lizenz hat: auf einem neuen Rechner `npx skills add rudedogg/zig-skills --skill zig -g`, dann
+`ln -s ~/.agents/skills/zig .claude/skills/zig` und die globale Verknüpfung `~/.claude/skills/zig` löschen.
+
 ## Überall geltende Regeln
 
 - **UI-Bausteine nie parallel nachbauen:** Schaltfläche, Tooltip, Scrollbalken, Kontextmenü und
