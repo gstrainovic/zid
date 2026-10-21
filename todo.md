@@ -100,3 +100,6 @@ gebaut, Windows installiert über den Scoop-Bucket `gstrainovic/scoop-zid`.
 
 1. **Binärgröße:** 155 MB entpackt, davon 109 MB tree-sitter-Parsetabellen. Strippen bringt
    1 MB, der Hebel wäre eine Auswahl an Grammatiken (`syntax`-Dependency).
+2. **Alte Stände nicht baubar:** Ältere Commits zeigen auf Submodul-Commits, die es in den Forks auf
+   GitHub nicht gibt (fancy-cat, wio, gooey, mupdf; `git fetch --recurse-submodules` meldet «not our
+   ref»). Der aktuelle Stand ist nicht betroffen; nur wichtig, falls ein alter Tag neu gebaut wird.
