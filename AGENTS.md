@@ -1,5 +1,15 @@
 # AGENTS.md
 
+## Vor der Arbeit: alle Repos holen
+
+Vor jeder Arbeit alle Repos unter `~/projects` auf den Stand von GitHub bringen, nicht nur dieses: uncommittete
+Änderungen committen, dann `git pull --rebase`, Konflikte melden statt selbst lösen. Ein Ordner ohne `.git`, den es
+als Repo `gstrainovic/<name>` gibt (`geheimnisse holen` legt nur `.env` und `.secrets/` an), wird zum Repo gemacht
+(`git init`, `git remote add origin …`, `git fetch`, `git checkout -t origin/<branch>`); ein Repo, das die Aufgabe
+braucht und fehlt, wird geklont. Skripte lesen quer über die Repos (etwa der YouTube-Abgleich die Manifeste aller
+Produkte) und liefern mit veraltetem oder fehlendem Stand falsche Ergebnisse. Windows: Skill `git-sync-all` mit
+`-Root "$env:USERPROFILE\projects"`.
+
 ## Git Regeln
 
 - **KEINE git-destructive Befehle ohne explizite Erlaubnis**: Kein `git push --force`, `git reset`, `git checkout`, `git restore`, `git clean` ohne vorher zu fragen.
