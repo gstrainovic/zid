@@ -15,8 +15,6 @@ KI-Punkte: Wirkung vorab schätzen, vorher/nachher messen (`scripts/e2e_ai_read_
 4. **Unicode-Fallfaltung fehlerhaft** (`libs/flow-core/src/buffer/unicode.zig`: × → ÷, ß → ÿ,
    Σ/Τ, Č/Š/Ž und Kyrillisch fehlen). Heute ungenutzt; vor Groß-/Kleinschreibung (4.2) auf uucode
    umstellen wie flow.
-5. **Suche ignoriert Groß/Klein nur für ASCII** (`find_ops.zig` `eqlIgnoreCase`): „Ä“ findet
-   kein „ä“ (Editor, Markdown- und PDF-Vorschau).
 6. **mupdf stürzt bei manchen kaputten PDFs ab** (System-Bibliothek 1.27.2; `mutool draw` auf
     einem zu 40 % geschriebenen PDF: Segfault, in zid „double free“). Der Reload wartet deshalb
     auf eine ruhende Datei; eine dauerhaft kaputte Datei öffnen reißt zid aber weiter mit.

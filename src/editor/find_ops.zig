@@ -93,8 +93,8 @@ pub const Pattern = struct {
             if (self.re) |*r| {
                 const m = r.find(line, byte) orelse return null;
                 hit = .{ m.start, m.end };
-            } else if (byte < line.len and startsWith(line[byte..], self.query, self.opts.case_sensitive)) {
-                hit = .{ byte, byte + self.query.len };
+            } else if (byte < line.len) {
+                if (startsWith(line[byte..], self.query, self.opts.case_sensitive)) |len| hit = .{ byte, byte + len };
             }
             if (hit) |h| {
                 if (!self.opts.whole_word or (isBoundary(line, h[0], true) and isBoundary(line, h[1], false))) return h;
@@ -174,10 +174,45 @@ fn isBoundary(line: []const u8, byte: usize, before: bool) bool {
     return !isWordByte(line[byte]) or byte == 0 or !isWordByte(line[byte - 1]);
 }
 
-fn startsWith(hay: []const u8, needle: []const u8, case_sensitive: bool) bool {
-    if (hay.len < needle.len) return false;
-    if (case_sensitive) return std.mem.eql(u8, hay[0..needle.len], needle);
-    return std.ascii.eqlIgnoreCase(hay[0..needle.len], needle);
+/// Einfache Kleinschreibung eines Codepoints: ASCII, Latin-1, Latin Erweitert-A, Griechisch,
+/// Kyrillisch. Alles andere bleibt unverändert.
+fn foldCp(c: u21) u21 {
+    return switch (c) {
+        'A'...'Z' => c + 0x20,
+        0xC0...0xD6, 0xD8...0xDE => c + 0x20,
+        0x100...0x12F, 0x132...0x137, 0x14A...0x177 => c | 1,
+        0x139...0x148, 0x179...0x17E => if (c & 1 == 1) c + 1 else c,
+        0x178 => 0xFF,
+        0x386 => 0x3AC,
+        0x388...0x38A => c + 0x25,
+        0x391...0x3A1, 0x3A3...0x3AB => c + 0x20,
+        0x400...0x40F => c + 0x50,
+        0x410...0x42F => c + 0x20,
+        else => c,
+    };
+}
+
+/// Länge des Treffers in Bytes von `hay` (kann von `needle.len` abweichen), wenn `hay` mit
+/// `needle` beginnt; sonst null.
+fn startsWith(hay: []const u8, needle: []const u8, case_sensitive: bool) ?usize {
+    if (case_sensitive) {
+        if (hay.len < needle.len or !std.mem.eql(u8, hay[0..needle.len], needle)) return null;
+        return needle.len;
+    }
+    var h: usize = 0;
+    var n: usize = 0;
+    while (n < needle.len) {
+        if (h >= hay.len) return null;
+        const hl = std.unicode.utf8ByteSequenceLength(hay[h]) catch 1;
+        const nl = std.unicode.utf8ByteSequenceLength(needle[n]) catch 1;
+        if (h + hl > hay.len or n + nl > needle.len) return null;
+        const hc = std.unicode.utf8Decode(hay[h..][0..hl]) catch hay[h];
+        const nc = std.unicode.utf8Decode(needle[n..][0..nl]) catch needle[n];
+        if (foldCp(hc) != foldCp(nc)) return null;
+        h += hl;
+        n += nl;
+    }
+    return h;
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -212,6 +247,24 @@ test "find vorwärts: Umbruch ans Dateiende zurück zum Anfang" {
     // Einziger Treffer genau an der Startposition: wird nach Umbruch wieder gefunden
     const same = F.find(src, "alpha", .{ .row = 0, .col = 0 }, true).?;
     try testing.expectEqual(@as(usize, 0), same.begin.row);
+}
+
+test "Groß/Klein egal gilt auch für Umlaute, Griechisch und Kyrillisch" {
+    const src = SliceSource{ .lines = &.{ "x ä y", "ÄÖÜ", "Σίσυφος", "привет МИР", "Straße" } };
+    const a = F.find(src, "Ä", .{ .row = 0, .col = 0 }, true).?;
+    try testing.expectEqual(@as(usize, 0), a.begin.row);
+    try testing.expectEqual(@as(usize, 2), a.begin.col);
+    try testing.expectEqual(@as(usize, 3), a.end.col);
+    const b = F.find(src, "äöü", .{ .row = 0, .col = 3 }, true).?;
+    try testing.expectEqual(@as(usize, 1), b.begin.row);
+    try testing.expectEqual(@as(usize, 3), b.end.col);
+    const c = F.find(src, "σίσυφος", .{ .row = 1, .col = 5 }, true).?;
+    try testing.expectEqual(@as(usize, 2), c.begin.row);
+    const d = F.find(src, "мир", .{ .row = 2, .col = 9 }, true).?;
+    try testing.expectEqual(@as(usize, 3), d.begin.row);
+    try testing.expectEqual(@as(usize, 7), d.begin.col);
+    // Groß/Klein-sensitiv: kein Treffer für "Ä" in "ä"
+    try testing.expect(F.findOpts(SliceSource{ .lines = &.{"ä"} }, "Ä", .{ .row = 0, .col = 0 }, true, .{ .case_sensitive = true }) == null);
 }
 
 test "find rückwärts: vorheriger Treffer, Umbruch ans Ende" {
