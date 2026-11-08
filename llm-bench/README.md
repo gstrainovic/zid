@@ -92,7 +92,7 @@ damit auf dem Testrechner nichts zu installieren ist.
 ## Loslegen (Linux)
 
 ```bash
-git clone <dieses-repo> && cd bitnet-colibri-bench
+git clone <zid-repo> && cd zid/llm-bench
 ./setup/linux.sh            # Repo-Wurzel von zid ist die Vorgabe
 ```
 
@@ -113,21 +113,21 @@ cd engines/BitNet
 ./build/bin/llama-server -m models/BitNet-b1.58-2B-4T/ggml-model-i2_s.gguf \
     -t 4 -tb 12 -c 4096 --port 8080 \
     --override-kv tokenizer.ggml.pre=str:llama-bpe &
-python3 ~/bitnet-colibri-bench/bench/agent_eval.py --port 8080 --label BitNet-2B-4T
-python3 ~/bitnet-colibri-bench/bench/probe.py      --port 8080 --label BitNet-2B-4T
+python3 ~/projects/zid/llm-bench/bench/agent_eval.py --port 8080 --label BitNet-2B-4T
+python3 ~/projects/zid/llm-bench/bench/probe.py      --port 8080 --label BitNet-2B-4T
 
 # Gegenprobe mit demselben Server-Binary, anderes Modell
 ./build/bin/llama-server -m models/_compare/Llama-3.2-3B-Instruct-Q4_K_M.gguf \
     -t 8 -c 4096 --port 8081 &
-python3 ~/bitnet-colibri-bench/bench/agent_eval.py --port 8081 --label Llama-3.2-3B-Q4
+python3 ~/projects/zid/llm-bench/bench/agent_eval.py --port 8081 --label Llama-3.2-3B-Q4
 ```
 
 colibri hat keinen OpenAI-Endpunkt, deshalb ein eigener Läufer:
 
 ```bash
-python3 ~/bitnet-colibri-bench/bench/olmoe_eval.py \
+python3 ~/projects/zid/llm-bench/bench/olmoe_eval.py \
     --engine <colibri>/c/olmoe --snap <colibri>/olmoe_merged   # colibri gelöscht am 06.09.2026, nur Protokoll
-python3 ~/bitnet-colibri-bench/bench/olmoe_speed.py \
+python3 ~/projects/zid/llm-bench/bench/olmoe_speed.py \
     --engine <colibri>/c/olmoe --snap <colibri>/olmoe_merged   # colibri gelöscht am 06.09.2026, nur Protokoll
 ```
 

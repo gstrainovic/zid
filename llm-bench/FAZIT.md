@@ -37,7 +37,7 @@ sauber".
 
 ```bash
 # Endpunkt starten (Qwen3-4B auf der P1000, OpenAI-kompatibel, Port 8080)
-cd ~/projects/bitnet-colibri-bench && ./setup/serve-coding-agent.sh
+cd ~/projects/zid/llm-bench && ./setup/serve-coding-agent.sh
 
 # Pi-Agent (Provider "llamacpp-lokal" ist in ~/.pi/agent/models.json eingerichtet)
 pi --provider llamacpp-lokal --model qwen3-4b-lokal --tools bash

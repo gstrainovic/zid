@@ -36,7 +36,7 @@ eigenen E2E-Skripten nur die Integration).
   messbar, nicht zu raten:
 
 ```bash
-cd ~/projects/bitnet-colibri-bench
+cd ~/projects/zid/llm-bench
 ./setup/serve-coding-agent.sh            # Qwen3-4B auf der P1000, Port 8080
 # zweites Terminal: Referenz bei 0.0, dann derselbe Test bei 0.7
 python3 bench/agent_eval.py --port 8080 --label qwen3-t0

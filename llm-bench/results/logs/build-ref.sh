@@ -3,7 +3,7 @@
 # Der bestehende Build in ~/ki/BitNet bleibt unberuehrt.
 set -euo pipefail
 
-BENCH=~/projects/bitnet-colibri-bench
+BENCH=~/projects/zid/llm-bench
 REF=~/ki/BitNet-ref
 
 say() { printf '\n=== %s\n' "$*"; }
